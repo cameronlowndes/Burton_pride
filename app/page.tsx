@@ -3,20 +3,30 @@ import Navbar from "./Navbar";
 import Footer from "./Footer";
 import Link from 'next/link';
 
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16">
+
       <Navbar />
       {/* Hero Section */}
       <header className="text-center flex flex-col items-center gap-6 mt-16">
-        <Image src="/image/logo.jpg" alt="Burton Pride Logo" width={180} height={180} />
-        <h1 className="text-4xl sm:text-6xl font-bold">Welcome to Burton Pride</h1>
-        <p className="text-lg sm:text-xl max-w-2xl">
+        <Image
+          src="/image/logo.jpg"
+          alt="Burton Pride Logo"
+          width={180}
+          height={180}
+          className="hero-logo"
+        />
+        <h1 className="text-4xl sm:text-6xl font-bold hero-title">
+          Welcome to Burton Pride
+        </h1>
+        <p className="text-lg sm:text-xl max-w-2xl hero-description">
           Celebrating diversity, inclusion, and love in the heart of Burton. Join us in making a difference!
         </p>
         <a
           href="events"
-          className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
+          className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition hero-button"
         >
           Explore Events
         </a>

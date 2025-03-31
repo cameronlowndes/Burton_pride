@@ -24,3 +24,55 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* In your globals.css or a component-specific CSS file */
+
+/* Keyframes for fade-in and movement */
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleUp {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Apply animation to Hero Section elements */
+.hero-logo {
+  animation: scaleUp 1s ease-out forwards;
+}
+
+.hero-title {
+  animation: fadeInUp 1s ease-out forwards;
+}
+
+.hero-description {
+  animation: fadeInUp 1.2s ease-out forwards;
+}
+
+.hero-button {
+  animation: fadeInUp 1.5s ease-out forwards;
+}
+/* Add to your CSS file */
+/* Ensure the button has a smooth transition for the transform effect */
+.hero-button {
+  transition: transform 0.3s ease, background-color 0.3s ease; /* Smooth transition */
+}
+
+.hero-button:hover {
+  transform: scale(1.2); /* Scale the button to 120% of its size */
+  background-color: #ff006e; /* Optional: Change background color on hover */
+}
