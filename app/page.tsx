@@ -1,5 +1,7 @@
 import Image from "next/image";
 import Navbar from "./Navbar";
+import Footer from "./Footer";
+import Link from 'next/link';
 
 export default function Home() {
   return (
@@ -13,7 +15,7 @@ export default function Home() {
           Celebrating diversity, inclusion, and love in the heart of Burton. Join us in making a difference!
         </p>
         <a
-          href="#events"
+          href="events"
           className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
         >
           Explore Events
@@ -37,11 +39,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="mt-16 text-center text-sm">
-        <p>&copy; 2025 Burton Pride. All rights reserved.</p>
-        <p className="mt-2">Follow us on <a href="#" className="underline">Instagram</a> | <a href="#" className="underline">Twitter</a></p>
-      </footer>
+      <Footer />
     </div>
   );
 }
