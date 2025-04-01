@@ -1,7 +1,7 @@
 import Image from "next/image";
-import Navbar from "../Navbar";
-import Footer from "../Footer";
-import PageTitle from "../PageTitle";
+import Navbar from "../components/Navbar";
+import Footer from "../components/Footer";
+import PageTitle from "../components/PageTitle";
 
 export const metadata = {
   title: "Burton Pride - About",

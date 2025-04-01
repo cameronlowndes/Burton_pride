@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function Footer() {
     const currentYear = new Date().getFullYear(); // Get the current year
   
@@ -7,9 +9,11 @@ export default function Footer() {
           &copy; {currentYear} Burton Pride | CIC No: 15490242 | Follow us on{" "}
           <a href="https://www.facebook.com/profile.php?id=61554367088734" className="underline">
             Facebook
-          </a>
+          </a> |{" "}
+          <Link href="/terms">
+            <a className="underline">Terms</a>  {/* Link to the Terms page */}
+          </Link>
         </p>
       </footer>
     );
-  }
-  
+}

@@ -18,7 +18,8 @@ export default function Navbar() {
         <Link href="/" className="hover:underline">Home</Link>
         <Link href="/about" className="hover:underline">About</Link>
         <Link href="/events" className="hover:underline">Events</Link>
-        <Link href="/meet-us" className="hover:underline">Meet Us</Link>
+        <Link href="/MeetUs" className="hover:underline">Meet Us</Link>
+        <Link href="/ContactUS" className="hover:underline">Contact Us</Link>
       </div>
 
       {/* Mobile Menu Button */}

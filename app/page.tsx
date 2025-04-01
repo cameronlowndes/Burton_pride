@@ -1,14 +1,16 @@
 import Image from "next/image";
-import Navbar from "./Navbar";
-import Footer from "./Footer";
-import Link from 'next/link';
-
+import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
+import Link from "next/link";
+import EventCard from "./components/EventCard"; 
+import Countdown from "./components/Countdown";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16">
-
+    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+      
       <Navbar />
+
       {/* Hero Section */}
       <header className="text-center flex flex-col items-center gap-6 mt-16">
         <Image
@@ -18,34 +20,41 @@ export default function Home() {
           height={180}
           className="hero-logo"
         />
-        <h1 className="text-4xl sm:text-6xl font-bold hero-title">
-          Welcome to Burton Pride
-        </h1>
-        <p className="text-lg sm:text-xl max-w-2xl hero-description">
+        <h1 className="text-4xl sm:text-6xl font-bold">Welcome to Burton Pride</h1>
+        <p className="text-lg sm:text-xl max-w-2xl">
           Celebrating diversity, inclusion, and love in the heart of Burton. Join us in making a difference!
         </p>
-        <a
-          href="events"
-          className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition hero-button"
+        <Link 
+          href="/events" 
+          className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
         >
           Explore Events
-        </a>
+        </Link>
       </header>
+
+      <Countdown />
+
+      {/* GoFundMe Section */}
+      <section className="mt-16 text-center w-full max-w-3xl">
+        <h2 className="text-3xl font-semibold mb-4">Support Burton Pride</h2>
+        <p className="text-lg mb-6">
+          Help us bring the best Pride event to Burton! Your donation supports community initiatives, parade organization, and inclusivity programs. 
+          Every contribution makes a difference! 🌈
+        </p>
+        <Link 
+          href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48" 
+          target="_blank"
+          className="bg-yellow-400 text-black px-6 py-3 rounded-full font-semibold text-lg hover:bg-yellow-300 transition"
+        >
+          Donate Now
+        </Link>
+      </section>
 
       {/* Events Section */}
       <section id="events" className="mt-16 text-center w-full max-w-4xl">
         <h2 className="text-3xl font-semibold mb-6">Upcoming Events</h2>
         <div className="grid gap-6 sm:grid-cols-2">
-          <div className="bg-white text-black p-6 rounded-lg shadow-md">
-            <h3 className="text-xl font-bold">Pride Parade</h3>
-            <p className="text-sm">Join us for a vibrant celebration in the streets of Burton! 🏳️‍🌈</p>
-            <span className="text-pink-600 font-semibold">June 15, 2025</span>
-          </div>
-          <div className="bg-white text-black p-6 rounded-lg shadow-md">
-            <h3 className="text-xl font-bold">Community Picnic</h3>
-            <p className="text-sm">Enjoy a day of fun, music, and connection with fellow supporters.</p>
-            <span className="text-pink-600 font-semibold">July 20, 2025</span>
-          </div>
+          <EventCard />
         </div>
       </section>
 
