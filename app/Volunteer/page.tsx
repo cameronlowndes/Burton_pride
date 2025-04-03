@@ -34,9 +34,6 @@ export default function Volunteer() {
                         src="https://docs.google.com/forms/d/e/1FAIpQLSdXxxxxxxx/viewform?embedded=true"
                         width="640"
                         height="1200"
-                        frameBorder="0"
-                        marginHeight="0"
-                        marginWidth="0"
                         className="border-0"
                         title="Volunteer Sign-up Form"
                     >

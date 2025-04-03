@@ -21,9 +21,7 @@ export default function Contact() {
           src="https://docs.google.com/forms/d/e/your-form-id/viewform?embedded=true"
           width="640"
           height="480"
-          frameBorder="0"
-          marginHeight="0"
-          marginWidth="0"
+         
           className="w-full max-w-3xl mx-auto"
         >
           Loading…
