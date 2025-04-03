@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import PageTitle from "../components/PageTitle";
+import Head from "next/head";
 
 export const metadata = {
   title: "Burton Pride - About",
@@ -11,7 +11,19 @@ export const metadata = {
 export default function About() {
   return (
     <>
-      <PageTitle title={metadata.title} />
+      <Head>
+        <title>Burton Pride - About</title>
+        <meta
+          name="description"
+          content="Learn more about Burton Pride, our mission, and how to get involved. Burton Pride is dedicated to fostering a welcoming and inclusive environment for the LGBTQ+ community in Burton."
+        />
+        <meta
+          name="keywords"
+          content="Burton Pride, LGBTQ+, diversity, inclusion, community, Burton, Pride events, equality"
+        />
+        <meta name="author" content="Burton Pride" />
+      </Head>
+
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16">
         <Navbar />
 

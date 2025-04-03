@@ -11,7 +11,12 @@ const TermsPage = () => {
 
       <Head>
         <title>Terms and Conditions | Burton Pride</title>
-        <meta name="description" content="Terms and conditions for Burton Pride." />
+        <meta name="description" content="Terms and conditions for Burton Pride. Learn more about our website use, privacy practices, and limitations." />
+        <meta
+          name="keywords"
+          content="terms and conditions, Burton Pride, privacy policy, website usage, volunteer, donations, collaborations"
+        />
+        <meta name="author" content="Burton Pride" />
       </Head>
 
       {/* Terms and Conditions Section */}
