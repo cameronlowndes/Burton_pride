@@ -16,8 +16,8 @@ export default function Navbar() {
       {/* Desktop Menu */}
       <div className="hidden md:flex gap-6">
         <Link href="/" className="hover:underline">Home</Link>
-        <Link href="/About" className="hover:underline">About</Link>
-        <Link href="/Events" className="hover:underline">Events</Link>
+        <Link href="/about" className="hover:underline">About</Link>
+        <Link href="/events" className="hover:underline">Events</Link>
         <Link href="/MeetUS" className="hover:underline">Meet Us</Link>
         <Link href="/ContactUS" className="hover:underline">Contact Us</Link>
         <Link href="/JoinUS" className="hover:underline">Join The Team</Link>
@@ -34,8 +34,8 @@ export default function Navbar() {
       {isMenuOpen && (
         <div className="absolute top-full left-0 w-full bg-white shadow-lg flex flex-col items-center py-4 md:hidden">
           <Link href="/" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Home</Link>
-          <Link href="/About" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>About</Link>
-          <Link href="/Events" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Events</Link>
+          <Link href="/about" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>About</Link>
+          <Link href="/events" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Events</Link>
           <Link href="/MeetUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Meet Us</Link>    
           <Link href="/ContactUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Contact Us</Link>    
           <Link href="/JoinUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Join The Team</Link>  
