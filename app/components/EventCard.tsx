@@ -59,7 +59,7 @@ const EventPage: React.FC = () => {
 
   const event = {
     name: "Pride Parade",
-    description: "Join us for a vibrant celebration on Shobnall Fields of Burton! 🏳️‍🌈",
+    description: "Join us for a vibrant celebration on Shobnall Fields of Burton at 12.pm! 🏳️‍🌈",
     date: "August 16, 2025",
     details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance.",
     link: "/events/pride-parade",

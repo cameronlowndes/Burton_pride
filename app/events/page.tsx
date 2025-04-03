@@ -3,7 +3,7 @@ import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import Link from "next/link";
 import Image from "next/image"; // Import Image component from Next.js
-import PageTitle from "../components/PageTitle";
+
 import EventCard from "../components/EventCard"; 
 
 export const metadata = {
