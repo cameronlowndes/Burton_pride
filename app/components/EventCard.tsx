@@ -5,9 +5,9 @@ interface EventCardProps {
   description: string;
   date: string;
   details: string;
-  link: string;
-  mapLink: string;  // Added mapLink prop
-  isEventPassed: boolean; // Added new prop for checking if event has passed
+  link?: string;  // Link is optional for events without a specific page
+  mapLink: string;
+  isEventPassed: boolean;
 }
 
 const EventCard: React.FC<EventCardProps> = ({ 
@@ -31,9 +31,11 @@ const EventCard: React.FC<EventCardProps> = ({
         {isEventPassed ? (
           <p className="text-red-500 font-semibold">Event Completed</p>
         ) : (
-          <Link href={link}>
-            <span className="text-blue-500 hover:underline"></span>
-          </Link>
+          link && (
+            <Link href={link}>
+              <span className="text-blue-500 hover:underline">More Details</span>
+            </Link>
+          )
         )}
       </div>
       <div className="mt-4">
@@ -51,23 +53,42 @@ const EventCard: React.FC<EventCardProps> = ({
 };
 
 const EventPage: React.FC = () => {
-  const eventDate = new Date("2025-08-16");  // The event date
-  const currentDate = new Date();  // Current date
+  const currentDate = new Date();
+  
+  const events = [
+    {
+      name: "Miss Tutu Drag Bingo Night",
+      description: "An exciting night of fun and laughter with Miss Tutu!",
+      date: "May 26, 2025",
+      details: "Join us for an inspiring and inclusive charity event at Marstons Sports & Social Club, Shobnall Road, Burton, starting at 7:00pm. Book The  Ticket by using the link below £11.50",
+      link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
+      mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
+      isEventPassed: new Date("2025-05-26") < currentDate
+    },
+    {
+      name: "Pride Event",
+      description: "Join us for a vibrant celebration on Shobnall Fields of Burton at 12.pm! 🏳️‍🌈",
+      date: "August 16, 2025",
+      details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance.",
+      mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
+      isEventPassed: new Date("2025-08-16") < currentDate
+    }
+  ];
 
-  // Check if the event date has passed
-  const isEventPassed = currentDate > eventDate;
+  const upcomingEvents = events.filter(event => !event.isEventPassed).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const event = {
-    name: "Pride Parade",
-    description: "Join us for a vibrant celebration on Shobnall Fields of Burton at 12.pm! 🏳️‍🌈",
-    date: "August 16, 2025",
-    details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance.",
-    link: "/events/pride-parade",
-    mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",  // Google Map link for the event location
-    isEventPassed // Pass this as a prop
-  };
-
-  return <EventCard {...event} isEventPassed={isEventPassed} />;
+  return (
+    <div className="flex flex-wrap justify-start gap-8 p-6">
+      {upcomingEvents.length > 0 ? (
+        upcomingEvents.map(event => <EventCard key={event.name} {...event} />)
+      ) : (
+        <div className="bg-white text-black p-8 rounded-lg shadow-md w-full md:w-2/3 lg:w-1/2 text-center">
+          <h3 className="text-2xl font-bold">No Upcoming Events</h3>
+          <p className="text-gray-600">Stay tuned for future updates!</p>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default EventPage;

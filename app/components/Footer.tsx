@@ -10,9 +10,17 @@ export default function Footer() {
           <a href="https://www.facebook.com/profile.php?id=61554367088734" className="underline">
             Facebook
           </a>{" "} |{" "}
-          <Link href="/terms" className="underline"> {/* Corrected this line */}
+          <Link href="/terms" className="underline">
             Terms
-          </Link>
+          </Link>{" "} |{" "}
+          <a 
+            href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="underline text-pink-600 font-semibold"
+          >
+            Donate
+          </a>
         </p>
       </footer>
     );

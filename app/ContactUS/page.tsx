@@ -33,7 +33,7 @@ export default function Contact() {
         <section className="mt-16 text-center w-full max-w-4xl">
           <h2 className="text-3xl font-semibold mb-6">Get in Touch</h2>
           <iframe
-            src="https://docs.google.com/forms/d/e/your-form-id/viewform?embedded=true"
+            src="https://forms.gle/h7fNYr81vFSCRQfz8"
             width="640"
             height="480"
             className="w-full max-w-3xl mx-auto"

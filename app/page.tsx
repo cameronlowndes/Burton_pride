@@ -50,9 +50,10 @@ export default function Home() {
         <section className="mt-16 text-center w-full max-w-3xl">
           <h2 className="text-3xl font-semibold mb-4">Support Burton Pride</h2>
           <p className="text-lg mb-6">
-            Help us bring the best Pride event to Burton! Your donation supports community initiatives, parade organization, and inclusivity programs. 
+            Help us bring the best Pride event to Burton! Your donation supports community initiatives, parade organisation, and inclusivity programs. 
             Every contribution makes a difference! 🌈
           </p>
+          {/* Donate Button */}
           <Link 
             href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48" 
             target="_blank"
@@ -60,6 +61,32 @@ export default function Home() {
           >
             Donate Now
           </Link>
+
+          {/* Collaborate Section */}
+        <section className="mt-16 text-center w-full max-w-3xl">
+          <h2 className="text-3xl font-semibold mb-4">Collaborate with Us</h2>
+        <p className="text-lg mb-6">
+          We’re always looking for like-minded businesses, organizations, and individuals who want to support our mission of inclusivity and equality.
+        </p>
+        <Link 
+        href="/Collaborate" 
+        className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
+        Learn More
+        </Link>
+        </section>
+
+
+          {/* Facebook Button Below Donate Button */}
+          <div className="mt-4">
+            <Link 
+              href="https://www.facebook.com/profile.php?id=61554367088734" 
+              target="_blank"
+              className="bg-blue-600 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-blue-500 transition flex items-center justify-center gap-2"
+            >
+          
+              Follow us on Facebook
+            </Link>
+          </div>
         </section>
 
         {/* Events Section */}

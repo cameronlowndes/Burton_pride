@@ -21,6 +21,7 @@ export default function Navbar() {
         <Link href="/MeetUS" className="hover:underline">Meet Us</Link>
         <Link href="/ContactUS" className="hover:underline">Contact Us</Link>
         <Link href="/JoinUS" className="hover:underline">Join The Team</Link>
+        <Link href="/Sponsor" className="hover:underline">See Your Sponers</Link>
       </div>
 
       {/* Mobile Menu Button */}
@@ -38,7 +39,8 @@ export default function Navbar() {
           <Link href="/events" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Events</Link>
           <Link href="/MeetUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Meet Us</Link>    
           <Link href="/ContactUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Contact Us</Link>    
-          <Link href="/JoinUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Join The Team</Link>  
+          <Link href="/JoinUS" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>Join The Team</Link> 
+          <Link href="/Sponsor" className="py-2 hover:underline" onClick={() => setIsMenuOpen(false)}>See Your Sponers</Link> 
 
        
         </div>
