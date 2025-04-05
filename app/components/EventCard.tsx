@@ -10,14 +10,14 @@ interface EventCardProps {
   isEventPassed: boolean;
 }
 
-const EventCard: React.FC<EventCardProps> = ({ 
-  name, 
-  description, 
-  date, 
-  details, 
-  link, 
-  mapLink, 
-  isEventPassed 
+const EventCard: React.FC<EventCardProps> = ({
+  name,
+  description,
+  date,
+  details,
+  link,
+  mapLink,
+  isEventPassed
 }) => {
   return (
     <div className="bg-white text-black p-6 rounded-lg shadow-md animate-fadeInUp">
@@ -54,8 +54,17 @@ const EventCard: React.FC<EventCardProps> = ({
 
 const EventPage: React.FC = () => {
   const currentDate = new Date();
-  
+
   const events = [
+    {
+      name: "Pride Event",
+      description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
+      date: "August 16, 2025",
+      details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance.  Book The  Ticket by using the link below £11.50",
+      link: "/events/pride-parade",
+      mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
+      isEventPassed: new Date("2025-08-16") < currentDate
+    },
     {
       name: "Miss Tutu Drag Bingo Night",
       description: "An exciting night of fun and laughter with Miss Tutu!",
@@ -64,28 +73,24 @@ const EventPage: React.FC = () => {
       link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
       mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
       isEventPassed: new Date("2025-05-26") < currentDate
-    },
-    {
-      name: "Pride Event",
-      description: "Join us for a vibrant celebration on Shobnall Fields of Burton at 12.pm! 🏳️‍🌈",
-      date: "August 16, 2025",
-      details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance.",
-      mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
-      isEventPassed: new Date("2025-08-16") < currentDate
     }
   ];
 
-  const upcomingEvents = events.filter(event => !event.isEventPassed).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // Sort events by date (upcoming first)
+  const sortedEvents = [...events].sort((a, b) => {
+    const dateA = new Date(a.date);
+    const dateB = new Date(b.date);
+    return dateA.getTime() - dateB.getTime();
+  });
+
+  const upcomingEvents = sortedEvents.filter(event => !event.isEventPassed);
 
   return (
-    <div className="flex flex-wrap justify-start gap-8 p-6">
+    <div className="flex flex-col items-center gap-6 p-6">
       {upcomingEvents.length > 0 ? (
         upcomingEvents.map(event => <EventCard key={event.name} {...event} />)
       ) : (
-        <div className="bg-white text-black p-8 rounded-lg shadow-md w-full md:w-2/3 lg:w-1/2 text-center">
-          <h3 className="text-2xl font-bold">No Upcoming Events</h3>
-          <p className="text-gray-600">Stay tuned for future updates!</p>
-        </div>
+        <p className="text-lg text-gray-500">No upcoming events</p>
       )}
     </div>
   );
