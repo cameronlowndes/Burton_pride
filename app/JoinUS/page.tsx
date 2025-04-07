@@ -76,7 +76,7 @@ export default function JoinUs() {
         <section className="mt-16 text-center w-full max-w-4xl">
           <h2 className="text-3xl font-semibold mb-6">Collaborate with Us</h2>
           <p className="text-lg mb-6">
-            We’re always looking for like-minded businesses, organizations, and individuals who want to support our mission of inclusivity and equality.
+            We’re always looking for like-minded businesses, organisations, and individuals who want to support our mission of inclusivity and equality.
           </p>
           <Link
             href="/Collaborate"

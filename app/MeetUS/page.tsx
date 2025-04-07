@@ -54,9 +54,9 @@ export default function MeetUs() {
             </div>
 
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
-              <Image src="/image/person2.jpg" alt="Isaac Timmins" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
+              <Image src="/image/isaac.jpg" alt="Isaac Timmins" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Isaac Timmins</h2>
-              <p className="text-gray-600">Founder & Organizer | He/Him</p>
+              <p className="text-gray-600">founder & director | He/Him</p>
             </div>
 
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
@@ -72,12 +72,20 @@ export default function MeetUs() {
           <h2 className="text-3xl font-semibold mb-6">Social Media Team</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
+              <Image src="/image/isaac.jpg" alt="Cameron Lowndes" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
+              <h2 className="text-xl font-semibold">Isaac Timmins</h2>
+              <p className="text-gray-600">Social Media Director | He/Him</p>
+            </div>
+
+            <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
               <Image src="/image/cameron.jpg" alt="Cameron Lowndes" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Cameron Lowndes</h2>
               <p className="text-gray-600">Social Media Manager | He/Him/His/They</p>
             </div>
+
           </div>
         </section>
+        
 
         {/* Website Admin */}
         <section className="mt-16 text-center w-full max-w-4xl">
@@ -95,11 +103,11 @@ export default function MeetUs() {
         <section className="mt-16 text-center w-full max-w-4xl">
           <h2 className="text-3xl font-semibold mb-6">Event Planning Team</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
+            {/* <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
               <Image src="/images/person4.jpg" alt="Sarah Lee" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Sarah Lee</h2>
               <p className="text-gray-600">Event Planner</p>
-            </div>
+            </div> */}
           </div>
         </section>
 
@@ -107,11 +115,11 @@ export default function MeetUs() {
         <section className="mt-16 text-center w-full max-w-4xl">
           <h2 className="text-3xl font-semibold mb-6">Volunteer Team</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
+            {/* <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
               <Image src="/images/person5.jpg" alt="Chris Evans" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Chris Evans</h2>
               <p className="text-gray-600">Volunteer Coordinator</p>
-            </div>
+            </div> */}
           </div>
         </section>
 

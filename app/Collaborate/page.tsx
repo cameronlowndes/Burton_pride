@@ -48,15 +48,8 @@ export default function Collaborate() {
 </section>
 
 
-                <div className="md:w-1/2 w-full flex justify-center mt-10">
-                    <iframe
-                        src="https://docs.google.com/forms/d/e/1FAIpQLSevaIQw4_HWCfbUgyt1ZNBD0Jy9WCAyE6U6qgq358xCKDW1AQ/viewform?usp=dialog"
-                        width="100%"
-                        height="800"
-                        className="border-0 rounded-lg shadow-lg"
-                        title="Collaboration Proposal Form"
-                    />
-                </div>
+
+
 
                 <div className="md:w-1/2 w-full flex justify-center mt-10">
                     <Link href="https://docs.google.com/forms/d/e/1FAIpQLSevaIQw4_HWCfbUgyt1ZNBD0Jy9WCAyE6U6qgq358xCKDW1AQ/viewform" passHref>
@@ -65,6 +58,15 @@ export default function Collaborate() {
                         </button>
                     </Link>
                 </div>
+
+                <div className="md:w-1/2 w-full flex justify-center mt-10">
+                    <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
+                        <button className="bg-white text-pink-500 px-6 py-3 rounded-lg shadow-lg font-semibold hover:bg-gray-200 transition-all">
+                        Vendor Booking
+                        </button>
+                    </Link>
+                </div>
+
 
                 <section className="mt-16 text-center w-full max-w-3xl bg-white text-black p-8 rounded-xl shadow-lg">
                     <h2 className="text-3xl font-semibold mb-6">What Burton Pride Can Do for You</h2>
