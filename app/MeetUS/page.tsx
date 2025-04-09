@@ -48,7 +48,7 @@ export default function MeetUs() {
           <h2 className="text-3xl font-semibold mb-6">Committed Board</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
-              <Image src="/image/person1.jpg" alt="Simon Whale" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
+              <Image src="/image/simon.jpg" alt="Simon Whale" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Simon Whale</h2>
               <p className="text-gray-600">Founder & Organizer | He/Him</p>
             </div>

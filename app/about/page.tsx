@@ -51,7 +51,7 @@ export default function About() {
             Whether you want to volunteer, sponsor, or simply show your support, there are many ways to be part of Burton Pride. Together, we can create a future filled with love, acceptance, and celebration.
           </p>
           <a
-            href="/contact"
+            href="/ContactUS"
             className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition hero-button animate-scaleUp duration-1000 ease-out delay-600"
           >
             Contact Us
