@@ -26,14 +26,14 @@ const TermsPage = () => {
         <section className="mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-2">1. Introduction</h2>
           <p className="text-gray-700">
-            Welcome to Burton Pride. These terms and conditions outline the rules and regulations for the use of Burton Pride's website and services.
+          Welcome to Burton pride CIC. These terms and conditions outline the rules and regulations of the use of burton pride’s website and services.
           </p>
         </section>
 
         <section className="mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-2">2. Use of Website</h2>
           <p className="text-gray-700">
-            By accessing this website, you agree to comply with the following terms and conditions. If you do not agree, please refrain from using this website.
+          by accessing this website, you agree to comply with the following terms and conditions. If you do not agree, please refrain from using this website.
           </p>
         </section>
 
@@ -79,7 +79,7 @@ const TermsPage = () => {
           <p className="text-gray-700">
             We do not sell or rent your personal data to third parties. However, we may share your data with third-party service providers for specific purposes such as:
             <ul className="list-disc pl-6">
-              <li>Processing payments (e.g., via PayPal or Stripe)</li>
+              <li>Processing payments (e.g., via PayPal, Stripe or shopify )</li>
               <li>Sending newsletters or promotional emails</li>
               <li>Analytics and website performance tracking</li>
             </ul>
@@ -93,6 +93,7 @@ const TermsPage = () => {
               <li>Access, update, or delete your personal data</li>
               <li>Request a copy of your personal data</li>
               <li>Opt-out of receiving marketing emails or communications</li>
+              
             </ul>
             If you would like to exercise these rights, please contact us at{' '}
             <a href="mailto:prideburton@gmail.com" className="text-blue-500 hover:underline">prideburton@gmail.com</a>.
