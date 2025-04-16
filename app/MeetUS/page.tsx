@@ -64,6 +64,11 @@ export default function MeetUs() {
               <h2 className="text-xl font-semibold">Cameron Lowndes</h2>
               <p className="text-gray-600">Board Member | He/Him/His/They</p>
             </div>
+            <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
+              <Image src="/image/john.jpg" alt="John" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
+              <h2 className="text-xl font-semibold">John</h2>
+              <p className="text-gray-600">Board Member | He/Him</p>
+            </div>
           </div>
         </section>
 

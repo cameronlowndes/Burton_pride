@@ -26,14 +26,14 @@ const TermsPage = () => {
         <section className="mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-2">1. Introduction</h2>
           <p className="text-gray-700">
-          Welcome to Burton pride CIC. These terms and conditions outline the rules and regulations of the use of burton pride’s website and services.
+            Welcome to Burton Pride CIC. These terms and conditions outline the rules and regulations of the use of Burton Pride’s website and services.
           </p>
         </section>
 
         <section className="mb-6">
           <h2 className="text-2xl font-semibold text-gray-800 mb-2">2. Use of Website</h2>
           <p className="text-gray-700">
-          by accessing this website, you agree to comply with the following terms and conditions. If you do not agree, please refrain from using this website.
+            By accessing this website, you agree to comply with the following terms and conditions. If you do not agree, please refrain from using this website.
           </p>
         </section>
 
@@ -44,60 +44,65 @@ const TermsPage = () => {
           </p>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">3.1 Data We Collect</h3>
-          <p className="text-gray-700">
-            We may collect the following types of data when you visit our website or interact with us:
+          <div className="text-gray-700">
+            <p>We may collect the following types of data when you visit our website or interact with us:</p>
             <ul className="list-disc pl-6">
               <li>Personal identification information (such as your name, email address,)</li>
               <li>Browsing data (such as your IP address, browser type, pages visited, and time spent on the site)</li>
               <li>Any information you provide through forms or interactions on our website</li>
             </ul>
-          </p>
+          </div>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">3.2 How We Use Your Data</h3>
-          <p className="text-gray-700">
-            The data we collect is used to improve your experience and provide the following services:
+          <div className="text-gray-700">
+            <p>The data we collect is used to improve your experience and provide the following services:</p>
             <ul className="list-disc pl-6">
               <li>To personalize your experience and respond to your inquiries</li>
               <li>To process donations or event registrations</li>
               <li>To improve the content and functionality of our website</li>
               <li>To send you updates regarding events, news, and activities related to Burton Pride (you may opt-out at any time)</li>
             </ul>
-          </p>
+          </div>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">3.3 How We Protect Your Data</h3>
-          <p className="text-gray-700">
-            We use a variety of security measures to ensure the safety of your personal data:
+          <div className="text-gray-700">
+            <p>We use a variety of security measures to ensure the safety of your personal data:</p>
             <ul className="list-disc pl-6">
               <li>Data encryption to protect sensitive information</li>
               <li>Regular security audits and updates</li>
               <li>Secure servers and secure data transmission protocols</li>
             </ul>
-            Despite our efforts, no online service can be 100% secure, so we cannot guarantee the absolute security of your data. However, we are committed to maintaining your privacy and minimizing risks.
-          </p>
+            <p>
+              Despite our efforts, no online service can be 100% secure, so we cannot guarantee the absolute security of your data. However, we are committed to maintaining your privacy and minimizing risks.
+            </p>
+          </div>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">3.4 Third-Party Services</h3>
-          <p className="text-gray-700">
-            We do not sell or rent your personal data to third parties. However, we may share your data with third-party service providers for specific purposes such as:
+          <div className="text-gray-700">
+            <p>We do not sell or rent your personal data to third parties. However, we may share your data with third-party service providers for specific purposes such as:</p>
             <ul className="list-disc pl-6">
-              <li>Processing payments (e.g., via PayPal, Stripe or shopify )</li>
+              <li>Processing payments (e.g., via PayPal, Stripe or Shopify)</li>
               <li>Sending newsletters or promotional emails</li>
               <li>Analytics and website performance tracking</li>
             </ul>
-            These third-party providers are bound by confidentiality agreements and are only allowed to use your data for these specific purposes.
-          </p>
+            <p>
+              These third-party providers are bound by confidentiality agreements and are only allowed to use your data for these specific purposes.
+            </p>
+          </div>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">3.5 Your Rights</h3>
-          <p className="text-gray-700">
-            You have the right to:
+          <div className="text-gray-700">
+            <p>You have the right to:</p>
             <ul className="list-disc pl-6">
               <li>Access, update, or delete your personal data</li>
               <li>Request a copy of your personal data</li>
               <li>Opt-out of receiving marketing emails or communications</li>
-              
             </ul>
-            If you would like to exercise these rights, please contact us at{' '}
-            <a href="mailto:prideburton@gmail.com" className="text-blue-500 hover:underline">prideburton@gmail.com</a>.
-          </p>
+            <p>
+              If you would like to exercise these rights, please contact us at{' '}
+              <a href="mailto:prideburton@gmail.com" className="text-blue-500 hover:underline">prideburton@gmail.com</a>.
+            </p>
+          </div>
         </section>
 
         <section className="mb-6">
