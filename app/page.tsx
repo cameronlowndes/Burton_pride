@@ -22,6 +22,10 @@ export default function Home() {
           content="Burton Pride, LGBTQ+, diversity, events, inclusivity"
         />
         <meta name="author" content="Burton Pride" />
+        <meta
+          name="google-site-verification"
+          content="LI3n61JOpv5xVsLpjjteAlTkEjNGprTSQ2aajD_XU5o"
+        />
       </Head>
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">

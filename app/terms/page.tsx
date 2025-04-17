@@ -1,23 +1,18 @@
-import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import Link from "next/link";
-import Head from "next/head";
+import MetaHead from "../components/MetaHead"; // Import MetaHead
+import Head from "next/head"; // Keep the Head import
 
 const TermsPage = () => {
   return (
     <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
       <Navbar />
 
-      <Head>
-        <title>Terms and Conditions | Burton Pride</title>
-        <meta name="description" content="Terms and conditions for Burton Pride. Learn more about our website use, privacy practices, and limitations." />
-        <meta
-          name="keywords"
-          content="terms and conditions, Burton Pride, privacy policy, website usage, volunteer, donations, collaborations"
-        />
-        <meta name="author" content="Burton Pride" />
-      </Head>
+      {/* MetaHead Component */}
+      <MetaHead
+        title="Terms and Conditions | Burton Pride"
+        description="Terms and conditions for Burton Pride. Learn more about our website use, privacy practices, and limitations."
+      />
 
       {/* Terms and Conditions Section */}
       <main className="container mx-auto p-6 bg-white text-black rounded-lg shadow-lg mt-16 max-w-3xl">

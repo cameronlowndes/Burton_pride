@@ -1,20 +1,23 @@
+import MetaHead from "../components/MetaHead"; // Adjust the path based on where your MetaHead component is located
 import Image from "next/image";
 import Link from "next/link";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import Head from "next/head";
+
 
 export default function Sponsors() {
   return (
     <>
-      <Head>
-        <title>Burton Pride - Sponsors</title>
-        <meta name="description" content="Meet the amazing sponsors who support Burton Pride and help make our events possible." />
-      </Head>
+      <MetaHead 
+        title="Burton Pride - Sponsors" 
+        description="Meet the amazing sponsors who support Burton Pride and help make our events possible." 
+        keywords="Burton Pride, sponsors, LGBTQ+ support, diversity, inclusion, events"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />
 
+        {/* Hero Section */}
         <header className="text-center flex flex-col items-center gap-6 mt-16">
           <Image src="/image/logo.jpg" alt="Burton Pride Sponsors" width={180} height={180} className="hero-logo" />
           <h1 className="text-4xl sm:text-6xl font-bold">Our Sponsors</h1>
@@ -28,13 +31,12 @@ export default function Sponsors() {
           <h2 className="text-3xl font-semibold mb-6">Proudly Supported By</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             
-            {/* Sponsor Card with Button */}
+            {/* Sponsor Card */}
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center transition hover:shadow-lg hover:scale-105">
               <Image src="/image/Social_Roots.jpg" alt="Social Roots & Green Shoots" width={150} height={150} className="w-32 h-32 rounded mb-4" />
               <h2 className="text-xl font-semibold">Social Roots & Green Shoots</h2>
               <p className="text-gray-600 text-center mb-4">Committed to supporting LGBTQ+ communities.</p>
-              
-              <Link 
+               <Link 
                 href="https://www.youtube.com/@SocialRootsGreenShoots" 
                 target="_blank" 
                 className="bg-pink-600 text-white px-4 py-2 rounded-full font-semibold hover:bg-pink-700 transition"
@@ -43,6 +45,7 @@ export default function Sponsors() {
               </Link>
             </div>
 
+            {/* Add more sponsor cards below as needed */}
           </div>
         </section>
 

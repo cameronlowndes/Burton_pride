@@ -1,28 +1,16 @@
-import Image from "next/image";
+import Head from "next/head"; // Keep this for future use or fallback
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import Head from "next/head"; // Import Head for SEO
-
-export const metadata = {
-    title: "Burton Pride - Volunteer",
-    description: "Join us to make a difference! Volunteer with Burton Pride and help us create an inclusive and vibrant community.",
-};
+import MetaHead from "../components/MetaHead";
 
 export default function Volunteer() {
     return (
         <>
-            <Head>
-                <title>Burton Pride - Volunteer</title>
-                <meta
-                    name="description"
-                    content="Join us to make a difference! Volunteer with Burton Pride and help us create an inclusive and vibrant community."
-                />
-                <meta
-                    name="keywords"
-                    content="Burton Pride, volunteer with Burton Pride, LGBTQ+ community, volunteer opportunities, inclusive events, volunteering at pride"
-                />
-                <meta name="author" content="Burton Pride" />
-            </Head>
+            <MetaHead
+                title="Burton Pride - Volunteer"
+                description="Join us to make a difference! Volunteer with Burton Pride and help us create an inclusive and vibrant community."
+                
+            />
 
             <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
                 <Navbar />
@@ -37,7 +25,6 @@ export default function Volunteer() {
 
                 {/* Volunteer Section */}
                 <section className="mt-16 w-full max-w-5xl flex flex-col md:flex-row gap-10">
-                    
                     {/* Text Content (Left Side) */}
                     <div className="md:w-1/2 text-left">
                         <h2 className="text-3xl font-semibold mb-4">Why does Burton Pride C.I.C. need volunteers?</h2>
@@ -71,7 +58,6 @@ export default function Volunteer() {
                             Loading…
                         </iframe>
                     </div>
-
                 </section>
 
                 <Footer />

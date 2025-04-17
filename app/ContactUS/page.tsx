@@ -1,22 +1,16 @@
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import Head from "next/head"; // Import Head for SEO
+import MetaHead from "../components/MetaHead"; // Import MetaHead
 
 export default function Contact() {
   return (
     <>
-      <Head>
-        <title>Burton Pride - Contact Us</title>
-        <meta
-          name="description"
-          content="Have any questions or want to get in touch with Burton Pride? Reach out to us through our contact form or email."
-        />
-        <meta
-          name="keywords"
-          content="Burton Pride, contact us, LGBTQ+ community, Pride organization, email us, inquiry"
-        />
-        <meta name="author" content="Burton Pride" />
-      </Head>
+      {/* Use the MetaHead component for SEO */}
+      <MetaHead
+        title="Burton Pride - Contact Us"
+        description="Have any questions or want to get in touch with Burton Pride? Reach out to us through our contact form or email."
+        keywords="Burton Pride, contact us, LGBTQ+ community, Pride organization, email us, inquiry"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />

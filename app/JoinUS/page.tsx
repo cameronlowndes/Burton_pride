@@ -2,7 +2,7 @@ import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import Link from "next/link";
-import Head from "next/head"; // Import Head for SEO
+import MetaHead from "../components/MetaHead"; // Import MetaHead
 
 export const metadata = {
   title: "Burton Pride - Join Us",
@@ -12,18 +12,12 @@ export const metadata = {
 export default function JoinUs() {
   return (
     <>
-      <Head>
-        <title>Burton Pride - Join Us</title>
-        <meta
-          name="description"
-          content="Learn how you can be a part of Burton Pride by volunteering, donating, or collaborating. Join us in creating a more inclusive and diverse community."
-        />
-        <meta
-          name="keywords"
-          content="Burton Pride, volunteer with Burton Pride, donate to Burton Pride, collaborate with Burton Pride, LGBTQ+ community, get involved with Burton Pride"
-        />
-        <meta name="author" content="Burton Pride" />
-      </Head>
+      {/* Use the MetaHead component here */}
+      <MetaHead
+        title="Burton Pride - Join Us"
+        description="Learn how you can be a part of Burton Pride by volunteering, donating, or collaborating. Join us in creating a more inclusive and diverse community."
+        keywords="Burton Pride, volunteer with Burton Pride, donate to Burton Pride, collaborate with Burton Pride, LGBTQ+ community, get involved with Burton Pride"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />

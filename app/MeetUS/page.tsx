@@ -2,28 +2,16 @@ import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import Link from "next/link";
-import Head from "next/head"; // Import Head for SEO
-
-export const metadata = {
-  title: "Burton Pride - Meet Us",
-  description: "Learn more about Burton Pride, our mission, and how to get involved.",
-};
+import MetaHead from "../components/MetaHead"; // Import MetaHead for SEO
 
 export default function MeetUs() {
   return (
     <>
-      <Head>
-        <title>Burton Pride - Meet Us</title>
-        <meta
-          name="description"
-          content="Meet the passionate people behind Burton Pride. Get to know our team members and learn how we work together to create an inclusive and vibrant community!"
-        />
-        <meta
-          name="keywords"
-          content="Burton Pride, Meet the team, LGBTQ+ community, Pride team, volunteers, event planners, social media team, website admin"
-        />
-        <meta name="author" content="Burton Pride" />
-      </Head>
+      <MetaHead
+        title="Burton Pride - Meet Us"
+        description="Meet the passionate people behind Burton Pride. Get to know our team members and learn how we work together to create an inclusive and vibrant community!"
+        keywords="Burton Pride, Meet the team, LGBTQ+ community, Pride team, volunteers, event planners, social media team, website admin"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />
@@ -56,7 +44,7 @@ export default function MeetUs() {
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
               <Image src="/image/isaac.jpg" alt="Isaac Timmins" width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
               <h2 className="text-xl font-semibold">Isaac Timmins</h2>
-              <p className="text-gray-600">founder & director | He/Him</p>
+              <p className="text-gray-600">Founder & Director | He/Him</p>
             </div>
 
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
@@ -87,10 +75,8 @@ export default function MeetUs() {
               <h2 className="text-xl font-semibold">Cameron Lowndes</h2>
               <p className="text-gray-600">Social Media Manager | He/Him/His/They</p>
             </div>
-
           </div>
         </section>
-        
 
         {/* Website Admin */}
         <section className="mt-16 text-center w-full max-w-4xl">
@@ -134,8 +120,8 @@ export default function MeetUs() {
           <p className="text-lg mb-6">
             Reach out to us for collaborations, volunteering, or any inquiries. We’d love to hear from you!
           </p>
-          <Link 
-            href="/ContactUS" 
+          <Link
+            href="/ContactUS"
             className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
           >
             Contact Us

@@ -4,7 +4,7 @@ import Navbar from "../components/Navbar";
 import Link from "next/link";
 import Image from "next/image"; // Import Image component from Next.js
 import EventCard from "../components/EventCard";
-import Head from "next/head"; // Import the Head component for SEO
+import MetaHead from "../components/MetaHead"; // Import MetaHead
 
 export const metadata = {
   title: "Burton Pride - Events",
@@ -14,18 +14,12 @@ export const metadata = {
 export default function EventsPage() {
   return (
     <>
-      <Head>
-        <title>Burton Pride - Events</title>
-        <meta
-          name="description"
-          content="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Parade, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
-        />
-        <meta
-          name="keywords"
-          content="Burton Pride, Pride events, LGBTQ+ events, community events, Pride Parade, inclusivity, diversity"
-        />
-        <meta name="author" content="Burton Pride" />
-      </Head>
+      {/* Use the MetaHead component here */}
+      <MetaHead
+        title="Burton Pride - Events"
+        description="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Parade, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
+        keywords="Burton Pride, Pride events, LGBTQ+ events, community events, Pride Parade, inclusivity, diversity"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />
