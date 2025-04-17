@@ -81,11 +81,11 @@ const EventPage: React.FC = () => {
       name: "Pride Event",
       description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
       date: "August 16, 2025",
-      details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance. Book The Ticket by using the link below £5 early bird",
-      link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
+      details: "The Pride Parade is a lively event celebrating diversity and inclusivity. It’s an opportunity for the community to unite and show support for the LGBTQ+ community, creating an atmosphere of love and acceptance. Ticket are coming SOON",
+      // link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
       mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
       isEventPassed: new Date("2025-08-16") < currentDate,
-      image: "/image/PrideEvent.png"
+      image: "/image/Pride_event_soon.png"
     },
     {
       name: "Miss Tutu Drag Bingo Night",
