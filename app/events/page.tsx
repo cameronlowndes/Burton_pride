@@ -17,7 +17,7 @@ export default function EventsPage() {
       {/* Use the MetaHead component here */}
       <MetaHead
         title="Burton Pride - Events"
-        description="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Parade, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
+        description="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Event, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
         keywords="Burton Pride, Pride events, LGBTQ+ events, community events, Pride Parade, inclusivity, diversity"
       />
 
@@ -37,7 +37,7 @@ export default function EventsPage() {
             Upcoming Events
           </h1>
           <p className="text-lg sm:text-xl max-w-2xl hero-description animate-fadeInUp delay-200">
-            Stay updated on all our exciting events, including the Pride Parade and community gatherings. We can’t wait to celebrate with you!
+            Stay updated on all our exciting events, including the Pride Evernt and community gatherings. We can’t wait to celebrate with you!
           </p>
         </section>
 
