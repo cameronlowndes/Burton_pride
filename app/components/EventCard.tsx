@@ -94,10 +94,11 @@ const EventPage: React.FC = () => {
         name: "Pride Event",
         description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
         date: "August 16, 2025",
-        details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Tickets coming SOON",
+        details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
+        link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: new Date("2025-08-16") < currentDate,
-        image: "/image/Pride_event_soon.png",
+        image: "/image/PrideEventPoster.png",
         onImageClick: setModalImage
       },
       {
