@@ -1,16 +1,16 @@
 // components/Countdown.tsx
-'use client'; // Add this line to mark this as a client component
+'use client';
 
 import React, { useEffect, useState } from "react";
 
 const Countdown = () => {
-  const targetDate = new Date("2025-08-16T11:00:00Z"); // Target date for the Pride Event (12 PM BST, which is 11 AM UTC)
+  const targetDate = new Date("2025-08-16T11:00:00Z");
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
-      const distance = targetDate.getTime() - now.getTime(); // Ensure both are in milliseconds
+      const distance = targetDate.getTime() - now.getTime();
 
       if (distance <= 0) {
         clearInterval(interval);
@@ -25,7 +25,7 @@ const Countdown = () => {
       }
     }, 1000);
 
-    return () => clearInterval(interval); // Cleanup the interval on component unmount
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -33,7 +33,7 @@ const Countdown = () => {
       <h2 className="text-3xl font-semibold mb-6">Countdown to Pride Event</h2>
       <div className="bg-white text-black p-6 rounded-lg shadow-md">
         <p className="text-lg mb-4">Time remaining until the Pride Event on August 16, 2025 at 12.pm:</p>
-        <div className="flex justify-center items-center space-x-6">
+        <div className="flex justify-center items-center space-x-6 mb-6">
           <div className="text-xl font-semibold">
             <span className="block text-3xl">{timeLeft.days}</span>
             <span className="text-sm">Days</span>
@@ -51,6 +51,13 @@ const Countdown = () => {
             <span className="text-sm">Seconds</span>
           </div>
         </div>
+        {/* Button for tickets */}
+        <a
+          href="https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator" 
+          className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-full transition duration-300 ease-in-out"
+        >
+          Get Your Tickets
+        </a>
       </div>
     </section>
   );
