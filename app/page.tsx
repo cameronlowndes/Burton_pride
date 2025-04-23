@@ -71,14 +71,24 @@ export default function Home() {
             Donate Now
           </Link>
 
-          {/* Facebook Button */}
-          <div className="mt-4">
+          {/* Social Buttons */}
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+            {/* Facebook Button */}
             <Link
               href="https://www.facebook.com/profile.php?id=61556621159422"
               target="_blank"
-              className="bg-blue-600 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-blue-500 transition flex items-center justify-center gap-2"
+              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition"
             >
               Follow us on Facebook
+            </Link>
+
+            {/* Instagram Button */}
+            <Link
+              href="https://www.instagram.com/prideburton/"
+              target="_blank"
+              className="inline-block bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:opacity-90 transition"
+            >
+              Follow us on Instagram
             </Link>
           </div>
         </section>
