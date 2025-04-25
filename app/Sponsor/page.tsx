@@ -14,7 +14,7 @@ export default function Sponsors() {
         keywords="Burton Pride, sponsors, LGBTQ+ support, diversity, inclusion, events"
       />
 
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-45">
         <Navbar />
 
         {/* Hero Section */}

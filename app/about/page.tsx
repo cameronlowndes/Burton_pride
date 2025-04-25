@@ -12,7 +12,7 @@ export default function About() {
         keywords="Burton Pride, LGBTQ+, diversity, inclusion, community, Burton, Pride events, equality"
       />
 
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16">
+      <div className="bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 min-h-screen relative pb-45"> {/* Increased padding-bottom */}
         <Navbar />
 
         {/* About Section */}
@@ -40,12 +40,13 @@ export default function About() {
           </p>
           <a
             href="/ContactUS"
-            className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition hero-button animate-scaleUp duration-1000 ease-out delay-600"
+            className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition hero-button animate-scaleUp duration-1000 ease-out delay-600 mt-8 sm:mt-12"
           >
             Contact Us
           </a>
         </section>
 
+        {/* Footer */}
         <Footer />
       </div>
     </>
