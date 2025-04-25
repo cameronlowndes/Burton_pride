@@ -108,6 +108,13 @@ export default function Home() {
             Learn More
           </Link>
         </section>
+        <div className="md:w-1/2 w-full flex justify-center mt-10">
+                    <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
+                        <button   className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
+                            Vendor Booking
+                        </button>
+                    </Link>
+                </div>
 
         {/* Events Section */}
         <section id="events" className="mt-16 text-center w-full max-w-4xl">
