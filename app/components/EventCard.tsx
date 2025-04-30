@@ -26,7 +26,7 @@ const EventCard: React.FC<EventCardProps> = ({
   image,
   onImageClick
 }) => (
-  <div className="bg-white text-black p-6 rounded-lg shadow-md animate-fadeInUp max-w-md w-full">
+  <div className="bg-white text-black p-6 rounded-lg shadow-md animate-fadeInUp w-full max-w-sm transition-transform hover:scale-105">
     {image && (
       <div className="mb-4 cursor-pointer" onClick={() => onImageClick(image)}>
         <img
@@ -38,7 +38,7 @@ const EventCard: React.FC<EventCardProps> = ({
     )}
     <h3 className="text-xl font-bold">{name}</h3>
     <p className="text-sm">{description}</p>
-    {date && <span className="text-pink-600 font-semibold">{date}</span>}
+    {date && <span className="text-pink-600 font-semibold block mt-1">{date}</span>}
     <div className="mt-4">
       <p className="text-sm text-gray-600">{details}</p>
     </div>
@@ -81,7 +81,6 @@ const EventPage: React.FC = () => {
 
   useEffect(() => {
     const currentDate = new Date();
-
     const rainbowDate = getNextThursday(currentDate);
     setRainbowRiotDate(rainbowDate.toLocaleDateString('en-GB', {
       day: 'numeric',
@@ -111,12 +110,22 @@ const EventPage: React.FC = () => {
         isEventPassed: new Date("2025-05-26") < currentDate,
         image: "/image/Drag_Queen_Bingo_Night_Poster.jpeg",
         onImageClick: setModalImage
+      },
+      {
+        name: "Burton Pride Walk in the Park",
+        description: "A great outdoor walk at Stapenhill Gardens for all LGBTQ+ and allies! 🌳🏳️‍🌈",
+        date: "May 14, 2025",
+        details: "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot) at 5pm.",
+        mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
+        isEventPassed: new Date("2025-05-14") < currentDate,
+        image: "/image/Burton_Pride_Walk_Poster.png",
+        onImageClick: setModalImage
       }
     ];
 
     const rainbowRiot: EventCardProps = {
       name: "Rainbow R.I.O.T. Every Thursday",
-      description: "Need Support? You’re Not Alone. Join Us Every Thursday  at Burton Fire Station",
+      description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
       details: `Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday 6:30–7:30pm at Burton Fire Station.`,
       mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
       isEventPassed: rainbowDate < currentDate,
@@ -138,17 +147,16 @@ const EventPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col items-center gap-6 p-6 relative">
-      {/* Upcoming Events */}
+<div className="grid grid-cols-2sm:grid-cols-2 lg:grid-cols-0 gap-10 p-10 justify-items-center">
+
       {upcomingEvents.length > 0 ? (
         upcomingEvents.map(event => (
           <EventCard key={event.name} {...event} />
         ))
       ) : (
-        <p className="text-lg text-gray-500">No upcoming events</p>
+        <p className="text-lg text-gray-500 col-span-full text-center">No upcoming events</p>
       )}
 
-      {/* Modal */}
       {modalImage && (
         <div
           className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
