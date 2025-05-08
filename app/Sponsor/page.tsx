@@ -33,11 +33,23 @@ export default function Sponsors() {
             
             {/* Sponsor Card */}
             <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center transition hover:shadow-lg hover:scale-105">
-              <Image src="/image/Social_Roots.jpg" alt="Social Roots & Green Shoots" width={150} height={150} className="w-32 h-32 rounded mb-4" />
+              <Image src="/image/SocialRoots&GreenShootsPrideLogo.jpg" alt="Social Roots & Green Shoots" width={150} height={150} className="w-32 h-32 rounded mb-4" />
               <h2 className="text-xl font-semibold">Social Roots & Green Shoots</h2>
               <p className="text-gray-600 text-center mb-4">Committed to supporting LGBTQ+ communities.</p>
                <Link 
                 href="https://www.youtube.com/@SocialRootsGreenShoots" 
+                target="_blank" 
+                className="bg-pink-600 text-white px-4 py-2 rounded-full font-semibold hover:bg-pink-700 transition"
+              >
+                Visit Sponsor
+              </Link>
+            </div>
+            <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center transition hover:shadow-lg hover:scale-105">
+              <Image src="/image/B&Q_LGBTQ_logo.jpeg" alt="B&Q" width={150} height={150} className="w-32 h-32 rounded mb-4" />
+              <h2 className="text-xl font-semibold">B&Q</h2>
+              <p className="text-gray-600 text-center mb-4">Committed to supporting LGBTQ+ communities.</p>
+               <Link 
+                href="https://www.diy.com" 
                 target="_blank" 
                 className="bg-pink-600 text-white px-4 py-2 rounded-full font-semibold hover:bg-pink-700 transition"
               >
