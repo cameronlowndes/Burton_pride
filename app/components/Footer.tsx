@@ -27,9 +27,16 @@ export default function Footer() {
                     </p>
                 </div>
 
-                {/* Watermark centered below the text */}
+                {/* Clickable watermark */}
                 <div className="text-xs text-center text-gray-500">
-                    Built and powered by Cameron Digital Works
+                    <a 
+                        href="https://camerondigitalworks.com" 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="underline hover:text-gray-700"
+                    >
+                        Built and powered by Cameron Digital Works
+                    </a>
                 </div>
             </div>
         </footer>

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Countdown from '../components/Countdown';
 import Navbar from '../components/Navbar'; 
 import Footer from '../components/Footer'; 
+import SponsorCard from '../components/SponsorCard';  // Ensure the SponsorCard component is imported
 
 const PrideEventPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,12 +80,26 @@ const PrideEventPage = () => {
       <section className="mt-16 text-center w-full max-w-3xl mx-auto">
         <h2 className="text-3xl font-semibold text-white mb-8">Frequently Asked Questions</h2>
         <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2">
-
+          {/* FAQ Content */}
+          
           {/* FAQ 1 */}
-          <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
-            <h3 className="text-xl font-semibold mb-4 text-purple-600">Where is it taking place?</h3>
-            <p className="text-gray-800">Shobnall Leisure Complex, playing fields, Shobnall Road, Burton upon Trent, DE14 2BD.</p>
-          </div>
+<div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
+  <h3 className="text-xl font-semibold mb-4 text-purple-600">Where is it taking place?</h3>
+  
+  {/* Add Image here */}
+  <div className="mb-4">
+    <Image
+      src="/image/map.png" // Path to your image
+      alt="Event Location"
+      width={300} // Set the width as per your design
+      height={200} // Set the height accordingly
+      className="rounded-lg"
+    />
+  </div>
+  
+  <p className="text-gray-800">Shobnall Leisure Complex, playing fields, Shobnall Road, Burton upon Trent, DE14 2BD.</p>
+</div>
+
 
           {/* FAQ 2 */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
@@ -117,49 +132,34 @@ const PrideEventPage = () => {
             </p>
           </div>
 
-            {/* FAQ 4*/}
+          {/* FAQ 4 */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Will alcohol be served?</h3>
-            <p className="text-gray-800">Yes! Alcohol will be served at Burton Pride, and we operate a Challenge
-            25 policy. This means that if you appear to be under 25, you may be
-              asked to show ID when purchasing alcohol. Please ensure you have a
-              valid form of identification with you if you wish to buy alcohol.</p>
+            <p className="text-gray-800">Yes! Alcohol will be served at Burton Pride, and we operate a Challenge 25 policy. This means that if you appear to be under 25, you may be asked to show ID when purchasing alcohol. Please ensure you have a valid form of identification with you if you wish to buy alcohol.</p>
           </div>
 
-           {/* FAQ 5*/}
+          {/* FAQ 5 */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Will food be available?</h3>
-            <p className="text-gray-800">You bet! We have a wide range of fantastic food vendors, ensuring you
-          wont go hungry. And for those who are thirsty, we;ve got you covered
-          too!</p>
+            <p className="text-gray-800">You bet! We have a wide range of fantastic food vendors, ensuring you won’t go hungry. And for those who are thirsty, we've got you covered too!</p>
           </div>
 
-           {/* FAQ 6*/}
-           <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
+          {/* FAQ 6 */}
+          <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Where can I park?</h3>
-            <p className="text-gray-800">We encourage attendees to walk or use public transportation to the
-            event. Please see the bottom of our ‘Plan Your Visit’ page for car parking
-            details.</p>
+            <p className="text-gray-800">We encourage attendees to walk or use public transportation to the event. Please see the bottom of our ‘Plan Your Visit’ page for car parking details.</p>
           </div>
 
-          
-             {/* FAQ 7*/}
-            <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
+          {/* FAQ 7 */}
+          <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Will Security and medical staff be present?</h3>
-            <p className="text-gray-800">SIA-trained security professionals and medically trained staff will be
-              present all day to ensure the safety of all attendees. Should you need to
-              speak with somebody, you can speak to a steward in hi-visibility who will
-            be connected to all staff via radio or at the Security and medical point.
-            Our security guards will also be responsible for lost and found items and
-          children, providing a secure environment for all.
-          Our security guards will also be responsible for lost and found items and
-            children.</p>
+            <p className="text-gray-800">SIA-trained security professionals and medically trained staff will be present all day to ensure the safety of all attendees. Should you need to speak with somebody, you can speak to a steward in hi-visibility who will be connected to all staff via radio or at the Security and medical point.</p>
           </div>
-
         </div>
       </section>
-        {/* Get Involved Section */}
-        <section className="mt-16 text-center w-full max-w-3xl">
+
+      {/* Get Involved Section */}
+      <section className="mt-16 text-center w-full max-w-3xl">
         <h2 className="text-3xl font-semibold mb-6">Get Involved</h2>
         <p className="text-lg text-gray-100 mb-4">We welcome volunteers to help with the event. Sign up to support and be part of the pride celebration!</p>
         <a
@@ -170,20 +170,11 @@ const PrideEventPage = () => {
         </a>
       </section>
 
-
       {/* Event Highlights Section */}
       <section className="mt-16 text-center w-full max-w-3xl">
         <h2 className="text-3xl font-semibold mb-6">Event Highlights</h2>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="bg-white text-black p-6 rounded-lg shadow-md">
-            <h3 className="text-xl font-semibold mb-2">Live Music</h3>
-            <p>Enjoy performances from local artists and popular musicians throughout the day!</p>
-          </div>
-
-          <div className="bg-white text-black p-6 rounded-lg shadow-md">
-            <h3 className="text-xl font-semibold mb-2">Community Booths</h3>
-            <p>Explore booths from local businesses, organizations, and advocacy groups.</p>
-          </div>
+          {/* Event Highlights Content */}
         </div>
       </section>
 
@@ -203,18 +194,10 @@ const PrideEventPage = () => {
       <section className="mt-16 text-center w-full max-w-3xl">
         <h2 className="text-3xl font-semibold mb-6">Sponsors</h2>
         <div className="flex flex-col sm:flex-row justify-center space-y-6 sm:space-y-0 sm:space-x-8">
-          {/* Sponsor 1 */}
-          <div className="bg-gray-200 p-4 rounded-lg">
-            <img src="/path-to-sponsor-logo.png" alt="Sponsor 1" className="w-40" />
-          </div>
-          {/* Sponsor 2 */}
-          <div className="bg-gray-200 p-4 rounded-lg">
-            <img src="/path-to-sponsor-logo.png" alt="Sponsor 2" className="w-40" />
-          </div>
+          {/* Just Importing SponsorCard here */}
+          <SponsorCard />
         </div>
       </section>
-
-      
 
       {/* Footer */}
       <Footer />
