@@ -44,8 +44,6 @@ export default function Sponsors() {
                 Visit Sponsor
               </Link>
             </div>
-
-            {/* Add more sponsor cards below as needed */}
           </div>
         </section>
 
