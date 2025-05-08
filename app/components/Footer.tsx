@@ -35,7 +35,7 @@ export default function Footer() {
                         rel="noopener noreferrer" 
                         className="underline hover:text-gray-700"
                     >
-                        Built and powered by Cameron Digital Works
+                        Built and powered by Cameron Digital Work
                     </a>
                 </div>
             </div>
