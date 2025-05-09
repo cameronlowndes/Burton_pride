@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -147,8 +147,7 @@ const EventPage: React.FC = () => {
   }, []);
 
   return (
-<div className="grid grid-cols-2sm:grid-cols-2 lg:grid-cols-0 gap-10 p-10 justify-items-center">
-
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10 p-10 justify-items-center">
       {upcomingEvents.length > 0 ? (
         upcomingEvents.map(event => (
           <EventCard key={event.name} {...event} />
