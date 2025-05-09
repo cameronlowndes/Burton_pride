@@ -25,7 +25,7 @@ export default function EventsPage() {
         <Navbar />
 
         {/* Hero Section */}
-        <section className="text-center flex flex-col items-center gap-6 mt-16 animate-fadeInUp">
+        <section className="text-center flex flex-col items-center gap-6 mt-16 animate-fadeInUp flex-grow">
           <Image
             src="/image/logo.jpg"
             alt="Burton Pride Logo"
@@ -37,7 +37,7 @@ export default function EventsPage() {
             Upcoming Events
           </h1>
           <p className="text-lg sm:text-xl max-w-2xl hero-description animate-fadeInUp delay-200">
-            Stay updated on all our exciting events, including the Pride Evernt and community gatherings. We can’t wait to celebrate with you!
+            Stay updated on all our exciting events, including the Pride Event and community gatherings. We can’t wait to celebrate with you!
           </p>
         </section>
 
@@ -45,10 +45,12 @@ export default function EventsPage() {
         <Countdown />
 
         {/* Events Section */}
-        <section id="events" className="mt-16 text-center w-full max-w-4xl">
+        <section id="events" className="mt-16 text-center w-full flex flex-col items-center max-w-6xl flex-grow">
           <h2 className="text-3xl font-semibold mb-6">Upcoming Events</h2>
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-wrap justify-center gap-6">
+            {/* EventCard components will adjust based on screen size */}
             <EventCard />
+            {/* You can add more EventCard components here if needed */}
           </div>
         </section>
 

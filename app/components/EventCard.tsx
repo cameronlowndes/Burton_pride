@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -120,6 +120,17 @@ const EventPage: React.FC = () => {
         isEventPassed: new Date("2025-05-14") < currentDate,
         image: "/image/Burton_Pride_Walk_Poster.png",
         onImageClick: setModalImage
+      },
+
+      {
+        name: "Burton Pride Game Session",
+        description: "come join the fun, meet new people, and play your favourite games! 🏳️‍🌈",
+        date: "May 17, 2025",
+        details: "Join Burton Pride for a fun board game session! Meet new people, play your favourites, and enjoy the good vibes.",
+        mapLink: "https://maps.app.goo.gl/UHwg29g7L4pQnpFT8",
+        isEventPassed: new Date("2025-05-17") < currentDate,
+        image: "/image/GameSession.png",
+        onImageClick: setModalImage
       }
     ];
 
@@ -147,8 +158,7 @@ const EventPage: React.FC = () => {
   }, []);
 
   return (
-<div className="grid grid-cols-2sm:grid-cols-2 lg:grid-cols-0 gap-10 p-10 justify-items-center">
-
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10 p-10 justify-items-center">
       {upcomingEvents.length > 0 ? (
         upcomingEvents.map(event => (
           <EventCard key={event.name} {...event} />

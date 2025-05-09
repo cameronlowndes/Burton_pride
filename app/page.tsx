@@ -1,58 +1,47 @@
-"use client";
-
 import Image from "next/image";
 import Link from "next/link";
-import Head from "next/head";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import EventCard from "./components/EventCard";
 import Countdown from "./components/Countdown";
+import MetaHead from "./components/MetaHead";
+
+export const metadata = {
+  title: "Burton Pride - Events",
+  description: "Learn more about Burton Pride, our mission, and how to get involved.",
+};
 
 export default function Home() {
   return (
     <>
-      <Head>
-        <title>Burton Pride | Home</title>
-        <meta
-          name="description"
-          content="Join Burton Pride and celebrate diversity, inclusion, and love in the heart of Burton."
-        />
-        <meta
-          name="keywords"
-          content="Burton Pride, LGBTQ+, diversity, events, inclusivity"
-        />
-        <meta name="author" content="Burton Pride" />
-        <meta
-          name="google-site-verification"
-          content="LI3n61JOpv5xVsLpjjteAlTkEjNGprTSQ2aajD_XU5o"
-        />
-      </Head>
+      {/* MetaHead Component for SEO */}
+      <MetaHead
+        title="Burton Pride - Events"
+        description="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Event, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
+        keywords="Burton Pride, Pride events, LGBTQ+ events, community events, Pride Parade, inclusivity, diversity"
+      />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />
 
         {/* Hero Section */}
-        <header className="text-center flex flex-col items-center gap-6 mt-16">
+        <section className="text-center flex flex-col items-center gap-6 mt-16 animate-fadeInUp flex-grow">
           <Image
             src="/image/logo.jpg"
             alt="Burton Pride Logo"
             width={180}
             height={180}
-            className="hero-logo"
+            className="hero-logo animate-scaleUp"
           />
-          <h1 className="text-4xl sm:text-6xl font-bold">Welcome to Burton Pride</h1>
-          <p className="text-lg sm:text-xl max-w-2xl">
-            Celebrating diversity, inclusion, and love in the heart of Burton.
-            Join us in making a difference!
+          <h1 className="text-4xl sm:text-6xl font-bold hero-title animate-fadeInUp delay-100">
+            Welcome to Burton Pride
+          </h1>
+          <p className="text-lg sm:text-xl max-w-2xl hero-description animate-fadeInUp delay-200">
+            Celebrating diversity, inclusion, and love in the heart of Burton. Join us in making a difference!
           </p>
-          <Link
-            href="/events"
-            className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
-          >
-            Explore Events
-          </Link>
-        </header>
+        </section>
 
+        {/* Countdown Section */}
         <Countdown />
 
         {/* Support Section */}
@@ -70,9 +59,11 @@ export default function Home() {
           >
             Donate Now
           </Link>
+        </section>
 
-          {/* Social Buttons */}
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+        {/* Social Buttons Section */}
+        <section className="mt-8 text-center w-full">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             {/* Facebook Button */}
             <Link
               href="https://www.facebook.com/profile.php?id=61556621159422"
@@ -94,7 +85,7 @@ export default function Home() {
         </section>
 
         {/* Collaborate Section */}
-        <section className="mt-16 text-center w-full max-w-3xl">
+        <section className="mt-16 text-center w-full max-w-3xl flex-grow">
           <h2 className="text-3xl font-semibold mb-4">Collaborate with Us</h2>
           <p className="text-lg mb-6">
             We’re always looking for like-minded businesses, organizations, and
@@ -107,23 +98,28 @@ export default function Home() {
           >
             Learn More
           </Link>
+      
+        <div  className="mt-16 text-center w-full max-w-3xl flex-grow">
+          <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
+            <button className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
+              Vendor Booking
+            </button>
+          </Link>
+        </div>
         </section>
-        <div className="md:w-1/2 w-full flex justify-center mt-10">
-                    <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
-                        <button   className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
-                            Vendor Booking
-                        </button>
-                    </Link>
-                </div>
+
 
         {/* Events Section */}
-        <section id="events" className="mt-16 text-center w-full max-w-4xl">
+        <section id="events" className="mt-16 text-center w-full flex flex-col items-center max-w-6xl">
           <h2 className="text-3xl font-semibold mb-6">Upcoming Events</h2>
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-wrap justify-center gap-6">
+            {/* EventCard components */}
             <EventCard />
+            {/* More EventCard components can be added here */}
           </div>
         </section>
 
+        {/* Footer */}
         <Footer />
       </div>
     </>
