@@ -7,7 +7,7 @@ import Countdown from "./components/Countdown";
 import MetaHead from "./components/MetaHead";
 
 export const metadata = {
-  title: "Burton Pride - Events",
+  title: "Burton Pride - home",
   description: "Learn more about Burton Pride, our mission, and how to get involved.",
 };
 

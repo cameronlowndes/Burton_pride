@@ -4,6 +4,10 @@ import Link from "next/link";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 
+ export const metadata = {
+  title: "Burton Pride - Sponsors",
+  description: "Learn how you can be a part of Burton Pride by volunteering, donating, or collaborating.",
+};
 
 export default function Sponsors() {
   return (

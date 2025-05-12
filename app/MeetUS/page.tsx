@@ -4,6 +4,11 @@ import Footer from "../components/Footer";
 import Link from "next/link";
 import MetaHead from "../components/MetaHead"; // Import MetaHead for SEO
 
+export const metadata = {
+  title: "Burton Pride - Meet Us",
+  description: "Learn more about Burton Pride, our mission, and how to get involved.",
+};
+
 export default function MeetUs() {
   return (
     <>

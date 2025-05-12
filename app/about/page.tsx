@@ -1,16 +1,28 @@
 import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import MetaHead from "../components/MetaHead";  // Import MetaHead component
+import Head from "next/head"; // Import Head from next/head
+
+export const metadata = {
+  title: "Burton Pride - About",
+  description: "Learn more about Burton Pride, our mission, and how to get involved.",
+};
+
 
 export default function About() {
   return (
     <>
-      <MetaHead 
-        title="Burton Pride - About"
-        description="Learn more about Burton Pride, our mission, and how to get involved. Burton Pride is dedicated to fostering a welcoming and inclusive environment for the LGBTQ+ community in Burton."
-        keywords="Burton Pride, LGBTQ+, diversity, inclusion, community, Burton, Pride events, equality"
-      />
+      <Head>
+        <title>Burton Pride - About</title>
+        <meta
+          name="description"
+          content="Learn more about Burton Pride, our mission, and how to get involved. Burton Pride is dedicated to fostering a welcoming and inclusive environment for the LGBTQ+ community in Burton."
+        />
+        <meta
+          name="keywords"
+          content="Burton Pride, LGBTQ+, diversity, inclusion, community, Burton, Pride events, equality"
+        />
+      </Head>
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16">
         <Navbar />
