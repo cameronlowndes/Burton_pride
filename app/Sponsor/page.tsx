@@ -4,6 +4,11 @@ import Footer from "../components/Footer";
 import SponsorCard from "../components/SponsorCard"; // Import the refined SponsorCard component
 import Link from "next/link";
 
+ export const metadata = {
+  title: "Burton Pride - Sponsors",
+  description: "Learn how you can be a part of Burton Pride by volunteering, donating, or collaborating.",
+};
+
 export default function Sponsors() {
   return (
     <>

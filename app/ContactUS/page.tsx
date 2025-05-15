@@ -2,6 +2,11 @@ import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import MetaHead from "../components/MetaHead"; // Import MetaHead
 
+export const metadata = {
+  title: "Burton Pride - Connact Us",
+  description: "Learn more about Burton Pride, our mission, and how to get involved.",
+};
+
 export default function Contact() {
   return (
     <>

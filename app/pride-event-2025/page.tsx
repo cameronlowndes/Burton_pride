@@ -5,7 +5,8 @@ import Image from 'next/image';
 import Countdown from '../components/Countdown';
 import Navbar from '../components/Navbar'; 
 import Footer from '../components/Footer'; 
-import SponsorCard from '../components/SponsorCard';  // Ensure the SponsorCard component is imported
+import SponsorCard from '../components/SponsorCard'; 
+
 
 const PrideEventPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -19,6 +20,7 @@ const PrideEventPage = () => {
   const closeModal = () => {
     setIsModalOpen(false);
   };
+
 
   return (
     <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-45">
@@ -82,23 +84,35 @@ const PrideEventPage = () => {
         <div className="grid gap-6 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-2">
           {/* FAQ Content */}
           
-          {/* FAQ 1 */}
+   {/* FAQ 1 */}
 <div className="bg-white text-black p-6 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
   <h3 className="text-xl font-semibold mb-4 text-purple-600">Where is it taking place?</h3>
   
   {/* Add Image here */}
   <div className="mb-4">
     <Image
-      src="/image/map.png" // Path to your image
+      src="/image/map.png" 
       alt="Event Location"
-      width={300} // Set the width as per your design
-      height={200} // Set the height accordingly
+      width={300} 
+      height={200}
       className="rounded-lg"
     />
   </div>
   
-  <p className="text-gray-800">Shobnall Leisure Complex, playing fields, Shobnall Road, Burton upon Trent, DE14 2BD.</p>
+  <p className="text-gray-800 mb-4">
+    Shobnall Leisure Complex, playing fields, Shobnall Road, Burton upon Trent, DE14 2BD.
+  </p>
+
+  <a
+    href="https://www.google.com/maps/place/Shobnall+Park/@52.8027581,-1.6465344,15.5z/data=!4m6!3m5!1s0x487a0315996f5935:0xa3dcc4d92c2e33e4!8m2!3d52.8098854!4d-1.6548522!16s%2Fg%2F11svyt0k5t?entry=ttu&g_ep=EgoyMDI1MDUxMi4wIKXMDSoJLDEwMjExNDUzSAFQAw%3D%3D"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out"
+  >
+    View on Map
+  </a>
 </div>
+
 
 
           {/* FAQ 2 */}

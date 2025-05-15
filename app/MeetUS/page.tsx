@@ -4,6 +4,11 @@ import Footer from "../components/Footer";
 import Link from "next/link";
 import MetaHead from "../components/MetaHead"; // Import MetaHead for SEO
 
+export const metadata = {
+  title: "Burton Pride - Meet Us",
+  description: "Learn more about Burton Pride, our mission, and how to get involved.",
+};
+
 export default function MeetUs() {
   return (
     <>
@@ -13,7 +18,7 @@ export default function MeetUs() {
         keywords="Burton Pride, Meet the team, LGBTQ+ community, Pride team, volunteers, event planners, social media team, website admin"
       />
 
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-45">
+      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
         <Navbar />
 
         {/* Hero Section */}

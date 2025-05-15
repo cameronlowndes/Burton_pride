@@ -7,7 +7,7 @@ import Countdown from "./components/Countdown";
 import MetaHead from "./components/MetaHead";
 
 export const metadata = {
-  title: "Burton Pride - Events",
+  title: "Burton Pride - home",
   description: "Learn more about Burton Pride, our mission, and how to get involved.",
 };
 
@@ -16,7 +16,7 @@ export default function Home() {
     <>
       {/* MetaHead Component for SEO */}
       <MetaHead
-        title="Burton Pride - Events"
+        title="Burton Pride - Home"
         description="Stay updated on all the exciting events hosted by Burton Pride, including the Pride Event, community gatherings, and more. Join us to celebrate diversity and inclusivity!"
         keywords="Burton Pride, Pride events, LGBTQ+ events, community events, Pride Parade, inclusivity, diversity"
       />
