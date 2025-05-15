@@ -2,7 +2,6 @@ import Link from 'next/link';
 import Watermark from '../../components/Watermark';
 import { Metadata } from 'next';
 
-
 export const metadata: Metadata = {
   title: 'Getting Here | Burton Pride 2025',
   description: 'Plan your journey to Burton Pride 2025. Discover the best travel options including train, bus, taxi, and local directions to the Shobnall Leisure Complex.',
@@ -13,23 +12,23 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Getting Here | Burton Pride 2025',
     description: 'All your travel options for getting to Burton Pride 2025 at Shobnall Leisure Complex.',
-    url: 'https://yourdomain.com/pride-event-2025/plan-your-visit',
     siteName: 'Burton Pride',
     type: 'website',
     locale: 'en_GB',
     images: [
       {
-        url: 'https://yourdomain.com/og-image.jpg',
+        url: '/image/logo.jpg',
         width: 1200,
         height: 630,
         alt: 'Burton Pride 2025 - Getting Here',
       },
     ],
   },
-  
 };
 
 const PlanYourVisitPage = () => {
+  const anyDisabled = true; // Control showing of disabled travel help card
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white px-6 py-12 sm:px-16">
       <div className="max-w-4xl mx-auto">
@@ -56,7 +55,7 @@ const PlanYourVisitPage = () => {
             </a>
           </div>
 
-          {/* Bus Card */}
+          {/* Bus Card with Timetables */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🚌 By Bus</h2>
             <p className="mb-4">
@@ -73,14 +72,57 @@ const PlanYourVisitPage = () => {
                 <strong>From Uttoxeter:</strong> Use 401, 402, or 403 and alight at Shobnall Street/Shell Petrol Station.
               </li>
             </ul>
-            <div className="flex flex-wrap gap-4">
+
+            <div className="grid sm:grid-cols-2 gap-4 mb-6">
+              {/* Diamond Midlands Routes */}
+              <a href="https://www.diamondbuses.com/bus-services/em/em-8-burton/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 8 Timetable
+              </a>
+              <a href="https://www.diamondbuses.com/bus-services/em/em-9-airway/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 9 Timetable
+              </a>
+              <a href="https://www.diamondbuses.com/bus-services/em/em-10-burton/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 10 Timetable
+              </a>
+              <a href="https://www.diamondbuses.com/bus-services/em/em-401-burton/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 401 Timetable
+              </a>
+              <a href="https://www.diamondbuses.com/bus-services/em/em-402-burton/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 402 Timetable
+              </a>
+              <a href="https://www.diamondbuses.com/bus-services/em/em-403-burton/" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                Route 403 Timetable
+              </a>
+
+              {/* Trent Barton Routes */}
+              <a href="https://www.trentbarton.co.uk/services/x38" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                X38 Timetable
+              </a>
+              <a href="https://www.trentbarton.co.uk/services/v3" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                V3 Timetable
+              </a>
+              <a href="https://www.trentbarton.co.uk/services/villager" target="_blank" rel="noopener noreferrer"
+                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
+                V1 Timetable
+              </a>
+            </div>
+
+            <div className="flex gap-4 flex-wrap">
               <a
-                href="https://www.diamondbuses.com/journey-planner/"
+                href="https://www.diamondbuses.com/services/midlands/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Diamond Buses
+                Diamond Buses Home
               </a>
               <a
                 href="https://www.trentbarton.co.uk"
@@ -88,7 +130,15 @@ const PlanYourVisitPage = () => {
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Trent Barton
+                Trent Barton Home
+              </a>
+              <a
+                href="https://www.staffordshire.gov.uk/Transport/buses/home.aspx"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+              >
+                Council Bus Info
               </a>
             </div>
           </div>
@@ -97,23 +147,48 @@ const PlanYourVisitPage = () => {
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🚖 By Taxi</h2>
             <p className="mb-4">Uber operates locally. You can also use the following taxi services:</p>
-            <div className="flex flex-col gap-4">
-              <a
-                href="https://www.newstreettaxis.com/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded w-fit"
-              >
-                New Street Taxis
-              </a>
-              <a
-                href="https://www.icarsltd.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded w-fit"
-              >
-               ICars
-              </a>
+            <div className="flex flex-col gap-6">
+              {/* New Street Taxis */}
+              <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
+                <h3 className="text-lg font-semibold mb-2">New Street Taxis</h3>
+                <div className="flex gap-4">
+                  <a
+                    href="https://www.newstreettaxis.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded"
+                  >
+                    Visit Website
+                  </a>
+                  <a
+                    href="tel:01283500500"
+                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded"
+                  >
+                    📞 Call 01283 500500
+                  </a>
+                </div>
+              </div>
+
+              {/* Stapenhill Taxis */}
+              <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
+                <h3 className="text-lg font-semibold mb-2">Stapenhill Taxis</h3>
+                <div className="flex gap-4">
+                  <a
+                    href="https://www.stapenhilltaxis.co.uk/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded"
+                  >
+                    Visit Website
+                  </a>
+                  <a
+                    href="tel:01283544444"
+                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded"
+                  >
+                    📞 Call 01283 544444
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -125,17 +200,44 @@ const PlanYourVisitPage = () => {
             </p>
           </div>
 
+      {/* Disabled Travel Help Card */}
+{anyDisabled && (
+  <div className="bg-yellow-100 text-yellow-900 p-6 rounded-lg shadow-lg border-2 border-yellow-500">
+    <h2 className="text-2xl font-semibold mb-4">🛠️ Need Help Traveling?</h2>
+    <p className="mb-4">
+      If you need assistance traveling to Burton Pride 2025, please{' '}
+      <Link href="/ContactUS">
+        <span className="underline cursor-pointer hover:text-yellow-700 font-semibold">
+          contact our support team
+        </span>
+      </Link>{' '}
+      for help.
+    </p>
+    <p>
+      Or email us directly at{' '}
+      <a
+        href="prideburton@gmail.com"
+        className="underline hover:text-yellow-700 font-semibold"
+      >
+        prideburton@gmail.com
+      </a>
+    </p>
+  </div>
+)}
+
+
           {/* Back to Main Event Page */}
           <div className="text-center mt-6">
             <Link href="/pride-event-2025">
-              <span className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out">
+              <span className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
                 ← Back to Main Event Page
               </span>
             </Link>
           </div>
         </div>
       </div>
-         {/* Watermark */}
+
+      {/* Watermark */}
       <Watermark />
     </main>
   );
