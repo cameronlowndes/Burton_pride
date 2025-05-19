@@ -4,14 +4,21 @@ import { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Getting Here | Burton Pride 2025',
-  description: 'Plan your journey to Burton Pride 2025. Discover the best travel options including train, bus, taxi, and local directions to the Shobnall Leisure Complex.',
+  description:
+    'Plan your journey to Burton Pride 2025. Discover the best travel options including train, bus, taxi, and local directions to the Shobnall Leisure Complex.',
   keywords: [
-    'Burton Pride', 'Pride Event 2025', 'Getting to Pride', 'Burton upon Trent travel',
-    'Shobnall Leisure Complex', 'LGBTQ+ event', 'Pride travel guide'
+    'Burton Pride',
+    'Pride Event 2025',
+    'Getting to Pride',
+    'Burton upon Trent travel',
+    'Shobnall Leisure Complex',
+    'LGBTQ+ event',
+    'Pride travel guide',
   ],
   openGraph: {
     title: 'Getting Here | Burton Pride 2025',
-    description: 'All your travel options for getting to Burton Pride 2025 at Shobnall Leisure Complex.',
+    description:
+      'All your travel options for getting to Burton Pride 2025 at Shobnall Leisure Complex.',
     siteName: 'Burton Pride',
     type: 'website',
     locale: 'en_GB',
@@ -27,16 +34,17 @@ export const metadata: Metadata = {
 };
 
 const PlanYourVisitPage = () => {
-  const anyDisabled = true; // Control showing of disabled travel help card
+  const anyDisabled = true;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white px-6 py-12 sm:px-16">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl sm:text-5xl font-bold mb-10 text-center">Getting Here – Burton Pride</h1>
+        <h1 className="text-4xl sm:text-5xl font-bold mb-10 text-center">
+          Getting Here – Burton Pride
+        </h1>
 
         <div className="grid gap-8">
-
-          {/* Train Card */}
+          {/* Train */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🚆 By Train</h2>
             <p className="mb-4">
@@ -55,7 +63,7 @@ const PlanYourVisitPage = () => {
             </a>
           </div>
 
-          {/* Bus Card with Timetables */}
+          {/* Bus */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🚌 By Bus</h2>
             <p className="mb-4">
@@ -72,65 +80,31 @@ const PlanYourVisitPage = () => {
                 <strong>From Uttoxeter:</strong> Use 401, 402, or 403 and alight at Shobnall Street/Shell Petrol Station.
               </li>
             </ul>
-
-            <div className="grid sm:grid-cols-2 gap-4 mb-6">
-              {/* Diamond Midlands Routes */}
-              <a href="https://www.diamondbuses.com/bus-services/em/em-8-burton/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 8 Timetable
-              </a>
-              <a href="https://www.diamondbuses.com/bus-services/em/em-9-airway/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 9 Timetable
-              </a>
-              <a href="https://www.diamondbuses.com/bus-services/em/em-10-burton/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 10 Timetable
-              </a>
-              <a href="https://www.diamondbuses.com/bus-services/em/em-401-burton/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 401 Timetable
-              </a>
-              <a href="https://www.diamondbuses.com/bus-services/em/em-402-burton/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 402 Timetable
-              </a>
-              <a href="https://www.diamondbuses.com/bus-services/em/em-403-burton/" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                Route 403 Timetable
-              </a>
-
-              {/* Trent Barton Routes */}
-              <a href="https://www.trentbarton.co.uk/services/x38" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                X38 Timetable
-              </a>
-              <a href="https://www.trentbarton.co.uk/services/v3" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                V3 Timetable
-              </a>
-              <a href="https://www.trentbarton.co.uk/services/villager" target="_blank" rel="noopener noreferrer"
-                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded text-center">
-                V1 Timetable
-              </a>
-            </div>
-
             <div className="flex gap-4 flex-wrap">
               <a
-                href="https://www.diamondbuses.com/services/midlands/"
+                href="https://www.diamondbuses.com/bus-tracker/?region=Staffordshire/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Diamond Buses Home
+                Diamond Buses Tracker
               </a>
               <a
-                href="https://www.trentbarton.co.uk"
+                href=""
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Trent Barton Home
+                Trent Barton Tracker   
+              </a>
+
+                <a
+                href="https://www.arrivabus.co.uk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
+              >
+              Arriva Bus
               </a>
               <a
                 href="https://www.staffordshire.gov.uk/Transport/buses/home.aspx"
@@ -143,10 +117,11 @@ const PlanYourVisitPage = () => {
             </div>
           </div>
 
-          {/* Taxi Card */}
+          {/* Taxi */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🚖 By Taxi</h2>
             <p className="mb-4">Uber operates locally. You can also use the following taxi services:</p>
+
             <div className="flex flex-col gap-6">
               {/* New Street Taxis */}
               <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
@@ -192,7 +167,7 @@ const PlanYourVisitPage = () => {
             </div>
           </div>
 
-          {/* Respect Message Card */}
+          {/* Respect Message */}
           <div className="bg-white text-black p-6 rounded-lg shadow-lg">
             <h2 className="text-2xl font-semibold mb-4">🙏 Be Considerate</h2>
             <p>
@@ -200,33 +175,32 @@ const PlanYourVisitPage = () => {
             </p>
           </div>
 
-      {/* Disabled Travel Help Card */}
-{anyDisabled && (
-  <div className="bg-yellow-100 text-yellow-900 p-6 rounded-lg shadow-lg border-2 border-yellow-500">
-    <h2 className="text-2xl font-semibold mb-4">🛠️ Need Help Traveling?</h2>
-    <p className="mb-4">
-      If you need assistance traveling to Burton Pride 2025, please{' '}
-      <Link href="/ContactUS">
-        <span className="underline cursor-pointer hover:text-yellow-700 font-semibold">
-          contact our support team
-        </span>
-      </Link>{' '}
-      for help.
-    </p>
-    <p>
-      Or email us directly at{' '}
-      <a
-        href="prideburton@gmail.com"
-        className="underline hover:text-yellow-700 font-semibold"
-      >
-        prideburton@gmail.com
-      </a>
-    </p>
-  </div>
-)}
+          {/* Disabled Travel Help */}
+          {anyDisabled && (
+            <div className="bg-yellow-100 text-yellow-900 p-6 rounded-lg shadow-lg border-2 border-yellow-500">
+              <h2 className="text-2xl font-semibold mb-4">🛠️ Need Help Traveling?</h2>
+              <p className="mb-4">
+                If you need assistance traveling to Burton Pride 2025, please{' '}
+                <Link href="/ContactUS">
+                  <span className="underline cursor-pointer hover:text-yellow-700 font-semibold">
+                    contact our support team
+                  </span>
+                </Link>
+                .
+              </p>
+              <p>
+                Or email us directly at{' '}
+                <a
+                  href="mailto:prideburton@gmail.com"
+                  className="underline hover:text-yellow-700 font-semibold"
+                >
+                  prideburton@gmail.com
+                </a>
+              </p>
+            </div>
+          )}
 
-
-          {/* Back to Main Event Page */}
+          {/* Back Link */}
           <div className="text-center mt-6">
             <Link href="/pride-event-2025">
               <span className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
