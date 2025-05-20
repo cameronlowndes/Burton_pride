@@ -13,6 +13,7 @@ interface EventCardProps {
   isEventPassed: boolean;
   image?: string;
   onImageClick: (src: string) => void;
+  isEventToday?: boolean;
 }
 
 const EventCard: React.FC<EventCardProps> = ({
@@ -23,6 +24,7 @@ const EventCard: React.FC<EventCardProps> = ({
   link,
   mapLink,
   isEventPassed,
+  isEventToday,
   image,
   onImageClick
 }) => (
@@ -43,7 +45,9 @@ const EventCard: React.FC<EventCardProps> = ({
       <p className="text-sm text-gray-600">{details}</p>
     </div>
     <div className="mt-4">
-      {isEventPassed ? (
+      {isEventToday ? (
+        <p className="text-yellow-600 font-semibold">Happening Today!</p>
+      ) : isEventPassed ? (
         <p className="text-red-500 font-semibold">Event Completed</p>
       ) : (
         link && (
@@ -66,12 +70,29 @@ const EventCard: React.FC<EventCardProps> = ({
   </div>
 );
 
+// Get next Thursday from a date
 const getNextThursday = (fromDate: Date) => {
   const date = new Date(fromDate);
   const dayOfWeek = date.getDay();
   const daysUntilThursday = (4 - dayOfWeek + 7) % 7;
   date.setDate(date.getDate() + daysUntilThursday);
   return date;
+};
+
+// Check if event is in the past
+const isEventInPast = (eventDateStr: string) => {
+  const eventDate = new Date(eventDateStr);
+  const today = new Date();
+  eventDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  return eventDate < today;
+};
+
+// Check if event is today
+const isEventToday = (eventDateStr: string) => {
+  const eventDate = new Date(eventDateStr);
+  const today = new Date();
+  return eventDate.toDateString() === today.toDateString();
 };
 
 const EventPage: React.FC = () => {
@@ -82,6 +103,8 @@ const EventPage: React.FC = () => {
   useEffect(() => {
     const currentDate = new Date();
     const rainbowDate = getNextThursday(currentDate);
+    const rainbowDateStr = rainbowDate.toISOString();
+
     setRainbowRiotDate(rainbowDate.toLocaleDateString('en-GB', {
       day: 'numeric',
       month: 'long',
@@ -96,7 +119,8 @@ const EventPage: React.FC = () => {
         details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
         link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
-        isEventPassed: new Date("2025-08-16") < currentDate,
+        isEventPassed: isEventInPast("2025-08-16"),
+        isEventToday: isEventToday("2025-08-16"),
         image: "/image/PrideEventPoster.png",
         onImageClick: setModalImage
       },
@@ -107,7 +131,8 @@ const EventPage: React.FC = () => {
         details: "Join us for an inspiring charity event at Marstons Sports & Social Club, 7:00pm. £11.50 entry",
         link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
         mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
-        isEventPassed: new Date("2025-05-26") < currentDate,
+        isEventPassed: isEventInPast("2025-05-26"),
+        isEventToday: isEventToday("2025-05-26"),
         image: "/image/Drag_Queen_Bingo_Night_Poster.jpeg",
         onImageClick: setModalImage
       },
@@ -117,7 +142,8 @@ const EventPage: React.FC = () => {
         date: "May 14, 2025",
         details: "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot) at 5pm.",
         mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
-        isEventPassed: new Date("2025-05-14") < currentDate,
+        isEventPassed: isEventInPast("2025-05-14"),
+        isEventToday: isEventToday("2025-05-14"),
         image: "/image/Burton_Pride_Walk_Poster.png",
         onImageClick: setModalImage
       }
@@ -128,7 +154,8 @@ const EventPage: React.FC = () => {
       description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
       details: `Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday 6:30–7:30pm at Burton Fire Station.`,
       mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
-      isEventPassed: rainbowDate < currentDate,
+      isEventPassed: isEventInPast(rainbowDateStr),
+      isEventToday: isEventToday(rainbowDateStr),
       image: "/image/RainbowEvent.jpg",
       onImageClick: setModalImage,
       date: rainbowDate.toLocaleDateString('en-GB', {
