@@ -16,7 +16,7 @@ export default function JoinUs() {
       <MetaHead
         title="Burton Pride - Join Us"
         description="Learn how you can be a part of Burton Pride by volunteering, donating, or collaborating. Join us in creating a more inclusive and diverse community."
-        keywords="Burton Pride, volunteer with Burton Pride, donate to Burton Pride, collaborate with Burton Pride, LGBTQ+ community, get involved with Burton Pride"
+        keywords="Burton Pride, volunteer with Burton Pridea donate to Burton Pride, collaborate with Burton Pride, LGBTQ+ community, get involved with Burton Pride"
       />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"> {/* Increased pb-24 to pb-32 */}
