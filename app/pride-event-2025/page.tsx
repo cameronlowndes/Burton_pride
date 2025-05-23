@@ -44,11 +44,18 @@ const PrideEventPage = () => {
         {/* Navbar */}
         <Navbar />
 
-        {/* Header Section */}
-        <header className="text-center pt-18">
-          <h1 className="text-5xl font-bold text-white mb-4">Pride Event 2025</h1>
-          <p className="text-lg text-white max-w-2xl mx-auto">
-            Join us for an unforgettable celebration of inclusivity, love, and unity. The Pride Event 2025 is set to be an exciting day of festivities, entertainment, and community spirit in Burton upon Trent.
+        {/* Hero Section */}
+        <header className="text-center flex flex-col items-center gap-6 mt-16">
+          <Image
+            src="/image/logo.jpg"
+            alt="Burton Pride Team"
+            width={180}
+            height={180}
+            className="hero-logo"
+          />
+          <h1 className="text-4xl sm:text-6xl font-bold">Pride Event 2025</h1>
+          <p className="text-lg sm:text-xl max-w-2xl">
+          Join us for an unforgettable celebration of inclusivity, love, and unity. The Pride Event 2025 is set to be an exciting day of festivities, entertainment, and community spirit in Burton upon Trent.
           </p>
         </header>
 
@@ -211,44 +218,7 @@ const PrideEventPage = () => {
           </Link>
         </section>
 
-        {/* Event Highlights Section */}
-        <section className="mt-16 text-center w-full max-w-3xl">
-          <h2 className="text-3xl font-semibold mb-6">Event Highlights</h2>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Event Highlights Content - Add specific highlights here */}
-            <div className="bg-white text-black p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-2">Live Music</h3>
-              <p className="text-gray-700">Enjoy performances from talented local artists.</p>
-              {/* Optional: Add an image or link */}
-            </div>
-            <div className="bg-white text-black p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-2">Community Booths</h3>
-              <p className="text-gray-700">Connect with local LGBTQ+ organizations and allies.</p>
-              {/* Optional: Add an image or link */}
-            </div>
-            <div className="bg-white text-black p-6 rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-2">Food & Drinks</h3>
-              <p className="text-gray-700">A variety of delicious food and beverage vendors will be on site.</p>
-              {/* Optional: Add an image or link */}
-            </div>
-            {/* Add more highlights as needed */}
-          </div>
-        </section>
 
-        {/* Event Schedule Section */}
-        <section className="mt-16 text-center w-full max-w-3xl">
-          <h2 className="text-3xl font-semibold mb-6">Event Schedule</h2>
-          <div className="bg-white text-black p-6 rounded-lg shadow-md">
-            <ul className="list-none">
-              <li className="py-2"><strong>12:00 PM</strong> - Event Opens & Welcome</li>
-              <li className="py-2"><strong>1:00 PM - 3:00 PM</strong> - Live music performances</li>
-              <li className="py-2"><strong>3:00 PM - 4:00 PM</strong> - Community messages and speakers</li>
-              <li className="py-2"><strong>4:00 PM - 6:00 PM</strong> - More live entertainment</li>
-              <li className="py-2"><strong>6:00 PM</strong> - Closing ceremony</li>
-              {/* Add more schedule items */}
-            </ul>
-          </div>
-        </section>
 
         {/* Sponsors Section */}
         <section className="mt-16 text-center w-full max-w-3xl">

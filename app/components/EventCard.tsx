@@ -7,6 +7,7 @@ interface EventCardProps {
   name: string;
   description: string;
   date?: string;
+  time?: string;
   details: string;
   link?: string;
   mapLink: string;
@@ -20,6 +21,7 @@ const EventCard: React.FC<EventCardProps> = ({
   name,
   description,
   date,
+  time,
   details,
   link,
   mapLink,
@@ -40,7 +42,12 @@ const EventCard: React.FC<EventCardProps> = ({
     )}
     <h3 className="text-xl font-bold">{name}</h3>
     <p className="text-sm">{description}</p>
-    {date && <span className="text-pink-600 font-semibold block mt-1">{date}</span>}
+    {(date || time) && (
+      <div className="mt-1">
+        {date && <p className="text-pink-600 font-semibold">{date}</p>}
+        {time && <p className="text-pink-600 font-semibold">{time}</p>}
+      </div>
+    )}
     <div className="mt-4">
       <p className="text-sm text-gray-600">{details}</p>
     </div>
@@ -70,7 +77,6 @@ const EventCard: React.FC<EventCardProps> = ({
   </div>
 );
 
-// Get next Thursday from a date
 const getNextThursday = (fromDate: Date) => {
   const date = new Date(fromDate);
   const dayOfWeek = date.getDay();
@@ -79,7 +85,6 @@ const getNextThursday = (fromDate: Date) => {
   return date;
 };
 
-// Check if event is in the past
 const isEventInPast = (eventDateStr: string) => {
   const eventDate = new Date(eventDateStr);
   const today = new Date();
@@ -88,7 +93,6 @@ const isEventInPast = (eventDateStr: string) => {
   return eventDate < today;
 };
 
-// Check if event is today
 const isEventToday = (eventDateStr: string) => {
   const eventDate = new Date(eventDateStr);
   const today = new Date();
@@ -98,24 +102,18 @@ const isEventToday = (eventDateStr: string) => {
 const EventPage: React.FC = () => {
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<EventCardProps[]>([]);
-  const [rainbowRiotDate, setRainbowRiotDate] = useState<string>("");
 
   useEffect(() => {
     const currentDate = new Date();
     const rainbowDate = getNextThursday(currentDate);
     const rainbowDateStr = rainbowDate.toISOString();
 
-    setRainbowRiotDate(rainbowDate.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }));
-
     const baseEvents: EventCardProps[] = [
       {
         name: "Pride Event",
         description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
         date: "August 16, 2025",
+        time: "12:00 PM - 6:PM",
         details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
         link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
@@ -128,7 +126,8 @@ const EventPage: React.FC = () => {
         name: "Miss Tutu Drag Bingo Night",
         description: "An exciting night of fun and laughter with Miss Tutu!",
         date: "May 26, 2025",
-        details: "Join us for an inspiring charity event at Marstons Sports & Social Club, 7:00pm. £11.50 entry",
+        time: "7:00 - 11PM",
+        details: "Join us for an inspiring charity event at Marstons Sports & Social Club. £11.50 entry",
         link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
         mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
         isEventPassed: isEventInPast("2025-05-26"),
@@ -140,7 +139,8 @@ const EventPage: React.FC = () => {
         name: "Burton Pride Walk in the Park",
         description: "A great outdoor walk at Stapenhill Gardens for all LGBTQ+ and allies! 🌳🏳️‍🌈",
         date: "May 14, 2025",
-        details: "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot) at 5pm.",
+        time: "5:00 PM",
+        details: "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot).",
         mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
         isEventPassed: isEventInPast("2025-05-14"),
         isEventToday: isEventToday("2025-05-14"),
@@ -152,17 +152,18 @@ const EventPage: React.FC = () => {
     const rainbowRiot: EventCardProps = {
       name: "Rainbow R.I.O.T. Every Thursday",
       description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
-      details: `Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday 6:30–7:30pm at Burton Fire Station.`,
-      mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
-      isEventPassed: isEventInPast(rainbowDateStr),
-      isEventToday: isEventToday(rainbowDateStr),
-      image: "/image/RainbowEvent.jpg",
-      onImageClick: setModalImage,
       date: rainbowDate.toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'long',
         year: 'numeric'
-      })
+      }),
+      time: "6:30 – 7:30PM",
+      details: "Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday at Burton Fire Station.",
+      mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
+      isEventPassed: isEventInPast(rainbowDateStr),
+      isEventToday: isEventToday(rainbowDateStr),
+      image: "/image/RainbowEvent.jpg",
+      onImageClick: setModalImage
     };
 
     const allEvents = [...baseEvents, rainbowRiot];

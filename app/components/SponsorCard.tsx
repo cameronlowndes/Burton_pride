@@ -10,7 +10,7 @@ type SponsorCardProps = {
   link: string;
 };
 
-const sponsors = [
+const sponsors: SponsorCardProps[] = [
   {
     imageSrc: "/image/SocialRoots&GreenShootsPrideLogo.jpg",
     altText: "Social Roots & Green Shoots",
@@ -25,7 +25,13 @@ const sponsors = [
     description: "Committed to supporting LGBTQ+ communities.",
     link: "https://www.diy.com",
   },
-  // Add more sponsors as needed
+  {
+    imageSrc: "/image/taskTidy.jpg",
+    altText: "Task Tidy",
+    name: "Task Tidy",
+    description: "Committed to supporting LGBTQ+ communities.",
+    link: "https://www.tasktidy.co.uk",
+  },
 ];
 
 export default function SponsorCard() {
@@ -39,9 +45,11 @@ export default function SponsorCard() {
           <Image
             src={sponsor.imageSrc}
             alt={sponsor.altText}
-            width={150}
-            height={150}
-            className="w-32 h-32 rounded mb-4"
+            width={sponsor.name === "Task Tidy" ? 200 : 150}
+            height={sponsor.name === "Task Tidy" ? 200 : 150}
+            className={`rounded mb-4 ${
+              sponsor.name === "Task Tidy" ? "w-48 h-48" : "w-32 h-32"
+            }`}
           />
           <h2 className="text-xl font-semibold">{sponsor.name}</h2>
           <p className="text-gray-600 text-center mb-4">{sponsor.description}</p>
@@ -57,3 +65,5 @@ export default function SponsorCard() {
     </div>
   );
 }
+  export default function SponsorCard()
+
