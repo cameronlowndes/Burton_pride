@@ -48,7 +48,7 @@ export default function Navbar() {
               <Link href="/events" className="block px-4 py-2 text-gray-800 hover:bg-gray-100" >
                 All Events
               </Link>
-              <Link href="/pride-event-2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100">
+              <Link href="/Pride2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100">
                 Pride Event 2025
               </Link>
             </div>
@@ -85,7 +85,7 @@ export default function Navbar() {
                   <Link href="/events" className="block px-4 py-2 text-gray-800 hover:bg-gray-100 whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>
                     All Events
                   </Link>
-                  <Link href="/pride-event-2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100 whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>
+                  <Link href="/Pride2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100 whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>
                     Pride Event 2025
                   </Link>
                 </div>

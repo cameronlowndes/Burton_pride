@@ -189,7 +189,7 @@ const PrideEventPage = () => {
               </p>
 
               <Link
-                href="/pride-event-2025/plan-your-visit"
+                href="/Pride2025/PlanForYourVist"
                 className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out"
               >
                 Plan Your Visit
