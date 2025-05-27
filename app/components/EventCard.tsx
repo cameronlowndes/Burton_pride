@@ -17,6 +17,14 @@ interface EventCardProps {
   isEventToday?: boolean;
 }
 
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+  });
+};
+
 const EventCard: React.FC<EventCardProps> = ({
   name,
   description,
@@ -44,7 +52,7 @@ const EventCard: React.FC<EventCardProps> = ({
     <p className="text-sm">{description}</p>
     {(date || time) && (
       <div className="mt-1">
-        {date && <p className="text-pink-600 font-semibold">{date}</p>}
+        {date && <p className="text-pink-600 font-semibold">{formatDate(date)}</p>}
         {time && <p className="text-pink-600 font-semibold">{time}</p>}
       </div>
     )}
@@ -52,16 +60,19 @@ const EventCard: React.FC<EventCardProps> = ({
       <p className="text-sm text-gray-600">{details}</p>
     </div>
     <div className="mt-4">
-      {isEventToday ? (
-        <p className="text-yellow-600 font-semibold">Happening Today!</p>
-      ) : isEventPassed ? (
+      {isEventPassed ? (
         <p className="text-red-500 font-semibold">Event Completed</p>
       ) : (
-        link && (
-          <Link href={link}>
-            <span className="text-blue-500 hover:underline">More Details</span>
-          </Link>
-        )
+        <>
+          {isEventToday && (
+            <p className="text-yellow-600 font-semibold">Happening Today!</p>
+          )}
+          {link && (
+            <Link href={link}>
+              <span className="text-blue-500 hover:underline">More Details</span>
+            </Link>
+          )}
+        </>
       )}
     </div>
     <div className="mt-4">
@@ -81,12 +92,11 @@ const EventCard: React.FC<EventCardProps> = ({
 const getNextThursday = (fromDate: Date) => {
   const date = new Date(fromDate);
   const dayOfWeek = date.getDay();
-  const daysUntilThursday = (4 - dayOfWeek + 7) % 7 || 7; // Ensure next Thursday if today is Thursday
+  const daysUntilThursday = (4 - dayOfWeek + 7) % 7 || 7;
   date.setDate(date.getDate() + daysUntilThursday);
   return date;
 };
 
-// Check if event is in the past
 const isEventInPast = (eventDateStr: string) => {
   const eventDate = new Date(eventDateStr);
   const today = new Date();
@@ -95,7 +105,6 @@ const isEventInPast = (eventDateStr: string) => {
   return eventDate < today;
 };
 
-// Check if event is today
 const isEventToday = (eventDateStr: string) => {
   const eventDate = new Date(eventDateStr);
   const today = new Date();
@@ -110,8 +119,6 @@ const EventPage: React.FC = () => {
     const currentDate = new Date();
     const rainbowDate = getNextThursday(currentDate);
     const rainbowDateStr = rainbowDate.toISOString();
-
-    // Removed setRainbowRiotDate because it was not declared or used anywhere else.
 
     const baseEvents: EventCardProps[] = [
       {

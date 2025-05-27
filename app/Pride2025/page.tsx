@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import Head from 'next/head'; // Import Head component for SEO
+import Head from 'next/head'; 
 import Link from 'next/link';
 import Countdown from '../components/Countdown';
 import Navbar from '../components/Navbar';
