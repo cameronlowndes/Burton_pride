@@ -25,13 +25,13 @@ const sponsors: SponsorCardProps[] = [
     description: "Committed to supporting LGBTQ+ communities.",
     link: "https://www.diy.com",
   },
-  {
-    imageSrc: "/image/taskTidy.jpg",
-    altText: "Task Tidy",
-    name: "Task Tidy",
-    description: "Committed to supporting LGBTQ+ communities.",
-    link: "https://www.tasktidy.co.uk",
-  },
+  // {
+  //   imageSrc: "/image/taskTidy.jpg",
+  //   altText: "Task Tidy",
+  //   name: "Task Tidy",
+  //   description: "Committed to supporting LGBTQ+ communities.",
+  //   link: "https://www.tasktidy.co.uk",
+  // },
 ];
 
 export default function SponsorCard() {
