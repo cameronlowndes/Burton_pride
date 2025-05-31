@@ -1,15 +1,16 @@
-"use client"; // ✅ Required for client-side React hooks
+"use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa"; // Import icons
-import Link from "next/link"; // Use Next.js Link for navigation
+import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa";
+import Link from "next/link";
+import { usePathname } from "next/navigation"; // ✅ Import hook
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isEventsOpen, setIsEventsOpen] = useState(false); // State for Events dropdown
+  const [isEventsOpen, setIsEventsOpen] = useState(false);
   const eventsRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname(); // ✅ Get current path
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (eventsRef.current && !eventsRef.current.contains(event.target as Node)) {
@@ -21,6 +22,8 @@ export default function Navbar() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  const isActive = (path: string) => pathname === path;
 
   const toggleEvents = () => {
     setIsEventsOpen(!isEventsOpen);
@@ -34,30 +37,42 @@ export default function Navbar() {
 
       {/* Desktop Menu */}
       <div className="hidden md:flex gap-6">
-        <Link href="/" className="hover:underline">Home</Link>
-        <Link href="/about" className="hover:underline">About</Link>
+        <Link href="/" className={isActive("/") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          Home
+        </Link>
+        <Link href="/about" className={isActive("/about") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          About
+        </Link>
         <div ref={eventsRef} className="relative">
           <button
             onClick={toggleEvents}
-            className="hover:underline flex items-center gap-1"
+            className={`flex items-center gap-1 ${pathname.startsWith("/events") || pathname === "/Pride2025" ? "text-pink-600 font-bold underline" : "hover:underline"}`}
           >
             Events <FaCaretDown className="text-sm" />
           </button>
           {isEventsOpen && (
             <div className="absolute left-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-10">
-              <Link href="/events" className="block px-4 py-2 text-gray-800 hover:bg-gray-100" >
+              <Link href="/events" className="block px-4 py-2 hover:bg-gray-100">
                 All Events
               </Link>
-              <Link href="/Pride2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100">
+              <Link href="/Pride2025" className="block px-4 py-2 hover:bg-gray-100">
                 Pride Event 2025
               </Link>
             </div>
           )}
         </div>
-        <Link href="/MeetUS" className="hover:underline">Meet Us</Link>
-        <Link href="/ContactUS" className="hover:underline">Contact Us</Link>
-        <Link href="/JoinUS" className="hover:underline">Join The Team</Link>
-        <Link href="/Sponsor" className="hover:underline">See Your Sponers</Link>
+        <Link href="/MeetUS" className={isActive("/MeetUS") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          Meet Us
+        </Link>
+        <Link href="/ContactUS" className={isActive("/ContactUS") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          Contact Us
+        </Link>
+        <Link href="/JoinUS" className={isActive("/JoinUS") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          Join The Team
+        </Link>
+        <Link href="/Sponsor" className={isActive("/Sponsor") ? "text-pink-600 font-bold underline" : "hover:underline"}>
+          See Your Sponsors
+        </Link>
       </div>
 
       {/* Mobile Menu Button */}
@@ -67,34 +82,30 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* Mobile Menu Dropdown */}
+      {/* Mobile Dropdown */}
       {isMenuOpen && (
-        <div className="absolute top-full left-0 w-full bg-white shadow-lg  py-4 md:hidden">
+        <div className="absolute top-full left-0 w-full bg-white shadow-lg py-4 md:hidden">
           <div className="flex flex-col sm:flex-row items-center justify-around">
-            <Link href="/" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>Home</Link>
-            <Link href="/about" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>About</Link>
-            <div ref={eventsRef} className="relative whitespace-nowrap">
+            <Link href="/" className={`py-2 ${isActive("/") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>Home</Link>
+            <Link href="/about" className={`py-2 ${isActive("/about") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>About</Link>
+            <div ref={eventsRef} className="relative">
               <button
                 onClick={toggleEvents}
-                className="py-2 hover:underline   flex items-center gap-1"
+                className={`py-2 flex items-center gap-1 ${pathname.startsWith("/events") || pathname === "/Pride2025" ? "text-pink-600 font-bold underline" : "hover:underline"}`}
               >
                 Events <FaCaretDown className="text-sm" />
               </button>
               {isEventsOpen && (
-                <div className="absolute  bg-white border border-gray-200 rounded-md shadow-lg z-10">
-                  <Link href="/events" className="block px-4 py-2 text-gray-800 hover:bg-gray-100 whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>
-                    All Events
-                  </Link>
-                  <Link href="/Pride2025" className="block px-4 py-2 text-gray-800 hover:bg-gray-100 whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>
-                    Pride Event 2025
-                  </Link>
+                <div className="absolute bg-white border border-gray-200 rounded-md shadow-lg z-10">
+                  <Link href="/events" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>All Events</Link>
+                  <Link href="/Pride2025" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>Pride Event 2025</Link>
                 </div>
               )}
             </div>
-            <Link href="/MeetUS" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>Meet Us</Link>
-            <Link href="/ContactUS" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>Contact Us</Link>
-            <Link href="/JoinUS" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>Join The Team</Link>
-            <Link href="/Sponsor" className="py-2 hover:underline whitespace-nowrap" onClick={() => setIsMenuOpen(false)}>See Your Sponers</Link>
+            <Link href="/MeetUS" className={`py-2 ${isActive("/MeetUS") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>Meet Us</Link>
+            <Link href="/ContactUS" className={`py-2 ${isActive("/ContactUS") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>Contact Us</Link>
+            <Link href="/JoinUS" className={`py-2 ${isActive("/JoinUS") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>Join The Team</Link>
+            <Link href="/Sponsor" className={`py-2 ${isActive("/Sponsor") ? "text-pink-600 font-bold underline" : "hover:underline"}`} onClick={() => setIsMenuOpen(false)}>See Your Sponsors</Link>
           </div>
         </div>
       )}
