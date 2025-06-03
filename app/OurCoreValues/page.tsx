@@ -122,7 +122,7 @@ export default function Values() {
         </section>
 
         {/* Closing Message */}
-        <section className="mt-16 text-center max-w-4xl animate-fadeInUp duration-1000 ease-out delay-400">
+        <section className="mt-16 text-center max-w-4xl animate-fadeInUp duration-1000 ease-out delay-400 pb-15">
           <p className="text-lg font-medium text-white">
             By joining Burton Pride, you become part of a movement committed to respect, equality, and belonging. Together, we
             build a brighter, more inclusive Burton for all.
