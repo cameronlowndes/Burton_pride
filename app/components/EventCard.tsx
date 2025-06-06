@@ -121,19 +121,19 @@ const EventPage: React.FC = () => {
     const rainbowDateStr = rainbowDate.toISOString();
 
     const baseEvents: EventCardProps[] = [
-      {
-        name: "Pride Event",
-        description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
-        date: "2025-08-16",
-        time: "12:00 PM - 6:00 PM",
-        details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
-        link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
-        mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
-        isEventPassed: isEventInPast("2025-08-16"),
-        isEventToday: isEventToday("2025-08-16"),
-        image: "/image/PrideEventPoster.png",
-        onImageClick: setModalImage
-      },
+      // {
+      //   name: "Pride Event",
+      //   description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
+      //   date: "2025-08-16",
+      //   time: "12:00 PM - 6:00 PM",
+      //   details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
+      //   link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
+      //   mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
+      //   isEventPassed: isEventInPast("2025-08-16"),
+      //   isEventToday: isEventToday("2025-08-16"),
+      //   image: "/image/PrideEventPoster.png",
+      //   onImageClick: setModalImage
+      // },
       {
         name: "Miss Tutu Drag Bingo Night",
         description: "An exciting night of fun and laughter with Miss Tutu!",
@@ -183,32 +183,39 @@ const EventPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10 p-10 justify-items-center">
-      {upcomingEvents.length > 0 ? (
-        upcomingEvents.map(event => (
-          <EventCard key={event.name} {...event} />
-        ))
-      ) : (
-        <p className="text-lg text-gray-500 col-span-full text-center">No upcoming events</p>
-      )}
+  <div
+    className={
+      upcomingEvents.length === 1
+        ? "flex items-center justify-center min-h-[70vh] p-10" // center horizontally and vertically, min height to help vertical centering
+        : "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10 p-10 justify-items-center"
+    }
+  >
+    {upcomingEvents.length > 0 ? (
+      upcomingEvents.map(event => (
+        <EventCard key={event.name} {...event} />
+      ))
+    ) : (
+      <p className="text-lg text-gray-500 col-span-full text-center">No upcoming events</p>
+    )}
 
-      {modalImage && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
-          onClick={() => setModalImage(null)}
-        >
-          <div className="max-w-3xl w-full px-4">
-            <img
-              src={modalImage}
-              alt="Enlarged Event"
-              className="rounded-lg shadow-lg w-full max-h-[90vh] object-contain"
-            />
-            <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
-          </div>
+    {modalImage && (
+      <div
+        className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
+        onClick={() => setModalImage(null)}
+      >
+        <div className="max-w-3xl w-full px-4">
+          <img
+            src={modalImage}
+            alt="Enlarged Event"
+            className="rounded-lg shadow-lg w-full max-h-[90vh] object-contain"
+          />
+          <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    )}
+  </div>
+);
+
 };
 
 export default EventPage;

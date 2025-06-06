@@ -1,5 +1,4 @@
 "use client";
-
 import React, { useState, useRef, useEffect } from "react";
 import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa";
 import Link from "next/link";
@@ -97,13 +96,13 @@ export default function Navbar() {
               <Link href="/events" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
                 All Events
               </Link>
-              <Link
+              {/* <Link
                 href="/Pride2025"
                 className="block px-4 py-2 hover:bg-gray-100"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Pride Event 2025
-              </Link>
+              </Link> */}
             </div>
           )}
         </div>
@@ -188,13 +187,13 @@ export default function Navbar() {
                   <Link href="/events" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
                     All Events
                   </Link>
-                  <Link
+                  {/* <Link
                     href="/Pride2025"
                     className="block px-4 py-2 hover:bg-gray-100"
                     onClick={() => setIsMenuOpen(false)}
                   >
                     Pride Event 2025
-                  </Link>
+                  </Link> */}
                 </div>
               )}
             </div>

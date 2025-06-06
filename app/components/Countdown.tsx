@@ -32,7 +32,7 @@ const Countdown = () => {
     <section id="countdown" className="mt-16 text-center w-full max-w-4xl">
       <h2 className="text-3xl font-semibold mb-6">Countdown to Pride Event</h2>
       <div className="bg-white text-black p-6 rounded-lg shadow-md">
-        <p className="text-lg mb-4">Time remaining until the Pride Event on August 16, 2025 at 12.pm:</p>
+        <p className="text-lg mb-4">Time remaining until the Pride Event</p>
         <div className="flex justify-center items-center space-x-6 mb-6">
           <div className="text-xl font-semibold">
             <span className="block text-3xl">{timeLeft.days}</span>
@@ -52,12 +52,6 @@ const Countdown = () => {
           </div>
         </div>
         {/* Button for tickets */}
-        <a
-          href="https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator" 
-          className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-full transition duration-300 ease-in-out"
-        >
-          Get Your Tickets
-        </a>
       </div>
     </section>
   );
