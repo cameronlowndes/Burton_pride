@@ -45,12 +45,9 @@ export default function EventsPage() {
         <Countdown />
 
         {/* Events Section */}
-        <section id="events" className="mt-16 text-center w-full flex flex-col items-center max-w-6xl flex-grow">
-          <h2 className="text-3xl font-semibold mb-6">Upcoming Events</h2>
-          <div className="flex flex-wrap justify-center gap-6">
-            {/* EventCard components will adjust based on screen size */}
+        <section>
+          <div>
             <EventCard />
-            {/* You can add more EventCard components here if needed */}
           </div>
         </section>
 

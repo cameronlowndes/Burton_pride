@@ -182,39 +182,49 @@ const EventPage: React.FC = () => {
     setUpcomingEvents(sorted);
   }, []);
 
-  return (
-  <div
-    className={
-      upcomingEvents.length === 1
-        ? "flex items-center justify-center min-h-[70vh] p-10" // center horizontally and vertically, min height to help vertical centering
-        : "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10 p-10 justify-items-center"
-    }
+return (
+  <section
+    id="events"
+    className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto"
   >
-    {upcomingEvents.length > 0 ? (
-      upcomingEvents.map(event => (
-        <EventCard key={event.name} {...event} />
-      ))
-    ) : (
-      <p className="text-lg text-gray-500 col-span-full text-center">No upcoming events</p>
-    )}
+    <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
+    
+    <div
+      className={
+        upcomingEvents.length === 1
+          ? "flex items-center justify-center min-h-[70vh] w-full"
+          : "flex flex-wrap justify-center gap-6 w-full"
+      }
+    >
+      {upcomingEvents.length > 0 ? (
+        upcomingEvents.map(event => (
+          <EventCard key={event.name} {...event} />
+        ))
+      ) : (
+        <p className="text-lg text-gray-500 w-full">No upcoming events</p>
+      )}
+    </div>
 
     {modalImage && (
       <div
-        className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50"
+        className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center"
         onClick={() => setModalImage(null)}
       >
-        <div className="max-w-3xl w-full px-4">
+        <div className="max-w-3xl w-full ">
           <img
             src={modalImage}
             alt="Enlarged Event"
-            className="rounded-lg shadow-lg w-full max-h-[90vh] object-contain"
+            className="rounded-lg shadow-lg w-full object-contain"
           />
           <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
         </div>
       </div>
     )}
-  </div>
+  </section>
 );
+
+
+
 
 };
 
