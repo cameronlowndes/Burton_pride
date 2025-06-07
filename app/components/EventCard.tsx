@@ -222,10 +222,6 @@ return (
     )}
   </section>
 );
-
-
-
-
 };
 
 export default EventPage;

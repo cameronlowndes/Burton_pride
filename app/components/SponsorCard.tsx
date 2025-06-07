@@ -18,13 +18,13 @@ const sponsors: SponsorCardProps[] = [
     description: "Committed to supporting LGBTQ+ communities.",
     link: "https://www.youtube.com/@SocialRootsGreenShoots",
   },
-  {
-    imageSrc: "/image/B&Q_LGBTQ_logo.jpeg",
-    altText: "B&Q",
-    name: "B&Q",
-    description: "Committed to supporting LGBTQ+ communities.",
-    link: "https://www.diy.com",
-  },
+  // {
+  //   imageSrc: "/image/B&Q_LGBTQ_logo.jpeg",
+  //   altText: "B&Q",
+  //   name: "B&Q",
+  //   description: "Committed to supporting LGBTQ+ communities.",
+  //   link: "https://www.diy.com",
+  // },
   // {
   //   imageSrc: "/image/taskTidy.jpg",
   //   altText: "Task Tidy",

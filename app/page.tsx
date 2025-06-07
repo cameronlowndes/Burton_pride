@@ -110,8 +110,6 @@ export default function Home() {
 
 
         {/* Events Section */}
-
-            {/* EventCard components */}
             <EventCard />
 
         {/* Footer */}
