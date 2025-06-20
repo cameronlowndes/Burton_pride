@@ -59,7 +59,8 @@ export default function Collaborate() {
                 <div className="md:w-1/2 w-full flex justify-center mt-10">
                     <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
                         <button className="bg-white text-pink-500 px-6 py-3 rounded-lg shadow-lg font-semibold hover:bg-gray-200 transition-all">
-                            Vendor Booking
+                         Vendor & Stallholder Bookings
+
                         </button>
                     </Link>
                 </div>

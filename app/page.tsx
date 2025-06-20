@@ -102,7 +102,7 @@ export default function Home() {
         <div  className="mt-16 text-center w-full max-w-3xl flex-grow">
           <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
             <button className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
-              Vendor Booking
+             Vendor & Stallholder Bookings
             </button>
           </Link>
         </div>
