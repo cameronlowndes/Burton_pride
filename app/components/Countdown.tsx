@@ -1,4 +1,3 @@
-// components/Countdown.tsx
 'use client';
 
 import React, { useEffect, useState } from "react";
@@ -51,7 +50,11 @@ const Countdown = () => {
             <span className="text-sm">Seconds</span>
           </div>
         </div>
-        {/* Button for tickets */}
+
+        {/* 🎉 Free Event Highlight */}
+        <div className="mt-4 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow animate-pulse">
+          🎉 This event is FREE and open to the public – No tickets required!
+        </div>
       </div>
     </section>
   );

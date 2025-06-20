@@ -56,9 +56,18 @@ const EventCard: React.FC<EventCardProps> = ({
         {time && <p className="text-pink-600 font-semibold">{time}</p>}
       </div>
     )}
+
+    {/* 🎉 FREE Event Notice */}
+    {!isEventPassed && name === "Pride Event" && (
+      <div className="mt-3 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-sm animate-pulse">
+        🎉 This event is FREE and open to the public – No tickets required!
+      </div>
+    )}
+
     <div className="mt-4">
       <p className="text-sm text-gray-600">{details}</p>
     </div>
+
     <div className="mt-4">
       {isEventPassed ? (
         <p className="text-red-500 font-semibold">Event Completed</p>
@@ -75,6 +84,7 @@ const EventCard: React.FC<EventCardProps> = ({
         </>
       )}
     </div>
+
     <div className="mt-4">
       <a
         href={mapLink}
@@ -88,7 +98,7 @@ const EventCard: React.FC<EventCardProps> = ({
   </div>
 );
 
-// Get next Thursday from a date
+// Helper functions
 const getNextThursday = (fromDate: Date) => {
   const date = new Date(fromDate);
   const dayOfWeek = date.getDay();
@@ -121,25 +131,26 @@ const EventPage: React.FC = () => {
     const rainbowDateStr = rainbowDate.toISOString();
 
     const baseEvents: EventCardProps[] = [
-      // {
-      //   name: "Pride Event",
-      //   description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
-      //   date: "2025-08-16",
-      //   time: "12:00 PM - 6:00 PM",
-      //   details: "The Pride Parade is a lively event celebrating diversity and inclusivity. Early Bird £5",
-      //   link: "https://www.eventbrite.com/e/pride-event-tickets-1316358476639?aff=oddtdtcreator",
-      //   mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
-      //   isEventPassed: isEventInPast("2025-08-16"),
-      //   isEventToday: isEventToday("2025-08-16"),
-      //   image: "/image/PrideEventPoster.png",
-      //   onImageClick: setModalImage
-      // },
+      {
+        name: "Pride Event",
+        description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
+        date: "2025-08-16",
+        time: "12:00 PM - 6:00 PM",
+        details:
+          "The Pride Parade is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
+        mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
+        isEventPassed: isEventInPast("2025-08-16"),
+        isEventToday: isEventToday("2025-08-16"),
+        image: "/image/NewPridePoster.png",
+        onImageClick: setModalImage
+      },
       {
         name: "Miss Tutu Drag Bingo Night",
         description: "An exciting night of fun and laughter with Miss Tutu!",
         date: "2025-05-26",
         time: "7:00 PM - 11:00 PM",
-        details: "Join us for an inspiring charity event at Marstons Sports & Social Club. £11.50 entry",
+        details:
+          "Join us for an inspiring charity event at Marstons Sports & Social Club. £11.50 entry",
         link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
         mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
         isEventPassed: isEventInPast("2025-05-26"),
@@ -152,7 +163,8 @@ const EventPage: React.FC = () => {
         description: "A great outdoor walk at Stapenhill Gardens for all LGBTQ+ and allies! 🌳🏳️‍🌈",
         date: "2025-05-14",
         time: "5:00 PM",
-        details: "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot).",
+        details:
+          "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot).",
         mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
         isEventPassed: isEventInPast("2025-05-14"),
         isEventToday: isEventToday("2025-05-14"),
@@ -166,7 +178,8 @@ const EventPage: React.FC = () => {
       description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
       date: rainbowDate.toISOString().split('T')[0],
       time: "6:30 PM – 7:30 PM",
-      details: "Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday at Burton Fire Station.",
+      details:
+        "Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday at Burton Fire Station.",
       mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
       isEventPassed: isEventInPast(rainbowDateStr),
       isEventToday: isEventToday(rainbowDateStr),
@@ -182,46 +195,46 @@ const EventPage: React.FC = () => {
     setUpcomingEvents(sorted);
   }, []);
 
-return (
-  <section
-    id="events"
-    className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto"
-  >
-    <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
-    
-    <div
-      className={
-        upcomingEvents.length === 1
-          ? "flex items-center justify-center min-h-[70vh] w-full"
-          : "flex flex-wrap justify-center gap-6 w-full"
-      }
+  return (
+    <section
+      id="events"
+      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto"
     >
-      {upcomingEvents.length > 0 ? (
-        upcomingEvents.map(event => (
-          <EventCard key={event.name} {...event} />
-        ))
-      ) : (
-        <p className="text-lg text-gray-500 w-full">No upcoming events</p>
-      )}
-    </div>
+      <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
 
-    {modalImage && (
       <div
-        className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center"
-        onClick={() => setModalImage(null)}
+        className={
+          upcomingEvents.length === 1
+            ? "flex items-center justify-center min-h-[70vh] w-full"
+            : "flex flex-wrap justify-center gap-6 w-full"
+        }
       >
-        <div className="max-w-3xl w-full ">
-          <img
-            src={modalImage}
-            alt="Enlarged Event"
-            className="rounded-lg shadow-lg w-full object-contain"
-          />
-          <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
-        </div>
+        {upcomingEvents.length > 0 ? (
+          upcomingEvents.map(event => (
+            <EventCard key={event.name} {...event} />
+          ))
+        ) : (
+          <p className="text-lg text-gray-500 w-full">No upcoming events</p>
+        )}
       </div>
-    )}
-  </section>
-);
+
+      {modalImage && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center"
+          onClick={() => setModalImage(null)}
+        >
+          <div className="max-w-3xl w-full">
+            <img
+              src={modalImage}
+              alt="Enlarged Event"
+              className="rounded-lg shadow-lg w-full object-contain"
+            />
+            <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 };
 
 export default EventPage;
