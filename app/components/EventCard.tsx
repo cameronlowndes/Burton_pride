@@ -163,13 +163,13 @@ const EventPage: React.FC = () => {
         name: "Burton Pride Walk in the Park",
         description: "A great outdoor walk at Stapenhill Gardens for all LGBTQ+ and allies! 🌳🏳️‍🌈",
         date: "2025-05-14",
-        time: "5:00 PM",
+        time: "5:00 PM - 6:00 PM",
         details:
           "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot).",
         mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
-        isEventPassed: isEventInPast("2025-05-14"),
-        isEventToday: isEventToday("2025-05-14"),
-        image: "/image/Burton_Pride_Walk_Poster.png",
+        isEventPassed: isEventInPast("2025-07-02"),
+        isEventToday: isEventToday("2025-07-02"),
+        image: "/image/WalkTheWalk.jpg",
         onImageClick: setModalImage
       }
     ];
