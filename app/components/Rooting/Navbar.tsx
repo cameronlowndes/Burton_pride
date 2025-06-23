@@ -70,7 +70,7 @@ export default function Navbar() {
                 About Us
               </Link>
               <Link
-                href="/OurCoreValues"
+                href="/about/OurCoreValues"
                 className="block px-4 py-2 hover:bg-gray-100"
                 onClick={() => setIsMenuOpen(false)}
               >
@@ -97,7 +97,7 @@ export default function Navbar() {
                 All Events
               </Link>
               <Link
-                href="/Pride2025"
+                href="/events/Pride2025"
                 className="block px-4 py-2 hover:bg-gray-100"
                 onClick={() => setIsMenuOpen(false)}
               >
@@ -161,7 +161,7 @@ export default function Navbar() {
                     About Us
                   </Link>
                   <Link
-                    href="/OurCoreValues"
+                    href="/about/OurCoreValues"
                     className="block px-4 py-2 hover:bg-gray-100"
                     onClick={() => setIsMenuOpen(false)}
                   >
@@ -188,7 +188,7 @@ export default function Navbar() {
                     All Events
                   </Link>
                   <Link
-                    href="/Pride2025"
+                    href="/events/Pride2025"
                     className="block px-4 py-2 hover:bg-gray-100"
                     onClick={() => setIsMenuOpen(false)}
                   >

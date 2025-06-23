@@ -1,6 +1,5 @@
 import Image from "next/image";
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
+
 import Link from "next/link";
 import MetaHead from "../components/MetaHead"; // Import MetaHead
 
@@ -20,7 +19,7 @@ export default function JoinUs() {
       />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"> {/* Increased pb-24 to pb-32 */}
-        <Navbar />
+     
 
         {/* Hero Section */}
         <header className="text-center flex flex-col items-center gap-6 mt-16 w-full">
@@ -44,7 +43,7 @@ export default function JoinUs() {
             Help us make Burton Pride an inclusive event! We’re always looking for passionate individuals to join our volunteer team and contribute to the success of the festival.
           </p>
           <Link
-            href="/Volunteer"
+            href="/JoinUS/Volunteer"
             className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
           >
             Volunteer with Us
@@ -94,7 +93,7 @@ export default function JoinUs() {
           </Link>
         </section>
 
-        <Footer />
+    
       </div>
     </>
   );

@@ -1,5 +1,4 @@
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
+
 import MetaHead from "../components/MetaHead"; // Import MetaHead
 
 export const metadata = {
@@ -18,7 +17,7 @@ export default function Contact() {
       />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-        <Navbar />
+     
 
         {/* Hero Section */}
         <header className="text-center flex flex-col items-center gap-6 mt-16">
@@ -57,7 +56,7 @@ export default function Contact() {
           </a>
         </section>
 
-        <Footer />
+
       </div>
     </>
   );

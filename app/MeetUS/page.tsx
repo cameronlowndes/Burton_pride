@@ -1,6 +1,4 @@
 import Image from "next/image";
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
 import Link from "next/link";
 import MetaHead from "../components/MetaHead"; // Import MetaHead for SEO
 
@@ -19,7 +17,7 @@ export default function MeetUs() {
       />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-        <Navbar />
+       
 
         {/* Hero Section */}
         <header className="text-center flex flex-col items-center gap-6 mt-16">
@@ -62,11 +60,7 @@ export default function MeetUs() {
               <h2 className="text-xl font-semibold">John</h2>
               <p className="text-gray-600">Board Member | He/Him</p>
             </div>
-            {/* <div className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center">
-              <Image src="/image/liam.jpg" alt="Liam Mc Quillan " width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
-              <h2 className="text-xl font-semibold">Liam Mc Quillan</h2>
-              <p className="text-gray-600">Board Member | He/Him</p>
-            </div> */}
+           
           </div>
         </section>
 
@@ -138,7 +132,7 @@ export default function MeetUs() {
           </Link>
         </section>
 
-        <Footer />
+       
       </div>
     </>
   );

@@ -1,7 +1,5 @@
 import Head from "next/head"; // Keep this for future use or fallback
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
-import MetaHead from "../components/MetaHead";
+import MetaHead from "../../components/MetaHead";
 
 export const metadata = {
   title: "Burton Pride - Volunteer ",
@@ -18,7 +16,7 @@ export default function Volunteer() {
             />
 
             <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-                <Navbar />
+              
 
                 {/* Hero Section */}
                 <header className="text-center flex flex-col items-center gap-6 mt-16">
@@ -65,7 +63,7 @@ export default function Volunteer() {
                     </div>
                 </section>
 
-                <Footer />
+              
             </div>
         </>
     );

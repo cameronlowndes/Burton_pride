@@ -1,7 +1,5 @@
 import MetaHead from "../components/MetaHead"; // Adjust the path based on where your MetaHead component is located
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
-import SponsorCard from "../components/SponsorCard"; // Import the refined SponsorCard component
+import SponsorCard from "../components/Card/SponsorCard"; // Import the refined SponsorCard component
 import Link from "next/link";
 
  export const metadata = {
@@ -19,7 +17,7 @@ export default function Sponsors() {
       />
 
       <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-45">
-        <Navbar />
+       
 
         {/* Hero Section */}
         <header className="text-center flex flex-col items-center gap-6 mt-16">
@@ -50,7 +48,7 @@ export default function Sponsors() {
           </Link>
         </section>
 
-        <Footer />
+      
       </div>
     </>
   );

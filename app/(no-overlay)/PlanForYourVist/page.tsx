@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Watermark from '../../components/Watermark';
+import Watermark from '../../components/Rooting/Watermark';
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -202,7 +202,7 @@ const PlanYourVisitPage = () => {
 
           {/* Back Link */}
           <div className="text-center mt-6">
-            <Link href="/Pride2025">
+            <Link href="/events/Pride2025">
               <span className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
                 ← Back to Main Event Page
               </span>

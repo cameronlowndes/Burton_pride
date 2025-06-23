@@ -1,7 +1,6 @@
-import Navbar from "../components/Navbar";
-import Footer from "../components/Footer";
+
 import MetaHead from "../components/MetaHead"; // Import MetaHead
-import Card from "../components/Card";
+import Card from "../components/Card/Card";
 import Link from "next/link";
 
 export const metadata = {
@@ -21,7 +20,7 @@ export default function Collaborate() {
             />
 
             <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-                <Navbar />
+                
 
                 <header className="text-center flex flex-col items-center gap-6 mt-16">
                     <h1 className="text-4xl sm:text-6xl font-bold">Collaborate with Us</h1>
@@ -85,7 +84,7 @@ export default function Collaborate() {
                     </ul>
                 </section>
 
-                <Footer />
+              
             </div>
         </>
     );
