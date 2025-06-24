@@ -1,4 +1,3 @@
-// components/HomeClient.tsx
 'use client';
 
 import { motion } from 'framer-motion';
@@ -10,7 +9,7 @@ import EventCard from '../Card/EventCard';
 export default function HomeClient() {
   return (
     <motion.div
-      className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24"
+      className="h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"
       initial="hidden"
       animate="visible"
       variants={{
@@ -24,7 +23,7 @@ export default function HomeClient() {
     >
       {/* Hero Section */}
       <motion.section
-        className="text-center flex flex-col items-center gap-6 mt-16 flex-grow"
+        className="text-center flex flex-col items-center gap-6 mt-16"
         variants={{
           hidden: { opacity: 0, y: 40 },
           visible: { opacity: 1, y: 0 },
@@ -32,12 +31,19 @@ export default function HomeClient() {
         transition={{ duration: 0.8, ease: 'easeOut' }}
       >
         <motion.div
-          className="animate-scaleUp"
+          className="animate-scaleUp rounded-full overflow-hidden"
+          style={{ width: 180, height: 180 }}
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          <Image src="/image/logo.jpg" alt="Burton Pride Logo" width={180} height={180} />
+          <Image
+            src="/image/logo.jpg"
+            alt="Burton Pride Logo"
+            width={180}
+            height={180}
+            className="rounded-full object-cover"
+          />
         </motion.div>
 
         <motion.h1
@@ -64,13 +70,14 @@ export default function HomeClient() {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.8 }}
+        className="mt-8"
       >
         <Countdown />
       </motion.div>
 
       {/* Support Section */}
       <motion.section
-        className="mt-16 text-center w-full max-w-3xl"
+        className="mt-16 text-center w-full max-w-3xl flex-grow flex flex-col justify-center"
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1 }}
@@ -82,7 +89,7 @@ export default function HomeClient() {
         <Link
           href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48"
           target="_blank"
-          className="bg-yellow-400 text-black px-6 py-3 rounded-full font-semibold text-lg hover:bg-yellow-300 transition"
+          className="bg-yellow-400 text-black px-6 py-3 rounded-full font-semibold text-lg hover:bg-yellow-300 transition self-center"
         >
           Donate Now
         </Link>
@@ -115,7 +122,7 @@ export default function HomeClient() {
 
       {/* Collaborate Section */}
       <motion.section
-        className="mt-16 text-center w-full max-w-3xl flex-grow"
+        className="mt-16 text-center w-full max-w-3xl"
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.4 }}
@@ -142,7 +149,7 @@ export default function HomeClient() {
 
       {/* Events Section */}
       <motion.div
-        className="mt-16 w-full"
+        className="mt-16 w-full mb-16" // Added mb-16 here for padding below event card
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.6 }}

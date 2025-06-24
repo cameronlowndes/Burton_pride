@@ -90,21 +90,20 @@ const PlanYourVisitPage = () => {
                 Diamond Buses Tracker
               </a>
               <a
-                href=""
+                href="https://www.trentbarton.co.uk/services"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Trent Barton Tracker   
+                Trent Barton Tracker
               </a>
-
-                <a
+              <a
                 href="https://www.arrivabus.co.uk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-              Arriva Bus
+                Arriva Bus
               </a>
               <a
                 href="https://www.staffordshire.gov.uk/Transport/buses/home.aspx"
@@ -123,7 +122,6 @@ const PlanYourVisitPage = () => {
             <p className="mb-4">Uber operates locally. You can also use the following taxi services:</p>
 
             <div className="flex flex-col gap-6">
-              {/* New Street Taxis */}
               <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
                 <h3 className="text-lg font-semibold mb-2">New Street Taxis</h3>
                 <div className="flex gap-4">
@@ -144,7 +142,6 @@ const PlanYourVisitPage = () => {
                 </div>
               </div>
 
-              {/* Stapenhill Taxis */}
               <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
                 <h3 className="text-lg font-semibold mb-2">Stapenhill Taxis</h3>
                 <div className="flex gap-4">
@@ -181,7 +178,7 @@ const PlanYourVisitPage = () => {
               <h2 className="text-2xl font-semibold mb-4">🛠️ Need Help Traveling?</h2>
               <p className="mb-4">
                 If you need assistance traveling to Burton Pride 2025, please{' '}
-                <Link href="/ContactUS">
+                <Link href="/contact-us">
                   <span className="underline cursor-pointer hover:text-yellow-700 font-semibold">
                     contact our support team
                   </span>
