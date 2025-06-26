@@ -1,6 +1,11 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import "../styles/globals.css"; // Import global styles
+import "../styles/globals.css";
+
+import ConditionalNavbar from "./components/Rooting/ConditionalNavbar";
+import ConditionalFooter from "./components/Rooting/ConditionalFooter";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -15,23 +20,26 @@ export const metadata: Metadata = {
   title: "Burton Pride",
   description: "Celebrating diversity, inclusion, and love in Burton",
   icons: {
-    icon: "/image/logo.jpg", // This sets the favicon/logo for the site
+    icon: "/image/logo.jpg",
   },
 };
 
-
-
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en">
+    <html
+      lang="en"
+      className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500"
+    >
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-transparent text-white m-0`}
       >
-        {children}
+        <ConditionalNavbar />
+        <main className="flex-grow pb-24">{children}</main> {/* Prevent footer overlap */}
+        <ConditionalFooter />
       </body>
     </html>
   );

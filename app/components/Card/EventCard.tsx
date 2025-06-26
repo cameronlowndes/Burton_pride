@@ -199,7 +199,7 @@ const EventPage: React.FC = () => {
   return (
     <section
       id="events"
-      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto"
+      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24" // Added padding bottom here
     >
       <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
 

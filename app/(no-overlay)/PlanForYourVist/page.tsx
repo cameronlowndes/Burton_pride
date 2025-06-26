@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Watermark from '../../components/Watermark';
+import Watermark from '../../components/Rooting/Watermark';
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -34,6 +34,7 @@ export const metadata: Metadata = {
 };
 
 const PlanYourVisitPage = () => {
+  // If you want to toggle this dynamically later, use state or props.
   const anyDisabled = true;
 
   return (
@@ -90,21 +91,20 @@ const PlanYourVisitPage = () => {
                 Diamond Buses Tracker
               </a>
               <a
-                href=""
+                href="https://www.trentbarton.co.uk/services"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-                Trent Barton Tracker   
+                Trent Barton Tracker
               </a>
-
-                <a
+              <a
                 href="https://www.arrivabus.co.uk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded"
               >
-              Arriva Bus
+                Arriva Bus
               </a>
               <a
                 href="https://www.staffordshire.gov.uk/Transport/buses/home.aspx"
@@ -123,7 +123,6 @@ const PlanYourVisitPage = () => {
             <p className="mb-4">Uber operates locally. You can also use the following taxi services:</p>
 
             <div className="flex flex-col gap-6">
-              {/* New Street Taxis */}
               <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
                 <h3 className="text-lg font-semibold mb-2">New Street Taxis</h3>
                 <div className="flex gap-4">
@@ -144,7 +143,6 @@ const PlanYourVisitPage = () => {
                 </div>
               </div>
 
-              {/* Stapenhill Taxis */}
               <div className="bg-gray-50 p-4 rounded-lg shadow-sm">
                 <h3 className="text-lg font-semibold mb-2">Stapenhill Taxis</h3>
                 <div className="flex gap-4">
@@ -181,10 +179,10 @@ const PlanYourVisitPage = () => {
               <h2 className="text-2xl font-semibold mb-4">🛠️ Need Help Traveling?</h2>
               <p className="mb-4">
                 If you need assistance traveling to Burton Pride 2025, please{' '}
-                <Link href="/ContactUS">
-                  <span className="underline cursor-pointer hover:text-yellow-700 font-semibold">
+                <Link href="/contact-us" legacyBehavior>
+                  <a className="underline cursor-pointer hover:text-yellow-700 font-semibold">
                     contact our support team
-                  </span>
+                  </a>
                 </Link>
                 .
               </p>
@@ -202,10 +200,10 @@ const PlanYourVisitPage = () => {
 
           {/* Back Link */}
           <div className="text-center mt-6">
-            <Link href="/Pride2025">
-              <span className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
+            <Link href="/events/Pride2025" legacyBehavior>
+              <a className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
                 ← Back to Main Event Page
-              </span>
+              </a>
             </Link>
           </div>
         </div>

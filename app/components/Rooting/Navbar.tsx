@@ -56,7 +56,7 @@ export default function Navbar() {
         <div ref={aboutRef} className="relative">
           <button
             onClick={toggleAbout}
-            className={`flex items-center gap-1 ${
+            className={`flex items-center gap-1 cursor-pointer ${
               pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
                 ? rainbowClass
                 : "hover:underline"
@@ -70,7 +70,7 @@ export default function Navbar() {
                 About Us
               </Link>
               <Link
-                href="/OurCoreValues"
+                href="/about/OurCoreValues"
                 className="block px-4 py-2 hover:bg-gray-100"
                 onClick={() => setIsMenuOpen(false)}
               >
@@ -83,7 +83,7 @@ export default function Navbar() {
         <div ref={eventsRef} className="relative">
           <button
             onClick={toggleEvents}
-            className={`flex items-center gap-1 ${
+            className={`flex items-center gap-1 cursor-pointer ${
               pathname.startsWith("/events") || pathname === "/Pride2025"
                 ? rainbowClass
                 : "hover:underline"
@@ -97,7 +97,7 @@ export default function Navbar() {
                 All Events
               </Link>
               <Link
-                href="/Pride2025"
+                href="/events/Pride2025"
                 className="block px-4 py-2 hover:bg-gray-100"
                 onClick={() => setIsMenuOpen(false)}
               >
@@ -147,7 +147,7 @@ export default function Navbar() {
             <div ref={aboutRef} className="relative">
               <button
                 onClick={toggleAbout}
-                className={`py-2 flex items-center gap-1 ${
+                className={`py-2 flex items-center gap-1 cursor-pointer ${
                   pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
                     ? rainbowClass
                     : "hover:underline"
@@ -161,7 +161,7 @@ export default function Navbar() {
                     About Us
                   </Link>
                   <Link
-                    href="/OurCoreValues"
+                    href="/about/OurCoreValues"
                     className="block px-4 py-2 hover:bg-gray-100"
                     onClick={() => setIsMenuOpen(false)}
                   >
@@ -174,7 +174,7 @@ export default function Navbar() {
             <div ref={eventsRef} className="relative">
               <button
                 onClick={toggleEvents}
-                className={`py-2 flex items-center gap-1 ${
+                className={`py-2 flex items-center gap-1 cursor-pointer ${
                   pathname.startsWith("/events") || pathname === "/Pride2025"
                     ? rainbowClass
                     : "hover:underline"
@@ -188,7 +188,7 @@ export default function Navbar() {
                     All Events
                   </Link>
                   <Link
-                    href="/Pride2025"
+                    href="/events/Pride2025"
                     className="block px-4 py-2 hover:bg-gray-100"
                     onClick={() => setIsMenuOpen(false)}
                   >
