@@ -28,7 +28,7 @@ export default function EventsClient() {
         transition={{ duration: 0.8, ease: 'easeOut' }}
       >
         <motion.div
-          className="animate-scaleUp"
+          className="rounded-full overflow-hidden w-[180px] h-[180px]"
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
@@ -38,6 +38,7 @@ export default function EventsClient() {
             alt="Burton Pride Logo"
             width={180}
             height={180}
+            className="rounded-full object-cover w-full h-full"
           />
         </motion.div>
 

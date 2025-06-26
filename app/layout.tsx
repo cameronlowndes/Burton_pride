@@ -37,7 +37,14 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen h-full bg-transparent text-white m-0`}
       >
         <ConditionalNavbar />
-        <main className="flex-grow pb-24">{children}</main> {/* Added padding bottom */}
+
+        {/* 
+          flex-grow makes main fill available vertical space,
+          pb-24 adds padding-bottom to prevent fixed footer overlap 
+          (24 = 6rem, enough space for the footer height)
+        */}
+        <main className="flex-grow pb-16">{children}</main>
+
         <ConditionalFooter />
       </body>
     </html>

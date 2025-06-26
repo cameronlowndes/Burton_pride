@@ -20,7 +20,7 @@ export default function PrideEventClient() {
         },
       }}
     >
-      {/* Hero Section */}
+         {/* Hero Section */}
       <motion.header
         className="text-center flex flex-col items-center gap-6 mt-16"
         variants={{
@@ -33,16 +33,17 @@ export default function PrideEventClient() {
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="mx-auto"  // <-- Added here to center image
+          className="rounded-full overflow-hidden w-[180px] h-[180px]"
         >
           <Image
             src="/image/logo.jpg"
             alt="Burton Pride Team"
             width={180}
             height={180}
-            className="hero-logo"
+            className="object-cover w-full h-full rounded-full"
           />
         </motion.div>
+        
         <motion.h1
           className="text-4xl sm:text-6xl font-bold"
           initial={{ opacity: 0, y: 20 }}

@@ -56,7 +56,7 @@ export default function Navbar() {
         <div ref={aboutRef} className="relative">
           <button
             onClick={toggleAbout}
-            className={`flex items-center gap-1 ${
+            className={`flex items-center gap-1 cursor-pointer ${
               pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
                 ? rainbowClass
                 : "hover:underline"
@@ -83,7 +83,7 @@ export default function Navbar() {
         <div ref={eventsRef} className="relative">
           <button
             onClick={toggleEvents}
-            className={`flex items-center gap-1 ${
+            className={`flex items-center gap-1 cursor-pointer ${
               pathname.startsWith("/events") || pathname === "/Pride2025"
                 ? rainbowClass
                 : "hover:underline"
@@ -147,7 +147,7 @@ export default function Navbar() {
             <div ref={aboutRef} className="relative">
               <button
                 onClick={toggleAbout}
-                className={`py-2 flex items-center gap-1 ${
+                className={`py-2 flex items-center gap-1 cursor-pointer ${
                   pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
                     ? rainbowClass
                     : "hover:underline"
@@ -174,7 +174,7 @@ export default function Navbar() {
             <div ref={eventsRef} className="relative">
               <button
                 onClick={toggleEvents}
-                className={`py-2 flex items-center gap-1 ${
+                className={`py-2 flex items-center gap-1 cursor-pointer ${
                   pathname.startsWith("/events") || pathname === "/Pride2025"
                     ? rainbowClass
                     : "hover:underline"

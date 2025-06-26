@@ -15,15 +15,17 @@ export default function ValuesHero() {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.2 }}
+        className="rounded-full overflow-hidden w-[180px] h-[180px]"
       >
         <Image
           src="/image/logo.jpg"
           alt="Burton Pride Logo"
           width={180}
           height={180}
-          className="hero-logo"
+          className="rounded-full object-cover w-full h-full"
         />
       </motion.div>
+
       <motion.h1
         className="text-4xl sm:text-6xl font-bold text-white"
         initial={{ opacity: 0, y: 20 }}
@@ -32,6 +34,7 @@ export default function ValuesHero() {
       >
         Our Core Values
       </motion.h1>
+
       <motion.p
         className="text-lg sm:text-xl max-w-3xl text-white"
         initial={{ opacity: 0, y: 20 }}

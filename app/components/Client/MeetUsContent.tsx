@@ -50,7 +50,15 @@ export default function MeetUsContent() {
         custom={0}
         className="text-center flex flex-col items-center gap-6 mt-16"
       >
-        <Image src="/image/logo.jpg" alt="Burton Pride Team" width={180} height={180} className="hero-logo" />
+        <div className="rounded-full overflow-hidden w-[180px] h-[180px]">
+          <Image
+            src="/image/logo.jpg"
+            alt="Burton Pride Team"
+            width={180}
+            height={180}
+            className="object-cover w-full h-full rounded-full"
+          />
+        </div>
         <h1 className="text-4xl sm:text-6xl font-bold">Meet the Burton Pride Team</h1>
         <p className="text-lg sm:text-xl max-w-2xl">
           Get to know the passionate people behind Burton Pride. We're dedicated to fostering an inclusive and vibrant community!
@@ -81,7 +89,13 @@ export default function MeetUsContent() {
                 variants={fadeUp}
                 custom={i}
               >
-                <Image src={member.image} alt={member.name} width={96} height={96} className="w-24 h-24 rounded-full mb-4" />
+                <Image
+                  src={member.image}
+                  alt={member.name}
+                  width={96}
+                  height={96}
+                  className="w-24 h-24 rounded-full mb-4 object-cover"
+                />
                 <h2 className="text-xl font-semibold">{member.name}</h2>
                 <p className="text-gray-600">{member.role}</p>
               </motion.div>

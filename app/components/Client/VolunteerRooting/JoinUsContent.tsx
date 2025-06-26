@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 
 const sectionVariants = {
@@ -15,6 +16,33 @@ const sectionVariants = {
 export default function JoinUsContent() {
   return (
     <>
+      {/* Hero Section */}
+      <motion.section
+        className="text-center flex flex-col items-center gap-6 mt-16 mb-8"
+        initial="hidden"
+        animate="visible"
+        variants={{
+          hidden: { opacity: 0, y: 30 },
+          visible: { opacity: 1, y: 0 },
+        }}
+        transition={{ duration: 0.8, ease: 'easeOut' }}
+      >
+        <div className="rounded-full overflow-hidden w-[180px] h-[180px]">
+          <Image
+            src="/image/logo.jpg"
+            alt="Burton Pride Logo"
+            width={180}
+            height={180}
+            className="object-cover w-full h-full rounded-full"
+          />
+        </div>
+
+        <h1 className="text-4xl sm:text-6xl font-bold text-white">Join the Movement</h1>
+        <p className="text-lg sm:text-xl text-white max-w-2xl">
+          Whether you're volunteering your time, donating, or collaborating Burton Pride thrives because of people like you!
+        </p>
+      </motion.section>
+
       {/* Volunteer Section */}
       <motion.section
         className="mt-16 text-center w-full max-w-4xl"
@@ -97,8 +125,6 @@ export default function JoinUsContent() {
             Contact Us
           </Link>
         </div>
-
-
       </motion.section>
     </>
   );
