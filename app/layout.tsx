@@ -30,15 +30,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500"
-    >
+    <html lang="en" className="h-full">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-transparent text-white m-0`}
       >
         <ConditionalNavbar />
-        <main className="flex-grow pb-24">{children}</main> {/* Prevent footer overlap */}
+        <div className="flex-grow bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 pb-24">
+          <main>{children}</main>
+        </div>
         <ConditionalFooter />
       </body>
     </html>

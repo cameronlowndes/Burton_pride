@@ -9,7 +9,7 @@ import EventCard from '../Card/EventCard';
 export default function HomeClient() {
   return (
     <motion.div
-      className="h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"
+      className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"
       initial="hidden"
       animate="visible"
       variants={{
@@ -149,7 +149,7 @@ export default function HomeClient() {
 
       {/* Events Section */}
       <motion.div
-        className="mt-16 w-full mb-16" // Added mb-16 here for padding below event card
+        className="mt-16 w-full mb-16"
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.6 }}

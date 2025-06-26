@@ -34,11 +34,10 @@ export const metadata: Metadata = {
 };
 
 const PlanYourVisitPage = () => {
-  // If you want to toggle this dynamically later, use state or props.
   const anyDisabled = true;
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white px-6 py-12 sm:px-16">
+    <main className="min-h-screen text-white px-6 py-12 sm:px-16">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl sm:text-5xl font-bold mb-10 text-center">
           Getting Here – Burton Pride
