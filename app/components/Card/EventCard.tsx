@@ -1,4 +1,3 @@
-//hello
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -39,7 +38,13 @@ const EventCard: React.FC<EventCardProps> = ({
   image,
   onImageClick
 }) => (
-  <div className="bg-white text-black p-6 rounded-lg shadow-md animate-fadeInUp w-full max-w-sm transition-transform hover:scale-105">
+  <div
+    className={`bg-white text-black p-6 rounded-lg shadow-md w-full max-w-sm transition-transform hover:scale-105 ${
+      isEventToday
+        ? 'border-4 border-yellow-400 shadow-yellow-300 animate-pulse'
+        : 'animate-fadeInUp'
+    }`}
+  >
     {image && (
       <div className="mb-4 cursor-pointer" onClick={() => onImageClick(image)}>
         <img
@@ -58,7 +63,6 @@ const EventCard: React.FC<EventCardProps> = ({
       </div>
     )}
 
-    {/* 🎉 FREE Event Notice */}
     {!isEventPassed && name === "Pride Event" && (
       <div className="mt-3 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-sm animate-pulse">
         🎉 This event is FREE and open to the public – No tickets required!
@@ -75,7 +79,9 @@ const EventCard: React.FC<EventCardProps> = ({
       ) : (
         <>
           {isEventToday && (
-            <p className="text-yellow-600 font-semibold">Happening Today!</p>
+            <div className="inline-block bg-yellow-400 text-black font-bold px-3 py-1 rounded-full shadow-sm mb-2 animate-bounce">
+              🎉 Happening Today!
+            </div>
           )}
           {link && (
             <Link href={link}>
@@ -99,7 +105,6 @@ const EventCard: React.FC<EventCardProps> = ({
   </div>
 );
 
-// Helper functions
 const getNextThursday = (fromDate: Date) => {
   const date = new Date(fromDate);
   const dayOfWeek = date.getDay();
@@ -174,6 +179,8 @@ const EventPage: React.FC = () => {
       }
     ];
 
+    // Rainbow R.I.O.T event commented out for now
+    /*
     const rainbowRiot: EventCardProps = {
       name: "Rainbow R.I.O.T. Every Thursday",
       description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
@@ -187,8 +194,9 @@ const EventPage: React.FC = () => {
       image: "/image/RainbowEvent.jpg",
       onImageClick: setModalImage
     };
+    */
 
-    const allEvents = [...baseEvents, rainbowRiot];
+    const allEvents = [...baseEvents /*, rainbowRiot */];
     const sorted = allEvents
       .filter(event => !event.isEventPassed)
       .sort((a, b) => new Date(a.date || "").getTime() - new Date(b.date || "").getTime());
@@ -199,7 +207,7 @@ const EventPage: React.FC = () => {
   return (
     <section
       id="events"
-      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24" // Added padding bottom here
+      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24"
     >
       <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
 
