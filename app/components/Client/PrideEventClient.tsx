@@ -119,7 +119,7 @@ export default function PrideEventClient() {
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Where is it taking place?</h3>
             <div className="mb-4">
               <Image
-                src="/image/map.png"
+                src="/image/PrideEvent/map.png"
                 alt="Event Location"
                 width={300}
                 height={200}
