@@ -144,7 +144,7 @@ export default function PrideEventClient() {
             <h3 className="text-xl font-semibold mb-4 text-purple-600">Can I bring my dog?</h3>
             <p className="text-gray-800">
               All of my four-legged doggy friends are now welcome at Burton Pride.
-              Please ensure you follow our doggy rules, or our steward or surety will ask you and your owner to leave. This is so everyone can enjoy the event.
+              Please ensure you follow our doggy rules, or our steward or security will ask you and your owner to leave. This is so everyone can enjoy the event.
               <br /><br />
               <span className="font-semibold">1. </span> Please keep your dog on the lead and make sure they don't wander off.
               <br />

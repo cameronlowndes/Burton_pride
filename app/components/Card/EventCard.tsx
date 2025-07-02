@@ -141,10 +141,10 @@ const EventPage: React.FC = () => {
         name: "Pride Event",
         description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
         date: "2025-08-16",
-        time: "12:00 PM - 6:00 PM",
+        time: "12:00 PM - 5:00 PM",
         details:
           "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
-        link: "events/Pride2025",  // <-- fixed missing comma here
+        // link: "events/Pride2025",  
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: isEventInPast("2025-08-16"),
         isEventToday: isEventToday("2025-08-16"),
