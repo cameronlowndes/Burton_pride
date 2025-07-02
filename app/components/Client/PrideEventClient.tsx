@@ -5,7 +5,9 @@ import Image from 'next/image';
 import Link from 'next/link';
 import Countdown from '../../components/Card/Countdown';
 import SponsorCard from '../../components/Card/SponsorCard';
-import EventMapWithModal from '../../components/BigPictureMode/EventMapWithModal';
+// import EventMapWithModal from '../../components/BigPictureMode/EventMapWithModal';
+import React from 'react';
+
 
 export default function PrideEventClient() {
   return (
@@ -20,7 +22,7 @@ export default function PrideEventClient() {
         },
       }}
     >
-         {/* Hero Section */}
+      {/* Hero Section */}
       <motion.header
         className="text-center flex flex-col items-center gap-6 mt-16"
         variants={{
@@ -43,7 +45,7 @@ export default function PrideEventClient() {
             className="object-cover w-full h-full rounded-full"
           />
         </motion.div>
-        
+
         <motion.h1
           className="text-4xl sm:text-6xl font-bold"
           initial={{ opacity: 0, y: 20 }}
@@ -79,7 +81,7 @@ export default function PrideEventClient() {
         transition={{ delay: 1 }}
         className="w-full max-w-6xl mt-16"
       >
-        <EventMapWithModal />
+        {/* <EventMapWithModal /> */}
       </motion.section>
 
       {/* Support Section */}

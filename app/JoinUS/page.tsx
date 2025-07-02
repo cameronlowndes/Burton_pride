@@ -1,5 +1,3 @@
-
-import Image from 'next/image';
 import MetaHead from '../components/MetaHead';
 import JoinUsContent from '../components/Client/VolunteerRooting/JoinUsContent';
 

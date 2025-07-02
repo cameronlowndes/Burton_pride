@@ -85,7 +85,7 @@ const EventCard: React.FC<EventCardProps> = ({
           )}
           {link && (
             <Link href={link}>
-              <span className="text-blue-500 hover:underline">More Details</span>
+              <span className="text-blue-500 hover:underline cursor-pointer">More Details</span>
             </Link>
           )}
         </>
@@ -143,11 +143,12 @@ const EventPage: React.FC = () => {
         date: "2025-08-16",
         time: "12:00 PM - 6:00 PM",
         details:
-          "The Pride Parade is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
+          "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
+        link: "events/Pride2025",  // <-- fixed missing comma here
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: isEventInPast("2025-08-16"),
         isEventToday: isEventToday("2025-08-16"),
-        image: "/image/NewPridePoster.png",
+        image: "/image/PrideEvent/NewPridePoster.png",
         onImageClick: setModalImage
       },
       {
@@ -174,12 +175,12 @@ const EventPage: React.FC = () => {
         mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
         isEventPassed: isEventInPast("2025-07-02"),
         isEventToday: isEventToday("2025-07-02"),
-        image: "/image/WalkTheWalk.jpg",
+        image: "/image/PosterPicture/WalkTheWalk.jpg",
         onImageClick: setModalImage
       }
     ];
 
-    // Rainbow R.I.O.T event commented out for now
+    // Optional Rainbow R.I.O.T event (commented out)
     /*
     const rainbowRiot: EventCardProps = {
       name: "Rainbow R.I.O.T. Every Thursday",
@@ -229,7 +230,7 @@ const EventPage: React.FC = () => {
 
       {modalImage && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center"
+          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center cursor-pointer"
           onClick={() => setModalImage(null)}
         >
           <div className="max-w-3xl w-full">

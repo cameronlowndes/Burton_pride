@@ -17,23 +17,23 @@ const sections = [
   {
     title: 'Committed Board',
     members: [
-      { name: 'Simon Whale', image: '/image/simon.jpg', role: 'Founder & Organizer | He/Him' },
-      { name: 'Isaac Timmins', image: '/image/isaac.jpg', role: 'Founder & Director | He/Him' },
-      { name: 'Cameron Lowndes', image: '/image/cameron.jpg', role: 'Board Member | He/Him/His/They' },
-      { name: 'John', image: '/image/john.jpg', role: 'Board Member | He/Him' },
+      { name: 'Simon Whale', image: '/image/PeoplePicture/simon.jpg', role: 'Founder & Organizer | He/Him' },
+      { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Founder & Director | He/Him' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Board Member | He/Him/His/They' },
+      { name: 'John', image: '/image/PeoplePicture/john.jpg', role: 'Board Member | He/Him' },
     ],
   },
   {
     title: 'Social Media Team',
     members: [
-      { name: 'Isaac Timmins', image: '/image/isaac.jpg', role: 'Social Media Director | He/Him' },
-      { name: 'Cameron Lowndes', image: '/image/cameron.jpg', role: 'Social Media Manager | He/Him/His/They' },
+      { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Social Media Director | He/Him' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Social Media Manager | He/Him/His/They' },
     ],
   },
   {
     title: 'Website Admin',
     members: [
-      { name: 'Cameron Lowndes', image: '/image/cameron.jpg', role: 'Website Administrator | He/Him/His/They' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Website Administrator | He/Him/His/They' },
     ],
   },
 ];
