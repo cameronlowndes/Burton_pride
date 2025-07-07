@@ -12,7 +12,7 @@ type SponsorCardProps = {
 
 const sponsors: SponsorCardProps[] = [
   {
-    imageSrc: "/image/SocialRoots&GreenShootsPrideLogo.jpg",
+    imageSrc: "/image/CompanyLogo/SocialRoots&GreenShootsPrideLogo.jpg",
     altText: "Social Roots & Green Shoots",
     name: "Social Roots & Green Shoots",
     description: "Committed to supporting LGBTQ+ communities.",
