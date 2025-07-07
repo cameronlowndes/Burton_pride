@@ -20,7 +20,7 @@ const sections = [
       { name: 'Simon Whale', image: '/image/PeoplePicture/simon.jpg', role: 'Founder & Organizer | He/Him' },
       { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Founder & Director | He/Him' },
       { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Board Member | He/Him/His/They' },
-      { name: 'John', image: '/image/PeoplePicture/john.jpg', role: 'Board Member | He/Him' },
+      // { name: 'John', image: '/image/PeoplePicture/john.jpg', role: 'Board Member | He/Him' },
     ],
   },
   {
