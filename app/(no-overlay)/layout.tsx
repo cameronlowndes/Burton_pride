@@ -1,3 +1,4 @@
+// app/(site)/plan/layout.tsx (or wherever your layout lives)
 import { Geist, Geist_Mono } from "next/font/google";
 import "../../styles/globals.css";
 
@@ -26,7 +27,7 @@ export default function PlanYourVisitLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-black text-white`}
       >
-        {/* NO Navbar and NO Footer here */}
+        {/* This layout does NOT include a Navbar or Footer */}
         <main className="flex-grow">{children}</main>
       </body>
     </html>

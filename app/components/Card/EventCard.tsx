@@ -56,6 +56,7 @@ const EventCard: React.FC<EventCardProps> = ({
     )}
     <h3 className="text-xl font-bold">{name}</h3>
     <p className="text-sm">{description}</p>
+
     {(date || time) && (
       <div className="mt-1">
         {date && <p className="text-pink-600 font-semibold">{formatDate(date)}</p>}
@@ -63,7 +64,8 @@ const EventCard: React.FC<EventCardProps> = ({
       </div>
     )}
 
-    {!isEventPassed && name === "Pride Event" && (
+    {/* 🎉 FREE EVENT LABEL */}
+    {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
       <div className="mt-3 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-sm animate-pulse">
         🎉 This event is FREE and open to the public – No tickets required!
       </div>
@@ -144,7 +146,7 @@ const EventPage: React.FC = () => {
         time: "12:00 PM - 5:00 PM",
         details:
           "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
-        link: "/PlanForYourVist",  
+        link: "/events/Pride2025",  
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: isEventInPast("2025-08-16"),
         isEventToday: isEventToday("2025-08-16"),
@@ -177,27 +179,23 @@ const EventPage: React.FC = () => {
         isEventToday: isEventToday("2025-07-02"),
         image: "/image/PosterPicture/WalkTheWalk.jpg",
         onImageClick: setModalImage
-      }
+      },
+      {
+        name: "Pride After Party",
+        description: "Join us for a vibrant celebration At Bridge INN in Burton at 6:30.pm! 🏳️‍🌈",
+        date: "2025-08-16",
+        time: "6:30 PM - 12:00 AM",
+        details:
+          "The Pride After Party Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
+        mapLink: "https://www.google.com/maps/place/Burton+Bridge+Inn/@52.8019424,-1.6258746,16.5z/data=!4m6!3m5!1s0x487a0242f9b9afcb:0xd63b58f898f2a911!8m2!3d52.8067703!4d-1.6255013!16s%2Fg%2F11bzsxx_t2?authuser=0&entry=ttu&g_ep=EgoyMDI1MDcxNi4wIKXMDSoASAFQAw%3D%3D",
+        isEventPassed: isEventInPast("2025-08-16"),
+        isEventToday: isEventToday("2025-08-16"),
+        image: "/image/PrideEvent/PrideAfterParty.png",
+        onImageClick: setModalImage
+      },
     ];
 
-    // Optional Rainbow R.I.O.T event (commented out)
-    /*
-    const rainbowRiot: EventCardProps = {
-      name: "Rainbow R.I.O.T. Every Thursday",
-      description: "Need Support? You’re Not Alone. Join Us Every Thursday at Burton Fire Station",
-      date: rainbowDate.toISOString().split('T')[0],
-      time: "6:30 PM – 7:30 PM",
-      details:
-        "Struggling with your sexuality or feeling isolated? Rainbow R.I.O.T. offers support every Thursday at Burton Fire Station.",
-      mapLink: "https://www.google.com/maps?q=Burton+Fire+Station",
-      isEventPassed: isEventInPast(rainbowDateStr),
-      isEventToday: isEventToday(rainbowDateStr),
-      image: "/image/RainbowEvent.jpg",
-      onImageClick: setModalImage
-    };
-    */
-
-    const allEvents = [...baseEvents /*, rainbowRiot */];
+    const allEvents = [...baseEvents];
     const sorted = allEvents
       .filter(event => !event.isEventPassed)
       .sort((a, b) => new Date(a.date || "").getTime() - new Date(b.date || "").getTime());
@@ -221,7 +219,7 @@ const EventPage: React.FC = () => {
       >
         {upcomingEvents.length > 0 ? (
           upcomingEvents.map(event => (
-            <EventCard key={event.name} {...event} />
+            <EventCard key={`${event.name}-${event.date}`} {...event} />
           ))
         ) : (
           <p className="text-lg text-gray-500 w-full">No upcoming events</p>

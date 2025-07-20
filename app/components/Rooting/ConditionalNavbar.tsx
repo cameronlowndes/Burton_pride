@@ -7,7 +7,7 @@ export default function ConditionalNavbar() {
   const pathname = usePathname();
 
   // List paths where you want to hide the navbar
-  const hideNavbarOnPaths = ["/PlanForYourVist", "/another-path"];
+  const hideNavbarOnPaths = ["/PlanYourVist", "/another-path"];
 
   if (hideNavbarOnPaths.includes(pathname)) {
     return null; // Do not render navbar on these paths

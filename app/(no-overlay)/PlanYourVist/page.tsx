@@ -199,7 +199,7 @@ const PlanYourVisitPage = () => {
 
           {/* Back Link */}
           <div className="text-center mt-6">
-            <Link href="/" legacyBehavior>
+            <Link href="/events/Pride2025" legacyBehavior>
               <a className="inline-block bg-white text-purple-700 font-bold py-3 px-6 rounded-full shadow-md hover:bg-gray-100 transition duration-300 ease-in-out cursor-pointer">
                 ← Back to Main Event Page
               </a>
