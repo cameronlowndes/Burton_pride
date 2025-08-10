@@ -137,6 +137,17 @@ export default function PrideEventClient() {
             </Link>
           </div>
 
+          {/* FAQ 10 */}
+          <div className="bg-white text-black p-8 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
+            <h3 className="text-2xl font-semibold mb-6 text-purple-600">Are children welcome?</h3>
+            <p className="text-gray-800 text-lg leading-relaxed">
+              We encourage families to attend Pride. Children under 16 must be accompanied at all times by an adult.
+
+            </p>
+          </div>
+
+
+
           {/* FAQ 2 */}
           <div className="bg-white text-black p-8 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
             <h3 className="text-2xl font-semibold mb-6 text-purple-600">Can I bring my dog?</h3>
