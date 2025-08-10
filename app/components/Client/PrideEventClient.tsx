@@ -228,6 +228,23 @@ export default function PrideEventClient() {
             </Link>
           </div>
 
+           {/* FAQ 9 */}
+          <div className="bg-white text-black p-8 rounded-lg shadow-lg transition-transform transform hover:scale-105 hover:shadow-xl">
+            <h3 className="text-2xl font-semibold mb-6 text-purple-600">How do I make a complaint?</h3>
+            <p className="text-gray-800 mb-6 text-lg leading-relaxed">
+              If you wish to send a complaint or feedback, please email prideburton@gmail.com We will aim to respond to complaints within 28 days, with a further 28-day extension added if a more in-depth investigation is required. 
+              Please note that complaints over social media are not monitored.
+
+            </p>
+           <a
+                    href="mailto:burtonpride@gmail.com?subject=Inquiry&body=Hello, I would like to inquire about..."
+                    className="bg-white text-pink-600 px-8 py-4 rounded-full font-semibold text-lg shadow-lg hover:bg-gray-100 transition duration-300 ease-in-out mb-10 inline-block"
+                    aria-label="Send an email to Burton Pride"
+                >
+                    📧 Send Us an Email
+                </a>
+          </div>
+
         </div>
       </motion.section>
 
