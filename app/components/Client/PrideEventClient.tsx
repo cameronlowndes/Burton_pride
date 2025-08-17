@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
-import Countdown from '../../components/Card/Countdown';
+import Countdown from '../Card/message';
 import SponsorCard from '../../components/Card/SponsorCard';
 import React from 'react';
 

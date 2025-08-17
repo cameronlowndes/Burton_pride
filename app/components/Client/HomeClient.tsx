@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
-import Countdown from '../Card/Countdown';
+import Message from '../Card/message'; // ✅ renamed to match new thank-you component
 import EventCard from '../Card/EventCard';
 
 export default function HomeClient() {
@@ -15,9 +15,7 @@ export default function HomeClient() {
       variants={{
         hidden: {},
         visible: {
-          transition: {
-            staggerChildren: 0.2,
-          },
+          transition: { staggerChildren: 0.2 },
         },
       }}
     >
@@ -61,18 +59,19 @@ export default function HomeClient() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
         >
-          Celebrating diversity, inclusion, and love in the heart of Burton. Join us in making a difference!
+          Celebrating diversity, inclusion, and love in the heart of Burton.
+          Together, we’re creating safe and joyful spaces for everyone 🌈
         </motion.p>
       </motion.section>
 
-      {/* Countdown */}
+      {/* Thank-You Message Section */}
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.8 }}
-        className="mt-8"
+        className="mt-8 w-full"
       >
-        <Countdown />
+        <Message />
       </motion.div>
 
       {/* Support Section */}
@@ -84,7 +83,9 @@ export default function HomeClient() {
       >
         <h2 className="text-3xl font-semibold mb-4">Support Burton Pride</h2>
         <p className="text-lg mb-6">
-          Help us bring the best Pride event to Burton! Your donation supports community initiatives, parade organisation, and inclusivity programs. Every contribution makes a difference! 🌈
+          Help us bring the best Pride event to Burton! Your donation supports
+          community initiatives, parade organisation, and inclusivity programs.
+          Every contribution makes a difference 💖
         </p>
         <Link
           href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48"
@@ -129,7 +130,9 @@ export default function HomeClient() {
       >
         <h2 className="text-3xl font-semibold mb-4">Collaborate with Us</h2>
         <p className="text-lg mb-6">
-          We’re always looking for like-minded businesses, organizations, and individuals who want to support our mission of inclusivity and equality.
+          We’re always looking for like-minded businesses, organisations, and
+          individuals who want to support our mission of inclusivity and
+          equality.
         </p>
         <Link
           href="/Collaborate"
@@ -138,13 +141,13 @@ export default function HomeClient() {
           Learn More
         </Link>
 
-        <div className="mt-8">
+        {/* <div className="mt-8">
           <Link href="https://forms.gle/taZ16ioQBXvEX7sE8" passHref>
             <button className="bg-green-500 text-white px-6 py-3 rounded-full font-semibold text-lg hover:bg-green-400 transition">
               Vendor & Stallholder Bookings
             </button>
           </Link>
-        </div>
+        </div> */}
       </motion.section>
 
       {/* Events Section */}

@@ -86,7 +86,7 @@ export default function CollaborateClient() {
         </motion.a>
       </motion.div>
 
-      <motion.div
+      {/* <motion.div
         className="md:w-1/2 w-full flex justify-center mt-10"
         variants={fadeUpVariant}
       >
@@ -99,7 +99,7 @@ export default function CollaborateClient() {
         >
           Vendor & Stallholder Bookings
         </motion.a>
-      </motion.div>
+      </motion.div> */}
 
       {/* Info Section */}
       <motion.section

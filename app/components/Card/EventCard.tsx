@@ -134,69 +134,24 @@ const EventPage: React.FC = () => {
   const [upcomingEvents, setUpcomingEvents] = useState<EventCardProps[]>([]);
 
   useEffect(() => {
-    const currentDate = new Date();
-    const rainbowDate = getNextThursday(currentDate);
-    const rainbowDateStr = rainbowDate.toISOString();
-
     const baseEvents: EventCardProps[] = [
       {
         name: "Pride Event",
         description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
         date: "2025-08-16",
         time: "12:00 PM - 5:00 PM",
-        details:
-          "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
-        link: "/events/Pride2025",  
+        details: "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
+        link: "/events/Pride2025",
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: isEventInPast("2025-08-16"),
         isEventToday: isEventToday("2025-08-16"),
         image: "/image/PrideEvent/NewPridePoster.png",
         onImageClick: setModalImage
       },
-      {
-        name: "Miss Tutu Drag Bingo Night",
-        description: "An exciting night of fun and laughter with Miss Tutu!",
-        date: "2025-05-26",
-        time: "7:00 PM - 11:00 PM",
-        details:
-          "Join us for an inspiring charity event at Marstons Sports & Social Club. £11.50 entry",
-        link: "https://donate.giveasyoulive.com/charity/burtonanddistrictmind/event/miss-tutu-drag-bingo-night",
-        mapLink: "https://www.google.com/maps?q=Marstons+Sports+%26+Social+Club+Burton",
-        isEventPassed: isEventInPast("2025-05-26"),
-        isEventToday: isEventToday("2025-05-26"),
-        image: "/image/Drag_Queen_Bingo_Night_Poster.jpeg",
-        onImageClick: setModalImage
-      },
-      {
-        name: "Burton Pride Walk in the Park",
-        description: "A great outdoor walk at Stapenhill Gardens for all LGBTQ+ and allies! 🌳🏳️‍🌈",
-        date: "2025-07-02",
-        time: "5:00 PM - 6:00 PM",
-        details:
-          "Relax in nature, do some light exercise and chat with likeminded people. Simply show up at the entrance off Main Street (by the small parking lot).",
-        mapLink: "https://www.google.com/maps?q=Stapenhill+Gardens+Burton",
-        isEventPassed: isEventInPast("2025-07-02"),
-        isEventToday: isEventToday("2025-07-02"),
-        image: "/image/PosterPicture/WalkTheWalk.jpg",
-        onImageClick: setModalImage
-      },
-      {
-        name: "Pride After Party",
-        description: "Join us for a vibrant celebration At Bridge INN in Burton at 6:30.pm! 🏳️‍🌈",
-        date: "2025-08-16",
-        time: "6:30 PM - 12:00 AM",
-        details:
-          "The Pride After Party Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
-        mapLink: "https://www.google.com/maps/place/Burton+Bridge+Inn/@52.8019424,-1.6258746,16.5z/data=!4m6!3m5!1s0x487a0242f9b9afcb:0xd63b58f898f2a911!8m2!3d52.8067703!4d-1.6255013!16s%2Fg%2F11bzsxx_t2?authuser=0&entry=ttu&g_ep=EgoyMDI1MDcxNi4wIKXMDSoASAFQAw%3D%3D",
-        isEventPassed: isEventInPast("2025-08-16"),
-        isEventToday: isEventToday("2025-08-16"),
-        image: "/image/PrideEvent/PrideAfterParty.png",
-        onImageClick: setModalImage
-      },
+      // other events...
     ];
 
-    const allEvents = [...baseEvents];
-    const sorted = allEvents
+    const sorted = baseEvents
       .filter(event => !event.isEventPassed)
       .sort((a, b) => new Date(a.date || "").getTime() - new Date(b.date || "").getTime());
 
@@ -204,10 +159,7 @@ const EventPage: React.FC = () => {
   }, []);
 
   return (
-    <section
-      id="events"
-      className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24"
-    >
+    <section id="events" className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24">
       <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
 
       <div
@@ -222,7 +174,22 @@ const EventPage: React.FC = () => {
             <EventCard key={`${event.name}-${event.date}`} {...event} />
           ))
         ) : (
-          <p className="text-lg text-gray-500 w-full">No upcoming events</p>
+          <div className="flex flex-col items-center justify-center text-center py-16 px-6 bg-gradient-to-r from-pink-500 via-purple-500 to-yellow-400 rounded-2xl shadow-lg animate-fadeInUp w-full max-w-4xl">
+            <h3 className="text-4xl font-extrabold text-white mb-4">
+              🌈 No Upcoming Events Right Now
+            </h3>
+            <p className="text-lg text-white mb-6 max-w-2xl">
+              But don’t worry – Burton Pride is always working behind the scenes to
+              bring more exciting celebrations, community events, and nights full of
+              love, unity, and inclusivity. 💖
+            </p>
+            <p className="text-md text-yellow-100 italic mb-4">
+              Stay tuned for updates — more events are on the way!
+            </p>
+            <Link href="https://www.facebook.com/profile.php?id=61556621159422" target="_blank" className="bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition">
+              Follow us on Facebook
+            </Link>
+          </div>
         )}
       </div>
 

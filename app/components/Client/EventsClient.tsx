@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import Countdown from '../Card/Countdown';
+import Message from '../Card/message'; // ✅ renamed for clarity
 import EventCard from '../Card/EventCard';
 
 export default function EventsClient() {
@@ -57,17 +57,20 @@ export default function EventsClient() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
         >
-          Stay updated on all our exciting events, including the Pride Event and community gatherings. We can’t wait to celebrate with you!
+          Stay updated on all our exciting events, from the Pride festival to
+          local community gatherings. Together, we’ll keep building safe,
+          inclusive spaces for everyone 🌈
         </motion.p>
       </motion.section>
 
-      {/* Countdown Section */}
+      {/* Thank-You Message Section */}
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.8 }}
+        className="w-full"
       >
-        <Countdown />
+        <Message />
       </motion.div>
 
       {/* Events Section */}

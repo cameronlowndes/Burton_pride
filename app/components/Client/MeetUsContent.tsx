@@ -1,5 +1,3 @@
-//add olga
-
 'use client';
 
 import Image from 'next/image';
@@ -23,6 +21,7 @@ const sections = [
       { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Founder & Director | He/Him' },
       { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Board Member | He/Him/His/They' },
       { name: 'Olga Niewiadomska', image: '/image/PeoplePicture/Olga.jpg', role: 'Board Member | She/Her' },
+      { name: 'Citrine Stone', image: '/image/PeoplePicture/citrine.jpg', role: 'Board Member | He/Him/His/They' },
     ],
   },
   {
