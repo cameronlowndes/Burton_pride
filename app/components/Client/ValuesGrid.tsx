@@ -57,9 +57,9 @@ const values = [
         <div className="mt-4">
           <Link
             href="/ContactUS"
-            className="inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out"
+            className="inline-block bg-gradient-to-r from-purple-600 to-pink-500 hover:from-pink-500 hover:to-purple-600 text-white font-bold py-2 px-5 rounded-full shadow-lg transition-all duration-300"
           >
-            Feedback
+            Give Feedback
           </Link>
         </div>
       </>
@@ -70,30 +70,26 @@ const values = [
 export default function ValuesGrid() {
   return (
     <motion.section
-      className="mt-12 max-w-6xl w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8"
+      className="mt-12 max-w-7xl w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 px-4 sm:px-0"
       initial="hidden"
       animate="visible"
       variants={{
         hidden: {},
-        visible: {
-          transition: {
-            staggerChildren: 0.1,
-          },
-        },
+        visible: { transition: { staggerChildren: 0.1 } },
       }}
     >
       {values.map(({ title, description }, i) => (
         <motion.div
           key={i}
-          className="bg-white rounded-xl p-6 shadow-lg hover:shadow-2xl transition-shadow duration-300 flex flex-col"
+          className="bg-gradient-to-tr from-purple-600 via-pink-500 to-orange-400 text-white rounded-2xl p-6 shadow-[0_10px_20px_rgba(0,0,0,0.3)] hover:shadow-[0_15px_30px_rgba(0,0,0,0.5)] transform hover:scale-105 transition-all duration-300 flex flex-col"
           variants={{
-            hidden: { opacity: 0, y: 30 },
+            hidden: { opacity: 0, y: 40 },
             visible: { opacity: 1, y: 0 },
           }}
           transition={{ duration: 0.5 }}
         >
-          <h2 className="text-purple-700 text-2xl font-semibold mb-3">{title}</h2>
-          <div className="text-gray-800 flex-grow">{description}</div>
+          <h2 className="text-2xl sm:text-3xl font-bold mb-4 drop-shadow-md">{title}</h2>
+          <div className="text-white text-base sm:text-lg flex-grow leading-relaxed">{description}</div>
         </motion.div>
       ))}
     </motion.section>

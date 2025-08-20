@@ -1,15 +1,12 @@
 'use client';
 
 import { motion } from "framer-motion";
+import VolunteerForm from "../../Forms/VolunteerForm";
 
 export default function JoinUsVolunteerContent() {
   const containerVariants = {
     hidden: {},
-    visible: {
-      transition: {
-        staggerChildren: 0.3,
-      },
-    },
+    visible: { transition: { staggerChildren: 0.3 } },
   };
 
   const fadeUpVariant = {
@@ -35,51 +32,25 @@ export default function JoinUsVolunteerContent() {
         </p>
       </motion.header>
 
-      {/* Volunteer Section */}
+      {/* Message and Form Section */}
       <motion.section
-        className="mt-16 w-full max-w-5xl flex flex-col md:flex-row gap-10"
+        className="mt-12 w-full max-w-6xl flex flex-col md:flex-row gap-10"
         variants={fadeUpVariant}
       >
-        {/* Text Content (Left Side) */}
-        <div className="md:w-1/2 text-left">
-          <h2 className="text-3xl font-semibold mb-4">Why does Burton Pride C.I.C. need volunteers?</h2>
-          <p className="text-lg mb-4">
-            Because your involvement can make a real difference. Your information is crucial for us to comply with our legal obligations and ensure the safety of everyone we serve.
-          </p>
-          <p className="text-lg mb-4">
-            Nearly all tasks that Burton Pride asks its volunteers to take on require interaction with the public, including potential contact with children and vulnerable adults.
-          </p>
-          <p className="text-lg mb-4">
-            Your trust is important to us. Burton Pride requires this information to comply with legal obligations. Your actions as a volunteer significantly impact our operations and the lives of those we serve.
-          </p>
-          <p className="text-lg mb-6">
-            Rest assured, Burton Pride C.I.C. values your privacy. We will only share your information if requested by the appropriate authority.
-          </p>
-          <p className="text-lg">
-            If you have any questions, please don’t hesitate to contact us at{" "}
-            <a href="mailto:prideburton@gmail.com" className="text-yellow-300 underline ml-1">
-              prideburton@gmail.com
-            </a>
-            . We would love to hear from you.
-          </p>
+        {/* Informational Message (Left) */}
+        <div className="md:w-1/2 bg-white/20 p-6 rounded-xl shadow-lg text-white text-lg space-y-4">
+          <h2 className="text-2xl font-bold mb-2 text-yellow-300">Why does Burton Pride C.I.C. need volunteers?</h2>
+          <p>Because your involvement can make a real difference. Your information is crucial for us to comply with our legal obligations and ensure the safety of everyone we serve.</p>
+          <p>Nearly all tasks that Burton Pride asks its volunteers to take on require interaction with the public, including potential contact with children and vulnerable adults.</p>
+          <p>Your trust is important to us. Burton Pride requires this information to comply with legal obligations. Your actions as a volunteer significantly impact our operations and the lives of those we serve.</p>
+          <p>Rest assured, Burton Pride C.I.C. values your privacy. We will only share your information if requested by the appropriate authority.</p>
+          <p>If you have any questions, please don’t hesitate to contact us at <a href="mailto:prideburton@gmail.com" className="underline text-yellow-300">prideburton@gmail.com</a>. We would love to hear from you.</p>
         </div>
 
-        {/* Google Form (Right Side) */}
-        <div className="md:w-1/2 flex justify-center px-4 sm:px-6">
-          <motion.iframe
-            src="https://forms.gle/oFteosGZ9sJPQR6T9"
-            width="100%"
-            height="600"
-            className="border-4 border-pink-400 rounded-2xl shadow-2xl max-w-full"
-            title="Volunteer Sign-up Form"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.7, delay: 0.3 }}
-          >
-            Loading…
-          </motion.iframe>
+        {/* Volunteer Form (Right) */}
+        <div className="md:w-1/2 flex justify-center">
+          <VolunteerForm />
         </div>
-
       </motion.section>
     </motion.div>
   );
