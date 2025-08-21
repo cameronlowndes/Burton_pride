@@ -8,7 +8,7 @@ import { MessageAfterParty } from '../Card/message';
 
 interface MediaItem {
   type: 'image' | 'video';
-  file: string;
+  file: string; // image file or YouTube video ID
 }
 
 interface NightPartyClientProps {
@@ -20,13 +20,13 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
     { type: 'image', file: 'partyOne.jpeg' }, // small box
     { type: 'image', file: 'partyTwo.jpeg' }, // small box
     { type: 'image', file: 'partyThree.JPG' }, // highlighted
-    { type: 'video', file: 'partyFour.mp4' }, // small box
-    { type: 'video', file: 'PartyFive.mp4' },
-    { type: 'video', file: 'partySix.mp4' },
-    { type: 'video', file: 'partySeven.mp4' },
+    { type: 'video', file: 'N4IIe0XsY1Q' }, // YouTube video ID for PartyFour
+    { type: 'video', file: 'XU7SYE4edzg' }, // PartyFive
+    { type: 'video', file: 'j-WJlgyKvnw' }, // PartySix
+    { type: 'video', file: 'i8Tspi8VZqA' }, // PartySeven
   ];
 
-  const preventRightClick = (e: React.MouseEvent<HTMLImageElement | HTMLVideoElement>) => {
+  const preventRightClick = (e: React.MouseEvent<HTMLImageElement>) => {
     e.preventDefault();
   };
 
@@ -96,13 +96,12 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
         <h2 className="text-4xl font-semibold mb-6">Party Highlights</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {galleryItems.map((item, i) => {
-            // Determine box size
             const boxClass =
-              item.file === 'partyOne.jpeg' || item.file === 'partyTwo.jpeg' || item.file === 'partyFour.mp4'
-                ? 'h-48' // smaller outer box
+              item.file === 'partyOne.jpeg' || item.file === 'partyTwo.jpeg' || item.file === '4bZp2Xk9Y8A'
+                ? 'h-48'
                 : item.file === 'partyThree.JPG'
-                ? 'h-80' // highlighted
-                : 'h-60'; // default
+                ? 'h-80'
+                : 'h-60';
 
             return item.type === 'image' ? (
               <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
@@ -120,12 +119,18 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
               </motion.div>
             ) : (
               <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
-                <video
-                  src={`/image/PrideParty/${item.file}`}
-                  controls
-                  className="w-full h-full object-cover rounded-2xl select-none"
-                  onContextMenu={preventRightClick}
-                />
+                <div className="relative w-full h-full">
+                  <iframe
+                    width="100%"
+                    height="100%"
+                    src={`https://www.youtube.com/embed/${item.file}`}
+                    title={`Night Party video ${i + 1}`}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="rounded-2xl"
+                  ></iframe>
+                </div>
               </motion.div>
             );
           })}
