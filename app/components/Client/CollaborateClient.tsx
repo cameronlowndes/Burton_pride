@@ -24,7 +24,7 @@ const buttonHover = {
 export default function CollaborateClient() {
   return (
     <motion.div
-      className="min-h-screen bg-gradient-to-r  text-white flex flex-col items-center p-8 sm:p-16 pb-24"
+      className="min-h-screen bg-gradient-to-r text-white flex flex-col items-center p-8 sm:p-16 pb-24"
       initial="hidden"
       animate="visible"
       variants={containerVariants}
@@ -69,7 +69,11 @@ export default function CollaborateClient() {
           { title: "Silver Sponsorship", price: "£995+", color: "text-gray-200", perks: ["Stall with other vendors", "5 Free passes for the event", "Social media mentions", "A5 or A6 Advert in program"] },
           { title: "Gold Sponsorship", price: "£1500+", color: "text-yellow-300", perks: ["3x6m gazebo with other vendors", "10 Free passes", "Mentions in social media posts", "A5, A6, or A4 Advert in program", "Feature on main stage screen", "Promotional material in event bags"] }
         ].map(({ title, price, color, perks }) => (
-          <Card key={title} title={title} className="bg-white/10 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 hover:scale-[1.03] hover:shadow-[0_8px_40px_rgba(255,255,255,0.6)] transition-all">
+          <Card
+            key={title}
+            title={title}
+            className="bg-white/10 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 hover:scale-[1.03] hover:shadow-[0_8px_40px_rgba(255,255,255,0.6)] transition-all"
+          >
             <p className={`text-lg font-bold ${color}`}>{price}</p>
             <ul className="list-disc ml-4 text-sm mt-2">
               {perks.map((perk, index) => (

@@ -2,20 +2,18 @@
 
 import React from "react";
 
-const Message = () => {
+// First Message Component
+export const Message = () => {
   return (
     <section
       id="message"
       className="mt-10 px-4 sm:px-6"
     >
-      {/* Heading */}
-      <h2 className="text-center text-3xl sm:text-5xl font-extrabold mb-8 bg-gradient-to-r text-white bg-clip-text text-transparent drop-shadow-md">
+      <h2 className="text-center text-3xl sm:text-5xl font-extrabold mb-8 text-white">
         Burton Pride 2025
       </h2>
 
-      {/* Main container */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 max-w-6xl mx-auto w-full">
-        {/* Block 1 */}
         <div className="bg-white/90 backdrop-blur-md text-black p-6 sm:p-10 rounded-2xl shadow-xl border-l-4 border-pink-500">
           <p className="text-lg sm:text-xl leading-relaxed">
             🌈 All of us at <b>Burton Pride</b> want to say a{" "}
@@ -27,7 +25,6 @@ const Message = () => {
           </p>
         </div>
 
-        {/* Block 2 */}
         <div className="bg-white/90 backdrop-blur-md text-black p-6 sm:p-10 rounded-2xl shadow-xl border-l-4 border-yellow-400">
           <p className="text-lg sm:text-xl leading-relaxed">
             A special thank you goes to the <b>Burton Pride Committee</b>, whose
@@ -38,7 +35,6 @@ const Message = () => {
           </p>
         </div>
 
-        {/* Block 3 (full row) */}
         <div className="bg-white/90 backdrop-blur-md text-black p-6 sm:p-10 rounded-2xl shadow-xl border-l-4 border-indigo-500 sm:col-span-2">
           <p className="text-lg sm:text-xl leading-relaxed">
             Your energy, kindness, and commitment to inclusivity are what make
@@ -49,7 +45,6 @@ const Message = () => {
         </div>
       </div>
 
-      {/* Full-width highlight banner */}
       <div className="mt-10 max-w-6xl mx-auto w-full bg-yellow-300 text-black text-lg sm:text-2xl font-bold px-6 sm:px-10 py-6 rounded-2xl shadow-lg text-center animate-pulse">
         🌟 Each and every one of you – our supporters, volunteers, and
         committee members – is truly amazing. Thank you for standing with
@@ -59,4 +54,18 @@ const Message = () => {
   );
 };
 
-export default Message;
+// Second Message Component (After Party) - Single Box Version
+export const MessageAfterParty = () => {
+  return (
+    <section
+      id="after-party-message"
+      className="mt-10 px-4 sm:px-6"
+    >
+      <div className="max-w-4xl mx-auto w-full bg-white text-black text-lg sm:text-2xl font-bold px-6 sm:px-10 py-10 rounded-2xl shadow-xl text-center ">
+        🌈❤️ Thank you from everyone at <b>Burton Bridge Inn</b>! 
+        A huge thank you to everyone who came along to the Burton Pride after party  what a fantastic evening! 
+        Your energy, love, and support made the night truly special. Here’s to many more! 💖
+      </div>
+    </section>
+  );
+};

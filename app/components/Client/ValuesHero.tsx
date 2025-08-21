@@ -29,7 +29,7 @@ export default function ValuesHero() {
 
       {/* Heading */}
       <motion.h1
-        className="text-4xl sm:text-6xl font-extrabold bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-500 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(0,0,0,0.5)]"
+        className="text-4xl sm:text-6xl font-extrabold bg-gradient-to-r  text-white bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(0,0,0,0.5)]"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.4 }}

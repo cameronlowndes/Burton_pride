@@ -3,7 +3,8 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
-import Message from '../Card/message';
+import { Message } from '../Card/message';
+
 import EventCard from '../Card/EventCard';
 
 export default function HomeClient() {

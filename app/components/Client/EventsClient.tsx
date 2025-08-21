@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import Message from '../Card/message'; // ✅ renamed for clarity
+import { Message } from '../Card/message';
 import EventCard from '../Card/EventCard';
 
 export default function EventsClient() {

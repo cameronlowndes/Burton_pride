@@ -5,7 +5,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import SponsorCard from '../../components/Card/SponsorCard';
 import React from 'react';
-import Message from '../Card/message';
+import { Message, MessageAfterParty } from '../Card/message';
+
 
 interface PrideEventClientProps {
   showPastEventNotice?: boolean; // optional prop

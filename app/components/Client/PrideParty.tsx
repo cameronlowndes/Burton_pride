@@ -4,27 +4,29 @@ import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
 import React from 'react';
-import Message from '../Card/message';
+import { MessageAfterParty } from '../Card/message';
+
+interface MediaItem {
+  type: 'image' | 'video';
+  file: string;
+}
 
 interface NightPartyClientProps {
   showPastEventNotice?: boolean;
 }
 
 export default function NightPartyClient({ showPastEventNotice }: NightPartyClientProps) {
-  const galleryPhotos = [
-    'partyOne.JPG',
-    'partyTwo.JPG',
-    'partyThree.JPG',
-    'partyFour.JPG',
-    'partyFive.JPG',
-    'partySix.JPG',
-    'partySeven.JPG',
-    'partyEight.JPG',
-    'partyNine.JPG',
-    'partyTen.JPG',
+  const galleryItems: MediaItem[] = [
+    { type: 'image', file: 'partyOne.jpeg' }, // small box
+    { type: 'image', file: 'partyTwo.jpeg' }, // small box
+    { type: 'image', file: 'partyThree.JPG' }, // highlighted
+    { type: 'video', file: 'partyFour.mp4' }, // small box
+    { type: 'video', file: 'PartyFive.mp4' },
+    { type: 'video', file: 'partySix.mp4' },
+    { type: 'video', file: 'partySeven.mp4' },
   ];
 
-  const preventRightClick = (e: React.MouseEvent<HTMLImageElement>) => {
+  const preventRightClick = (e: React.MouseEvent<HTMLImageElement | HTMLVideoElement>) => {
     e.preventDefault();
   };
 
@@ -33,10 +35,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
       className="min-h-screen bg-gradient-to-r animate-gradient text-white flex flex-col items-center px-10 sm:px-20 py-24 space-y-16"
       initial="hidden"
       animate="visible"
-      variants={{
-        hidden: {},
-        visible: { transition: { staggerChildren: 0.25 } },
-      }}
+      variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.25 } } }}
     >
       {/* Past Event Notice */}
       {showPastEventNotice && (
@@ -57,8 +56,8 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
           className="rounded-full overflow-hidden w-[220px] h-[220px] shadow-xl shadow-purple-400/50"
         >
           <Image
-            src="/image/bridge_inn_logo.jpg"
-            alt="Bridge Inn Night Party"
+            src="/image/CompanyLogo/BridgeInn.JPEG"
+            alt="Bridge Inn LGBTQ Logo"
             width={220}
             height={220}
             className="object-cover w-full h-full rounded-full select-none"
@@ -84,7 +83,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
         transition={{ delay: 0.6 }}
         className="w-full max-w-4xl"
       >
-        <Message />
+        <MessageAfterParty />
       </motion.div>
 
       {/* Event Gallery */}
@@ -96,23 +95,40 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
       >
         <h2 className="text-4xl font-semibold mb-6">Party Highlights</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {galleryPhotos.map((fileName, i) => (
-            <motion.div
-              key={i}
-              whileHover={{ scale: 1.05 }}
-              className="overflow-hidden rounded-2xl shadow-lg"
-            >
-              <Image
-                src={`/image/BridgeParty/${fileName}`}
-                alt={`Night Party photo ${i + 1}`}
-                width={500}
-                height={500}
-                className="object-cover w-full h-60 select-none"
-                draggable={false}
-                onContextMenu={preventRightClick}
-              />
-            </motion.div>
-          ))}
+          {galleryItems.map((item, i) => {
+            // Determine box size
+            const boxClass =
+              item.file === 'partyOne.jpeg' || item.file === 'partyTwo.jpeg' || item.file === 'partyFour.mp4'
+                ? 'h-48' // smaller outer box
+                : item.file === 'partyThree.JPG'
+                ? 'h-80' // highlighted
+                : 'h-60'; // default
+
+            return item.type === 'image' ? (
+              <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
+                <Image
+                  src={`/image/PrideParty/${item.file}`}
+                  alt={`Night Party photo ${i + 1}`}
+                  width={500}
+                  height={500}
+                  className={`object-cover w-full h-full select-none rounded-2xl ${
+                    item.file === 'partyThree.JPG' ? 'object-[0_25%]' : 'object-top'
+                  }`}
+                  draggable={false}
+                  onContextMenu={preventRightClick}
+                />
+              </motion.div>
+            ) : (
+              <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
+                <video
+                  src={`/image/PrideParty/${item.file}`}
+                  controls
+                  className="w-full h-full object-cover rounded-2xl select-none"
+                  onContextMenu={preventRightClick}
+                />
+              </motion.div>
+            );
+          })}
         </div>
       </motion.section>
 
@@ -133,7 +149,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
           Help us continue hosting amazing night events at Bridge Inn! Your support keeps the parties vibrant and inclusive.
         </p>
         <Link
-          href="https://www.gofundme.com/f/night-party-bridge-inn"
+          href="https://www.gofundme.com/f/raising-funds-for-burton-pride"
           target="_blank"
           rel="noopener noreferrer"
           className="bg-yellow-400 text-black px-8 py-4 rounded-full font-bold text-xl hover:bg-yellow-300 transition transform hover:scale-105 shadow-lg shadow-yellow-400/50 animate-bounce"
@@ -164,16 +180,6 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
           </Link>
         </motion.section>
       )}
-
-      {/* Sponsors Section */}
-      <motion.section
-        className="text-center w-full max-w-6xl"
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.8 }}
-      >
-       
-      </motion.section>
     </motion.main>
   );
 }

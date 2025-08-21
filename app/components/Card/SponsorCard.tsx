@@ -55,10 +55,10 @@ const sponsors: SponsorCardProps[] = [
     description: "Proud to support Burton Pride.",
     link: "https://www.been.coffee",
     story: [
-      "Tucked just off the beaten path, Been Coffee is an award-winning independent coffee shop known for doing things a little differently - and a lot more thoughtfully. From the moment you walk in, you’re welcomed like an old friend, whether it’s your first visit or your hundredth.",
-      "We’re passionate about serving specialty coffee that’s expertly roasted and brewed with care, alongside a menu of loose-leaf teas, locally sourced food, and house-made treats. Every item we serve is crafted to bring comfort, joy, and a little inspiration to your day.",
-      "But we’re more than a coffee shop. We’re a community space, a dog-friendly haven, and a place where sustainability meets sincerity. From compostable cups to conscious sourcing, we make decisions that are kind to the planet - and to the people we serve.",
-      "We believe a great coffee shop should be more than good coffee (though we’re very serious about that, too). It should be a space that reflects the values of the people who gather there: welcoming, thoughtful, inclusive, and real.",
+      "Tucked just off the beaten path, Been Coffee is an award-winning independent coffee shop known for doing things a little differently - and a lot more thoughtfully.",
+      "We’re passionate about serving specialty coffee that’s expertly roasted and brewed with care, alongside a menu of loose-leaf teas, locally sourced food, and house-made treats.",
+      "But we’re more than a coffee shop. We’re a community space, a dog-friendly haven, and a place where sustainability meets sincerity.",
+      "We believe a great coffee shop should be more than good coffee. It should be a space that reflects the values of the people who gather there: welcoming, thoughtful, inclusive, and real.",
       "So whether you’re here for a quick espresso, a slow morning, or a spontaneous catch-up with a friend, there’s always a seat - and a warm smile - waiting for you at Been.",
     ],
   },
@@ -66,30 +66,24 @@ const sponsors: SponsorCardProps[] = [
 
 export default function SponsorCard() {
   const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
-  function toggleFlip(index: number) {
+  const toggleFlip = (index: number) => {
     setFlippedIndex(flippedIndex === index ? null : index);
-  }
+  };
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setFlippedIndex(null);
-      }
+      if (e.key === "Escape") setFlippedIndex(null);
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
   }, []);
 
-  const overlayRef = useRef<HTMLDivElement>(null);
-
   const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === overlayRef.current) {
-      setFlippedIndex(null);
-    }
+    if (e.target === overlayRef.current) setFlippedIndex(null);
   };
 
-  // Shared button style
   const buttonClasses = `
     inline-block
     bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800
@@ -110,11 +104,11 @@ export default function SponsorCard() {
 
   return (
     <>
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
         {sponsors.map((sponsor, index) => (
           <div
             key={index}
-            className="cursor-pointer bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center"
+            className="cursor-pointer bg-white/10 backdrop-blur-md text-white shadow-[0_8px_25px_rgba(0,0,0,0.4)] border border-white/20 rounded-2xl p-6 flex flex-col items-center hover:scale-105 hover:shadow-[0_12px_45px_rgba(255,255,255,0.5)] transition-all duration-500"
             onClick={() => sponsor.story && toggleFlip(index)}
           >
             <div className="w-40 h-32 mb-4 relative">
@@ -123,12 +117,12 @@ export default function SponsorCard() {
                 alt={sponsor.altText}
                 fill
                 style={{ objectFit: "contain" }}
-                className="rounded"
+                className="rounded-lg shadow-md"
               />
             </div>
-            <h2 className="text-xl font-semibold text-center">{sponsor.name}</h2>
-            <p className="text-gray-600 text-center mb-4">{sponsor.description}</p>
-            
+            <h2 className="text-xl font-bold text-center mb-2">{sponsor.name}</h2>
+            <p className="text-gray-200 text-center mb-4">{sponsor.description}</p>
+
             {sponsor.link && (
               <Link
                 href={sponsor.link}
@@ -147,9 +141,8 @@ export default function SponsorCard() {
                   e.stopPropagation();
                   toggleFlip(index);
                 }}
-                aria-label={`Read story about ${sponsor.name}`}
               >
-                Click to read story →
+                Read Story →
               </button>
             )}
           </div>
@@ -160,29 +153,20 @@ export default function SponsorCard() {
         <div
           ref={overlayRef}
           onClick={handleOverlayClick}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
         >
-          <div
-            className={`relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-lg p-8 shadow-xl bg-white text-black ${
-              sponsors[flippedIndex].name === "Been Coffee"
-                ? "bg-gradient-to-br from-yellow-50 via-yellow-100 to-yellow-50 font-serif"
-                : ""
-            }`}
-          >
-            <h2 className="text-3xl font-semibold text-center mb-6">
-              {sponsors[flippedIndex].name}
-            </h2>
-            <div className="text-gray-800 text-lg leading-relaxed font-serif space-y-6">
+          <div className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20">
+            <h2 className="text-3xl font-bold text-center mb-6">{sponsors[flippedIndex].name}</h2>
+            <div className="text-gray-800 text-lg leading-relaxed space-y-6">
               {sponsors[flippedIndex].story!.map((paragraph, i) => (
                 <p key={i}>{paragraph}</p>
               ))}
             </div>
             <button
               onClick={() => setFlippedIndex(null)}
-              className="mt-8 block mx-auto text-pink-600 text-lg font-semibold hover:underline"
-              aria-label="Close story modal"
+              className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
             >
-              Click to go back ←
+              ← Back
             </button>
           </div>
         </div>
