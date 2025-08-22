@@ -8,7 +8,7 @@ import { MessageAfterParty } from '../Card/message';
 
 interface MediaItem {
   type: 'image' | 'video';
-  file: string; // image file or YouTube video ID
+  file: string; // image file or Google Drive file ID
 }
 
 interface NightPartyClientProps {
@@ -17,13 +17,14 @@ interface NightPartyClientProps {
 
 export default function NightPartyClient({ showPastEventNotice }: NightPartyClientProps) {
   const galleryItems: MediaItem[] = [
-    { type: 'image', file: 'partyOne.jpeg' }, // small box
-    { type: 'image', file: 'partyTwo.jpeg' }, // small box
-    { type: 'image', file: 'partyThree.JPG' }, // highlighted
-    { type: 'video', file: 'N4IIe0XsY1Q' }, // YouTube video ID for PartyFour
-    { type: 'video', file: 'XU7SYE4edzg' }, // PartyFive
-    { type: 'video', file: 'j-WJlgyKvnw' }, // PartySix
-    { type: 'video', file: 'i8Tspi8VZqA' }, // PartySeven
+    { type: 'image', file: 'partyOne.jpeg' },
+    { type: 'image', file: 'partyTwo.jpeg' },
+    { type: 'image', file: 'partyThree.JPG' },
+    { type: 'video', file: '1cLDHnLg2G-bSTjHQHhxaRK5hbPqdlV4G' }, // replace with your Drive file ID
+    { type: 'video', file: '2BcDefGhIJLmNOPqrS3' },
+    { type: 'video', file: '3CdEfGhIJLmNOPqrS45' },
+    { type: 'video', file: '4DeFgHIJKlmNOPqrS678' },
+    { type: 'video', file: '5EfGhIJkLMNOPqrS7890' },
   ];
 
   const preventRightClick = (e: React.MouseEvent<HTMLImageElement>) => {
@@ -32,7 +33,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
 
   return (
     <motion.main
-      className="min-h-screen bg-gradient-to-r animate-gradient text-white flex flex-col items-center px-10 sm:px-20 py-24 space-y-16"
+      className="min-h-screen bg-gradient-to-r animate-gradient text-white flex flex-col items-center px-6 sm:px-16 py-24 space-y-16"
       initial="hidden"
       animate="visible"
       variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.25 } } }}
@@ -88,52 +89,48 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
 
       {/* Event Gallery */}
       <motion.section
-        className="w-full max-w-6xl text-center space-y-12"
+        className="w-full max-w-7xl text-center space-y-12"
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.8 }}
       >
-        <h2 className="text-4xl font-semibold mb-6">Party Highlights</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {galleryItems.map((item, i) => {
-            const boxClass =
-              item.file === 'partyOne.jpeg' || item.file === 'partyTwo.jpeg' || item.file === '4bZp2Xk9Y8A'
-                ? 'h-48'
-                : item.file === 'partyThree.JPG'
-                ? 'h-80'
-                : 'h-60';
+        <h2 className="text-5xl font-extrabold mb-8 drop-shadow-lg">✨ Party Highlights ✨</h2>
 
-            return item.type === 'image' ? (
-              <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
+        {/* Masonry-style grid */}
+        <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
+          {galleryItems.map((item, i) => (
+            <motion.div
+              key={i}
+              whileHover={{ scale: 1.02 }}
+              className="relative overflow-hidden rounded-2xl shadow-xl break-inside-avoid cursor-pointer group"
+            >
+              {item.type === 'image' ? (
                 <Image
                   src={`/image/PrideParty/${item.file}`}
                   alt={`Night Party photo ${i + 1}`}
-                  width={500}
-                  height={500}
-                  className={`object-cover w-full h-full select-none rounded-2xl ${
-                    item.file === 'partyThree.JPG' ? 'object-[0_25%]' : 'object-top'
-                  }`}
+                  width={800}
+                  height={600}
+                  className="object-cover w-full rounded-2xl transition-transform duration-500 group-hover:scale-110"
                   draggable={false}
                   onContextMenu={preventRightClick}
                 />
-              </motion.div>
-            ) : (
-              <motion.div key={i} whileHover={{ scale: 1.05 }} className={`overflow-hidden rounded-2xl shadow-lg ${boxClass}`}>
-                <div className="relative w-full h-full">
+              ) : (
+                <div className="relative">
                   <iframe
-                    width="100%"
-                    height="100%"
-                    src={`https://www.youtube.com/embed/${item.file}`}
+                    src={`https://drive.google.com/file/d/${item.file}/preview`}
                     title={`Night Party video ${i + 1}`}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allow="autoplay"
                     allowFullScreen
-                    className="rounded-2xl"
-                  ></iframe>
+                    className="w-full aspect-video rounded-2xl"
+                  />
+                  {/* Hover Play Overlay */}
+                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                    <span className="text-white text-3xl font-bold">▶</span>
+                  </div>
                 </div>
-              </motion.div>
-            );
-          })}
+              )}
+            </motion.div>
+          ))}
         </div>
       </motion.section>
 
@@ -163,7 +160,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
         </Link>
       </motion.section>
 
-      {/* Get Involved Section - hide if past event */}
+      {/* Get Involved Section */}
       {!showPastEventNotice && (
         <motion.section
           className="text-center w-full max-w-4xl"

@@ -29,6 +29,8 @@ export default function PrideEventClient({ showPastEventNotice }: PrideEventClie
     'Photo13.jpg',
     'Photo15.jpg',
     'Photo16.jpg',
+    'Photo17.jpg'
+
   ];
 
   const preventRightClick = (e: React.MouseEvent<HTMLImageElement>) => {
