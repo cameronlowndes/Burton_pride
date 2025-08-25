@@ -16,7 +16,6 @@ export default function PrideEventClient({ showPastEventNotice }: PrideEventClie
   const galleryPhotos = [
     'photoOne.png',
     'PhotoTwo.png',
-    'PhotoThree.png',
     'PhotoFour.png',
     'PhotoFive.png',
     'PhotoSix.png',

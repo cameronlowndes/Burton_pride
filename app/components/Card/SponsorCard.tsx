@@ -28,7 +28,7 @@ const sponsors: SponsorCardProps[] = [
     description: "Proud to support Burton Pride.",
   },
   {
-    imageSrc: "/image/CompanyLogoPng/DavidWilson.png",
+    imageSrc: "/image/CompanyLogoPng/DavidWilson.Png",
     altText: "David Wilson Homes",
     name: "David Wilson Home",
     description: "Proud to support Burton Pride.",
