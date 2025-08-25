@@ -1,8 +1,9 @@
-"use client";
+'use client';
 import React, { useState, useRef, useEffect } from "react";
 import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -42,7 +43,7 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="w-full bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 text-white shadow-md py-4 px-8 flex justify-between items-center fixed top-0 left-0 right-0 z-50">
+    <nav className="w-full bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 text-white shadow-md py-4 px-8 flex justify-between items-center fixed top-0 left-0 right-0 z-50 backdrop-blur-md">
       <Link href="/" className="text-xl font-bold text-white drop-shadow-md">
         Burton Pride
       </Link>
@@ -57,26 +58,25 @@ export default function Navbar() {
           <button
             onClick={toggleAbout}
             className={`flex items-center gap-1 cursor-pointer ${
-              pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
-                ? rainbowClass
-                : "hover:underline"
+              pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues") ? rainbowClass : "hover:underline"
             }`}
           >
             About <FaCaretDown className="text-sm" />
           </button>
           {isAboutOpen && (
-            <div className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-10">
-              <Link href="/about" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-10"
+            >
+              <Link href="/about" className="block px-4 py-2 hover:bg-gray-100">
                 About Us
               </Link>
-              <Link
-                href="/about/OurCoreValues"
-                className="block px-4 py-2 hover:bg-gray-100"
-                onClick={() => setIsMenuOpen(false)}
-              >
+              <Link href="/about/OurCoreValues" className="block px-4 py-2 hover:bg-gray-100">
                 Our Values
               </Link>
-            </div>
+            </motion.div>
           )}
         </div>
 
@@ -84,26 +84,28 @@ export default function Navbar() {
           <button
             onClick={toggleEvents}
             className={`flex items-center gap-1 cursor-pointer ${
-              pathname.startsWith("/events") || pathname === "/Pride2025"
-                ? rainbowClass
-                : "hover:underline"
+              pathname.startsWith("/events") || pathname === "/Pride2025" ? rainbowClass : "hover:underline"
             }`}
           >
             Events <FaCaretDown className="text-sm" />
           </button>
           {isEventsOpen && (
-            <div className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-10">
-              <Link href="/events" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-10"
+            >
+              <Link href="/events" className="block px-4 py-2 hover:bg-gray-100">
                 All Events
               </Link>
-              {/* <Link
-                href="/events/Pride2025"
-                className="block px-4 py-2 hover:bg-gray-100"
-                onClick={() => setIsMenuOpen(false)}
-              >
+              <Link href="/events/Pride2025" className="block px-4 py-2 hover:bg-gray-100">
                 Pride Event 2025
-              </Link> */}
-            </div>
+              </Link>
+              <Link href="/events/NightParty" className="block px-4 py-2 hover:bg-gray-100">
+                Pride Party 2025
+              </Link>
+            </motion.div>
           )}
         </div>
 
@@ -119,13 +121,16 @@ export default function Navbar() {
         <Link href="/Sponsor" className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}>
           See Your Sponsors
         </Link>
+        {/* <Link href="/Shop" className={isActive("/Shop") ? rainbowClass : "hover:underline"}>
+          See Your Shop
+        </Link> */}
       </div>
 
       {/* Mobile Menu Button */}
       <div className="md:hidden">
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="text-2xl rainbow-text"
+          className="text-2xl rainbow-text z-50 relative"
           aria-label="Toggle menu"
         >
           {isMenuOpen ? <FaTimes /> : <FaBars />}
@@ -133,102 +138,101 @@ export default function Navbar() {
       </div>
 
       {/* Mobile Dropdown */}
-      {isMenuOpen && (
-        <div className="absolute top-full left-0 w-full bg-white text-black shadow-lg py-4 md:hidden">
-          <div className="flex flex-col sm:flex-row items-center justify-around gap-2">
+      <AnimatePresence>
+        {isMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
+            className="absolute top-full left-0 w-full bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 text-white shadow-xl py-6 flex flex-col items-center gap-4 backdrop-blur-lg z-40"
+          >
+            {/* Home */}
             <Link
               href="/"
-              className={`py-2 ${isActive("/") ? rainbowClass : "hover:underline"}`}
+              className={`block py-2 text-lg font-semibold hover:scale-105 transition transform ${isActive("/") ? rainbowClass : ""}`}
               onClick={() => setIsMenuOpen(false)}
             >
               Home
             </Link>
 
-            <div ref={aboutRef} className="relative">
+            {/* About Dropdown */}
+            <div className="w-full flex flex-col items-center gap-2">
               <button
                 onClick={toggleAbout}
-                className={`py-2 flex items-center gap-1 cursor-pointer ${
-                  pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
-                    ? rainbowClass
-                    : "hover:underline"
-                }`}
+                className="flex items-center gap-1 text-lg font-semibold hover:scale-105 transition transform"
               >
-                About <FaCaretDown className="text-sm" />
+                About <FaCaretDown />
               </button>
-              {isAboutOpen && (
-                <div className="absolute bg-white text-black border border-gray-200 rounded-md shadow-lg z-10 left-0 mt-2 w-48">
-                  <Link href="/about" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
-                    About Us
-                  </Link>
-                  <Link
-                    href="/about/OurCoreValues"
-                    className="block px-4 py-2 hover:bg-gray-100"
-                    onClick={() => setIsMenuOpen(false)}
+              <AnimatePresence>
+                {isAboutOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex flex-col bg-white text-black rounded-md shadow-lg w-48 overflow-hidden"
                   >
-                    Our Values
-                  </Link>
-                </div>
-              )}
+                    <Link href="/about" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                      About Us
+                    </Link>
+                    <Link href="/about/OurCoreValues" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                      Our Values
+                    </Link>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            <div ref={eventsRef} className="relative">
+            {/* Events Dropdown */}
+            <div className="w-full flex flex-col items-center gap-2">
               <button
                 onClick={toggleEvents}
-                className={`py-2 flex items-center gap-1 cursor-pointer ${
-                  pathname.startsWith("/events") || pathname === "/Pride2025"
-                    ? rainbowClass
-                    : "hover:underline"
-                }`}
+                className="flex items-center gap-1 text-lg font-semibold hover:scale-105 transition transform"
               >
-                Events <FaCaretDown className="text-sm" />
+                Events <FaCaretDown />
               </button>
-              {isEventsOpen && (
-                <div className="absolute bg-white text-black border border-gray-200 rounded-md shadow-lg z-10 left-0 mt-2 w-48">
-                  <Link href="/events" className="block px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
-                    All Events
-                  </Link>
-                  {/* <Link
-                    href="/events/Pride2025"
-                    className="block px-4 py-2 hover:bg-gray-100"
-                    onClick={() => setIsMenuOpen(false)}
+              <AnimatePresence>
+                {isEventsOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex flex-col bg-white text-black rounded-md shadow-lg w-48 overflow-hidden"
                   >
-                    Pride Event 2025
-                  </Link> */}
-                </div>
-              )}
+                    <Link href="/events" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                      All Events
+                    </Link>
+                    <Link href="/events/Pride2025" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                      Pride Event 2025
+                    </Link>
+                    <Link href="/events/NightParty" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                      Pride Party 2025
+                    </Link>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            <Link
-              href="/MeetUS"
-              className={`py-2 ${isActive("/MeetUS") ? rainbowClass : "hover:underline"}`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Meet Us
-            </Link>
-            <Link
-              href="/ContactUS"
-              className={`py-2 ${isActive("/ContactUS") ? rainbowClass : "hover:underline"}`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Contact Us
-            </Link>
-            <Link
-              href="/JoinUS"
-              className={`py-2 ${isActive("/JoinUS") ? rainbowClass : "hover:underline"}`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Join The Team
-            </Link>
-            <Link
-              href="/Sponsor"
-              className={`py-2 ${isActive("/Sponsor") ? rainbowClass : "hover:underline"}`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              See Your Sponsors
-            </Link>
-          </div>
-        </div>
-      )}
+            {/* Remaining Links */}
+            {[
+              { name: "Meet Us", href: "/MeetUS" },
+              { name: "Contact Us", href: "/ContactUS" },
+              { name: "Join The Team", href: "/JoinUS" },
+              { name: "See Your Sponsors", href: "/Sponsor" },
+              // { name: "See Your Shop", href: "/Shop" },
+            ].map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`block py-2 text-lg font-semibold hover:scale-105 transition transform ${isActive(link.href) ? rainbowClass : ""}`}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                {link.name}
+              </Link>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </nav>
   );
 }
