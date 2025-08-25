@@ -14,7 +14,7 @@ interface PrideEventClientProps {
 export default function PrideEventClient({ showPastEventNotice }: PrideEventClientProps) {
   // ✅ Make file names consistent (all lowercase, numbered)
   const galleryPhotos = [
-    'PhotoOne.png',
+    'photoOne.png',
     'PhotoTwo.png',
     'PhotoThree.png',
     'PhotoFour.png',

@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { useForm, ValidationError } from '@formspree/react';
 
@@ -19,6 +21,7 @@ function VolunteerForm() {
     >
       {/* Personal Information Section */}
       <h2 className="text-2xl font-bold mb-4 text-white drop-shadow-md">Personal Information</h2>
+      
       <div className="flex flex-col sm:flex-row gap-4">
         <input
           id="firstName"
@@ -45,12 +48,20 @@ function VolunteerForm() {
         placeholder="Preferred Pronouns"
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-pink-300"
       />
-      <input
-        id="dob"
-        type="date"
-        name="dob"
-        className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-pink-300"
-      />
+
+      {/* Date of Birth with Label */}
+      <div className="flex flex-col">
+        <label htmlFor="dob" className="mb-1 text-white/90 font-medium">
+          Date of Birth
+        </label>
+        <input
+          id="dob"
+          type="date"
+          name="dob"
+          className="p-3 border border-white/20 rounded-lg bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-pink-300"
+        />
+      </div>
+
       <input
         id="address"
         type="text"
@@ -77,6 +88,7 @@ function VolunteerForm() {
 
       {/* Emergency Contacts Section */}
       <h2 className="text-2xl font-bold mb-4 mt-6 text-white drop-shadow-md">Emergency Contacts</h2>
+      
       <div className="flex flex-col sm:flex-row gap-4">
         <input
           id="emFirstName"
@@ -110,6 +122,20 @@ function VolunteerForm() {
         placeholder="Address"
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-red-300"
       />
+
+      {/* Emergency Contact Date of Birth (Optional) */}
+      <div className="flex flex-col">
+        <label htmlFor="emDob" className="mb-1 text-white/90 font-medium">
+          Emergency Contact Date of Birth
+        </label>
+        <input
+          id="emDob"
+          type="date"
+          name="emDob"
+          className="p-3 border border-white/20 rounded-lg bg-white/10 text-white focus:outline-none focus:ring-2 focus:ring-red-300"
+        />
+      </div>
+
       <input
         id="emEmail"
         type="email"
