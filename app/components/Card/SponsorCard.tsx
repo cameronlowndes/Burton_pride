@@ -54,7 +54,7 @@ const sponsors: SponsorCardProps[] = [
     altText: "Been Coffee",
     name: "Been Coffee",
     description: "Proud to support Burton Pride.",
-    link: "https://https://www.been.coffee",
+    link: "https://www.been.coffee",
     story: [
       "Tucked just off the beaten path, Been Coffee is an award-winning independent coffee shop known for doing things a little differently - and a lot more thoughtfully.",
       "We’re passionate about serving specialty coffee that’s expertly roasted and brewed with care, alongside a menu of loose-leaf teas, locally sourced food, and house-made treats.",
