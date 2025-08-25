@@ -121,9 +121,9 @@ export default function Navbar() {
         <Link href="/Sponsor" className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}>
           See Your Sponsors
         </Link>
-        <Link href="/Shop" className={isActive("/Shop") ? rainbowClass : "hover:underline"}>
+        {/* <Link href="/Shop" className={isActive("/Shop") ? rainbowClass : "hover:underline"}>
           See Your Shop
-        </Link>
+        </Link> */}
       </div>
 
       {/* Mobile Menu Button */}
@@ -219,7 +219,7 @@ export default function Navbar() {
               { name: "Contact Us", href: "/ContactUS" },
               { name: "Join The Team", href: "/JoinUS" },
               { name: "See Your Sponsors", href: "/Sponsor" },
-              { name: "See Your Shop", href: "/Shop" },
+              // { name: "See Your Shop", href: "/Shop" },
             ].map((link) => (
               <Link
                 key={link.href}

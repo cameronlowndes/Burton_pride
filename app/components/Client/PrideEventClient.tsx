@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import SponsorCard from '../../components/Card/SponsorCard';
 import React from 'react';
-import { Message, MessageAfterParty } from '../Card/message';
+import { Message} from '../Card/message';
 
 
 interface PrideEventClientProps {

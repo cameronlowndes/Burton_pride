@@ -3,12 +3,12 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
-import React from 'react';
+import React, { useState } from 'react';
 import { MessageAfterParty } from '../Card/message';
 
 interface MediaItem {
   type: 'image' | 'video';
-  file: string; // image file or Google Drive file ID
+  file: string; // image file or Streamable video ID
 }
 
 interface NightPartyClientProps {
@@ -20,12 +20,14 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
     { type: 'image', file: 'partyOne.jpeg' },
     { type: 'image', file: 'partyTwo.jpeg' },
     { type: 'image', file: 'partyThree.JPG' },
-    { type: 'video', file: '1cLDHnLg2G-bSTjHQHhxaRK5hbPqdlV4G' }, // replace with your Drive file ID
-    { type: 'video', file: '2BcDefGhIJLmNOPqrS3' },
-    { type: 'video', file: '3CdEfGhIJLmNOPqrS45' },
-    { type: 'video', file: '4DeFgHIJKlmNOPqrS678' },
-    { type: 'video', file: '5EfGhIJkLMNOPqrS7890' },
+    { type: 'video', file: '6nrwr0' },
+    { type: 'video', file: 'n8vdt8' },
+    { type: 'video', file: 'f8w8es' },
+    { type: 'video', file: 'pcvg7q' },
+    { type: 'video', file: 'fnbegr' },
   ];
+
+  const [playing, setPlaying] = useState<number | null>(null);
 
   const preventRightClick = (e: React.MouseEvent<HTMLImageElement>) => {
     e.preventDefault();
@@ -114,18 +116,29 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
                   draggable={false}
                   onContextMenu={preventRightClick}
                 />
+              ) : playing === i ? (
+                <iframe
+                  src={`https://streamable.com/e/${item.file}`}
+                  title={`Night Party video ${i + 1}`}
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                  className="w-full aspect-video rounded-2xl"
+                />
               ) : (
-                <div className="relative">
-                  <iframe
-                    src={`https://drive.google.com/file/d/${item.file}/preview`}
-                    title={`Night Party video ${i + 1}`}
-                    allow="autoplay"
-                    allowFullScreen
-                    className="w-full aspect-video rounded-2xl"
+                <div
+                  className="relative w-full aspect-video bg-black/50 flex items-center justify-center rounded-2xl overflow-hidden"
+                  onClick={() => setPlaying(i)}
+                >
+                  {/* Thumbnail overlay */}
+                  <Image
+                    src="/image/CompanyLogo/BridgeInn.JPEG"
+                    alt="Video thumbnail"
+                    width={800}
+                    height={600}
+                    className="object-cover w-full h-full opacity-60"
                   />
-                  {/* Hover Play Overlay */}
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                    <span className="text-white text-3xl font-bold">▶</span>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-white text-5xl font-bold drop-shadow-lg">▶</span>
                   </div>
                 </div>
               )}

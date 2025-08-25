@@ -29,7 +29,7 @@ export default function Footer() {
               href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48"
               target="_blank"
               rel="noopener noreferrer"
-              className=" font-bold hover:text-cyan-100 transition-colors duration-300"
+              className="font-bold hover:text-cyan-100 transition-colors duration-300"
             >
               Donate
             </a>

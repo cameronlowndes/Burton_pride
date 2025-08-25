@@ -1,10 +1,10 @@
 import React, { ReactNode } from "react";
-import clsx from "clsx"; // optional but nice for merging classes
+import clsx from "clsx"; 
 
 interface CardProps {
   title: string;
   children: ReactNode;
-  className?: string; // ✅ allow custom styles
+  className?: string;
 }
 
 const Card: React.FC<CardProps> = ({ title, children, className }) => {
@@ -12,7 +12,7 @@ const Card: React.FC<CardProps> = ({ title, children, className }) => {
     <div
       className={clsx(
         "bg-white shadow-lg rounded-2xl p-6 w-full max-w-sm text-center text-black",
-        className // ✅ merge additional styles
+        className 
       )}
     >
       <h3 className="text-2xl font-semibold mb-4">{title}</h3>
