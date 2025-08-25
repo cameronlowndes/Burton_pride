@@ -1,5 +1,5 @@
 'use client';
-//fixs
+//fixs 2
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
