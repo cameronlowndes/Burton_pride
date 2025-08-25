@@ -14,22 +14,22 @@ interface PrideEventClientProps {
 export default function PrideEventClient({ showPastEventNotice }: PrideEventClientProps) {
   // ✅ Make file names consistent (all lowercase, numbered)
   const galleryPhotos = [
-    'PhotoOne.jpg',
-    'PhotoTwo.jpg',
-    'PhotoThree.jpg',
-    'PhotoFour.jpg',
-    'PhotoFive.jpg',
-    'PhotoSix.jpg',
-    'PhotoSeven.jpg',
-    'PhotoEghit.jpg',
-    'PhotoNine.jpg',
-    'PhotoTen.jpg',
-    'Photo11.jpg',
-    'Photo12.jpg',
-    'Photo13.jpg',
-    'Photo15.jpg',
-    'Photo16.jpg',
-    'Photo17.jpg'
+    'PhotoOne.png',
+    'PhotoTwo.png',
+    'PhotoThree.png',
+    'PhotoFour.png',
+    'PhotoFive.png',
+    'PhotoSix.png',
+    'PhotoSeven.png',
+    'PhotoEghit.png',
+    'PhotoNine.png',
+    'PhotoTen.png',
+    'Photo11.png',
+    'Photo12.png',
+    'Photo13.png',
+    'Photo15.png',
+    'Photo16.png',
+    'Photo17.png'
   ];
 
   // Disable right-click on images
@@ -64,7 +64,7 @@ export default function PrideEventClient({ showPastEventNotice }: PrideEventClie
         >
           {/* ✅ Logo fix: lowercase file name and fallback */}
           <Image
-            src="/image/logo.png"
+            src="/image/Logo.png"
             alt="Burton Pride Team Logo"
             width={220}
             height={220}
@@ -114,7 +114,7 @@ export default function PrideEventClient({ showPastEventNotice }: PrideEventClie
               className="overflow-hidden rounded-2xl shadow-lg"
             >
               <Image
-                src={`/image/PrideEventPicture/${fileName}`}
+                src={`/image/PrideEventPicturePng/${fileName}`}
                 alt={`Burton Pride 2025 photo ${i + 1}`}
                 width={500}
                 height={500}
