@@ -17,30 +17,30 @@ const sections = [
   {
     title: 'Committed Board',
     members: [
-      { name: 'Simon Whale', image: '/image/PeoplePicture/simon.jpg', role: 'Founder & Organizer | He/Him' },
-      { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Founder & Director | He/Him' },
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Board Member | He/Him/His/They' },
-      { name: 'Olga Niewiadomska', image: '/image/PeoplePicture/Olga.jpg', role: 'Board Member | She/Her' },
-      { name: 'Citrine Stone', image: '/image/PeoplePicture/citrine.jpg', role: 'Board Member | they/them' },
+      { name: 'Simon Whale', image: '/image/PeoplePicturePng/simon.png', role: 'Founder & Organizer | He/Him' },
+      { name: 'Isaac Timmins', image: '/image/PeoplePicturePng/isaac.png', role: 'Founder & Director | He/Him' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Board Member | He/Him/His/They' },
+      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Board Member | She/Her' },
+      { name: 'Citrine Stone', image: '/image/PeoplePicturePng/citrine.png', role: 'Board Member | they/them' },
     ],
   },
   {
     title: 'Social Media Team',
     members: [
-      { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Social Media Director | He/Him' },
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Social Media Manager | He/Him/His/They' },
+      { name: 'Isaac Timmins', image: '/image/PeoplePicturePng/isaac.png', role: 'Social Media Director | He/Him' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Social Media Manager | He/Him/His/They' },
     ],
   },
   {
     title: 'Website Admin',
     members: [
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Website Administrator | He/Him/His/They' },
+      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Website Administrator | He/Him/His/They' },
     ],
   },
   {
     title: 'Volunteer Team',
     members: [
-      { name: 'Olga Niewiadomska', image: '/image/PeoplePicture/Olga.jpg', role: 'Volunteer Team Manager | She/Her' },
+      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Volunteer Team Manager | She/Her' },
     ],
   },
 ];

@@ -15,41 +15,41 @@ type SponsorCardProps = {
 
 const sponsors: SponsorCardProps[] = [
   {
-    imageSrc: "/image/CompanyLogo/SocialRoots&GreenShootsPrideLogo.jpg",
+    imageSrc: "/image/CompanyLogoPng/SocialRoots&GreenShootsPrideLogo.png",
     altText: "Social Roots & Green Shoots",
     name: "Social Roots & Green Shoots",
     description: "Committed to supporting LGBTQ+ communities.",
     link: "https://www.youtube.com/@SocialRootsGreenShoots",
   },
   {
-    imageSrc: "/image/CompanyLogo/WincantonLogo.png",
+    imageSrc: "/image/CompanyLogoPng/WincantonLogo.png",
     altText: "Wincanton",
     name: "Wincanton",
     description: "Proud to support Burton Pride.",
   },
   {
-    imageSrc: "/image/CompanyLogo/DavidWilson.jpg",
+    imageSrc: "/image/CompanyLogoPng/DavidWilson.png",
     altText: "David Wilson Homes",
     name: "David Wilson Home",
     description: "Proud to support Burton Pride.",
     link: "https://www.dwh.co.uk",
   },
   {
-    imageSrc: "/image/CompanyLogo/Central_Co-op_logo.png",
+    imageSrc: "/image/CompanyLogoPng/Central_Co-op_logo.png",
     altText: "Central England co-op",
     name: "Central England Co-Op",
     description: "Proud to support Burton Pride.",
     link: "https://www.centralcoop.co.uk",
   },
   {
-    imageSrc: "/image/CompanyLogo/EastMidland.jpg",
+    imageSrc: "/image/CompanyLogoPng/EastMidland.png",
     altText: "East Midlands Airport",
     name: "East Midlands Airport",
     description: "Proud to support Burton Pride.",
     link: "https://www.eastmidlandsairport.com",
   },
   {
-    imageSrc: "/image/CompanyLogo/BeenCoffee.jpg",
+    imageSrc: "/image/CompanyLogoPng/BeenCoffee.png",
     altText: "Been Coffee",
     name: "Been Coffee",
     description: "Proud to support Burton Pride.",
