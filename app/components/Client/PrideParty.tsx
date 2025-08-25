@@ -24,7 +24,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
     { type: 'video', file: 'n8vdt8' },
     { type: 'video', file: '4de1iq' },
     { type: 'video', file: 'pcvg7q' },
-    { type: 'video', file: 'fnbegr' },
+  
   ];
 
   const [playing, setPlaying] = useState<number | null>(null);
