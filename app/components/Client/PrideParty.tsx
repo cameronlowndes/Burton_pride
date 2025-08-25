@@ -22,7 +22,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
     { type: 'image', file: 'partyThree.JPG' },
     { type: 'video', file: '6nrwr0' },
     { type: 'video', file: 'n8vdt8' },
-    { type: 'video', file: 'f8w8es' },
+    { type: 'video', file: '4de1iq' },
     { type: 'video', file: 'pcvg7q' },
     { type: 'video', file: 'fnbegr' },
   ];
