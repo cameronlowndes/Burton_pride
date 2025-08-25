@@ -9,7 +9,7 @@ const fadeUp = {
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.1, duration: 0.5 },
+    transition: { delay: i * 0.15, duration: 0.6, ease: 'easeOut' },
   }),
 };
 
@@ -21,7 +21,7 @@ const sections = [
       { name: 'Isaac Timmins', image: '/image/PeoplePicture/isaac.jpg', role: 'Founder & Director | He/Him' },
       { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Board Member | He/Him/His/They' },
       { name: 'Olga Niewiadomska', image: '/image/PeoplePicture/Olga.jpg', role: 'Board Member | She/Her' },
-      { name: 'Citrine Stone', image: '/image/PeoplePicture/citrine.jpg', role: 'Board Member | He/Him/His/They' },
+      { name: 'Citrine Stone', image: '/image/PeoplePicture/citrine.jpg', role: 'Board Member | they/them' },
     ],
   },
   {
@@ -37,11 +37,18 @@ const sections = [
       { name: 'Cameron Lowndes', image: '/image/PeoplePicture/cameron.jpg', role: 'Website Administrator | He/Him/His/They' },
     ],
   },
+  {
+    title: 'Volunteer Team',
+    members: [
+      { name: 'Olga Niewiadomska', image: '/image/PeoplePicture/Olga.jpg', role: 'Volunteer Team Manager | She/Her' },
+    ],
+  },
 ];
 
 export default function MeetUsContent() {
   return (
-    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+    <div className="min-h-screen bg-gradient-to-r  text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+      
       {/* Hero Section */}
       <motion.header
         initial="hidden"
@@ -51,39 +58,49 @@ export default function MeetUsContent() {
         custom={0}
         className="text-center flex flex-col items-center gap-6 mt-16"
       >
-        <div className="rounded-full overflow-hidden w-[180px] h-[180px]">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="rounded-full overflow-hidden w-[180px] h-[180px] shadow-[0_0_45px_rgba(255,255,255,0.7)] border-4 border-white"
+        >
           <Image
-            src="/image/logo.jpg"
+            src="/image/Logo.png"
             alt="Burton Pride Team"
             width={180}
             height={180}
             className="object-cover w-full h-full rounded-full"
           />
-        </div>
-        <h1 className="text-4xl sm:text-6xl font-bold">Meet the Burton Pride Team</h1>
-        <p className="text-lg sm:text-xl max-w-2xl">
-          Get to know the passionate people behind Burton Pride. We're dedicated to fostering an inclusive and vibrant community!
+        </motion.div>
+
+        {/* Hero Heading now white with glow */}
+        <h1 className="text-5xl sm:text-6xl font-extrabold text-white drop-shadow-[0_0_25px_rgba(255,255,255,1)]">
+          Meet the Burton Pride Team
+        </h1>
+        <p className="text-lg sm:text-xl max-w-2xl bg-white/10 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20">
+          Get to know the passionate people behind <span className="font-bold text-yellow-300">Burton Pride</span>.  
+          We’re dedicated to fostering an inclusive and vibrant community! 🌈
         </p>
       </motion.header>
 
       {/* Sections */}
       {sections.map((section, sIndex) => (
-        <section key={sIndex} className="mt-16 text-center w-full max-w-4xl">
+        <section key={sIndex} className="mt-20 text-center w-full max-w-5xl">
           <motion.h2
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true }}
             variants={fadeUp}
             custom={0}
-            className="text-3xl font-semibold mb-6"
+            className="text-4xl font-bold mb-10 text-white drop-shadow-[0_0_25px_rgba(255,255,255,0.8)]"
           >
             {section.title}
           </motion.h2>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
             {section.members.map((member, i) => (
               <motion.div
                 key={i}
-                className="bg-white text-black shadow-md rounded-lg p-6 flex flex-col items-center"
+                className="bg-white/10 backdrop-blur-md text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 rounded-2xl p-6 flex flex-col items-center hover:scale-105 hover:shadow-[0_8px_45px_rgba(255,255,255,0.7)] transition-all"
                 initial="hidden"
                 whileInView="visible"
                 viewport={{ once: true }}
@@ -93,32 +110,15 @@ export default function MeetUsContent() {
                 <Image
                   src={member.image}
                   alt={member.name}
-                  width={96}
-                  height={96}
-                  className="w-24 h-24 rounded-full mb-4 object-cover"
+                  width={120}
+                  height={120}
+                  className="w-28 h-28 rounded-full mb-4 object-cover shadow-[0_0_20px_rgba(255,255,255,0.6)]"
                 />
-                <h2 className="text-xl font-semibold">{member.name}</h2>
-                <p className="text-gray-600">{member.role}</p>
+                <h2 className="text-2xl font-semibold">{member.name}</h2>
+                <p className="text-sm text-gray-200 mt-2">{member.role}</p>
               </motion.div>
             ))}
           </div>
-        </section>
-      ))}
-
-      {/* Placeholder Sections */}
-      {['Event Planning Team', 'Volunteer Team'].map((title, idx) => (
-        <section key={idx} className="mt-16 text-center w-full max-w-4xl">
-          <motion.h2
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={fadeUp}
-            custom={0}
-            className="text-3xl font-semibold mb-6"
-          >
-            {title}
-          </motion.h2>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"></div>
         </section>
       ))}
 
@@ -129,17 +129,20 @@ export default function MeetUsContent() {
         viewport={{ once: true }}
         variants={fadeUp}
         custom={0}
-        className="mt-16 text-center w-full max-w-3xl"
+        className="mt-24 text-center w-full max-w-3xl bg-white/10 backdrop-blur-md p-10 rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.6)] border border-white/20"
       >
-        <h2 className="text-3xl font-semibold mb-4">Want to Connect?</h2>
-        <p className="text-lg mb-6">
-          Reach out to us for collaborations, volunteering, or any inquiries. We’d love to hear from you!
+        <h2 className="text-4xl font-bold mb-4 text-white drop-shadow-[0_0_25px_rgba(255,255,255,1)]">
+          Want to Connect?
+        </h2>
+        <p className="text-lg mb-8">
+          Reach out to us for collaborations, volunteering, or any inquiries.  
+          We’d love to hear from you and welcome you to the Pride family!
         </p>
         <Link
           href="/ContactUS"
-          className="bg-white text-pink-600 px-6 py-3 rounded-full font-semibold text-lg hover:bg-opacity-80 transition"
+          className="bg-gradient-to-r from-yellow-300 via-pink-400 to-purple-500 text-black px-8 py-4 rounded-full font-bold text-lg shadow-lg hover:scale-105 hover:shadow-[0_0_35px_rgba(255,255,255,0.8)] transition-all"
         >
-          Contact Us
+          🌟 Contact Us
         </Link>
       </motion.section>
     </div>
