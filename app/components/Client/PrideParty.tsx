@@ -1,5 +1,5 @@
 'use client';
-
+//fixs
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -107,7 +107,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
             >
               {item.type === 'image' ? (
                 <Image
-                  src={`/image/PrideParty/${item.file}`}
+                  src={`/image/PridePartyPng/${item.file}`}
                   alt={`Night Party photo ${i + 1}`}
                   width={800}
                   height={600}
