@@ -130,7 +130,7 @@ export default function NightPartyClient({ showPastEventNotice }: NightPartyClie
                   onClick={() => setPlaying(i)}
                 >
                   <Image
-                    src="/image/CompanyLogo/BridgeInn.JPEG"
+                    src="/image/CompanyLogoPng/BridgeInn.png"
                     alt="Video thumbnail"
                     width={800}
                     height={600}
