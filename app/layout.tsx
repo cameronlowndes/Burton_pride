@@ -5,6 +5,7 @@ import "../styles/globals.css";
 
 import ConditionalNavbar from "./components/Rooting/ConditionalNavbar";
 import ConditionalFooter from "./components/Rooting/ConditionalFooter";
+import Watermark from "./components/Rooting/Watermark";
 
 
 const geistSans = Geist({
@@ -43,7 +44,7 @@ export default function RootLayout({
         </div>
 
         <ConditionalFooter />
-
+       <Watermark />
       </body>
     </html>
   );
