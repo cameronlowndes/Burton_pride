@@ -6,6 +6,7 @@ import "../styles/globals.css";
 import ConditionalNavbar from "./components/Rooting/ConditionalNavbar";
 import ConditionalFooter from "./components/Rooting/ConditionalFooter";
 
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -35,10 +36,14 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-transparent text-white m-0`}
       >
         <ConditionalNavbar />
+
+        {/* Main gradient background */}
         <div className="flex-grow bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 pb-24">
           <main>{children}</main>
         </div>
+
         <ConditionalFooter />
+
       </body>
     </html>
   );

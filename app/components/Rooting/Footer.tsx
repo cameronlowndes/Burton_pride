@@ -56,18 +56,24 @@ export default function Footer() {
           </a>
         </div>
       </div>
+{/* Powered By - In Your Face */}
+<div className="mt-12 relative z-20">
+  <a
+    href="https://camerondigitalworks.com"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="block text-center text-3xl md:text-4xl font-extrabold uppercase 
+               bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600 
+               text-transparent bg-clip-text 
+               drop-shadow-[0_0_15px_rgba(255,255,0,0.9)] 
+               animate-pulse tracking-wider hover:scale-110 transition-transform duration-300"
+  >
+    🚀 Built & Powered by Cameron Digital Works 🚀
+  </a>
+</div>
 
-      {/* Powered By */}
-      <div className="mt-6 text-center text-sm md:text-base text-white/80 relative z-10">
-        <a
-          href="https://camerondigitalworks.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:text-yellow-300 font-semibold transition-colors duration-300"
-        >
-          Built and powered by Cameron Digital Works
-        </a>
-      </div>
+   
+      
     </footer>
   );
 }

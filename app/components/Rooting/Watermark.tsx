@@ -1,3 +1,5 @@
+"use client";
+
 const Watermark = () => {
   return (
     <a
@@ -5,22 +7,25 @@ const Watermark = () => {
       target="_blank"
       rel="noopener noreferrer"
       className="
-        fixed 
-        bottom-0 left-0 right-0
-        sm:bottom-4 sm:left-auto sm:right-4 sm:w-auto sm:rounded-md
-        text-center sm:text-left
-        text-xs sm:text-sm 
-        text-white 
-        bg-black bg-opacity-50 
-        px-3 py-2 
-        z-50 
-        shadow-md 
-        hover:bg-opacity-70 
+        fixed
+        bottom-4 right-4
+        rounded-lg
+        bg-black
+        text-white
+        text-sm sm:text-base
+        font-bold
+        px-4 py-2
+        z-50
+        shadow-lg
+        hover:shadow-2xl
+        hover:bg-gray-900
         transition
       "
-      style={{ pointerEvents: 'auto' }}
     >
-      Built and powered by <span className="font-semibold">Cameron Digital Works</span>
+      🚀 Built & Powered by{" "}
+      <span className="uppercase text-yellow-300">
+        Cameron Digital Works
+      </span>
     </a>
   );
 };
