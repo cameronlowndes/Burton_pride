@@ -139,14 +139,24 @@ export default function Navbar() {
         <Link href="/Sponsor" className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}>
           See Your Sponsors
         </Link>
-        <Link
-          href="https://camerondigitalworks.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:underline"
-        >
-          Cameron Digital Works
-        </Link>
+     
+<Link
+  href="https://camerondigitalworks.com"
+  target="_blank"
+  rel="noopener noreferrer"
+  className="
+    relative font-extrabold tracking-wide
+    text-transparent bg-clip-text
+    bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
+    bg-[length:200%_auto]
+    animate-gradient-x
+    drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
+    hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
+    transition-transform duration-300 ease-out
+  "
+>
+  Cameron&nbsp;Digital&nbsp;Works
+</Link>
       </div>
 
       {/* Mobile Menu Button */}

@@ -56,21 +56,34 @@ export default function Footer() {
           </a>
         </div>
       </div>
-{/* Powered By - In Your Face */}
-<div className="mt-12 relative z-20">
+{/* Powered By - Mega Neon Watermark */}
+<div className="mt-14 relative z-30 flex justify-center">
+  {/* Outer neon ring that slowly spins */}
+  <div className="absolute inset-0 flex justify-center items-center">
+    <div className="w-64 h-64 sm:w-80 sm:h-80 rounded-full bg-gradient-to-r 
+                    from-fuchsia-500 via-yellow-400 to-cyan-500 
+                    opacity-40 blur-3xl animate-spin-slow" />
+  </div>
+
   <a
     href="https://camerondigitalworks.com"
     target="_blank"
     rel="noopener noreferrer"
-    className="block text-center text-3xl md:text-4xl font-extrabold uppercase 
-               bg-gradient-to-r from-yellow-400 via-orange-500 to-red-600 
-               text-transparent bg-clip-text 
-               drop-shadow-[0_0_15px_rgba(255,255,0,0.9)] 
-               animate-pulse tracking-wider hover:scale-110 transition-transform duration-300"
+    className="
+      relative text-center font-extrabold uppercase tracking-widest
+      text-4xl sm:text-5xl md:text-6xl
+      bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
+      bg-[length:200%_auto] bg-clip-text text-transparent
+      animate-gradient-x
+      drop-shadow-[0_0_25px_rgba(255,255,255,0.95)]
+      hover:scale-110 hover:drop-shadow-[0_0_35px_rgba(255,255,255,1)]
+      transition-transform duration-500
+    "
   >
     🚀 Built & Powered by Cameron Digital Works 🚀
   </a>
 </div>
+
 
    
       

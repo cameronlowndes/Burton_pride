@@ -8,18 +8,22 @@ const Watermark = () => {
       rel="noopener noreferrer"
       className="
         fixed
-        bottom-4 right-4
-        rounded-lg
-        bg-black
-        text-white
-        text-sm sm:text-base
-        font-bold
-        px-4 py-2
+        bottom-3 right-3
         z-50
-        shadow-lg
-        hover:shadow-2xl
-        hover:bg-gray-900
+        rounded-lg
+        bg-black/80
+        backdrop-blur-sm
+        text-white
+        font-bold
+        text-xs sm:text-sm lg:text-base
+        px-2.5 sm:px-3.5
+        py-1.5 sm:py-2
+        shadow-md
+        hover:shadow-xl
+        hover:bg-black
         transition
+        max-w-[85%]
+        break-words
       "
     >
       🚀 Built & Powered by{" "}

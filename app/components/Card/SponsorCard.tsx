@@ -15,13 +15,6 @@ type SponsorCardProps = {
 
 const sponsors: SponsorCardProps[] = [
   {
-    imageSrc: "/image/CompanyLogoPng/SocialRoots&GreenShootsPrideLogo.png",
-    altText: "Social Roots & Green Shoots",
-    name: "Social Roots & Green Shoots",
-    description: "Committed to supporting LGBTQ+ communities.",
-    link: "https://www.youtube.com/@SocialRootsGreenShoots",
-  },
-  {
     imageSrc: "/image/CompanyLogoPng/WincantonLogo.png",
     altText: "Wincanton",
     name: "Wincanton",
@@ -48,7 +41,6 @@ const sponsors: SponsorCardProps[] = [
     description: "Proud to support Burton Pride.",
     link: "https://www.eastmidlandsairport.com",
   },
-
   {
     imageSrc: "/image/CompanyLogoPng/BeenCoffee.png",
     altText: "Been Coffee",
@@ -63,6 +55,13 @@ const sponsors: SponsorCardProps[] = [
       "So whether you’re here for a quick espresso, a slow morning, or a spontaneous catch-up with a friend, there’s always a seat - and a warm smile - waiting for you at Been.",
     ],
   },
+  {
+    imageSrc: "/image/CompanyLogoPng/SocialRoots&GreenShootsPrideLogo.png",
+    altText: "Soical Roots & Green Shoots",
+    name: "Soical Roots & Green Shoots",
+    description: "We are proud to support Burton Pride in mind",
+    link: "https://www.eastmidlandsairport.com",
+  },
 ];
 
 export default function SponsorCard() {
@@ -70,7 +69,6 @@ export default function SponsorCard() {
   const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
   const router = useRouter();
 
-  // Detect mobile
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth <= 768);
     checkMobile();
@@ -108,9 +106,15 @@ export default function SponsorCard() {
         {sponsors.map((sponsor, index) => (
           <div
             key={index}
-            className="cursor-pointer bg-white/10 backdrop-blur-md text-white shadow-[0_8px_25px_rgba(0,0,0,0.4)] border border-white/20 rounded-2xl p-6 flex flex-col items-center
-                       transition-all duration-500
-                       sm:hover:scale-105 sm:hover:shadow-[0_12px_45px_rgba(255,255,255,0.5)]"
+            className={`
+              cursor-pointer bg-white/10 backdrop-blur-md text-white border border-white/20 rounded-2xl p-6 flex flex-col items-center
+              transition-all duration-500
+              sm:hover:scale-105 sm:hover:shadow-[0_12px_45px_rgba(255,255,255,0.5)]
+              ${sponsor.name === "Wincanton"
+                ? "relative ring-2 ring-pink-500 animate-pulse shadow-[0_0_25px_rgba(255,105,180,0.7)]"
+                : "shadow-[0_8px_25px_rgba(0,0,0,0.4)]"
+              }
+            `}
           >
             <div className="w-40 h-32 mb-4 relative">
               <Image
@@ -118,18 +122,26 @@ export default function SponsorCard() {
                 alt={sponsor.altText}
                 fill
                 style={{ objectFit: "contain" }}
-                className="rounded-lg shadow-md"
+                className={`rounded-lg shadow-md ${sponsor.name === "Wincanton" ? "scale-105" : ""}`}
               />
             </div>
-            <h2 className="text-xl font-bold text-center mb-2">{sponsor.name}</h2>
-            <p className="text-gray-200 text-center mb-4">{sponsor.description}</p>
+            <h2
+              className={`text-xl font-bold text-center mb-2 ${
+                sponsor.name === "Wincanton" ? "text-pink-400 drop-shadow-lg" : ""
+              }`}
+            >
+              {sponsor.name}
+            </h2>
+            <p
+              className={`text-center mb-4 ${
+                sponsor.name === "Wincanton" ? "text-pink-200 font-semibold" : "text-gray-200"
+              }`}
+            >
+              {sponsor.description}
+            </p>
 
             {sponsor.link && (
-              <Link
-                href={sponsor.link}
-                target="_blank"
-                className={buttonClasses}
-              >
+              <Link href={sponsor.link} target="_blank" className={buttonClasses}>
                 Visit Sponsor
               </Link>
             )}
@@ -146,7 +158,7 @@ export default function SponsorCard() {
         ))}
       </div>
 
-      {/* Desktop modal */}
+      {/* Desktop modal for story */}
       {flippedIndex !== null && sponsors[flippedIndex]?.story && !isMobile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
