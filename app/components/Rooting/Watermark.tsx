@@ -3,7 +3,7 @@
 const Watermark = () => {
   return (
     <a
-      href="https://www.camerondigitalworks.com"
+      href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
       target="_blank"
       rel="noopener noreferrer"
       className="

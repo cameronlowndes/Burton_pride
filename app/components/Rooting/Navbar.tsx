@@ -1,4 +1,4 @@
-'use client';
+"use client";
 import React, { useState, useRef, useEffect } from "react";
 import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa";
 import Link from "next/link";
@@ -6,13 +6,19 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function Navbar() {
+  // State
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEventsOpen, setIsEventsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+
+  // Refs
   const eventsRef = useRef<HTMLDivElement>(null);
   const aboutRef = useRef<HTMLDivElement>(null);
+
+  // Router
   const pathname = usePathname();
 
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -29,6 +35,7 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Helpers
   const isActive = (path: string) => pathname === path;
   const rainbowClass = "font-bold rainbow-underline";
 
@@ -43,26 +50,28 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="w-full bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 text-white shadow-md py-3 px-8 flex justify-between items-center fixed top-0 left-0 right-0 z-50 backdrop-blur-md">
-      
-      {/* Logo with small watermark under it */}
+    <nav className="fixed top-0 left-0 right-0 z-50 flex w-full items-center justify-between bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-8 py-3 text-white shadow-md backdrop-blur-md">
+      {/* Logo with watermark */}
       <div className="flex flex-col leading-tight">
         <Link href="/" className="text-xl font-bold text-white drop-shadow-md">
           Burton Pride
         </Link>
         <Link
-          href="https://camerondigitalworks.com"
+          href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[10px] md:text-xs font-semibold text-white tracking-wide hover:text-white transition"
+          className="text-[10px] font-semibold tracking-wide text-white transition hover:text-white md:text-xs"
         >
           Built & Powered by Cameron Digital Works
         </Link>
       </div>
 
       {/* Desktop Menu */}
-      <div className="hidden md:flex gap-6">
-        <Link href="/" className={isActive("/") ? rainbowClass : "hover:underline"}>
+      <div className="hidden gap-6 md:flex">
+        <Link
+          href="/"
+          className={isActive("/") ? rainbowClass : "hover:underline"}
+        >
           Home
         </Link>
 
@@ -71,7 +80,8 @@ export default function Navbar() {
           <button
             onClick={toggleAbout}
             className={`flex items-center gap-1 cursor-pointer ${
-              pathname.startsWith("/about") || pathname.startsWith("/OurCoreValues")
+              pathname.startsWith("/about") ||
+              pathname.startsWith("/OurCoreValues")
                 ? rainbowClass
                 : "hover:underline"
             }`}
@@ -83,12 +93,15 @@ export default function Navbar() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-20"
+              className="absolute left-0 mt-2 w-48 rounded-md border border-gray-200 bg-white text-black shadow-lg z-20"
             >
               <Link href="/about" className="block px-4 py-2 hover:bg-gray-100">
                 About Us
               </Link>
-              <Link href="/about/OurCoreValues" className="block px-4 py-2 hover:bg-gray-100">
+              <Link
+                href="/about/OurCoreValues"
+                className="block px-4 py-2 hover:bg-gray-100"
+              >
                 Our Values
               </Link>
             </motion.div>
@@ -112,58 +125,79 @@ export default function Navbar() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="absolute left-0 mt-2 w-48 bg-white text-black border border-gray-200 rounded-md shadow-lg z-20"
+              className="absolute left-0 mt-2 w-48 rounded-md border border-gray-200 bg-white text-black shadow-lg z-20"
             >
-              <Link href="/events" className="block px-4 py-2 hover:bg-gray-100">
+              <Link
+                href="/events"
+                className="block px-4 py-2 hover:bg-gray-100"
+              >
                 All Events
               </Link>
-              <Link href="/events/Pride2025" className="block px-4 py-2 hover:bg-gray-100">
+              <Link
+                href="/events/Pride2025"
+                className="block px-4 py-2 hover:bg-gray-100"
+              >
                 Pride Event 2025
               </Link>
-              <Link href="/events/NightParty" className="block px-4 py-2 hover:bg-gray-100">
+              <Link
+                href="/events/NightParty"
+                className="block px-4 py-2 hover:bg-gray-100"
+              >
                 Pride Party 2025
               </Link>
             </motion.div>
           )}
         </div>
 
-        <Link href="/MeetUS" className={isActive("/MeetUS") ? rainbowClass : "hover:underline"}>
+        <Link
+          href="/MeetUS"
+          className={isActive("/MeetUS") ? rainbowClass : "hover:underline"}
+        >
           Meet Us
         </Link>
-        <Link href="/ContactUS" className={isActive("/ContactUS") ? rainbowClass : "hover:underline"}>
+        <Link
+          href="/ContactUS"
+          className={isActive("/ContactUS") ? rainbowClass : "hover:underline"}
+        >
           Contact Us
         </Link>
-        <Link href="/JoinUS" className={isActive("/JoinUS") ? rainbowClass : "hover:underline"}>
+        <Link
+          href="/JoinUS"
+          className={isActive("/JoinUS") ? rainbowClass : "hover:underline"}
+        >
           Join The Team
         </Link>
-        <Link href="/Sponsor" className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}>
+        <Link
+          href="/Sponsor"
+          className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}
+        >
           See Your Sponsors
         </Link>
-     
-<Link
-  href="https://camerondigitalworks.com"
-  target="_blank"
-  rel="noopener noreferrer"
-  className="
-    relative font-extrabold tracking-wide
-    text-transparent bg-clip-text
-    bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
-    bg-[length:200%_auto]
-    animate-gradient-x
-    drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
-    hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
-    transition-transform duration-300 ease-out
-  "
->
-  Cameron&nbsp;Digital&nbsp;Works
-</Link>
+
+        {/* External Link */}
+        <Link
+          href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="
+            relative font-extrabold tracking-wide
+            text-transparent bg-clip-text
+            bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
+            bg-[length:200%_auto] animate-gradient-x
+            drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
+            transition-transform duration-300 ease-out
+            hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
+          "
+        >
+          Cameron&nbsp;Digital&nbsp;Works
+        </Link>
       </div>
 
       {/* Mobile Menu Button */}
       <div className="md:hidden">
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          className="text-2xl rainbow-text z-50 relative"
+          className="relative z-50 text-2xl rainbow-text"
           aria-label="Toggle menu"
         >
           {isMenuOpen ? <FaTimes /> : <FaBars />}
@@ -178,11 +212,12 @@ export default function Navbar() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
-            className="absolute top-full left-0 w-full bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 text-white shadow-xl py-6 flex flex-col items-center gap-4 backdrop-blur-lg z-40"
+            className="absolute top-full left-0 z-40 flex w-full flex-col items-center gap-4 bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 py-6 text-white shadow-xl backdrop-blur-lg"
           >
+            {/* Main Links */}
             <Link
               href="/"
-              className={`block py-2 text-lg font-semibold hover:scale-105 transition transform ${
+              className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${
                 isActive("/") ? rainbowClass : ""
               }`}
               onClick={() => setIsMenuOpen(false)}
@@ -191,10 +226,10 @@ export default function Navbar() {
             </Link>
 
             {/* About in Mobile */}
-            <div className="w-full flex flex-col items-center gap-2">
+            <div className="flex w-full flex-col items-center gap-2">
               <button
                 onClick={toggleAbout}
-                className="flex items-center gap-1 text-lg font-semibold hover:scale-105 transition transform"
+                className="flex items-center gap-1 text-lg font-semibold transition transform hover:scale-105"
               >
                 About <FaCaretDown />
               </button>
@@ -204,9 +239,13 @@ export default function Navbar() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex flex-col bg-white text-black rounded-md shadow-lg w-48 overflow-hidden"
+                    className="flex w-48 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
                   >
-                    <Link href="/about" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                    <Link
+                      href="/about"
+                      className="px-4 py-2 hover:bg-gray-100"
+                      onClick={() => setIsMenuOpen(false)}
+                    >
                       About Us
                     </Link>
                     <Link
@@ -222,10 +261,10 @@ export default function Navbar() {
             </div>
 
             {/* Events in Mobile */}
-            <div className="w-full flex flex-col items-center gap-2">
+            <div className="flex w-full flex-col items-center gap-2">
               <button
                 onClick={toggleEvents}
-                className="flex items-center gap-1 text-lg font-semibold hover:scale-105 transition transform"
+                className="flex items-center gap-1 text-lg font-semibold transition transform hover:scale-105"
               >
                 Events <FaCaretDown />
               </button>
@@ -235,9 +274,13 @@ export default function Navbar() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex flex-col bg-white text-black rounded-md shadow-lg w-48 overflow-hidden"
+                    className="flex w-48 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
                   >
-                    <Link href="/events" className="px-4 py-2 hover:bg-gray-100" onClick={() => setIsMenuOpen(false)}>
+                    <Link
+                      href="/events"
+                      className="px-4 py-2 hover:bg-gray-100"
+                      onClick={() => setIsMenuOpen(false)}
+                    >
                       All Events
                     </Link>
                     <Link
@@ -269,7 +312,7 @@ export default function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`block py-2 text-lg font-semibold hover:scale-105 transition transform ${
+                className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${
                   isActive(link.href) ? rainbowClass : ""
                 }`}
                 onClick={() => setIsMenuOpen(false)}
@@ -280,13 +323,21 @@ export default function Navbar() {
 
             {/* External Link */}
             <Link
-              href="https://camerondigitalworks.com"
+              href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
               target="_blank"
               rel="noopener noreferrer"
-              className="block py-2 text-lg font-semibold hover:scale-105 transition transform"
+              className="
+                relative font-extrabold tracking-wide
+                text-transparent bg-clip-text
+                bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
+                bg-[length:200%_auto] animate-gradient-x
+                drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
+                transition-transform duration-300 ease-out
+                hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
+              "
               onClick={() => setIsMenuOpen(false)}
             >
-              Cameron Digital Works
+              Cameron&nbsp;Digital&nbsp;Works
             </Link>
           </motion.div>
         )}

@@ -59,7 +59,7 @@ const sponsors: SponsorCardProps[] = [
     imageSrc: "/image/CompanyLogoPng/SocialRoots&GreenShootsPrideLogo.png",
     altText: "Soical Roots & Green Shoots",
     name: "Soical Roots & Green Shoots",
-    description: "We are proud to support Burton Pride in mind",
+    description: "We’re proud to celebrate and support Burton Pride.",
     link: "https://www.eastmidlandsairport.com",
   },
 ];
@@ -110,10 +110,7 @@ export default function SponsorCard() {
               cursor-pointer bg-white/10 backdrop-blur-md text-white border border-white/20 rounded-2xl p-6 flex flex-col items-center
               transition-all duration-500
               sm:hover:scale-105 sm:hover:shadow-[0_12px_45px_rgba(255,255,255,0.5)]
-              ${sponsor.name === "Wincanton"
-                ? "relative ring-2 ring-pink-500 animate-pulse shadow-[0_0_25px_rgba(255,105,180,0.7)]"
-                : "shadow-[0_8px_25px_rgba(0,0,0,0.4)]"
-              }
+              shadow-[0_8px_25px_rgba(0,0,0,0.4)]
             `}
           >
             <div className="w-40 h-32 mb-4 relative">
@@ -122,23 +119,11 @@ export default function SponsorCard() {
                 alt={sponsor.altText}
                 fill
                 style={{ objectFit: "contain" }}
-                className={`rounded-lg shadow-md ${sponsor.name === "Wincanton" ? "scale-105" : ""}`}
+                className="rounded-lg shadow-md"
               />
             </div>
-            <h2
-              className={`text-xl font-bold text-center mb-2 ${
-                sponsor.name === "Wincanton" ? "text-pink-400 drop-shadow-lg" : ""
-              }`}
-            >
-              {sponsor.name}
-            </h2>
-            <p
-              className={`text-center mb-4 ${
-                sponsor.name === "Wincanton" ? "text-pink-200 font-semibold" : "text-gray-200"
-              }`}
-            >
-              {sponsor.description}
-            </p>
+            <h2 className="text-xl font-bold text-center mb-2">{sponsor.name}</h2>
+            <p className="text-center mb-4 text-gray-200">{sponsor.description}</p>
 
             {sponsor.link && (
               <Link href={sponsor.link} target="_blank" className={buttonClasses}>

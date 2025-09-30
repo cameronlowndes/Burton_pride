@@ -66,7 +66,7 @@ export default function Footer() {
   </div>
 
   <a
-    href="https://camerondigitalworks.com"
+    href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
     target="_blank"
     rel="noopener noreferrer"
     className="
