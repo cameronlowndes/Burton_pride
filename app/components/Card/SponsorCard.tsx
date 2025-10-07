@@ -60,7 +60,7 @@ const sponsors: SponsorCardProps[] = [
     altText: "Soical Roots & Green Shoots",
     name: "Soical Roots & Green Shoots",
     description: "We’re proud to celebrate and support Burton Pride.",
-    link: "https://www.eastmidlandsairport.com",
+    link: "https://www.youtube.com/@SocialRootsGreenShoots/featured",
   },
 ];
 
