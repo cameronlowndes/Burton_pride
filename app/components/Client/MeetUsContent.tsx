@@ -19,8 +19,8 @@ const sections = [
     members: [
       { name: 'Simon Whale', image: '/image/PeoplePicturePng/simon.png', role: 'Founder & Organizer | He/Him' },
       { name: 'Isaac Timmins', image: '/image/PeoplePicturePng/isaac.png', role: 'Founder & Director | He/Him' },
+      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Stock Controller | She/Her' },
       { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Board Member | He/Him/His/They' },
-      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Board Member | She/Her' },
       { name: 'Citrine Stone', image: '/image/PeoplePicturePng/citrine.png', role: 'Board Member | they/them' },
     ],
   },
