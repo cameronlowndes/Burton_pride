@@ -8,6 +8,7 @@ import ConditionalFooter from "./components/Rooting/ConditionalFooter";
 import Watermark from "./components/Rooting/Watermark";
 
 
+import { Analytics } from "@vercel/analytics/react"; 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -44,7 +45,9 @@ export default function RootLayout({
         </div>
 
         <ConditionalFooter />
-       <Watermark />
+        <Watermark />
+
+        <Analytics />
       </body>
     </html>
   );
