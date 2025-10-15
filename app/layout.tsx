@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   title: "Burton Pride",
   description: "Celebrating diversity, inclusion, and love in Burton",
   icons: {
-    icon: "/image/logo.jpg",
+    icon: "/image/logo.png",
   },
 };
 
