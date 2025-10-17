@@ -8,7 +8,7 @@ interface EventCardProps {
   description: string;
   date?: string;
   time?: string;
-  details: string;
+  details?: string; // ✅ Made optional
   link?: string;
   mapLink: string;
   isEventPassed: boolean;
@@ -54,6 +54,7 @@ const EventCard: React.FC<EventCardProps> = ({
         />
       </div>
     )}
+
     <h3 className="text-xl font-bold">{name}</h3>
     <p className="text-sm">{description}</p>
 
@@ -64,16 +65,18 @@ const EventCard: React.FC<EventCardProps> = ({
       </div>
     )}
 
-    {/* 🎉 FREE EVENT LABEL */}
     {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
       <div className="mt-3 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-sm animate-pulse">
         🎉 This event is FREE and open to the public – No tickets required!
       </div>
     )}
 
-    <div className="mt-4">
-      <p className="text-sm text-gray-600">{details}</p>
-    </div>
+    {/* ✅ Only render details if provided */}
+    {details && (
+      <div className="mt-4">
+        <p className="text-sm text-gray-600">{details}</p>
+      </div>
+    )}
 
     <div className="mt-4">
       {isEventPassed ? (
@@ -106,14 +109,6 @@ const EventCard: React.FC<EventCardProps> = ({
     </div>
   </div>
 );
-
-const getNextThursday = (fromDate: Date) => {
-  const date = new Date(fromDate);
-  const dayOfWeek = date.getDay();
-  const daysUntilThursday = (4 - dayOfWeek + 7) % 7 || 7;
-  date.setDate(date.getDate() + daysUntilThursday);
-  return date;
-};
 
 const isEventInPast = (eventDateStr: string) => {
   const eventDate = new Date(eventDateStr);
@@ -148,7 +143,18 @@ const EventPage: React.FC = () => {
         image: "/image/PrideEvent/NewPridePoster.png",
         onImageClick: setModalImage
       },
-      // other events...
+      {
+        name: "Drag Bingo Night",
+        description: "We’re hosting a Drag Bingo Night at The Blacksmiths Arms (DE14 3EY)! Join us for an unforgettable evening of fun, laughter, and fabulous entertainment.",
+        date: "2026-03-07",
+        time: "7:00 PM - 10:00 PM",
+        link: "https://www.tickettailor.com/events/burtonpride/1913327",
+        mapLink: "https://www.google.com/maps/dir//The+Blacksmiths+Arms+Main+St+Branston+Burton-on-Trent+DE14+3EY/@52.7875072,-1.6704757,16z",
+        isEventPassed: isEventInPast("2026-03-07"),
+        isEventToday: isEventToday("2026-03-07"),
+        image: "/image/PosterPicturePng/DRAGBINGNIGHTWITHQR.png",
+        onImageClick: setModalImage
+      }
     ];
 
     const sorted = baseEvents
@@ -186,26 +192,31 @@ const EventPage: React.FC = () => {
             <p className="text-md text-yellow-100 italic mb-4">
               Stay tuned for updates — more events are on the way!
             </p>
-            <Link href="https://www.facebook.com/profile.php?id=61556621159422" target="_blank" className="bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition">
+            <Link
+              href="https://www.facebook.com/profile.php?id=61556621159422"
+              target="_blank"
+              className="bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition"
+            >
               Follow us on Facebook
             </Link>
           </div>
         )}
       </div>
 
+      {/* ✅ Fullscreen Modal Image */}
       {modalImage && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center cursor-pointer"
+          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center cursor-pointer p-4"
           onClick={() => setModalImage(null)}
         >
-          <div className="max-w-3xl w-full">
-            <img
-              src={modalImage}
-              alt="Enlarged Event"
-              className="rounded-lg shadow-lg w-full object-contain"
-            />
-            <p className="text-center text-white mt-4 text-sm">Click anywhere to close</p>
-          </div>
+          <img
+            src={modalImage}
+            alt="Enlarged Event"
+            className="max-h-[95vh] max-w-[95vw] w-auto h-auto rounded-lg object-contain shadow-2xl transition-transform duration-300 hover:scale-105"
+          />
+          <p className="absolute bottom-4 text-center text-white text-sm w-full">
+            Click anywhere to close
+          </p>
         </div>
       )}
     </section>

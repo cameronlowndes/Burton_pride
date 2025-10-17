@@ -79,12 +79,11 @@ export default function Navbar() {
         <div ref={aboutRef} className="relative">
           <button
             onClick={toggleAbout}
-            className={`flex items-center gap-1 cursor-pointer ${
-              pathname.startsWith("/about") ||
-              pathname.startsWith("/OurCoreValues")
+            className={`flex items-center gap-1 cursor-pointer ${pathname.startsWith("/about") ||
+                pathname.startsWith("/OurCoreValues")
                 ? rainbowClass
                 : "hover:underline"
-            }`}
+              }`}
           >
             About <FaCaretDown className="text-sm" />
           </button>
@@ -112,11 +111,10 @@ export default function Navbar() {
         <div ref={eventsRef} className="relative">
           <button
             onClick={toggleEvents}
-            className={`flex items-center gap-1 cursor-pointer ${
-              pathname.startsWith("/events") || pathname === "/Pride2025"
+            className={`flex items-center gap-1 cursor-pointer ${pathname.startsWith("/events") || pathname === "/Pride2025"
                 ? rainbowClass
                 : "hover:underline"
-            }`}
+              }`}
           >
             Events <FaCaretDown className="text-sm" />
           </button>
@@ -133,18 +131,28 @@ export default function Navbar() {
               >
                 All Events
               </Link>
+
+              <Link
+                href="https://www.tickettailor.com/events/burtonpride"
+                className="block px-4 py-2 hover:bg-gray-100"
+              >
+                Tickets
+              </Link>
+
               <Link
                 href="/events/Pride2025"
                 className="block px-4 py-2 hover:bg-gray-100"
               >
                 Pride Event 2025
               </Link>
+
               <Link
                 href="/events/NightParty"
                 className="block px-4 py-2 hover:bg-gray-100"
               >
                 Pride Party 2025
               </Link>
+
             </motion.div>
           )}
         </div>
@@ -217,9 +225,8 @@ export default function Navbar() {
             {/* Main Links */}
             <Link
               href="/"
-              className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${
-                isActive("/") ? rainbowClass : ""
-              }`}
+              className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${isActive("/") ? rainbowClass : ""
+                }`}
               onClick={() => setIsMenuOpen(false)}
             >
               Home
@@ -283,6 +290,14 @@ export default function Navbar() {
                     >
                       All Events
                     </Link>
+                    
+                    <Link
+                      href="https://www.tickettailor.com/events/burtonpride"
+                      className="block px-4 py-2 hover:bg-gray-100"
+                    >
+                      Tickets
+                    </Link>
+
                     <Link
                       href="/events/Pride2025"
                       className="px-4 py-2 hover:bg-gray-100"
@@ -290,6 +305,7 @@ export default function Navbar() {
                     >
                       Pride Event 2025
                     </Link>
+
                     <Link
                       href="/events/NightParty"
                       className="px-4 py-2 hover:bg-gray-100"
@@ -297,6 +313,7 @@ export default function Navbar() {
                     >
                       Pride Party 2025
                     </Link>
+
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -312,9 +329,8 @@ export default function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${
-                  isActive(link.href) ? rainbowClass : ""
-                }`}
+                className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${isActive(link.href) ? rainbowClass : ""
+                  }`}
                 onClick={() => setIsMenuOpen(false)}
               >
                 {link.name}
