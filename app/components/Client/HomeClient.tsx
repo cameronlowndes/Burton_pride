@@ -99,7 +99,6 @@ export default function HomeClient() {
         </p>
         <Link
           href="/FeedBack"
-          target="_blank"
           className="bg-yellow-400 text-black px-10 py-4 rounded-full font-bold text-xl hover:bg-yellow-300 transition transform hover:scale-110 shadow-lg shadow-yellow-400/50 animate-pulse"
         >
          FeedBack
