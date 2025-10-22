@@ -8,7 +8,7 @@ interface EventCardProps {
   description: string;
   date?: string;
   time?: string;
-  details?: string; // ✅ Made optional
+  details?: string;
   link?: string;
   mapLink: string;
   isEventPassed: boolean;
@@ -41,7 +41,7 @@ const EventCard: React.FC<EventCardProps> = ({
   <div
     className={`bg-white text-black p-6 rounded-lg shadow-md w-full max-w-sm transition-transform hover:scale-105 ${
       isEventToday
-        ? 'border-4 border-yellow-400 shadow-yellow-300 animate-pulse'
+        ? 'border-4 border-yellow-400 shadow-yellow-300 animate-fadeInUp'
         : 'animate-fadeInUp'
     }`}
   >
@@ -65,35 +65,51 @@ const EventCard: React.FC<EventCardProps> = ({
       </div>
     )}
 
-    {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
-      <div className="mt-3 bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-sm animate-pulse">
-        🎉 This event is FREE and open to the public – No tickets required!
-      </div>
-    )}
+    {/* Special Note for Pride Event or Today */}
+    {(isEventToday || name === "Pride Event") ? (
+      <div className="mt-4 p-3 rounded-lg bg-yellow-100 border-2 border-yellow-400 shadow-lg flex flex-col items-center">
+        {isEventToday && (
+          <div className="inline-block bg-yellow-400 text-black font-extrabold px-4 py-2 rounded-full shadow-md text-lg animate-bounce mb-2">
+            🎉 Happening Today!
+          </div>
+        )}
 
-    {/* ✅ Only render details if provided */}
-    {details && (
-      <div className="mt-4">
-        <p className="text-sm text-gray-600">{details}</p>
+        {/* Pride Event Note */}
+        {name === "Pride Event" && (
+          <div className="bg-red-200 text-red-800 font-bold px-4 py-2 rounded shadow-md text-center mb-2 animate-pulse w-full">
+            ⚠️ Note: This event is still in the works. Details may change!
+          </div>
+        )}
+
+        {/* {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
+          <div className="bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-md text-center animate-pulse mb-2">
+            🎉 This event is FREE and open to the public – No tickets required!
+          </div>
+        )} */}
+
+        {details && (
+          <div className="mt-2">
+            <p className="text-sm text-gray-700">{details}</p>
+          </div>
+        )}
       </div>
+    ) : (
+      details && (
+        <div className="mt-4">
+          <p className="text-sm text-gray-600">{details}</p>
+        </div>
+      )
     )}
 
     <div className="mt-4">
       {isEventPassed ? (
         <p className="text-red-500 font-semibold">Event Completed</p>
       ) : (
-        <>
-          {isEventToday && (
-            <div className="inline-block bg-yellow-400 text-black font-bold px-3 py-1 rounded-full shadow-sm mb-2 animate-bounce">
-              🎉 Happening Today!
-            </div>
-          )}
-          {link && (
-            <Link href={link}>
-              <span className="text-blue-500 hover:underline cursor-pointer">More Details</span>
-            </Link>
-          )}
-        </>
+        link && (
+          <Link href={link}>
+            <span className="text-blue-500 hover:underline cursor-pointer">More Details</span>
+          </Link>
+        )
       )}
     </div>
 
@@ -132,15 +148,12 @@ const EventPage: React.FC = () => {
     const baseEvents: EventCardProps[] = [
       {
         name: "Pride Event",
-        description: "Join us for a vibrant celebration on Shobnall Fields in Burton at 12.pm! 🏳️‍🌈",
-        date: "2025-08-16",
-        time: "12:00 PM - 5:00 PM",
-        details: "The Pride Event is a lively event celebrating diversity and inclusivity. 🆓 This event is free and open to the public – no tickets required!",
-        link: "/events/Pride2025",
+        description: "Join us for a vibrant celebration on Shobnall Fields in Burton Please Note this Event is still in the works 🏳️‍🌈",
+        date: "2026-06-27",
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
-        isEventPassed: isEventInPast("2025-08-16"),
-        isEventToday: isEventToday("2025-08-16"),
-        image: "/image/PrideEvent/NewPridePoster.png",
+        isEventPassed: isEventInPast("2026-06-27"),
+        isEventToday: isEventToday("2026-06-27"),
+        image: "/image/PosterPicturePng/PridePoste2026.png",
         onImageClick: setModalImage
       },
       {
@@ -166,44 +179,37 @@ const EventPage: React.FC = () => {
 
   return (
     <section id="events" className="mt-8 text-center w-full flex flex-col items-center max-w-6xl mx-auto pb-24">
-      <h2 className="text-3xl font-semibold mb-1">Upcoming Events</h2>
+      <h2 className="text-3xl font-semibold mb-6">Upcoming Events</h2>
 
-      <div
-        className={
-          upcomingEvents.length === 1
-            ? "flex items-center justify-center min-h-[70vh] w-full"
-            : "flex flex-wrap justify-center gap-6 w-full"
-        }
-      >
-        {upcomingEvents.length > 0 ? (
-          upcomingEvents.map(event => (
+      {upcomingEvents.length > 0 ? (
+        <div className="flex flex-wrap justify-center gap-6 w-full">
+          {upcomingEvents.map(event => (
             <EventCard key={`${event.name}-${event.date}`} {...event} />
-          ))
-        ) : (
-          <div className="flex flex-col items-center justify-center text-center py-16 px-6 bg-gradient-to-r from-pink-500 via-purple-500 to-yellow-400 rounded-2xl shadow-lg animate-fadeInUp w-full max-w-4xl">
-            <h3 className="text-4xl font-extrabold text-white mb-4">
-              🌈 No Upcoming Events Right Now
-            </h3>
-            <p className="text-lg text-white mb-6 max-w-2xl">
-              But don’t worry – Burton Pride is always working behind the scenes to
-              bring more exciting celebrations, community events, and nights full of
-              love, unity, and inclusivity. 💖
-            </p>
-            <p className="text-md text-yellow-100 italic mb-4">
-              Stay tuned for updates — more events are on the way!
-            </p>
-            <Link
-              href="https://www.facebook.com/profile.php?id=61556621159422"
-              target="_blank"
-              className="bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition"
-            >
-              Follow us on Facebook
-            </Link>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center text-center py-16 px-6 bg-gradient-to-r from-pink-500 via-purple-500 to-yellow-400 rounded-2xl shadow-lg animate-fadeInUp w-full max-w-4xl">
+          <h3 className="text-4xl font-extrabold text-white mb-4">
+            🌈 No Upcoming Events Right Now
+          </h3>
+          <p className="text-lg text-white mb-6 max-w-2xl">
+            But don’t worry – Burton Pride is always working behind the scenes to
+            bring more exciting celebrations, community events, and nights full of
+            love, unity, and inclusivity. 💖
+          </p>
+          <p className="text-md text-yellow-100 italic mb-4">
+            Stay tuned for updates — more events are on the way!
+          </p>
+          <Link
+            href="https://www.facebook.com/profile.php?id=61556621159422"
+            target="_blank"
+            className="bg-blue-600 text-white px-6 py-3 rounded-full text-lg font-semibold shadow-md hover:bg-blue-500 transition"
+          >
+            Follow us on Facebook
+          </Link>
+        </div>
+      )}
 
-      {/* ✅ Fullscreen Modal Image */}
       {modalImage && (
         <div
           className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center cursor-pointer p-4"

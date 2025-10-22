@@ -79,6 +79,33 @@ export default function HomeClient() {
         <Message />
       </motion.div>
 
+         {/* Support Section */}
+      <motion.section
+        className="mt-16 w-full bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 p-12 rounded-3xl shadow-2xl shadow-pink-500/50 flex flex-col items-center text-center relative overflow-hidden animate-fadeIn"
+        initial={{ opacity: 0, y: 50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1 }}
+      >
+        <div className="absolute -top-24 -left-24 w-72 h-72 bg-pink-400/40 rounded-full blur-3xl animate-pulse mix-blend-overlay"></div>
+        <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-blue-400/40 rounded-full blur-3xl animate-pulse mix-blend-overlay"></div>
+
+        <h2 className="text-4xl sm:text-5xl font-extrabold mb-4 text-white drop-shadow-lg animate-bounce">
+         Give Your FeedBack To Burton Pride 💖
+        </h2>
+        <p className="text-lg sm:text-xl mb-8 max-w-2xl text-white/90 leading-relaxed animate-fadeIn">
+         We would love your help in making next year’s event even better! Please take a moment to share your feedback on this year’s event. 
+         Every comment, suggestion, or idea you provide will help us enhance the experience for everyone and ensure future events are more enjoyable,
+          exciting, and memorable. Your input truly makes a difference, and we appreciate your time and honesty in helping us grow!
+        </p>
+        <Link
+          href="/FeedBack"
+          target="_blank"
+          className="bg-yellow-400 text-black px-10 py-4 rounded-full font-bold text-xl hover:bg-yellow-300 transition transform hover:scale-110 shadow-lg shadow-yellow-400/50 animate-pulse"
+        >
+         FeedBack
+        </Link>
+      </motion.section>
+
       {/* Support Section */}
       <motion.section
         className="mt-16 w-full bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 p-12 rounded-3xl shadow-2xl shadow-pink-500/50 flex flex-col items-center text-center relative overflow-hidden animate-fadeIn"
@@ -147,9 +174,11 @@ export default function HomeClient() {
         </Link>
       </motion.section>
 
+     
+
       {/* Events Section */}
       <motion.div
-        className="mt-16 w-full mb-16"
+        className="w-full mt-12"
         initial={{ opacity: 0, y: 50 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.6 }}
