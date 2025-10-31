@@ -4,7 +4,7 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Message } from '../Card/message';
+import Countdown from '../Countdown';
 import EventCard from '../Card/EventCard';
 
 export default function HomeClient() {
@@ -76,7 +76,7 @@ export default function HomeClient() {
         transition={{ delay: 0.8 }}
         className="mt-8 w-full max-w-4xl px-4 sm:px-0"
       >
-        <Message />
+        <Countdown/>
       </motion.div>
 
          {/* Support Section */}

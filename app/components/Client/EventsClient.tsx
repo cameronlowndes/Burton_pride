@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import { Message } from '../Card/message';
+import Countdown from '../Countdown';
 import EventCard from '../Card/EventCard';
 
 export default function EventsClient() {
@@ -70,7 +70,7 @@ export default function EventsClient() {
         transition={{ delay: 0.8 }}
         className="w-full"
       >
-        <Message />
+        <Countdown />
       </motion.div>
 
       {/* Events Section */}
