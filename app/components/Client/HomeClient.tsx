@@ -1,5 +1,5 @@
 'use client';
-//trying to fix image 
+
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
@@ -69,7 +69,7 @@ export default function HomeClient() {
         </motion.p>
       </motion.section>
 
-      {/* Thank-You Message Section */}
+
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
@@ -78,6 +78,24 @@ export default function HomeClient() {
       >
         <Countdown/>
       </motion.div>
+       {/* sing up  Section */}
+      <motion.section
+        className="mt-16 text-center w-full max-w-3xl px-4 sm:px-0"
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.4 }}
+      >
+        <h2 className="text-3xl sm:text-4xl font-extrabold mb-4 animate-fadeIn">Burton Pride 2026 Application Forms</h2>
+        <p className="text-lg mb-6 animate-fadeIn">
+          We are looking for local companies and charities to take part in Burton Pride 2026.
+        </p>
+        <Link
+          href="/BurtronPride2026"
+          className="bg-green-500 text-white px-8 py-3 rounded-full font-bold text-lg hover:bg-green-400 transition transform hover:scale-105 shadow-lg"
+        >
+          Learn More
+        </Link>
+      </motion.section>
 
          {/* Support Section */}
       <motion.section
