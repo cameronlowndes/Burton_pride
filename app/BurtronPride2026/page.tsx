@@ -4,16 +4,16 @@ import BurtonPrideClient2026 from "../components/Client/BurtonPrideClient2026";
 export const metadata: Metadata = {
   title: "Burton Pride 2026",
   description:
-    "Join the Burton Pride volunteer team and help create a safe, inclusive, and unforgettable Pride event.",
+    "Join us for Burton Pride 2026 and be part of this amazing event!",
   openGraph: {
-    title: "Volunteer with Burton Pride 2026",
+    title: " Burton Pride 2026",
     description:
-      "Be part of the Burton Pride volunteer team and help make Pride 2026 amazing.",
+      "Join us for Burton Pride 2026 and be part of this amazing event!",
     siteName: "Burton Pride",
     type: "website",
   },
 };
 
-export default function VolunteerPage() {
+export default function BurtonPride2026() {
   return <BurtonPrideClient2026 />;
 }
