@@ -1,6 +1,5 @@
 'use client';
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, ValidationError } from '@formspree/react';
 
 function VolunteerForm() {
@@ -13,7 +12,6 @@ function VolunteerForm() {
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
-
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
@@ -47,18 +45,16 @@ function VolunteerForm() {
     }
 
     if (!valid) {
-      event.preventDefault(); // stop form submission
-      return;
+      event.preventDefault();
     }
   };
 
-  if (state.succeeded) {
-    return (
-      <p className="text-green-400 font-semibold text-lg mt-4 text-center">
-        ✅ Thanks for submitting your details!
-      </p>
-    );
-  }
+  // Redirect to Thank You page on successful submission
+  useEffect(() => {
+    if (state.succeeded) {
+      window.location.href = '/ThankYou';
+    }
+  }, [state.succeeded]);
 
   return (
     <form
@@ -69,9 +65,7 @@ function VolunteerForm() {
       className="max-w-3xl mx-auto p-8 bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white rounded-3xl shadow-2xl border-4 border-white/30 flex flex-col gap-6"
     >
       {/* Personal Information Section */}
-      <h2 className="text-2xl font-bold mb-4 text-white drop-shadow-md">
-        Personal Information
-      </h2>
+      <h2 className="text-2xl font-bold mb-4 text-white drop-shadow-md">Personal Information</h2>
 
       <div className="flex flex-col sm:flex-row gap-4">
         <input id="firstName" type="text" name="firstName" placeholder="First Name" required
@@ -83,7 +77,6 @@ function VolunteerForm() {
       <input id="pronouns" type="text" name="pronouns" placeholder="Preferred Pronouns"
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"/>
 
-      {/* Date of Birth with Validation */}
       <div className="flex flex-col">
         <label htmlFor="dob" className="mb-1 text-white/90 font-medium">Date of Birth</label>
         <input id="dob" type="date" name="dob"
@@ -91,7 +84,6 @@ function VolunteerForm() {
         {dobError && <p className="text-yellow-300 mt-1">{dobError}</p>}
       </div>
 
-      {/* Other Personal Info */}
       <input id="address" type="text" name="address" placeholder="Address"
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"/>
       <input id="email" type="email" name="email" placeholder="Email Address" required
@@ -101,9 +93,7 @@ function VolunteerForm() {
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"/>
 
       {/* Emergency Contacts Section */}
-      <h2 className="text-2xl font-bold mb-4 mt-6 text-white drop-shadow-md">
-        Emergency Contacts
-      </h2>
+      <h2 className="text-2xl font-bold mb-4 mt-6 text-white drop-shadow-md">Emergency Contacts</h2>
 
       <div className="flex flex-col sm:flex-row gap-4">
         <input id="emFirstName" type="text" name="emFirstName" placeholder="First Name" required
@@ -115,7 +105,6 @@ function VolunteerForm() {
       <input id="relationship" type="text" name="relationship" placeholder="Relationship to You"
         className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"/>
 
-      {/* Emergency DOB with Validation */}
       <div className="flex flex-col">
         <label htmlFor="emDob" className="mb-1 text-white/90 font-medium">Emergency Contact Date of Birth</label>
         <input id="emDob" type="date" name="emDob"

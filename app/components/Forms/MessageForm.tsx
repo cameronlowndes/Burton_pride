@@ -1,18 +1,17 @@
 'use client';
-import React from "react";
+import React, { useEffect } from "react";
 import { useForm, ValidationError } from "@formspree/react";
 import { motion } from "framer-motion";
 
 export default function ContactForm() {
   const [state, handleSubmit] = useForm("xyzpqnrq");
 
-  if (state.succeeded) {
-    return (
-      <p className="text-green-400 font-semibold text-lg mt-4 text-center">
-        🌈 Thanks for reaching out! We will get back to you soon.
-      </p>
-    );
-  }
+  // Redirect to Thank You page on successful submission
+  useEffect(() => {
+    if (state.succeeded) {
+      window.location.href = '/ThankYou'; // <-- your thank you page
+    }
+  }, [state.succeeded]);
 
   return (
     <motion.form

@@ -1,10 +1,18 @@
 'use client';
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useForm, ValidationError } from '@formspree/react';
 import Image from 'next/image';
 
 export default function FeedBack() {
   const [state, handleSubmit] = useForm('xjkaqgyr');
+
+  // Redirect to Thank You page on success
+  useEffect(() => {
+    if (state.succeeded) {
+      window.location.href = '/ThankYou'; // <-- your thank you page path
+    }
+  }, [state.succeeded]);
 
   const containerVariants = {
     hidden: {},
@@ -84,49 +92,43 @@ export default function FeedBack() {
           {/* Gradient Glow Background */}
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-pink-400 via-purple-500 to-blue-400 opacity-20 blur-3xl animate-pulse -z-10"></div>
 
-          {state.succeeded ? (
-            <p className="text-xl font-semibold text-green-700 text-center">
-              🌈 Thank you for your feedback! Your support helps make Burton Pride shine brighter every year.
-            </p>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-6 relative z-10">
-              <label htmlFor="email" className="font-semibold">
-                Email Address
-              </label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                required
-                className="w-full p-4 rounded-xl border-2 border-pink-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
-                placeholder="you@example.com"
-              />
-              <ValidationError prefix="Email" field="email" errors={state.errors} />
+          <form onSubmit={handleSubmit} className="flex flex-col gap-6 relative z-10">
+            <label htmlFor="email" className="font-semibold">
+              Email Address
+            </label>
+            <input
+              id="email"
+              type="email"
+              name="email"
+              required
+              className="w-full p-4 rounded-xl border-2 border-pink-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              placeholder="you@example.com"
+            />
+            <ValidationError prefix="Email" field="email" errors={state.errors} />
 
-              <label htmlFor="message" className="font-semibold">
-                Your Feedback
-              </label>
-              <textarea
-                id="message"
-                name="message"
-                rows={6}
-                required
-                className="w-full p-4 rounded-xl border-2 border-purple-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="Share your thoughts about Burton Pride..."
-              ></textarea>
-              <ValidationError prefix="Message" field="message" errors={state.errors} />
+            <label htmlFor="message" className="font-semibold">
+              Your Feedback
+            </label>
+            <textarea
+              id="message"
+              name="message"
+              rows={6}
+              required
+              className="w-full p-4 rounded-xl border-2 border-purple-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="Share your thoughts about Burton Pride..."
+            ></textarea>
+            <ValidationError prefix="Message" field="message" errors={state.errors} />
 
-              <motion.button
-                type="submit"
-                disabled={state.submitting}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300"
-              >
-                {state.submitting ? 'Sending...' : 'Submit Feedback'}
-              </motion.button>
-            </form>
-          )}
+            <motion.button
+              type="submit"
+              disabled={state.submitting}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300"
+            >
+              {state.submitting ? 'Sending...' : 'Submit Feedback'}
+            </motion.button>
+          </form>
         </motion.div>
       </motion.section>
     </motion.div>
