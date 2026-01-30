@@ -1,5 +1,5 @@
-import MetaHead from "../components/MetaHead"; // Import MetaHead
-import Head from "next/head"; // Keep the Head import
+import MetaHead from "../components/MetaHead"; 
+
 
 export const metadata = {
   title: "Burton Pride - Terms and Conditions ",

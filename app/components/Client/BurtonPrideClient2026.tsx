@@ -4,11 +4,14 @@ import { useState } from "react";
 import { useMediaQuery } from "react-responsive";
 import { motion } from "framer-motion";
 import BusinessForm from "../../components/Forms/BussinessForm";
-import CharityForm from "../Forms/ChraityForm"; // import your CharityForm
+import CharityForm from "../Forms/ChraityForm";
+import EntertainmentForm from "../../components/Forms/EntertainmentForm"; 
 
 export default function BurtonPrideClient2026() {
   const [isBusinessModalOpen, setIsBusinessModalOpen] = useState(false);
   const [isCharityModalOpen, setIsCharityModalOpen] = useState(false);
+  const [isEntertainmentModalOpen, setIsEntertainmentModalOpen] = useState(false);
+
   const isMobile = useMediaQuery({ maxWidth: 767 });
 
   const openBusinessForm = () => {
@@ -27,8 +30,17 @@ export default function BurtonPrideClient2026() {
     }
   };
 
+  const openEntertainmentForm = () => {
+    if (isMobile) {
+      window.location.href = "/EntertainmentForm";
+    } else {
+      setIsEntertainmentModalOpen(true);
+    }
+  };
+
   const closeBusinessModal = () => setIsBusinessModalOpen(false);
   const closeCharityModal = () => setIsCharityModalOpen(false);
+  const closeEntertainmentModal = () => setIsEntertainmentModalOpen(false);
 
   const containerVariants = {
     hidden: {},
@@ -87,13 +99,9 @@ export default function BurtonPrideClient2026() {
             equality and inclusion.
           </p>
 
-          <p>
-            <strong>Local Businesses:</strong> Apply using the Business Form.
-          </p>
-
-          <p>
-            <strong>Charities &amp; C.I.C.s:</strong> Apply using the Charity Form.
-          </p>
+          <p><strong>Local Businesses:</strong> Apply using the Business Form.</p>
+          <p><strong>Charities &amp; C.I.C.s:</strong> Apply using the Charity Form.</p>
+          <p><strong>Entertainment:</strong> Apply using the Entertainment Form.</p>
 
           <p>
             Questions? Contact us at{" "}
@@ -119,6 +127,12 @@ export default function BurtonPrideClient2026() {
             className="w-3/4 sm:w-1/2 bg-purple-400 text-white px-8 py-4 rounded-full font-bold text-xl hover:bg-purple-300 transition transform hover:scale-105 shadow-lg cursor-pointer"
           >
             Charity Form
+          </button>
+          <button
+            onClick={openEntertainmentForm}
+            className="w-3/4 sm:w-1/2 bg-pink-500 text-white px-8 py-4 rounded-full font-bold text-xl hover:bg-pink-400 transition transform hover:scale-105 shadow-lg cursor-pointer"
+          >
+            Entertainment Form
           </button>
         </div>
       </motion.section>
@@ -158,6 +172,16 @@ export default function BurtonPrideClient2026() {
           <p className="mt-6 text-white/90">
             Prices are per stall. Additional space may be available at an extra cost.
           </p>
+
+          {/* TERMS BUTTON */}
+          <div className="mt-8 flex justify-center">
+            <a
+              href="/BurtronPride2026/Terms"
+              className="bg-white text-purple-700 px-8 py-4 rounded-full font-bold text-lg hover:bg-gray-200 transition transform hover:scale-105 shadow-lg"
+            >
+              View Terms & Conditions
+            </a>
+          </div>
         </div>
       </motion.section>
 
@@ -175,7 +199,6 @@ export default function BurtonPrideClient2026() {
             >
               &times;
             </button>
-
             <BusinessForm />
           </motion.div>
         </div>
@@ -195,8 +218,26 @@ export default function BurtonPrideClient2026() {
             >
               &times;
             </button>
-
             <CharityForm />
+          </motion.div>
+        </div>
+      )}
+
+      {/* Entertainment Modal */}
+      {isEntertainmentModalOpen && !isMobile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <motion.div
+            className="bg-white rounded-xl p-6 max-w-lg w-full relative"
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+          >
+            <button
+              onClick={closeEntertainmentModal}
+              className="absolute top-3 right-3 text-black text-xl font-bold"
+            >
+              &times;
+            </button>
+            <EntertainmentForm />
           </motion.div>
         </div>
       )}
