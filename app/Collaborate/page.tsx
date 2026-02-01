@@ -12,7 +12,7 @@ export const metadata = {
 
 export default function Collaborate() {
   // 🚨 Redirect happens immediately, before rendering
-  redirect("/update");
+
 
   // ⚡ Old content is kept safe but won’t render
   return (

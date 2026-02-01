@@ -1,28 +1,24 @@
-'use client';
+"use client";
 
 import Image from "next/image";
-import Card from "../Card/Card";
-import Link from "next/link";
 import { motion } from "framer-motion";
+import SponsorForm from "../Forms/SponsorForm"; 
 
-const containerVariants = {
-  hidden: {},
-  visible: {
-    transition: { staggerChildren: 0.3 }
-  }
-};
+export default function Collaborate() {
+  const containerVariants = {
+    hidden: {},
+    visible: { transition: { staggerChildren: 0.25 } },
+  };
 
-const fadeUpVariant = {
-  hidden: { opacity: 0, y: 40 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: "easeOut" } }
-};
+  const fadeUpVariant = {
+    hidden: { opacity: 0, y: 40 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.6, ease: "easeOut" },
+    },
+  };
 
-const buttonHover = {
-  scale: 1.05,
-  transition: { duration: 0.2 }
-};
-
-export default function CollaborateClient() {
   return (
     <motion.div
       className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24"
@@ -30,113 +26,86 @@ export default function CollaborateClient() {
       animate="visible"
       variants={containerVariants}
     >
-      {/* Hero */}
+      {/* HERO */}
       <motion.header
-        className="text-center flex flex-col items-center gap-6 mt-16"
+        className="text-center flex flex-col items-center gap-6 mt-16 max-w-3xl"
         variants={fadeUpVariant}
       >
-        <Image
-          src="/image/logo.jpg"
-          alt="Burton Pride Logo"
-          width={180}
-          height={180}
-          className="hero-logo rounded-full shadow-lg"
-        />
-        <h1 className="text-4xl sm:text-6xl font-bold">Collaborate with Us</h1>
-        <p className="text-lg sm:text-xl max-w-2xl">
-          Want to partner with Burton Pride? We’re always open to new collaborations and ideas to make Burton Pride even better. Let's make it happen together!
+        <div className="p-2 rounded-full bg-white/20 backdrop-blur-md shadow-xl">
+          <Image
+            src="/image/logo.jpg"
+            alt="Burton Pride Logo"
+            width={170}
+            height={170}
+            className="rounded-full"
+          />
+        </div>
+
+        <h1 className="text-4xl sm:text-6xl font-bold drop-shadow-lg">
+          Collaborate With Us
+        </h1>
+
+        <p className="text-lg sm:text-xl text-white/90 leading-relaxed">
+          Want to partner with Burton Pride? We’re always open to collaborations
+          and ideas that help make Pride in Burton even bigger, better, and more inclusive.
         </p>
       </motion.header>
 
-      {/* Sponsorship Cards */}
+      {/* STORY LEFT + FORM RIGHT */}
       <motion.section
-        className="mt-16 w-full max-w-5xl grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+        className="mt-16 w-full max-w-7xl flex flex-col md:flex-row gap-10"
         variants={fadeUpVariant}
       >
-        {[
-          { title: "Standard Sponsorship", price: "£150+", color: "text-pink-500", perks: ["Business logo included in social media", "2 Wristbands to the Pride event"] },
-          { title: "Bronze Sponsorship", price: "£350+", color: "text-yellow-500", perks: ["Business logo on social media & main stage screen", "A6 advert in event program", "Opportunity to have a stall"] },
-          { title: "Silver Sponsorship", price: "£995+", color: "text-gray-500", perks: ["Stall with other vendors", "5 Free passes for the event", "Social media mentions", "A5 or A6 Advert in program"] },
-          { title: "Gold Sponsorship", price: "£1500+", color: "text-yellow-700", perks: ["3x6m gazebo with other vendors", "10 Free passes", "Mentions in social media posts", "A5, A6, or A4 Advert in program", "Feature on main stage screen", "Promotional material in event bags"] }
-        ].map(({ title, price, color, perks }) => (
-          <Card key={title} title={title}>
-            <p className={`text-lg font-bold ${color}`}>{price}</p>
-            <ul className="list-disc ml-4 text-sm mt-2">
-              {perks.map((perk, index) => (
-                <li key={index}>{perk}</li>
-              ))}
-            </ul>
-          </Card>
-        ))}
-      </motion.section>
+        {/* LEFT — STORY */}
+        <div className="md:w-1/2 bg-white/20 backdrop-blur-md rounded-2xl shadow-xl p-10">
+          <h2 className="text-3xl sm:text-4xl font-bold text-yellow-300 mb-8">
+            Why Sponsor Burton Pride C.I.C?
+          </h2>
 
-      {/* Buttons */}
-      <motion.div
-        className="md:w-1/2 w-full flex justify-center mt-10"
-        variants={fadeUpVariant}
-      >
-        <motion.a
-          href="https://docs.google.com/forms/d/e/1FAIpQLSevaIQw4_HWCfbUgyt1ZNBD0Jy9WCAyE6U6qgq358xCKDW1AQ/viewform"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-white text-pink-500 px-6 py-3 rounded-lg shadow-lg font-semibold hover:bg-gray-200 transition-all"
-          whileHover={buttonHover}
-        >
-          Fill Out Our Collaboration Form
-        </motion.a>
-      </motion.div>
+          <div className="space-y-6 text-lg leading-relaxed text-white/95">
+            <p>
+              Burton Pride C.I.C is a <strong>fully community-led Pride organisation</strong>,
+              created by local people — Simon, Isaac, Cameron, Olga and Ben —
+              who care deeply about Burton and the people who live here.
+            </p>
 
-      {/* <motion.div
-        className="md:w-1/2 w-full flex justify-center mt-10"
-        variants={fadeUpVariant}
-      >
-        <motion.a
-          href="https://forms.gle/taZ16ioQBXvEX7sE8"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-white text-pink-500 px-6 py-3 rounded-lg shadow-lg font-semibold hover:bg-gray-200 transition-all"
-          whileHover={buttonHover}
-        >
-          Vendor & Stallholder Bookings
-        </motion.a>
-      </motion.div> */}
+            <p>
+              We are not backed by large corporations, and that is a conscious choice.
+              Burton Pride was built from the ground up by the community, for the community.
+              We believe Pride belongs at a local level, where real people, real stories,
+              and real support matter most.
+            </p>
 
-      {/* Info Section */}
-      <motion.section
-        className="mt-16 text-center w-full max-w-3xl bg-white text-black p-8 rounded-xl shadow-lg"
-        variants={fadeUpVariant}
-      >
-        <h2 className="text-3xl font-semibold mb-6">What Burton Pride Can Do for You</h2>
-        <ul className="text-lg list-disc list-inside">
-          {[
-            "Attract visitors to the town.",
-            "Increase your Diversity & Inclusion profile.",
-            "Amplify your business brand and product impact.",
-            "Engage a broad audience beyond the LGBTQ+ community."
-          ].map((item, index) => (
-            <li key={index}>{item}</li>
-          ))}
-        </ul>
+            <p>
+              Our team works tirelessly behind the scenes to deliver a safe, inclusive,
+              and welcoming event for everyone. From planning and fundraising to logistics
+              and volunteer coordination, everything we do is driven by passion, not profit.
+            </p>
 
-        <h2 className="text-2xl font-semibold mt-8">Did You Know?</h2>
-        <p className="text-lg mt-2">1 in 16 people in the UK identify as LGBTQ+.</p>
-        <p className="text-lg">3 in 5 LGBTQ+ people prefer businesses that support LGBTQ+ inclusivity.</p>
+            <p>
+              There are easier ways to run events — corporate control and outside influence.
+              But we choose to stay rooted in Burton because we never want to lose what makes Burton Pride special:
+            </p>
 
-        <h2 className="text-2xl font-semibold mt-8">What Does My Sponsorship Support?</h2>
-        <ul className="text-lg list-disc list-inside mt-2">
-          {[
-            "Event stage hire",
-            "Event security & fencing",
-            "Radio communication hire",
-            "First aid coverage",
-            "Flags, poles, signage & branding",
-            "Recycling & waste management",
-            "Insurance & PPE",
-            "PA systems & sanitation"
-          ].map((item, index) => (
-            <li key={index}>{item}</li>
-          ))}
-        </ul>
+            <p className="font-semibold text-xl text-yellow-300">
+              The people. The heart. The community spirit.
+            </p>
+
+            <p>
+              When you sponsor Burton Pride, you are investing directly into the local
+              community and helping us keep Pride independent, inclusive, and full of heart —
+              exactly how Pride should be.
+            </p>
+          </div>
+        </div>
+
+        {/* RIGHT — Sponsor Burton Pride */}
+        <div className="md:w-1/2 bg-white/10 backdrop-blur-md rounded-2xl shadow-xl p-8">
+          <h3 className="text-2xl font-bold text-yellow-300 mb-6 text-center">
+            Apply to be a sponsor of Burton Pride
+          </h3>
+          <SponsorForm />
+        </div>
       </motion.section>
     </motion.div>
   );

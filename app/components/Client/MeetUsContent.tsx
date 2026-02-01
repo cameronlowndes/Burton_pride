@@ -24,25 +24,8 @@ const sections = [
       { name: 'Citrine Stone', image: '/image/PeoplePicturePng/citrine.png', role: 'Board Member | they/them' },
     ],
   },
-  {
-    title: 'Social Media Team',
-    members: [
-      { name: 'Isaac Timmins', image: '/image/PeoplePicturePng/isaac.png', role: 'Social Media Director | He/Him' },
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Social Media Manager | He/Him/His/They' },
-    ],
-  },
-  {
-    title: 'Website Admin',
-    members: [
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Website Administrator | He/Him/His/They' },
-    ],
-  },
-  {
-    title: 'Volunteer Team',
-    members: [
-      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Volunteer Team Manager | She/Her' },
-    ],
-  },
+
+
 ];
 
 export default function MeetUsContent() {
