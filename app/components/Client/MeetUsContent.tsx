@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { sections, Member } from '@/data/TeamData';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import BoardSection from '../Card/BoardSection'; // ✅ import BoardSection
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -55,7 +56,7 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
           {member.story && (
             <button
               onClick={handleStoryClick}
-              className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none"
+              className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none cursor-pointer"
             >
               Read Story →
             </button>
@@ -79,12 +80,14 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
           <h2 className="text-2xl font-semibold">{member.name}</h2>
           <p className="text-sm text-gray-200 mt-2">{member.role}</p>
         </div>
-         <button
-              onClick={handleStoryClick}
-              className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none"
-            >
-              Read Story →
-            </button>
+        {member.story && (
+          <button
+            onClick={handleStoryClick}
+            className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none cursor-pointer"
+          >
+            Read Story →
+          </button>
+        )}
       </Link>
 
       {/* Desktop Modal */}
@@ -120,8 +123,8 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
 export default function MeetUsContent() {
   return (
     <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-      
-      {/* Hero */}
+
+      {/* HERO */}
       <motion.header
         initial="hidden"
         whileInView="visible"
@@ -153,25 +156,30 @@ export default function MeetUsContent() {
         </p>
       </motion.header>
 
-      {/* Sections */}
+      {/* BOARD SECTION */}
+      <BoardSection />
+
+      {/* OTHER SECTIONS */}
       {sections.map((section, sIndex) => (
-        <section key={sIndex} className="mt-20 text-center w-full max-w-5xl">
-          <motion.h2
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={fadeUp}
-            custom={0}
-            className="text-4xl font-bold mb-10 text-white drop-shadow-[0_0_25px_rgba(255,255,255,0.8)]"
-          >
-            {section.title}
-          </motion.h2>
-          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
-            {section.members.map((member, i) => (
-              <MemberCard key={i} member={member} index={i} />
-            ))}
-          </div>
-        </section>
+        section.title !== 'Committed Board' && ( // ✅ skip Committed Board since it's in BoardSection
+          <section key={sIndex} className="mt-20 text-center w-full max-w-5xl">
+            <motion.h2
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true }}
+              variants={fadeUp}
+              custom={0}
+              className="text-4xl font-bold mb-10 text-white drop-shadow-[0_0_25px_rgba(255,255,255,0.8)]"
+            >
+              {section.title}
+            </motion.h2>
+            <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+              {section.members.map((member, i) => (
+                <MemberCard key={i} member={member} index={i} />
+              ))}
+            </div>
+          </section>
+        )
       ))}
 
       {/* Contact Section */}
@@ -197,6 +205,7 @@ export default function MeetUsContent() {
           🌟 Contact Us
         </Link>
       </motion.section>
+
     </div>
   );
 }

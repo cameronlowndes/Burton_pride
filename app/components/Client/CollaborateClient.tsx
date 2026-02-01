@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { motion } from "framer-motion";
-import SponsorForm from "../Forms/SponsorForm"; 
+import SponsorForm from "../Forms/SponsorForm";
+import BoardSection from "../Card/BoardSection";
 
 export default function Collaborate() {
   const containerVariants = {
@@ -51,7 +52,7 @@ export default function Collaborate() {
         </p>
       </motion.header>
 
-      {/* STORY LEFT + FORM RIGHT */}
+      {/* STORY + FORM */}
       <motion.section
         className="mt-16 w-full max-w-7xl flex flex-col md:flex-row gap-10"
         variants={fadeUpVariant}
@@ -99,7 +100,7 @@ export default function Collaborate() {
           </div>
         </div>
 
-        {/* RIGHT — Sponsor Burton Pride */}
+        {/* RIGHT — FORM */}
         <div className="md:w-1/2 bg-white/10 backdrop-blur-md rounded-2xl shadow-xl p-8">
           <h3 className="text-2xl font-bold text-yellow-300 mb-6 text-center">
             Apply to be a sponsor of Burton Pride
@@ -107,6 +108,11 @@ export default function Collaborate() {
           <SponsorForm />
         </div>
       </motion.section>
+
+      {/* 👇 MEET THE TEAM ADDED HERE 👇 */}
+      <div className="w-full mt-24">
+        <BoardSection/>
+      </div>
     </motion.div>
   );
 }
