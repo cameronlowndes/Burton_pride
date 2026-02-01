@@ -3,6 +3,9 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+import { sections, Member } from '@/data/TeamData';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -13,26 +16,112 @@ const fadeUp = {
   }),
 };
 
-const sections = [
-  {
-    title: 'Committed Board',
-    members: [
-      { name: 'Simon Whale', image: '/image/PeoplePicturePng/simon.png', role: 'Founder & Organizer | He/Him' },
-      { name: 'Isaac Timmins', image: '/image/PeoplePicturePng/isaac.png', role: 'Founder & Director | He/Him' },
-      { name: 'Olga Niewiadomska', image: '/image/PeoplePicturePng/Olga.png', role: 'Director | She/Her' },
-      { name: 'Cameron Lowndes', image: '/image/PeoplePicturePng/cameron.png', role: 'Board Member | He/Him/His/They' },
-      { name: 'Citrine Stone', image: '/image/PeoplePicturePng/citrine.png', role: 'Board Member | they/them' },
-    ],
-  },
+// Member card with modal for desktop and mobile page routing
+function MemberCard({ member, index }: { member: Member; index: number }) {
+  const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+  const router = useRouter();
 
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
-];
+  const handleStoryClick = () => {
+    if (isMobile) {
+      const query = encodeURIComponent(JSON.stringify(member.story));
+      router.push(`/team/story/${member.name.replace(/\s+/g, '-').toLowerCase()}?story=${query}`);
+    } else {
+      setFlippedIndex(index);
+    }
+  };
+
+  return (
+    <div className="relative w-full group">
+      {/* Desktop Card */}
+      <div className="hidden sm:flex relative">
+        <div className="bg-white/10 backdrop-blur-md text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 rounded-2xl p-6 flex flex-col items-center hover:scale-105 transition-all duration-300">
+          <Image
+            src={member.image}
+            alt={member.name}
+            width={120}
+            height={120}
+            className="w-28 h-28 rounded-full mb-4 object-cover shadow-[0_0_20px_rgba(255,255,255,0.6)]"
+          />
+          <h2 className="text-2xl font-semibold">{member.name}</h2>
+          <p className="text-sm text-gray-200 mt-2">{member.role}</p>
+          {member.story && (
+            <button
+              onClick={handleStoryClick}
+              className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none"
+            >
+              Read Story →
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Link */}
+      <Link
+        href={`/team/${member.name.replace(/\s+/g, '-').toLowerCase()}`}
+        className="sm:hidden block"
+      >
+        <div className="bg-white/10 backdrop-blur-md text-white p-6 rounded-2xl flex flex-col items-center">
+          <Image
+            src={member.image}
+            alt={member.name}
+            width={120}
+            height={120}
+            className="w-28 h-28 rounded-full mb-4 object-cover"
+          />
+          <h2 className="text-2xl font-semibold">{member.name}</h2>
+          <p className="text-sm text-gray-200 mt-2">{member.role}</p>
+        </div>
+         <button
+              onClick={handleStoryClick}
+              className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none"
+            >
+              Read Story →
+            </button>
+      </Link>
+
+      {/* Desktop Modal */}
+      {flippedIndex === index && member.story && !isMobile && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
+          onClick={() => setFlippedIndex(null)}
+        >
+          <div
+            className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-3xl font-bold text-center mb-6">{member.name}</h2>
+            <p className="text-gray-800 text-lg leading-relaxed">{member.role}</p>
+            <div className="text-gray-800 text-lg leading-relaxed space-y-6 mt-4">
+              {member.story.split('\n').map((paragraph, i) => (
+                <p key={i}>{paragraph}</p>
+              ))}
+            </div>
+            <button
+              onClick={() => setFlippedIndex(null)}
+              className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function MeetUsContent() {
   return (
-    <div className="min-h-screen bg-gradient-to-r  text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
       
-      {/* Hero Section */}
+      {/* Hero */}
       <motion.header
         initial="hidden"
         whileInView="visible"
@@ -44,7 +133,7 @@ export default function MeetUsContent() {
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
           className="rounded-full overflow-hidden w-[180px] h-[180px] shadow-[0_0_45px_rgba(255,255,255,0.7)] border-4 border-white"
         >
           <Image
@@ -55,8 +144,6 @@ export default function MeetUsContent() {
             className="object-cover w-full h-full rounded-full"
           />
         </motion.div>
-
-        {/* Hero Heading now white with glow */}
         <h1 className="text-5xl sm:text-6xl font-extrabold text-white drop-shadow-[0_0_25px_rgba(255,255,255,1)]">
           Meet the Burton Pride Team
         </h1>
@@ -81,25 +168,7 @@ export default function MeetUsContent() {
           </motion.h2>
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
             {section.members.map((member, i) => (
-              <motion.div
-                key={i}
-                className="bg-white/10 backdrop-blur-md text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 rounded-2xl p-6 flex flex-col items-center hover:scale-105 hover:shadow-[0_8px_45px_rgba(255,255,255,0.7)] transition-all"
-                initial="hidden"
-                whileInView="visible"
-                viewport={{ once: true }}
-                variants={fadeUp}
-                custom={i}
-              >
-                <Image
-                  src={member.image}
-                  alt={member.name}
-                  width={120}
-                  height={120}
-                  className="w-28 h-28 rounded-full mb-4 object-cover shadow-[0_0_20px_rgba(255,255,255,0.6)]"
-                />
-                <h2 className="text-2xl font-semibold">{member.name}</h2>
-                <p className="text-sm text-gray-200 mt-2">{member.role}</p>
-              </motion.div>
+              <MemberCard key={i} member={member} index={i} />
             ))}
           </div>
         </section>
