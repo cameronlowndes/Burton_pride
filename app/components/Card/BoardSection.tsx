@@ -35,7 +35,9 @@ export default function BoardSection() {
 
     if (isMobile) {
       const query = encodeURIComponent(member.story);
-      router.push(`/team/${member.name.replace(/\s+/g, "-").toLowerCase()}?story=${query}`);
+      router.push(
+        `/team/${member.name.replace(/\s+/g, "-").toLowerCase()}?story=${query}`
+      );
     } else {
       setActiveMember(index);
     }
@@ -100,7 +102,7 @@ export default function BoardSection() {
             className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-3xl font-bold text-center mb-4">
+            <h2 className="text-3xl font-bold text-center mb-2">
               {board.members[activeMember].name}
             </h2>
 
@@ -109,8 +111,16 @@ export default function BoardSection() {
             </p>
 
             <div className="text-lg leading-relaxed space-y-6">
+              {board.members[activeMember].storyTitle && (
+                <h2 className="text-2xl font-bold text-pink-700 text-center mb-4">
+                  {board.members[activeMember].storyTitle}
+                </h2>
+              )}
+
               {board.members[activeMember].story.split("\n").map((p, i) => (
-                <p key={i}>{p}</p>
+                <p key={i} className="text-gray-800">
+                  {p}
+                </p>
               ))}
             </div>
 

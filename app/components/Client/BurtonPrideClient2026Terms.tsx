@@ -25,7 +25,7 @@ const TermsPage = () => {
                 <section>
                     <h2 className="text-2xl font-semibold mb-2">2. About the Event</h2>
                     <p>
-                        Burton Pride 2026 is a free, public event organized by Burton Pride C.I.C. It celebrates and supports the LGBTQIA+ community, promoting inclusion, diversity, and equality. The event is open to all and aims to provide a safe, welcoming, and fun environment where people of all ages and backgrounds can come together in celebration.
+                        Burton Pride 2026 is a free, public event organised by Burton Pride C.I.C. It celebrates and supports the LGBTQIA+ community, promoting inclusion, diversity, and equality. The event is open to all and aims to provide a safe, welcoming, and fun environment where people of all ages and backgrounds can come together in celebration.
                     </p>
                 </section>
 
@@ -76,7 +76,7 @@ const TermsPage = () => {
                     <ul className="list-disc pl-6 space-y-1">
                         <li>No one is allowed on stage without prior approval from Burton Pride C.I.C.</li>
                         <li>Only scheduled performers, event staff, and volunteers assisting with operations may access the stage.</li>
-                        <li>Authorized personnel will be clearly identifiable by high-visibility clothing or badges labeled ‘Committee Team’ or ‘Volunteers’.</li>
+                        <li>Authorised personnel will be clearly identifiable by high-visibility clothing or badges labeled ‘Committee Team’ or ‘Volunteers’.</li>
                         <li>Anyone found on stage without authorization may be asked to leave immediately.</li>
                     </ul>
                 </section>
@@ -104,11 +104,9 @@ const TermsPage = () => {
                     </div>
 
                     <div className="space-y-4">
-                        <h3 className="text-2xl font-semibold">2. Vendor Safety and High-Visibility Requirements</h3>
+                        <h3 className="text-2xl font-semibold">2. Vendor Safety </h3>
                         <ul className="list-disc pl-6 space-y-2">
-                            <li>All vendors must wear high-visibility clothing during setup and shutdown.</li>
-                            <li>Vehicles, including cars, lorries, and service vehicles, will be moving around the site, so high-visibility clothing is mandatory.</li>
-                            <li>Vendors may remove high-visibility clothing once the event is open to the public.</li>
+                            <li>Movement of all vehicles on site, including cars, lorries, and service vehicles, is restricted to a maximum speed of 5 mph, with hazard lights required to be on at all times.</li>
                             <li>Vendors requiring assistance during setup or shutdown should contact a committee member.</li>
                             <li>Burton Pride C.I.C. is committed to providing a safe working environment for all vendors, staff, and volunteers.</li>
                         </ul>

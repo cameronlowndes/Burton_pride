@@ -66,7 +66,7 @@ export default function Collaborate() {
           <div className="space-y-6 text-lg leading-relaxed text-white/95">
             <p>
               Burton Pride C.I.C is a <strong>fully community-led Pride organisation</strong>,
-              created by local people — Simon, Isaac, Cameron, Olga and Ben —
+              created by local people  Simon, Isaac, Cameron, Olga and Ben 
               who care deeply about Burton and the people who live here.
             </p>
 
@@ -84,7 +84,7 @@ export default function Collaborate() {
             </p>
 
             <p>
-              There are easier ways to run events — corporate control and outside influence.
+              There are easier ways to run events  corporate control and outside influence.
               But we choose to stay rooted in Burton because we never want to lose what makes Burton Pride special:
             </p>
 
@@ -94,7 +94,7 @@ export default function Collaborate() {
 
             <p>
               When you sponsor Burton Pride, you are investing directly into the local
-              community and helping us keep Pride independent, inclusive, and full of heart —
+              community and helping us keep Pride independent, inclusive, and full of heart 
               exactly how Pride should be.
             </p>
           </div>

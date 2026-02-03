@@ -1,9 +1,10 @@
 'use client';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { sections } from '@/data/TeamData';
 
 export default function TeamMemberPage() {
   const params = useParams();
+  const router = useRouter();
   const memberName = params.member;
 
   const member = sections
@@ -13,11 +14,42 @@ export default function TeamMemberPage() {
   if (!member) return <p className="text-white p-8">Member not found</p>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 flex flex-col items-center p-8">
-      <img src={member.image} alt={member.name} className="w-40 h-40 rounded-full mb-6" />
-      <h1 className="text-4xl font-bold text-white mb-4">{member.name}</h1>
-      <h2 className="text-xl text-white/80 mb-6">{member.role}</h2>
-      <p className="text-white max-w-xl text-center">{member.story}</p>
+    <div className="min-h-screen bg-gradient-to-r flex flex-col items-center p-8">
+
+      <img
+        src={member.image}
+        alt={member.name}
+        className="w-40 h-40 rounded-full mb-6 object-cover shadow-lg"
+      />
+
+      <h1 className="text-4xl font-bold text-white mb-2 text-center">
+        {member.name}
+      </h1>
+
+      <h2 className="text-xl text-white/80 mb-6 text-center">
+        {member.role}
+      </h2>
+
+      {member.storyTitle && (
+        <h2 className="text-2xl font-bold text-yellow-300 mb-4 text-center">
+          {member.storyTitle}
+        </h2>
+      )}
+
+      <div className="text-white max-w-2xl text-center space-y-4 leading-relaxed mb-10">
+        {member.story.split("\n").map((p, i) => (
+          <p key={i}>{p}</p>
+        ))}
+      </div>
+
+
+      <button
+        onClick={() => router.back()}
+        className="mt-auto bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-full font-semibold shadow-md transition backdrop-blur-md cursor-pointer"
+      >
+        ← Back to Team
+      </button>
+
     </div>
   );
 }

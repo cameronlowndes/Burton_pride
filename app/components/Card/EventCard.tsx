@@ -39,11 +39,10 @@ const EventCard: React.FC<EventCardProps> = ({
   onImageClick
 }) => (
   <div
-    className={`bg-white text-black p-6 rounded-lg shadow-md w-full max-w-sm transition-transform hover:scale-105 ${
-      isEventToday
+    className={`bg-white text-black p-6 rounded-lg shadow-md w-full max-w-sm transition-transform hover:scale-105 ${isEventToday
         ? 'border-4 border-yellow-400 shadow-yellow-300 animate-fadeInUp'
         : 'animate-fadeInUp'
-    }`}
+      }`}
   >
     {image && (
       <div className="mb-4 cursor-pointer" onClick={() => onImageClick(image)}>
@@ -74,18 +73,13 @@ const EventCard: React.FC<EventCardProps> = ({
           </div>
         )}
 
-        {/* Pride Event Note */}
-        {name === "Pride Event" && (
-          <div className="bg-red-200 text-red-800 font-bold px-4 py-2 rounded shadow-md text-center mb-2 animate-pulse w-full">
-            ⚠️ Note: This event is still in the works. Details may change!
-          </div>
-        )}
+    
 
-        {/* {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
+        {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
           <div className="bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-md text-center animate-pulse mb-2">
             🎉 This event is FREE and open to the public – No tickets required!
           </div>
-        )} */}
+        )}
 
         {details && (
           <div className="mt-2">
@@ -148,8 +142,9 @@ const EventPage: React.FC = () => {
     const baseEvents: EventCardProps[] = [
       {
         name: "Pride Event",
-        description: "Join us for a vibrant celebration on Shobnall Fields in Burton Please Note this Event is still in the works 🏳️‍🌈",
+        description: "Join us for a vibrant celebration on Shobnall Fields in Burton 🏳️‍🌈",
         date: "2026-06-27",
+        time: "12:00 PM - 6:00 PM",   // ✅ ADDED
         mapLink: "https://www.google.com/maps?q=Shobnall+Fields+Burton",
         isEventPassed: isEventInPast("2026-06-27"),
         isEventToday: isEventToday("2026-06-27"),
