@@ -1,16 +1,12 @@
 'use client';
 
-import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import Link from 'next/link';
 import Countdown from '../Countdown';
 import EventCard from '../Card/EventCard';
-import CompetitionModal from './CompetitionModal';
 
 export default function HomeClient() {
-  const [isModalOpen, setIsModalOpen] = useState(false); // <-- state for modal
-
   return (
     <motion.div
       className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-32"
@@ -72,26 +68,36 @@ export default function HomeClient() {
         </motion.p>
       </motion.section>
 
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
+      {/* Competition Section (Centered) */}
+      <motion.section
+        className="mt-16 w-full flex justify-center"
+        initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.8 }}
-        className="mt-8 w-full max-w-4xl px-4 sm:px-0"
+        transition={{ delay: 1.1 }}
       >
-        {/* Button to open Competition Modal */}
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-yellow-400 text-black px-10 py-4 rounded-full font-bold text-xl hover:bg-yellow-300 transition transform hover:scale-110 shadow-lg shadow-yellow-400/50 mb-6"
-        >
-          Enter the Pride Competition
-        </button>
+        <div className="bg-white/10 backdrop-blur-lg p-10 rounded-3xl shadow-2xl border border-white/20 w-full max-w-3xl text-center flex flex-col items-center">
+          <h2 className="text-3xl sm:text-4xl font-extrabold mb-4">
+            🌈 Windows Of Hope Competition 2026
+          </h2>
 
-        {/* Competition Modal */}
-        <CompetitionModal open={isModalOpen} onClose={() => setIsModalOpen(false)} />
+          <p className="text-lg mb-6 text-white/90 leading-relaxed">
+            Show your creativity and Pride spirit! Enter our competition for a chance to win amazing prizes.
+            Upload your design, photo, or artwork and take part in the celebration.
+          </p>
 
-        {/* Countdown */}
-        <Countdown />
-      </motion.div>
+          <p className="font-bold text-xl mb-6">Entry Fee: £2</p>
+
+          <Link
+            href="/Competition"
+            className="bg-yellow-400 text-black px-10 py-4 rounded-full font-bold text-xl hover:bg-yellow-300 transition transform hover:scale-110 shadow-lg shadow-yellow-400/50 animate-pulse"
+          >
+            Enter Competition
+          </Link>
+        </div>
+      </motion.section>
+
+      {/* Countdown */}
+      <Countdown />
 
       {/* Signup Section */}
       <motion.section

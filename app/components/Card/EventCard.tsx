@@ -73,8 +73,6 @@ const EventCard: React.FC<EventCardProps> = ({
           </div>
         )}
 
-    
-
         {!isEventPassed && (name === "Pride Event" || name === "Pride After Party") && (
           <div className="bg-yellow-300 text-black text-base font-bold px-4 py-2 rounded shadow-md text-center animate-pulse mb-2">
             🎉 This event is FREE and open to the public – No tickets required!
