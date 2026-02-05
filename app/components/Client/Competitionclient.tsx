@@ -7,21 +7,81 @@ import Image from 'next/image';
 export default function CompetitionPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    businessName: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    address: '',
+    website: '',
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** Preview uploaded image */
   const handleImagePreview = (file: File) => {
     const reader = new FileReader();
     reader.onloadend = () => setPreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  /** Submit form -> go to Stripe checkout in a floating window */
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!consent) {
       alert('You must agree to the terms before submitting!');
       return;
     }
-    alert('Frontend only — entry submitted!');
+
+    // Basic validation for required fields
+    const { businessName, contactName, email, phone, address } = formData;
+    if (!businessName || !contactName || !email || !phone || !address) {
+      alert('Please fill out all required fields!');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData }),
+      });
+
+      const data = await res.json();
+
+      if (data.url) {
+        // Open Stripe checkout in a floating window
+        window.open(
+          data.url,
+          'stripeCheckout',
+          'width=500,height=800,resizable,scrollbars=yes'
+        );
+      } else {
+        alert('Error creating checkout session.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Test Auto-Fill for testing only — remove before going live */
+  const autoFillForm = () => {
+    setFormData({
+      businessName: 'Test Business Ltd',
+      contactName: 'John Doe',
+      email: 'test@example.com',
+      phone: '0123456789',
+      address: '123 Test Street, Burton',
+      website: 'https://example.com',
+    });
+    setConsent(true);
+    setPreview('/image/Logo.png');
   };
 
   return (
@@ -71,36 +131,60 @@ export default function CompetitionPage() {
           <input
             type="text"
             placeholder="Business Name"
+            value={formData.businessName}
+            onChange={(e) =>
+              setFormData({ ...formData, businessName: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
           <input
             type="text"
             placeholder="Contact Name"
+            value={formData.contactName}
+            onChange={(e) =>
+              setFormData({ ...formData, contactName: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
           <input
             type="email"
             placeholder="Email Address"
+            value={formData.email}
+            onChange={(e) =>
+              setFormData({ ...formData, email: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
           <input
             type="tel"
             placeholder="Phone Number"
+            value={formData.phone}
+            onChange={(e) =>
+              setFormData({ ...formData, phone: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
           <input
             type="text"
             placeholder="Business Address"
+            value={formData.address}
+            onChange={(e) =>
+              setFormData({ ...formData, address: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
           <input
             type="text"
             placeholder="Website / Social Media (optional)"
+            value={formData.website}
+            onChange={(e) =>
+              setFormData({ ...formData, website: e.target.value })
+            }
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
           />
 
@@ -111,7 +195,9 @@ export default function CompetitionPage() {
             className="cursor-pointer flex items-center justify-center h-40 border-2 border-dashed border-white/50 rounded-xl bg-white/10 hover:bg-white/20 transition relative overflow-hidden"
           >
             {!preview ? (
-              <span className="text-white/80 font-medium">Click to Upload Image</span>
+              <span className="text-white/80 font-medium">
+                Click to Upload Image
+              </span>
             ) : (
               <img
                 src={preview}
@@ -123,9 +209,10 @@ export default function CompetitionPage() {
               type="file"
               accept="image/*"
               ref={fileInputRef}
-              onChange={(e) => e.target.files && handleImagePreview(e.target.files[0])}
+              onChange={(e) =>
+                e.target.files && handleImagePreview(e.target.files[0])
+              }
               className="hidden"
-              required
             />
           </div>
 
@@ -137,15 +224,27 @@ export default function CompetitionPage() {
               onChange={(e) => setConsent(e.target.checked)}
               className="w-5 h-5 rounded border-white/50 text-yellow-400 focus:ring-yellow-400"
             />
-            <span className="text-white/90 font-medium">I agree to the terms and conditions</span>
+            <span className="text-white/90 font-medium">
+              I agree to the terms and conditions
+            </span>
           </label>
 
           {/* Submit */}
           <button
             type="submit"
-            className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg shadow-pink-500/50 hover:scale-105 transition transform"
+            disabled={loading}
+            className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg shadow-pink-500/50 hover:scale-105 transition transform disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            Submit Entry
+            {loading ? 'Processing...' : 'Submit & Pay'}
+          </button>
+
+          {/* Test Auto-Fill Button — REMOVE BEFORE GO LIVE */}
+          <button
+            type="button"
+            onClick={autoFillForm}
+            className="mt-2 bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-300 transition"
+          >
+            Auto-Fill Form (Test Only)
           </button>
         </motion.form>
 
