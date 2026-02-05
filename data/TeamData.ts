@@ -21,7 +21,12 @@ export const sections: Section[] = [
         name: 'Simon Whale',
         image: '/image/PeoplePicturePng/simon.png',
         role: 'Founder & Organizer | He/Him',
-        story: 'Need To BE ADDED'
+        storyTitle: 'Why I Joined Burton Pride', 
+        story: ` For me, being part of Burton Pride is about creating understanding, hope, and long-lasting change, not just planning events. Being a part of something that unites people, dismantles barriers, and serves as a constant reminder to our community that love and respect know no bounds makes me proud. 
+
+The effort is rewarded by every smile, every thank-you note, and every person who says they at last feel heard. For this reason, I'm still dedicated to this endeavour and to making Burton a more accepting and inclusive place for everyone.
+
+I witnessed for many years how neurodiverse people and members of the LGBTQ+ community frequently felt alone, invisible, or uncertain of their place in the world. I was aware that Burton-on-Trent had the capacity to become a community that celebrates diversity rather than merely tolerating it. I wanted to help create environments where people of diverse origins, families, and young people can feel free to be who they are.`
       },
       {
         name: 'Isaac Timmins',
@@ -39,7 +44,7 @@ export const sections: Section[] = [
         name: 'Cameron Lowndes',
         image: '/image/PeoplePicturePng/cameron.png',
         role: 'Board Member | He/Him/His/They',
-        storyTitle: 'Why I Joined Burton Pride',   // ✅ NEW TITLE FIELD
+        storyTitle: 'Why I Joined Burton Pride', 
         story: `
 
 I joined Burton Pride because I deeply believe in the power of community. Pride is not just a celebration it’s about connection, support, and belonging. For me, Pride should always be community-first, not company-first. I want to help build something that reflects the people it serves, a place where everyone feels seen, included, and valued.
