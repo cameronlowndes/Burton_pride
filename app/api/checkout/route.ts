@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: `${process.env.NEXT_PUBLIC_URL}/competition/success`,
+      success_url: `${process.env.NEXT_PUBLIC_URL}/Competition/success`,
       cancel_url: `${process.env.NEXT_PUBLIC_URL}/competition`,
       customer_email: email,
     });

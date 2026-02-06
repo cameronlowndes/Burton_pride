@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
+import { uploadFiles } from '@/lib/uploadthing'; // ✅ UploadThing client helper
 
 export default function CompetitionPage() {
   const [preview, setPreview] = useState<string | null>(null);
@@ -22,106 +22,78 @@ export default function CompetitionPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  /** Preview uploaded image */
   const handleImagePreview = (file: File) => {
     setSelectedFile(file);
-
     const reader = new FileReader();
     reader.onloadend = () => setPreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
-  /** Remove uploaded image */
   const removeImage = () => {
     setPreview(null);
     setSelectedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  /** Upload image to Supabase Storage and return public URL */
-  const uploadImageToSupabase = async (file: File) => {
-    // Basic file checks (optional but recommended)
+  // ✅ Upload image via UploadThing (NEW backend)
+  const uploadImageToUploadThing = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       throw new Error('Please upload an image file.');
     }
+
     const maxSizeMb = 8;
     if (file.size > maxSizeMb * 1024 * 1024) {
       throw new Error(`Image too large. Max ${maxSizeMb}MB.`);
     }
 
-    const ext = file.name.split('.').pop() || 'jpg';
-    const fileName = `${crypto.randomUUID()}.${ext}`;
-    const filePath = `uploads/${fileName}`;
+    const uploaded = await uploadFiles('imageUploader', {
+      files: [file],
+    });
 
-    const { error: uploadError } = await supabase.storage
-      .from('competition-images')
-      .upload(filePath, file, {
-        contentType: file.type,
-        upsert: false,
-      });
+    const url = uploaded?.[0]?.url;
+    if (!url) throw new Error('Image upload failed');
 
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = supabase.storage
-      .from('competition-images')
-      .getPublicUrl(filePath);
-
-    return urlData.publicUrl;
+    return url;
   };
 
-  /** Submit form */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!consent) {
-      alert('You must agree to the terms before submitting!');
-      return;
-    }
+    if (!consent) return alert('You must agree to the terms before submitting!');
 
     const { businessName, contactName, email, phone, address } = formData;
     if (!businessName || !contactName || !email || !phone || !address) {
-      alert('Please fill out all required fields!');
-      return;
+      return alert('Please fill out all required fields!');
     }
 
     try {
       setLoading(true);
 
-      // 1) Upload image (if selected)
+      // 1) upload image (optional) via UploadThing
       let imageUrl: string | null = null;
       if (selectedFile) {
-        imageUrl = await uploadImageToSupabase(selectedFile);
+        imageUrl = await uploadImageToUploadThing(selectedFile);
       }
 
-      // 2) Save entry to Supabase DB
-      const { data: inserted, error: insertError } = await supabase
-        .from('competition_entries')
-        .insert([
-          {
-            business_name: formData.businessName,
-            contact_name: formData.contactName,
-            email: formData.email,
-            phone: formData.phone,
-            address: formData.address,
-            website: formData.website || null,
-            image_url: imageUrl,
-            payment_status: 'pending',
-          },
-        ])
-        .select('id')
-        .single();
+      // 2) save entry via your server
+      const entryRes = await fetch('/api/entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, imageUrl }),
+      });
 
-      if (insertError) throw insertError;
+      const entryData = await entryRes.json();
+      if (!entryRes.ok) {
+        throw new Error(entryData?.error || 'Failed to save entry');
+      }
 
-     
+      const entryId = entryData.entryId as string;
+
+      // 3) create Stripe checkout session
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formData,
-          entryId: inserted?.id,
-          imageUrl,
-        }),
+        body: JSON.stringify({ ...formData, entryId, imageUrl }),
       });
 
       const data = await res.json();
@@ -133,7 +105,6 @@ export default function CompetitionPage() {
           'width=500,height=800,resizable,scrollbars=yes'
         );
       } else {
-       
         alert('Entry saved, but Stripe session failed. Please try again.');
       }
     } catch (err: any) {
@@ -144,7 +115,6 @@ export default function CompetitionPage() {
     }
   };
 
-  /** Test Auto-Fill for testing only — remove before going live */
   const autoFillForm = () => {
     setFormData({
       businessName: 'Test Business Ltd',
@@ -155,8 +125,6 @@ export default function CompetitionPage() {
       website: 'https://example.com',
     });
     setConsent(true);
-
-    // NOTE: this only sets preview. It does not upload a file.
     setPreview('/image/Logo.png');
     setSelectedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -169,7 +137,6 @@ export default function CompetitionPage() {
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
     >
-      {/* Logo */}
       <motion.div
         className="animate-scaleUp rounded-full overflow-hidden shadow-2xl shadow-pink-400/50 border-4 border-white mb-8"
         style={{ width: 180, height: 180 }}
@@ -186,7 +153,6 @@ export default function CompetitionPage() {
         />
       </motion.div>
 
-      {/* Page Title */}
       <motion.h1
         className="text-5xl sm:text-6xl font-extrabold mb-12 text-center drop-shadow-lg"
         initial={{ y: -20, opacity: 0 }}
@@ -196,7 +162,6 @@ export default function CompetitionPage() {
         🌈 Windows Of Hope Competition 2026
       </motion.h1>
 
-      {/* Form layout */}
       <div className="flex flex-col lg:flex-row items-start gap-12 w-full max-w-6xl">
         <motion.form
           onSubmit={handleSubmit}
@@ -205,7 +170,6 @@ export default function CompetitionPage() {
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.6, delay: 0.2 }}
         >
-          {/* Fields */}
           <input
             type="text"
             placeholder="Business Name"
@@ -262,22 +226,11 @@ export default function CompetitionPage() {
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
           />
 
-          {/* Upload */}
           <label className="font-semibold mt-2">Upload Photo / Design</label>
 
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="
-              cursor-pointer
-              w-full max-w-sm mx-auto
-              aspect-square
-              flex items-center justify-center
-              border-2 border-dashed border-white/50
-              rounded-xl
-              bg-white/10 hover:bg-white/20
-              transition
-              relative overflow-hidden
-            "
+            className="cursor-pointer w-full max-w-sm mx-auto aspect-square flex items-center justify-center border-2 border-dashed border-white/50 rounded-xl bg-white/10 hover:bg-white/20 transition relative overflow-hidden"
           >
             {!preview ? (
               <span className="text-white/80 font-medium text-center px-4">
@@ -288,13 +241,7 @@ export default function CompetitionPage() {
                 <img
                   src={preview}
                   alt="Preview"
-                  className="
-                    absolute inset-0
-                    w-full h-full
-                    object-cover
-                    rounded-xl
-                    transition transform hover:scale-105
-                  "
+                  className="absolute inset-0 w-full h-full object-cover rounded-xl transition transform hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 flex items-center justify-center text-white font-semibold transition">
                   Change Image
@@ -323,7 +270,6 @@ export default function CompetitionPage() {
             </button>
           )}
 
-          {/* Consent */}
           <label className="flex items-center gap-3 mt-4">
             <input
               type="checkbox"
@@ -336,7 +282,6 @@ export default function CompetitionPage() {
             </span>
           </label>
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
@@ -345,7 +290,6 @@ export default function CompetitionPage() {
             {loading ? 'Processing...' : 'Submit & Pay'}
           </button>
 
-          {/* Test Auto-Fill Button — REMOVE BEFORE GO LIVE */}
           <button
             type="button"
             onClick={autoFillForm}
@@ -355,7 +299,6 @@ export default function CompetitionPage() {
           </button>
         </motion.form>
 
-        {/* Info */}
         <motion.div
           className="flex-1 flex flex-col justify-center gap-6"
           initial={{ x: 50, opacity: 0 }}
@@ -367,9 +310,7 @@ export default function CompetitionPage() {
             chance to win amazing prizes. Upload your design, photo, or artwork
             and take part in the celebration.
           </p>
-          <p className="text-lg sm:text-xl font-bold text-white/90">
-            Entry Fee: £2
-          </p>
+          <p className="text-lg sm:text-xl font-bold text-white/90">Entry Fee: £2</p>
         </motion.div>
       </div>
     </motion.div>
