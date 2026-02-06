@@ -3,11 +3,14 @@
 import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
+import { supabase } from '@/lib/supabase';
 
 export default function CompetitionPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const [formData, setFormData] = useState({
     businessName: '',
     contactName: '',
@@ -16,16 +19,57 @@ export default function CompetitionPage() {
     address: '',
     website: '',
   });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** Preview uploaded image */
   const handleImagePreview = (file: File) => {
+    setSelectedFile(file);
+
     const reader = new FileReader();
     reader.onloadend = () => setPreview(reader.result as string);
     reader.readAsDataURL(file);
   };
 
-  /** Submit form -> go to Stripe checkout in a floating window */
+  /** Remove uploaded image */
+  const removeImage = () => {
+    setPreview(null);
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  /** Upload image to Supabase Storage and return public URL */
+  const uploadImageToSupabase = async (file: File) => {
+    // Basic file checks (optional but recommended)
+    if (!file.type.startsWith('image/')) {
+      throw new Error('Please upload an image file.');
+    }
+    const maxSizeMb = 8;
+    if (file.size > maxSizeMb * 1024 * 1024) {
+      throw new Error(`Image too large. Max ${maxSizeMb}MB.`);
+    }
+
+    const ext = file.name.split('.').pop() || 'jpg';
+    const fileName = `${crypto.randomUUID()}.${ext}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('competition-images')
+      .upload(filePath, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: urlData } = supabase.storage
+      .from('competition-images')
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  };
+
+  /** Submit form */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -34,7 +78,6 @@ export default function CompetitionPage() {
       return;
     }
 
-    // Basic validation for required fields
     const { businessName, contactName, email, phone, address } = formData;
     if (!businessName || !contactName || !email || !phone || !address) {
       alert('Please fill out all required fields!');
@@ -44,27 +87,58 @@ export default function CompetitionPage() {
     try {
       setLoading(true);
 
+      // 1) Upload image (if selected)
+      let imageUrl: string | null = null;
+      if (selectedFile) {
+        imageUrl = await uploadImageToSupabase(selectedFile);
+      }
+
+      // 2) Save entry to Supabase DB
+      const { data: inserted, error: insertError } = await supabase
+        .from('competition_entries')
+        .insert([
+          {
+            business_name: formData.businessName,
+            contact_name: formData.contactName,
+            email: formData.email,
+            phone: formData.phone,
+            address: formData.address,
+            website: formData.website || null,
+            image_url: imageUrl,
+            payment_status: 'pending',
+          },
+        ])
+        .select('id')
+        .single();
+
+      if (insertError) throw insertError;
+
+     
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData }),
+        body: JSON.stringify({
+          ...formData,
+          entryId: inserted?.id,
+          imageUrl,
+        }),
       });
 
       const data = await res.json();
 
       if (data.url) {
-        // Open Stripe checkout in a floating window
         window.open(
           data.url,
           'stripeCheckout',
           'width=500,height=800,resizable,scrollbars=yes'
         );
       } else {
-        alert('Error creating checkout session.');
+       
+        alert('Entry saved, but Stripe session failed. Please try again.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Something went wrong.');
+      alert(err?.message || 'Something went wrong.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +155,11 @@ export default function CompetitionPage() {
       website: 'https://example.com',
     });
     setConsent(true);
+
+    // NOTE: this only sets preview. It does not upload a file.
     setPreview('/image/Logo.png');
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -152,9 +230,7 @@ export default function CompetitionPage() {
             type="email"
             placeholder="Email Address"
             value={formData.email}
-            onChange={(e) =>
-              setFormData({ ...formData, email: e.target.value })
-            }
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
@@ -162,9 +238,7 @@ export default function CompetitionPage() {
             type="tel"
             placeholder="Phone Number"
             value={formData.phone}
-            onChange={(e) =>
-              setFormData({ ...formData, phone: e.target.value })
-            }
+            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
             required
           />
@@ -188,23 +262,46 @@ export default function CompetitionPage() {
             className="p-3 rounded-lg border border-white/30 text-black font-medium"
           />
 
-          {/* Custom Upload Button */}
+          {/* Upload */}
           <label className="font-semibold mt-2">Upload Photo / Design</label>
+
           <div
             onClick={() => fileInputRef.current?.click()}
-            className="cursor-pointer flex items-center justify-center h-40 border-2 border-dashed border-white/50 rounded-xl bg-white/10 hover:bg-white/20 transition relative overflow-hidden"
+            className="
+              cursor-pointer
+              w-full max-w-sm mx-auto
+              aspect-square
+              flex items-center justify-center
+              border-2 border-dashed border-white/50
+              rounded-xl
+              bg-white/10 hover:bg-white/20
+              transition
+              relative overflow-hidden
+            "
           >
             {!preview ? (
-              <span className="text-white/80 font-medium">
+              <span className="text-white/80 font-medium text-center px-4">
                 Click to Upload Image
               </span>
             ) : (
-              <img
-                src={preview}
-                alt="Preview"
-                className="w-full h-full object-cover rounded-xl transform hover:scale-105 transition"
-              />
+              <>
+                <img
+                  src={preview}
+                  alt="Preview"
+                  className="
+                    absolute inset-0
+                    w-full h-full
+                    object-cover
+                    rounded-xl
+                    transition transform hover:scale-105
+                  "
+                />
+                <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 flex items-center justify-center text-white font-semibold transition">
+                  Change Image
+                </div>
+              </>
             )}
+
             <input
               type="file"
               accept="image/*"
@@ -216,7 +313,17 @@ export default function CompetitionPage() {
             />
           </div>
 
-          {/* Consent Checkbox */}
+          {preview && (
+            <button
+              type="button"
+              onClick={removeImage}
+              className="w-full max-w-sm mx-auto mt-2 bg-white/20 hover:bg-white/30 text-white font-semibold py-2 rounded-lg transition cursor-pointer"
+            >
+              Remove Photo
+            </button>
+          )}
+
+          {/* Consent */}
           <label className="flex items-center gap-3 mt-4">
             <input
               type="checkbox"
@@ -248,7 +355,7 @@ export default function CompetitionPage() {
           </button>
         </motion.form>
 
-        {/* Info text */}
+        {/* Info */}
         <motion.div
           className="flex-1 flex flex-col justify-center gap-6"
           initial={{ x: 50, opacity: 0 }}
@@ -256,8 +363,9 @@ export default function CompetitionPage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <p className="text-lg sm:text-xl text-white/90 leading-relaxed">
-            Show your creativity and Pride spirit! Enter our competition for a chance to win amazing prizes.
-            Upload your design, photo, or artwork and take part in the celebration.
+            Show your creativity and Pride spirit! Enter our competition for a
+            chance to win amazing prizes. Upload your design, photo, or artwork
+            and take part in the celebration.
           </p>
           <p className="text-lg sm:text-xl font-bold text-white/90">
             Entry Fee: £2

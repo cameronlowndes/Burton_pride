@@ -1,19 +1,18 @@
+
 import Stripe from 'stripe';
 import { NextRequest, NextResponse } from 'next/server';
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('STRIPE_SECRET_KEY is not set');
-}
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2023-08-16' as any,
+});
 
 export async function POST(req: NextRequest) {
-  try {
-    const { businessName, contactName, email } = await req.json();
+  const { businessName, contactName, email, phone, address } = await req.json();
 
+  try {
     const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
       payment_method_types: ['card'],
+      mode: 'payment',
       line_items: [
         {
           price_data: {
@@ -22,7 +21,7 @@ export async function POST(req: NextRequest) {
               name: 'Windows of Hope Competition Entry',
               description: `Entry by ${businessName} (${contactName})`,
             },
-            unit_amount: 200,
+            unit_amount: 200, // £2 in pence
           },
           quantity: 1,
         },
@@ -33,11 +32,8 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    return NextResponse.json(
-      { error: 'Stripe checkout failed' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
