@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useParams, useRouter } from 'next/navigation';
-import { sections } from '@/data/TeamData';
+import { useParams, useRouter } from "next/navigation";
+import { sections } from "@/data/TeamData";
 
 export default function TeamMemberPage() {
   const params = useParams();
@@ -9,18 +9,22 @@ export default function TeamMemberPage() {
   const memberName = params.member as string;
 
   const member = sections
-    .flatMap(section => section.members)
-    .find(m => m.name.replace(/\s+/g, '-').toLowerCase() === memberName);
+    .flatMap((section) => section.members)
+    .find((m) => m.name.replace(/\s+/g, "-").toLowerCase() === memberName);
 
   if (!member) {
     return <p className="text-white p-8">Member not found</p>;
   }
 
+  const storyLines =
+    member.story?.trim()
+      ? member.story.split("\n").filter((line) => line.trim())
+      : [];
+
   return (
     <div
       className="
         min-h-screen
-        +
         flex flex-col items-center
         px-6
         pt-[calc(env(safe-area-inset-top)+96px)]
@@ -40,9 +44,7 @@ export default function TeamMemberPage() {
       </h1>
 
       {/* ROLE */}
-      <h2 className="text-xl text-white/80 mb-6 text-center">
-        {member.role}
-      </h2>
+      <h2 className="text-xl text-white/80 mb-6 text-center">{member.role}</h2>
 
       {/* STORY TITLE */}
       {member.storyTitle && (
@@ -53,9 +55,13 @@ export default function TeamMemberPage() {
 
       {/* STORY */}
       <div className="text-white max-w-2xl text-center space-y-4 leading-relaxed mb-10">
-        {member.story.split('\n').map((p, i) => (
-          <p key={i}>{p}</p>
-        ))}
+        {storyLines.length > 0 ? (
+          storyLines.map((p, i) => <p key={i}>{p}</p>)
+        ) : (
+          <p className="text-white/80 italic">
+            Story coming soon.
+          </p>
+        )}
       </div>
 
       {/* BACK BUTTON */}
