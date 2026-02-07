@@ -31,7 +31,7 @@ export default function BoardSection() {
   if (!board) return null;
 
   const handleStoryClick = (member: any, index: number) => {
-    if (!member.story) return;
+    if (!member?.story) return;
 
     if (isMobile) {
       const query = encodeURIComponent(member.story);
@@ -42,6 +42,9 @@ export default function BoardSection() {
       setActiveMember(index);
     }
   };
+
+  const active = activeMember !== null ? board.members[activeMember] : null;
+  const activeStoryLines = active?.story ? active.story.split("\n").filter(Boolean) : [];
 
   return (
     <>
@@ -80,77 +83,73 @@ export default function BoardSection() {
               <h3 className="text-2xl font-semibold">{member.name}</h3>
               <p className="text-sm text-gray-200 mt-2">{member.role}</p>
 
-              {member.story && (
+              {/* Button only shows if story exists */}
+              {member.story ? (
                 <button
+                  type="button"
                   onClick={() => handleStoryClick(member, i)}
                   className="mt-4 bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition hover:scale-105 cursor-pointer"
                 >
                   Read Story →
                 </button>
-              )}
+              ) : null}
             </motion.div>
           ))}
         </div>
       </section>
 
       {/* 💻 DESKTOP STORY MODAL */}
-      {activeMember !== null &&
-        board.members[activeMember].story &&
-        !isMobile && (
+      {active && active.story && !isMobile && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
+          onClick={() => setActiveMember(null)}
+        >
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
-            onClick={() => setActiveMember(null)}
+            className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div
-              className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* IMAGE + NAME */}
-              <div className="flex flex-col items-center mb-6">
-                <Image
-                  src={board.members[activeMember].image}
-                  alt={board.members[activeMember].name}
-                  width={150}
-                  height={150}
-                  className="w-36 h-36 rounded-full object-cover mb-4 shadow-[0_0_25px_rgba(236,72,153,0.9)]"
-                />
+            {/* IMAGE + NAME */}
+            <div className="flex flex-col items-center mb-6">
+              <Image
+                src={active.image}
+                alt={active.name}
+                width={150}
+                height={150}
+                className="w-36 h-36 rounded-full object-cover mb-4 shadow-[0_0_25px_rgba(236,72,153,0.9)]"
+              />
 
-                <h2 className="text-3xl font-bold text-center">
-                  {board.members[activeMember].name}
-                </h2>
+              <h2 className="text-3xl font-bold text-center">{active.name}</h2>
 
-                <p className="text-center text-gray-600 mt-1">
-                  {board.members[activeMember].role}
-                </p>
-              </div>
-
-              {/* STORY */}
-              <div className="text-lg leading-relaxed space-y-6">
-                {board.members[activeMember].storyTitle && (
-                  <h3 className="text-2xl font-bold text-pink-700 text-center mb-4">
-                    {board.members[activeMember].storyTitle}
-                  </h3>
-                )}
-
-                {board.members[activeMember].story
-                  .split("\n")
-                  .map((p, i) => (
-                    <p key={i} className="text-gray-800">
-                      {p}
-                    </p>
-                  ))}
-              </div>
-
-              {/* CLOSE */}
-              <button
-                onClick={() => setActiveMember(null)}
-                className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
-              >
-                ← Back
-              </button>
+              <p className="text-center text-gray-600 mt-1">{active.role}</p>
             </div>
+
+            {/* STORY */}
+            <div className="text-lg leading-relaxed space-y-6">
+              {active.storyTitle ? (
+                <h3 className="text-2xl font-bold text-pink-700 text-center mb-4">
+                  {active.storyTitle}
+                </h3>
+              ) : null}
+
+              {/* ✅ SAFE: only split if story exists */}
+              {activeStoryLines.map((p, i) => (
+                <p key={i} className="text-gray-800">
+                  {p}
+                </p>
+              ))}
+            </div>
+
+            {/* CLOSE */}
+            <button
+              type="button"
+              onClick={() => setActiveMember(null)}
+              className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
+            >
+              ← Back
+            </button>
           </div>
-        )}
+        </div>
+      )}
     </>
   );
 }
