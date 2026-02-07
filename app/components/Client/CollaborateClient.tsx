@@ -34,7 +34,7 @@ export default function Collaborate() {
       >
         <div className="p-2 rounded-full bg-white/20 backdrop-blur-md shadow-xl">
           <Image
-            src="/image/logo.jpg"
+            src="/image/Logo.png"
             alt="Burton Pride Logo"
             width={170}
             height={170}
@@ -109,7 +109,6 @@ export default function Collaborate() {
         </div>
       </motion.section>
 
-      {/* 👇 MEET THE TEAM ADDED HERE 👇 */}
       <div className="w-full mt-24">
         <BoardSection/>
       </div>
