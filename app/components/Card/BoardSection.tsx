@@ -31,7 +31,7 @@ export default function BoardSection() {
   if (!board) return null;
 
   const handleStoryClick = (member: any, index: number) => {
-    if (!member?.story) return;
+    if (!member?.story?.trim()) return;
 
     if (isMobile) {
       const query = encodeURIComponent(member.story);
@@ -43,8 +43,13 @@ export default function BoardSection() {
     }
   };
 
-  const active = activeMember !== null ? board.members[activeMember] : null;
-  const activeStoryLines = active?.story ? active.story.split("\n").filter(Boolean) : [];
+  const active =
+    activeMember !== null && activeMember >= 0 && activeMember < board.members.length
+      ? board.members[activeMember]
+      : null;
+
+  const activeStoryLines =
+    active?.story?.trim() ? active.story.split("\n").filter((l: string) => l.trim()) : [];
 
   return (
     <>
@@ -62,44 +67,48 @@ export default function BoardSection() {
         </motion.h2>
 
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
-          {board.members.map((member, i) => (
-            <motion.div
-              key={i}
-              className="bg-white/10 backdrop-blur-md text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 rounded-2xl p-6 flex flex-col items-center transition-all duration-300 hover:scale-105"
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true }}
-              variants={fadeUp}
-              custom={i}
-            >
-              <Image
-                src={member.image}
-                alt={member.name}
-                width={120}
-                height={120}
-                className="w-28 h-28 rounded-full mb-4 object-cover shadow-[0_0_20px_rgba(255,255,255,0.6)]"
-              />
+          {board.members.map((member, i) => {
+            const hasStory = !!member.story?.trim();
 
-              <h3 className="text-2xl font-semibold">{member.name}</h3>
-              <p className="text-sm text-gray-200 mt-2">{member.role}</p>
+            return (
+              <motion.div
+                key={i}
+                className="bg-white/10 backdrop-blur-md text-white shadow-[0_8px_30px_rgba(0,0,0,0.5)] border border-white/20 rounded-2xl p-6 flex flex-col items-center transition-all duration-300 hover:scale-105"
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true }}
+                variants={fadeUp}
+                custom={i}
+              >
+                <Image
+                  src={member.image}
+                  alt={member.name}
+                  width={120}
+                  height={120}
+                  className="w-28 h-28 rounded-full mb-4 object-cover shadow-[0_0_20px_rgba(255,255,255,0.6)]"
+                />
 
-              {/* Button only shows if story exists */}
-              {member.story ? (
-                <button
-                  type="button"
-                  onClick={() => handleStoryClick(member, i)}
-                  className="mt-4 bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition hover:scale-105 cursor-pointer"
-                >
-                  Read Story →
-                </button>
-              ) : null}
-            </motion.div>
-          ))}
+                <h3 className="text-2xl font-semibold">{member.name}</h3>
+                <p className="text-sm text-gray-200 mt-2">{member.role}</p>
+
+                {/* Button only shows if story exists and isn't blank */}
+                {hasStory ? (
+                  <button
+                    type="button"
+                    onClick={() => handleStoryClick(member, i)}
+                    className="mt-4 bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition hover:scale-105 cursor-pointer"
+                  >
+                    Read Story →
+                  </button>
+                ) : null}
+              </motion.div>
+            );
+          })}
         </div>
       </section>
 
       {/* 💻 DESKTOP STORY MODAL */}
-      {active && active.story && !isMobile && (
+      {active && active.story?.trim() && !isMobile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
           onClick={() => setActiveMember(null)}
@@ -131,7 +140,6 @@ export default function BoardSection() {
                 </h3>
               ) : null}
 
-              {/* ✅ SAFE: only split if story exists */}
               {activeStoryLines.map((p, i) => (
                 <p key={i} className="text-gray-800">
                   {p}
