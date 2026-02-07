@@ -60,7 +60,7 @@ export const sections: Section[] = [
         name: 'Citrine Stone',
         image: '/image/PeoplePicturePng/citrine.png',
         role: 'Board Member | they/them',
-        story: 'Need To BE ADDED' // TODO
+        // story: 'Need To BE ADDED' // TODO
       },
       {
         name: 'Jazz',
