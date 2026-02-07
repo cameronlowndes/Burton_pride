@@ -11,10 +11,9 @@ type SearchParams = { session_id?: string };
 export default async function SuccessPage({
   searchParams,
 }: {
-  searchParams: SearchParams | Promise<SearchParams>;
+  searchParams?: Promise<SearchParams>;
 }) {
-  // ✅ Works whether Next provides an object or a Promise (Next 15 types)
-  const sp = await searchParams;
+  const sp = searchParams ? await searchParams : undefined;
   const sessionId = sp?.session_id;
 
   // 🔒 Block direct access
@@ -102,12 +101,13 @@ export default async function SuccessPage({
             </div>
 
             <div className="p-6 sm:p-7">
+              {/* sessionId is guaranteed here because we redirect if missing */}
               <DriveUploader sessionId={sessionId} email={email} />
             </div>
 
             <div className="px-6 sm:px-7 py-4 bg-gray-50 text-sm text-gray-600">
-              Tip: If you uploaded the wrong image, just upload again and tell us your paid
-              email — we’ll use the latest one.
+              Tip: If you uploaded the wrong image, just upload again and tell us your
+              paid email — we’ll use the latest one.
             </div>
           </div>
 
