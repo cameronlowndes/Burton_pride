@@ -5,7 +5,7 @@ export interface Member {
   image: string;
   role: string;
   storyTitle?: string; // Optional
-  story: string;
+  story?: string;
 }
 
 export interface Section {
@@ -31,7 +31,11 @@ export const sections: Section[] = [
         name: 'Isaac Timmins',
         image: '/image/PeoplePicturePng/isaac.png',
         role: 'Founder & Director | He/Him',
-        story: 'Need To BE ADDED' // TODO
+        story: `I am Isaac, I’m in my late 20s now but have always been a bit odd battling both physical and mental disabilities I have never been what society deems as “Normal”
+            I am bi so the LGBTIA+ community is very close to my heart. So after attending many prides across the country me and Simon decided why can’t our home town have one. It’s a tremendous source of hard work but it is rewarding to be there to support the community. 
+
+I want more integration than just queuing in the supermarket. I moved to Burton after uni as it is a great midlands town where we have a rich heritage and I want to support an organization that helps the town and the people.`
+
       },
       {
         name: 'Olga Niewiadomska',
@@ -56,7 +60,7 @@ export const sections: Section[] = [
         name: 'Citrine Stone',
         image: '/image/PeoplePicturePng/citrine.png',
         role: 'Board Member | they/them',
-        story: 'Need To BE ADDED' // TODO
+        // story: 'Need To BE ADDED' // TODO
       },
       {
         name: 'Jazz',
