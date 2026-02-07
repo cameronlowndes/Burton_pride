@@ -6,12 +6,16 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
+type SearchParams = { session_id?: string };
+
 export default async function SuccessPage({
   searchParams,
 }: {
-  searchParams: { session_id?: string };
+  searchParams: SearchParams | Promise<SearchParams>;
 }) {
-  const sessionId = searchParams.session_id;
+  // ✅ Works whether Next provides an object or a Promise (Next 15 types)
+  const sp = await searchParams;
+  const sessionId = sp?.session_id;
 
   // 🔒 Block direct access
   if (!sessionId) redirect("/Competition");
@@ -31,7 +35,6 @@ export default async function SuccessPage({
           <div className="mx-auto mt-8 mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur shadow-lg">
             <span className="text-4xl">✅</span>
           </div>
-
 
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight drop-shadow">
             Payment successful
@@ -108,7 +111,6 @@ export default async function SuccessPage({
             </div>
           </div>
 
-          {/* Footer note */}
           <p className="text-center text-sm text-white/70">
             Please upload using the same email used for payment.
           </p>
