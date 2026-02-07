@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 
 export default function CompetitionPage() {
-  const [preview, setPreview] = useState<string | null>(null);
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     businessName: "",
@@ -18,67 +16,6 @@ export default function CompetitionPage() {
     address: "",
     website: "",
   });
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleImagePreview = (file: File) => {
-    setSelectedFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setPreview(reader.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  const removeImage = () => {
-    setPreview(null);
-    setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  // ✅ Cloudinary upload (SIGNED)
-  const uploadImageToCloudinary = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      throw new Error("Please upload an image file.");
-    }
-
-    const maxSizeMb = 8;
-    if (file.size > maxSizeMb * 1024 * 1024) {
-      throw new Error(`Image too large. Max ${maxSizeMb}MB.`);
-    }
-
-    // 1) ask your server for signature + params
-    const signRes = await fetch("/api/cloudinary/sign", { method: "POST" });
-    if (!signRes.ok) throw new Error("Failed to sign upload (Cloudinary).");
-
-    const { cloudName, apiKey, timestamp, signature, uploadPreset, folder } =
-      await signRes.json();
-
-    // 2) upload to cloudinary
-    const form = new FormData();
-    form.append("file", file);
-    form.append("api_key", apiKey);
-    form.append("timestamp", String(timestamp));
-    form.append("signature", signature);
-    form.append("upload_preset", uploadPreset);
-    form.append("folder", folder);
-
-    const uploadRes = await fetch(
-      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-      {
-        method: "POST",
-        body: form,
-      }
-    );
-
-    const data = await uploadRes.json();
-    if (!uploadRes.ok) {
-      throw new Error(data?.error?.message || "Cloudinary upload failed.");
-    }
-
-    return {
-      url: data.secure_url as string,
-      publicId: data.public_id as string,
-    };
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,47 +30,31 @@ export default function CompetitionPage() {
     try {
       setLoading(true);
 
-      // 1) Upload image first (optional)
-      let imageUrl: string | null = null;
-      let imagePublicId: string | null = null;
-
-      if (selectedFile) {
-        const uploaded = await uploadImageToCloudinary(selectedFile);
-        imageUrl = uploaded.url;
-        imagePublicId = uploaded.publicId;
-      }
-
-      // 2) Save entry
+      // 1️⃣ Save entry
       const entryRes = await fetch("/api/entry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, imageUrl, imagePublicId }),
+        body: JSON.stringify({ ...formData }),
       });
 
       const entryData = await entryRes.json();
-      if (!entryRes.ok) {
-        throw new Error(entryData?.error || "Failed to save entry");
-      }
+      if (!entryRes.ok) throw new Error(entryData?.error || "Failed to save entry");
 
-      const entryId = entryData.entryId as string;
+      const entryId = entryData.entryId;
 
-      // 3) Create Stripe checkout session
+      // 2️⃣ Stripe checkout
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, entryId, imageUrl, imagePublicId }),
+        body: JSON.stringify({ ...formData, entryId }),
       });
 
       const data = await res.json();
 
       if (data.url) {
-        window.open(
-          data.url,
-          "stripeCheckout",
-          "width=500,height=800,resizable,scrollbars=yes"
-        );
+        window.location.href = data.url;
       } else {
-        alert("Entry saved, but Stripe session failed. Please try again.");
+        alert("Stripe session failed. Please try again.");
       }
     } catch (err: any) {
       console.error(err);
@@ -153,9 +74,6 @@ export default function CompetitionPage() {
       website: "https://example.com",
     });
     setConsent(true);
-    setPreview("/image/Logo.png");
-    setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -165,8 +83,9 @@ export default function CompetitionPage() {
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
     >
+      {/* Logo */}
       <motion.div
-        className="animate-scaleUp rounded-full overflow-hidden shadow-2xl shadow-pink-400/50 border-4 border-white mb-8"
+        className="rounded-full overflow-hidden shadow-2xl shadow-pink-400/50 border-4 border-white mb-8"
         style={{ width: 180, height: 180 }}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -185,18 +104,15 @@ export default function CompetitionPage() {
         className="text-5xl sm:text-6xl font-extrabold mb-12 text-center drop-shadow-lg"
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.8 }}
       >
         🌈 Windows Of Hope Competition 2026
       </motion.h1>
 
       <div className="flex flex-col lg:flex-row items-start gap-12 w-full max-w-6xl">
+        {/* FORM */}
         <motion.form
           onSubmit={handleSubmit}
           className="flex-1 bg-white/10 backdrop-blur-lg rounded-3xl p-8 flex flex-col gap-4 shadow-2xl border border-white/20"
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.6, delay: 0.2 }}
         >
           <input
             type="text"
@@ -205,9 +121,10 @@ export default function CompetitionPage() {
             onChange={(e) =>
               setFormData({ ...formData, businessName: e.target.value })
             }
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            className="p-3 rounded-lg border border-white/30 text-black"
             required
           />
+
           <input
             type="text"
             placeholder="Contact Name"
@@ -215,25 +132,32 @@ export default function CompetitionPage() {
             onChange={(e) =>
               setFormData({ ...formData, contactName: e.target.value })
             }
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            className="p-3 rounded-lg border border-white/30 text-black"
             required
           />
+
           <input
             type="email"
             placeholder="Email Address"
             value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            onChange={(e) =>
+              setFormData({ ...formData, email: e.target.value })
+            }
+            className="p-3 rounded-lg border border-white/30 text-black"
             required
           />
+
           <input
             type="tel"
             placeholder="Phone Number"
             value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            onChange={(e) =>
+              setFormData({ ...formData, phone: e.target.value })
+            }
+            className="p-3 rounded-lg border border-white/30 text-black"
             required
           />
+
           <input
             type="text"
             placeholder="Business Address"
@@ -241,9 +165,10 @@ export default function CompetitionPage() {
             onChange={(e) =>
               setFormData({ ...formData, address: e.target.value })
             }
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            className="p-3 rounded-lg border border-white/30 text-black"
             required
           />
+
           <input
             type="text"
             placeholder="Website / Social Media (optional)"
@@ -251,73 +176,54 @@ export default function CompetitionPage() {
             onChange={(e) =>
               setFormData({ ...formData, website: e.target.value })
             }
-            className="p-3 rounded-lg border border-white/30 text-black font-medium"
+            className="p-3 rounded-lg border border-white/30 text-black"
           />
 
-          <label className="font-semibold mt-2">Upload Photo / Design</label>
-
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="cursor-pointer w-full max-w-sm mx-auto aspect-square flex items-center justify-center border-2 border-dashed border-white/50 rounded-xl bg-white/10 hover:bg-white/20 transition relative overflow-hidden"
-          >
-            {!preview ? (
-              <span className="text-white/80 font-medium text-center px-4">
-                Click to Upload Image
-              </span>
-            ) : (
-              <>
-                <img
-                  src={preview}
-                  alt="Preview"
-                  className="absolute inset-0 w-full h-full object-cover rounded-xl transition transform hover:scale-105"
-                />
-                <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 flex items-center justify-center text-white font-semibold transition">
-                  Change Image
-                </div>
-              </>
-            )}
-
-            <input
-              type="file"
-              accept="image/*"
-              ref={fileInputRef}
-              onChange={(e) =>
-                e.target.files && handleImagePreview(e.target.files[0])
-              }
-              className="hidden"
-            />
+          {/* 📢 Upload Notice */}
+          <div className="bg-white/10 border border-white/30 rounded-xl p-4 mt-2 text-center">
+            <p className="font-semibold text-white text-lg">
+              📸 Image Upload Notice
+            </p>
+            <p className="text-white/90 text-sm mt-1">
+              You will upload your competition image on the success page after
+              payment has been completed.
+            </p>
           </div>
 
-          {preview && (
-            <button
-              type="button"
-              onClick={removeImage}
-              className="w-full max-w-sm mx-auto mt-2 bg-white/20 hover:bg-white/30 text-white font-semibold py-2 rounded-lg transition cursor-pointer"
+          {/* 📄 Terms Button */}
+          <div className="flex justify-center mt-4">
+            <a
+              href="/Competition/Terms"
+              rel="noopener noreferrer"
+              className="px-6 py-3 rounded-xl font-semibold bg-white text-purple-700 shadow-lg hover:scale-105 hover:shadow-xl transition"
             >
-              Remove Photo
-            </button>
-          )}
+              📄 View Terms & Conditions
+            </a>
+          </div>
 
-          <label className="flex items-center gap-3 mt-4">
+          {/* Consent */}
+          <label className="flex items-center gap-3 mt-5 bg-white/10 p-4 rounded-xl border border-white/20">
             <input
               type="checkbox"
               checked={consent}
               onChange={(e) => setConsent(e.target.checked)}
-              className="w-5 h-5 rounded border-white/50 text-yellow-400 focus:ring-yellow-400"
+              className="w-5 h-5"
             />
-            <span className="text-white/90 font-medium">
-              I agree to the terms and conditions
+            <span className="font-medium">
+              I agree to the Terms & Conditions
             </span>
           </label>
 
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
-            className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg shadow-pink-500/50 hover:scale-105 transition transform disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 transition disabled:opacity-50"
           >
-            {loading ? "Processing..." : "Submit & Pay"}
+            {loading ? "Processing..." : "Submit & Pay £2"}
           </button>
 
+          {/* Test button */}
           <button
             type="button"
             onClick={autoFillForm}
@@ -327,27 +233,24 @@ export default function CompetitionPage() {
           </button>
         </motion.form>
 
-        <motion.div
-          className="flex-1 flex flex-col justify-center gap-6"
-          initial={{ x: 50, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
-        >
+        {/* SIDE TEXT */}
+        <motion.div className="flex-1 flex flex-col justify-center gap-6">
           <p className="text-lg sm:text-xl text-white/90 leading-relaxed">
             Show your creativity and Pride spirit! Enter our competition for a
-            chance to win amazing prizes. Upload your design, photo, or artwork
-            and take part in the celebration.
+            chance to win amazing prizes.
           </p>
+
           <p className="text-lg sm:text-xl font-bold text-white/90">
             Entry Fee: £2
           </p>
 
-          {selectedFile ? (
-            <p className="text-white/80 text-sm">
-              Selected image:{" "}
-              <span className="font-semibold">{selectedFile.name}</span>
+          <div className="bg-white/10 border border-white/20 rounded-2xl p-5">
+            <p className="font-semibold">What happens next?</p>
+            <p className="text-white/85 text-sm mt-2">
+              After payment, you’ll be taken to the success page where you can upload your
+              competition image. That upload completes your entry.
             </p>
-          ) : null}
+          </div>
         </motion.div>
       </div>
     </motion.div>
