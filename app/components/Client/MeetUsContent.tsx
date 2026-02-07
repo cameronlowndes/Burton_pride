@@ -1,19 +1,19 @@
-'use client';
+"use client";
 
-import Image from 'next/image';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { sections, Member } from '@/data/TeamData';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import BoardSection from '../Card/BoardSection'; // ✅ import BoardSection
+import Image from "next/image";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { sections, Member } from "@/data/TeamData";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import BoardSection from "../Card/BoardSection"; // ✅ import BoardSection
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: i * 0.15, duration: 0.6, ease: 'easeOut' },
+    transition: { delay: i * 0.15, duration: 0.6, ease: "easeOut" },
   }),
 };
 
@@ -26,14 +26,20 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth <= 768);
     checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  const hasStory = !!member.story?.trim();
+
   const handleStoryClick = () => {
+    if (!hasStory) return;
+
     if (isMobile) {
-      const query = encodeURIComponent(JSON.stringify(member.story));
-      router.push(`/team/story/${member.name.replace(/\s+/g, '-').toLowerCase()}?story=${query}`);
+      const query = encodeURIComponent(member.story as string);
+      router.push(
+        `/team/story/${member.name.replace(/\s+/g, "-").toLowerCase()}?story=${query}`
+      );
     } else {
       setFlippedIndex(index);
     }
@@ -53,8 +59,10 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
           />
           <h2 className="text-2xl font-semibold">{member.name}</h2>
           <p className="text-sm text-gray-200 mt-2">{member.role}</p>
-          {member.story && (
+
+          {hasStory && (
             <button
+              type="button"
               onClick={handleStoryClick}
               className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none cursor-pointer"
             >
@@ -66,7 +74,7 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
 
       {/* Mobile Link */}
       <Link
-        href={`/team/${member.name.replace(/\s+/g, '-').toLowerCase()}`}
+        href={`/team/${member.name.replace(/\s+/g, "-").toLowerCase()}`}
         className="sm:hidden block"
       >
         <div className="bg-white/10 backdrop-blur-md text-white p-6 rounded-2xl flex flex-col items-center">
@@ -80,18 +88,23 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
           <h2 className="text-2xl font-semibold">{member.name}</h2>
           <p className="text-sm text-gray-200 mt-2">{member.role}</p>
         </div>
-        {member.story && (
+      </Link>
+
+      {/* Mobile Read Story Button (outside Link so it doesn't conflict) */}
+      {hasStory && (
+        <div className="sm:hidden flex justify-center">
           <button
+            type="button"
             onClick={handleStoryClick}
             className="mt-4 inline-block bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800 text-white px-6 py-2 rounded-full font-semibold shadow-lg transition duration-300 focus:outline-none cursor-pointer"
           >
             Read Story →
           </button>
-        )}
-      </Link>
+        </div>
+      )}
 
       {/* Desktop Modal */}
-      {flippedIndex === index && member.story && !isMobile && (
+      {flippedIndex === index && hasStory && !isMobile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
           onClick={() => setFlippedIndex(null)}
@@ -100,14 +113,22 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
             className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-3xl font-bold text-center mb-6">{member.name}</h2>
-            <p className="text-gray-800 text-lg leading-relaxed">{member.role}</p>
+            <h2 className="text-3xl font-bold text-center mb-6">
+              {member.name}
+            </h2>
+            <p className="text-gray-700 text-lg leading-relaxed">{member.role}</p>
+
             <div className="text-gray-800 text-lg leading-relaxed space-y-6 mt-4">
-              {member.story.split('\n').map((paragraph, i) => (
-                <p key={i}>{paragraph}</p>
-              ))}
+              {(member.story ?? "")
+                .split("\n")
+                .filter((p) => p.trim())
+                .map((paragraph, i) => (
+                  <p key={i}>{paragraph}</p>
+                ))}
             </div>
+
             <button
+              type="button"
               onClick={() => setFlippedIndex(null)}
               className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
             >
@@ -123,7 +144,6 @@ function MemberCard({ member, index }: { member: Member; index: number }) {
 export default function MeetUsContent() {
   return (
     <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
-
       {/* HERO */}
       <motion.header
         initial="hidden"
@@ -136,7 +156,7 @@ export default function MeetUsContent() {
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.6, ease: 'easeOut' }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
           className="rounded-full overflow-hidden w-[180px] h-[180px] shadow-[0_0_45px_rgba(255,255,255,0.7)] border-4 border-white"
         >
           <Image
@@ -151,8 +171,9 @@ export default function MeetUsContent() {
           Meet the Burton Pride Team
         </h1>
         <p className="text-lg sm:text-xl max-w-2xl bg-white/10 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20">
-          Get to know the passionate people behind <span className="font-bold text-yellow-300">Burton Pride</span>.  
-          We’re dedicated to fostering an inclusive and vibrant community! 🌈
+          Get to know the passionate people behind{" "}
+          <span className="font-bold text-yellow-300">Burton Pride</span>. We’re
+          dedicated to fostering an inclusive and vibrant community! 🌈
         </p>
       </motion.header>
 
@@ -160,27 +181,32 @@ export default function MeetUsContent() {
       <BoardSection />
 
       {/* OTHER SECTIONS */}
-      {sections.map((section, sIndex) => (
-        section.title !== 'Committed Board' && ( // ✅ skip Committed Board since it's in BoardSection
-          <section key={sIndex} className="mt-20 text-center w-full max-w-5xl">
-            <motion.h2
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true }}
-              variants={fadeUp}
-              custom={0}
-              className="text-4xl font-bold mb-10 text-white drop-shadow-[0_0_25px_rgba(255,255,255,0.8)]"
+      {sections.map(
+        (section, sIndex) =>
+          section.title !== "Committed Board" && (
+            <section
+              key={sIndex}
+              className="mt-20 text-center w-full max-w-5xl"
             >
-              {section.title}
-            </motion.h2>
-            <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
-              {section.members.map((member, i) => (
-                <MemberCard key={i} member={member} index={i} />
-              ))}
-            </div>
-          </section>
-        )
-      ))}
+              <motion.h2
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true }}
+                variants={fadeUp}
+                custom={0}
+                className="text-4xl font-bold mb-10 text-white drop-shadow-[0_0_25px_rgba(255,255,255,0.8)]"
+              >
+                {section.title}
+              </motion.h2>
+
+              <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+                {section.members.map((member, i) => (
+                  <MemberCard key={i} member={member} index={i} />
+                ))}
+              </div>
+            </section>
+          )
+      )}
 
       {/* Contact Section */}
       <motion.section
@@ -195,7 +221,7 @@ export default function MeetUsContent() {
           Want to Connect?
         </h2>
         <p className="text-lg mb-8">
-          Reach out to us for collaborations, volunteering, or any inquiries.  
+          Reach out to us for collaborations, volunteering, or any inquiries.
           We’d love to hear from you and welcome you to the Pride family!
         </p>
         <Link
@@ -205,7 +231,6 @@ export default function MeetUsContent() {
           🌟 Contact Us
         </Link>
       </motion.section>
-
     </div>
   );
 }
