@@ -1,9 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useRef } from 'react';
-import { motion } from 'framer-motion';
-import Image from 'next/image';
-import { uploadFiles } from '@/lib/uploadthing'; // ✅ UploadThing client helper
+import { useState, useRef } from "react";
+import { motion } from "framer-motion";
+import Image from "next/image";
 
 export default function CompetitionPage() {
   const [preview, setPreview] = useState<string | null>(null);
@@ -12,12 +11,12 @@ export default function CompetitionPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
-    businessName: '',
-    contactName: '',
-    email: '',
-    phone: '',
-    address: '',
-    website: '',
+    businessName: "",
+    contactName: "",
+    email: "",
+    phone: "",
+    address: "",
+    website: "",
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -32,13 +31,13 @@ export default function CompetitionPage() {
   const removeImage = () => {
     setPreview(null);
     setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ✅ Upload image via UploadThing (NEW backend)
-  const uploadImageToUploadThing = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      throw new Error('Please upload an image file.');
+  // ✅ Cloudinary upload (SIGNED)
+  const uploadImageToCloudinary = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Please upload an image file.");
     }
 
     const maxSizeMb = 8;
@@ -46,54 +45,83 @@ export default function CompetitionPage() {
       throw new Error(`Image too large. Max ${maxSizeMb}MB.`);
     }
 
-    const uploaded = await uploadFiles('imageUploader', {
-      files: [file],
-    });
+    // 1) ask your server for signature + params
+    const signRes = await fetch("/api/cloudinary/sign", { method: "POST" });
+    if (!signRes.ok) throw new Error("Failed to sign upload (Cloudinary).");
 
-    const url = uploaded?.[0]?.url;
-    if (!url) throw new Error('Image upload failed');
+    const { cloudName, apiKey, timestamp, signature, uploadPreset, folder } =
+      await signRes.json();
 
-    return url;
+    // 2) upload to cloudinary
+    const form = new FormData();
+    form.append("file", file);
+    form.append("api_key", apiKey);
+    form.append("timestamp", String(timestamp));
+    form.append("signature", signature);
+    form.append("upload_preset", uploadPreset);
+    form.append("folder", folder);
+
+    const uploadRes = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      {
+        method: "POST",
+        body: form,
+      }
+    );
+
+    const data = await uploadRes.json();
+    if (!uploadRes.ok) {
+      throw new Error(data?.error?.message || "Cloudinary upload failed.");
+    }
+
+    return {
+      url: data.secure_url as string,
+      publicId: data.public_id as string,
+    };
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!consent) return alert('You must agree to the terms before submitting!');
+    if (!consent) return alert("You must agree to the terms before submitting!");
 
     const { businessName, contactName, email, phone, address } = formData;
     if (!businessName || !contactName || !email || !phone || !address) {
-      return alert('Please fill out all required fields!');
+      return alert("Please fill out all required fields!");
     }
 
     try {
       setLoading(true);
 
-      // 1) upload image (optional) via UploadThing
+      // 1) Upload image first (optional)
       let imageUrl: string | null = null;
+      let imagePublicId: string | null = null;
+
       if (selectedFile) {
-        imageUrl = await uploadImageToUploadThing(selectedFile);
+        const uploaded = await uploadImageToCloudinary(selectedFile);
+        imageUrl = uploaded.url;
+        imagePublicId = uploaded.publicId;
       }
 
-      // 2) save entry via your server
-      const entryRes = await fetch('/api/entry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, imageUrl }),
+      // 2) Save entry
+      const entryRes = await fetch("/api/entry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, imageUrl, imagePublicId }),
       });
 
       const entryData = await entryRes.json();
       if (!entryRes.ok) {
-        throw new Error(entryData?.error || 'Failed to save entry');
+        throw new Error(entryData?.error || "Failed to save entry");
       }
 
       const entryId = entryData.entryId as string;
 
-      // 3) create Stripe checkout session
-      const res = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, entryId, imageUrl }),
+      // 3) Create Stripe checkout session
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, entryId, imageUrl, imagePublicId }),
       });
 
       const data = await res.json();
@@ -101,15 +129,15 @@ export default function CompetitionPage() {
       if (data.url) {
         window.open(
           data.url,
-          'stripeCheckout',
-          'width=500,height=800,resizable,scrollbars=yes'
+          "stripeCheckout",
+          "width=500,height=800,resizable,scrollbars=yes"
         );
       } else {
-        alert('Entry saved, but Stripe session failed. Please try again.');
+        alert("Entry saved, but Stripe session failed. Please try again.");
       }
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || 'Something went wrong.');
+      alert(err?.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -117,17 +145,17 @@ export default function CompetitionPage() {
 
   const autoFillForm = () => {
     setFormData({
-      businessName: 'Test Business Ltd',
-      contactName: 'John Doe',
-      email: 'test@example.com',
-      phone: '0123456789',
-      address: '123 Test Street, Burton',
-      website: 'https://example.com',
+      businessName: "Test Business Ltd",
+      contactName: "John Doe",
+      email: "test@example.com",
+      phone: "0123456789",
+      address: "123 Test Street, Burton",
+      website: "https://example.com",
     });
     setConsent(true);
-    setPreview('/image/Logo.png');
+    setPreview("/image/Logo.png");
     setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -142,7 +170,7 @@ export default function CompetitionPage() {
         style={{ width: 180, height: 180 }}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        transition={{ delay: 0.2, type: 'spring', stiffness: 120 }}
+        transition={{ delay: 0.2, type: "spring", stiffness: 120 }}
       >
         <Image
           src="/image/Logo.png"
@@ -287,7 +315,7 @@ export default function CompetitionPage() {
             disabled={loading}
             className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg shadow-pink-500/50 hover:scale-105 transition transform disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {loading ? 'Processing...' : 'Submit & Pay'}
+            {loading ? "Processing..." : "Submit & Pay"}
           </button>
 
           <button
@@ -310,7 +338,16 @@ export default function CompetitionPage() {
             chance to win amazing prizes. Upload your design, photo, or artwork
             and take part in the celebration.
           </p>
-          <p className="text-lg sm:text-xl font-bold text-white/90">Entry Fee: £2</p>
+          <p className="text-lg sm:text-xl font-bold text-white/90">
+            Entry Fee: £2
+          </p>
+
+          {selectedFile ? (
+            <p className="text-white/80 text-sm">
+              Selected image:{" "}
+              <span className="font-semibold">{selectedFile.name}</span>
+            </p>
+          ) : null}
         </motion.div>
       </div>
     </motion.div>
