@@ -6,7 +6,14 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 export async function POST(req: NextRequest) {
-  const { businessName, contactName, email, phone, address } = await req.json();
+  const { businessName, contactName, email, phone, address, entryId } = await req.json();
+
+  if (!email || !entryId) {
+    return NextResponse.json(
+      { error: "Missing required fields (email or entryId)" },
+      { status: 400 }
+    );
+  }
 
   try {
     const session = await stripe.checkout.sessions.create({
@@ -18,7 +25,7 @@ export async function POST(req: NextRequest) {
             currency: "gbp",
             product_data: {
               name: "Windows of Hope Competition Entry",
-              description: `Entry by ${businessName} (${contactName})`,
+              description: `Entry by ${businessName || ""} (${contactName || ""})`,
             },
             unit_amount: 200, // £2 in pence
           },
@@ -32,8 +39,9 @@ export async function POST(req: NextRequest) {
 
       customer_email: email,
 
-      // Optional but useful:
+      // ✅ CRITICAL: Link Stripe -> your Supabase entry row
       metadata: {
+        entryId: String(entryId), // <-- this is the key one
         businessName: businessName || "",
         contactName: contactName || "",
         phone: phone || "",
