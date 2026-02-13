@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing STRIPE_WEBHOOK_SECRET" }, { status: 500 });
   }
 
-  const body = await req.text(); // ✅ raw body for signature verification
+  const body = await req.text();
 
   let event: Stripe.Event;
   try {
@@ -34,21 +34,17 @@ export async function POST(req: Request) {
 
   console.log("✅ Stripe webhook received:", event.type);
 
-  // Only handle the event we care about
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
 
   const session = event.data.object as Stripe.Checkout.Session;
 
-  // Email may be here (depends how checkout was created)
   const sessionEmail =
     session.customer_details?.email || session.customer_email || undefined;
 
-  // --- ✅ FIX: Get entryId from Session metadata OR PaymentIntent metadata ---
   let entryId = session.metadata?.entryId;
 
-  // If missing, pull from PaymentIntent metadata (because you set it there earlier)
   if (!entryId && session.payment_intent) {
     try {
       const pi = await stripe.paymentIntents.retrieve(session.payment_intent as string);
@@ -63,13 +59,12 @@ export async function POST(req: Request) {
   console.log("ℹ️ EntryId:", entryId);
 
   if (!entryId) {
-    console.warn("⚠️ No entryId found (session.metadata or payment_intent.metadata)");
+    console.warn("⚠️ No entryId found");
     return NextResponse.json({ received: true });
   }
 
   const db = supabaseAdmin();
 
-  // 1) Mark as paid
   const { error: updatePaidError } = await db
     .from("competition_entries")
     .update({ payment_status: "paid" })
@@ -77,7 +72,6 @@ export async function POST(req: Request) {
 
   if (updatePaidError) console.error("❌ Supabase update paid error:", updatePaidError);
 
-  // 2) Fetch entry
   const { data: entry, error: entryError } = await db
     .from("competition_entries")
     .select("id, business_name, contact_name, email, confirmation_email_sent_at")
@@ -89,13 +83,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true });
   }
 
-  const toEmail = entry.email || sessionEmail;
+  // REAL EMAIL FROM ENTRY
+  const realRecipient = entry.email || sessionEmail;
+
+  // IF PREVIEW (testing) FORCE EMAIL TO YOU
+  const isPreview = process.env.VERCEL_ENV === "preview";
+  const toEmail = isPreview ? "prideburton@gmail.com" : realRecipient;
+
   if (!toEmail) {
-    console.error("❌ No recipient email found (db or session)");
+    console.error("❌ No recipient email found");
     return NextResponse.json({ received: true });
   }
 
-  // Idempotency: don’t send twice
   if (entry.confirmation_email_sent_at) {
     console.log("ℹ️ Email already sent for entry:", entryId);
     return NextResponse.json({ received: true });
@@ -103,14 +102,12 @@ export async function POST(req: Request) {
 
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) {
-    console.error("❌ RESEND_API_KEY missing in environment variables");
+    console.error("❌ RESEND_API_KEY missing");
     return NextResponse.json({ received: true });
   }
 
   const resend = new Resend(resendKey);
 
-  // ✅ While testing: use Resend default sender (avoids domain verification issues)
-  // Later (live), switch back to your custom domain once verified in Resend.
   const FROM =
     process.env.EMAIL_FROM?.trim() ||
     "Burton Pride <onboarding@resend.dev>";
@@ -140,7 +137,6 @@ export async function POST(req: Request) {
 
     console.log("✅ Resend send result:", result);
 
-    // Mark sent
     const { error: markSentError } = await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
@@ -148,7 +144,7 @@ export async function POST(req: Request) {
 
     if (markSentError) console.error("❌ Supabase mark email sent error:", markSentError);
   } catch (emailErr: any) {
-    console.error("❌ Resend send error:", emailErr?.message || emailErr, emailErr);
+    console.error("❌ Resend send error:", emailErr?.message || emailErr);
   }
 
   return NextResponse.json({ received: true });
