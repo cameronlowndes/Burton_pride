@@ -9,16 +9,34 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
+/**
+ * Server-side Supabase client (admin).
+ * Uses service role key when available.
+ */
 function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url) throw new Error("SUPABASE_URL missing");
-  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY missing");
-  return createClient(url, key);
+  const url =
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || // ✅ best (legacy name)
+    process.env.SUPABASE_SECRET_KEY ||       // ✅ fallback (new name some people use)
+    process.env.SUPABASE_ANON_KEY ||         // ⚠️ last resort (won’t bypass RLS)
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url) throw new Error("SUPABASE_URL is missing");
+  if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is missing");
+
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
 export async function POST(req: Request) {
-  // Must be raw text
   const body = await req.text();
 
   const sig = req.headers.get("stripe-signature");
@@ -26,14 +44,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
   }
 
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     return NextResponse.json({ error: "Missing STRIPE_WEBHOOK_SECRET" }, { status: 500 });
   }
 
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
     return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
   }
@@ -42,11 +61,8 @@ export async function POST(req: Request) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
-    // You must set this when creating checkout session:
-    // metadata: { entryId: "..." }
     const entryId = session.metadata?.entryId;
 
-    // Stripe provides email in one of these places
     const email =
       session.customer_details?.email ||
       session.customer_email ||
@@ -67,10 +83,10 @@ export async function POST(req: Request) {
 
     if (updatePaidError) {
       console.error("Supabase update paid error:", updatePaidError);
-      // continue anyway, we may still want to email
+      // continue anyway
     }
 
-    // 2) Fetch entry details (so we can personalize email and guard duplicates)
+    // 2) Fetch entry details
     const { data: entry, error: entryError } = await supabaseAdmin
       .from("competition_entries")
       .select("id, business_name, contact_name, email, confirmation_email_sent_at")
@@ -82,7 +98,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true });
     }
 
-    // Prefer email from DB, fallback to Stripe
     const toEmail = entry.email || email;
     if (!toEmail) {
       console.warn("No email found on entry or Stripe session");
@@ -91,17 +106,17 @@ export async function POST(req: Request) {
 
     // 3) Idempotency: only send once
     if (entry.confirmation_email_sent_at) {
-      // Already sent
       return NextResponse.json({ received: true });
     }
 
     // 4) Send email
-    if (!process.env.RESEND_API_KEY) {
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
       console.error("Missing RESEND_API_KEY");
       return NextResponse.json({ received: true });
     }
 
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    const resend = new Resend(resendKey);
 
     try {
       await resend.emails.send({
@@ -129,7 +144,7 @@ export async function POST(req: Request) {
         `,
       });
 
-      // 5) Mark email as sent (prevents duplicates)
+      // 5) Mark email as sent
       const { error: markSentError } = await supabaseAdmin
         .from("competition_entries")
         .update({ confirmation_email_sent_at: new Date().toISOString() })
