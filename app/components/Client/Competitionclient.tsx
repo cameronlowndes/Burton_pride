@@ -103,7 +103,7 @@ export default function CompetitionPage() {
     setFormData({
       businessName: "Test Business Ltd",
       contactName: "John Doe",
-      email: "soical.roots.green.shoots@gmail.com",
+      email: "prideburton@gmail.com",
       phone: "0123456789",
       address: "123 Test Street, Burton",
       website: "https://example.com",
