@@ -1,19 +1,9 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url) throw new Error("SUPABASE_URL is missing");
-  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is missing");
-
-  return createClient(url, key);
-}
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
   try {
-    const supabaseAdmin = getSupabaseAdmin();
+    const db = supabaseAdmin();
 
     const body = await req.json();
     const { businessName, contactName, email, phone, address, website, imageUrl } = body;
@@ -22,7 +12,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await db
       .from("competition_entries")
       .insert([
         {
