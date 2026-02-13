@@ -1,23 +1,35 @@
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+if (!stripeSecretKey) {
+  throw new Error("STRIPE_SECRET_KEY is missing");
+}
+
+const stripe = new Stripe(stripeSecretKey, {
   apiVersion: "2023-08-16" as any,
 });
 
 export async function POST(req: NextRequest) {
-  const { businessName, contactName, email, phone, address, entryId } = await req.json();
-
-  if (!email || !entryId) {
-    return NextResponse.json(
-      { error: "Missing required fields (email or entryId)" },
-      { status: 400 }
-    );
-  }
-
   try {
+    const { businessName, contactName, email, phone, address, entryId } = await req.json();
+
+    if (!email || !entryId) {
+      return NextResponse.json(
+        { error: "Missing required fields (email or entryId)" },
+        { status: 400 }
+      );
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_URL;
+    if (!baseUrl) {
+      return NextResponse.json(
+        { error: "NEXT_PUBLIC_URL is missing in Vercel env vars" },
+        { status: 500 }
+      );
+    }
+
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
       mode: "payment",
       line_items: [
         {
@@ -27,31 +39,41 @@ export async function POST(req: NextRequest) {
               name: "Windows of Hope Competition Entry",
               description: `Entry by ${businessName || ""} (${contactName || ""})`,
             },
-            unit_amount: 200, // £2 in pence
+            unit_amount: 200,
           },
           quantity: 1,
         },
       ],
-
-      // ✅ IMPORTANT: include session_id so Success page can verify payment
-      success_url: `${process.env.NEXT_PUBLIC_URL}/Competition/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_URL}/competition`,
-
+      success_url: `${baseUrl}/Competition/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/competition`,
       customer_email: email,
 
-      // ✅ CRITICAL: Link Stripe -> your Supabase entry row
-      metadata: {
-        entryId: String(entryId), // <-- this is the key one
-        businessName: businessName || "",
-        contactName: contactName || "",
-        phone: phone || "",
-        address: address || "",
+      // ✅ best practice: metadata on payment intent
+      payment_intent_data: {
+        metadata: {
+          entryId: String(entryId),
+          businessName: businessName || "",
+          contactName: contactName || "",
+          phone: phone || "",
+          address: address || "",
+        },
       },
     });
 
+    if (!session.url) {
+      return NextResponse.json(
+        { error: "Stripe did not return a session URL" },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    // Show the real Stripe error in Vercel logs
+    console.error("Stripe session create error:", err?.message, err);
+    return NextResponse.json(
+      { error: err?.message || "Stripe session create failed" },
+      { status: 500 }
+    );
   }
 }
