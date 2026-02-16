@@ -34,7 +34,7 @@ I witnessed for many years how neurodiverse people and members of the LGBTQ+ com
         role: 'Founder & Director | He/Him',
         storyTitle: 'Why I Joined Burton Pride',
         story: `I am Isaac, I’m in my late 20s now but have always been a bit odd battling both physical and mental disabilities I have never been what society deems as “Normal”
-            I am bi so the LGBTIA+ community is very close to my heart. So after attending many prides across the country me and Simon decided why can’t our home town have one. It’s a tremendous source of hard work but it is rewarding to be there to support the community. 
+            I am bi so the LGBTIQA+  community is very close to my heart. So after attending many prides across the country me and Simon decided why can’t our home town have one. It’s a tremendous source of hard work but it is rewarding to be there to support the community. 
             I want more integration than just queuing in the supermarket. I moved to Burton after uni as it is a great midlands town where we have a rich heritage and I want to support an organization that helps the town and the people.`
 
       },
