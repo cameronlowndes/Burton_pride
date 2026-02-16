@@ -1,4 +1,3 @@
-//hi
 "use client";
 
 import { useRef, useState } from "react";
@@ -17,8 +16,6 @@ export default function DriveUploader({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-
-  const SCRIPT_URL = process.env.NEXT_PUBLIC_DRIVE_UPLOAD_URL;
 
   const openPicker = () => inputRef.current?.click();
 
@@ -47,16 +44,15 @@ export default function DriveUploader({
     setUploading(true);
 
     try {
-      if (!SCRIPT_URL) throw new Error("Missing NEXT_PUBLIC_DRIVE_UPLOAD_URL in .env.local");
-
+      // We DON'T call Google directly from the browser anymore.
+      // We call our own API route which proxies to Google (no CORS).
       const base64 = await fileToBase64(file);
 
-      // create a nice filename in Drive
       const ext = file.name.split(".").pop() || "jpg";
       const safeEmail = email.replace(/[^a-zA-Z0-9@._-]/g, "_");
       const driveFileName = `competition_${safeEmail}_${sessionId}.${ext}`;
 
-      const res = await fetch(SCRIPT_URL, {
+      const res = await fetch("/api/drive-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -69,11 +65,13 @@ export default function DriveUploader({
 
       const data = await res.json();
 
-      if (!data.ok) throw new Error(data.error || "Upload failed");
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Upload failed");
+      }
 
       setUploadedUrl(data.url);
     } catch (e: any) {
-      setError(e.message || "Upload failed");
+      setError(e?.message || "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -113,7 +111,7 @@ export default function DriveUploader({
             type="button"
             onClick={openPicker}
             disabled={uploading}
-            className="w-full sm:w-auto px-8 py-3 rounded-xl text-base font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 shadow-lg hover:shadow-xl hover:scale-[1.02] transition disabled:opacity-60 disabled:hover:scale-100 cursor-pointer"
+            className="w-full sm:w-auto px-8 py-3 rounded-xl text-base font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed cursor-pointer"
           >
             {uploading ? "Uploading…" : uploadedUrl ? "Upload another image" : "Upload Image"}
           </button>
@@ -123,26 +121,20 @@ export default function DriveUploader({
               href={uploadedUrl}
               target="_blank"
               rel="noreferrer"
-              className="w-full sm:w-auto px-6 py-3 rounded-xl text-base font-semibold bg-gray-900 text-white hover:bg-gray-800 transition text-center"
+              className="cursor-pointer w-full sm:w-auto px-6 py-3 rounded-xl text-base font-semibold bg-gray-900 text-white hover:bg-gray-800 transition text-center"
             >
               View upload
             </a>
           )}
         </div>
 
-        <p className="mt-4 text-xs text-gray-500">
-          JPG/PNG/WebP • Max 10MB
-        </p>
+        <p className="mt-4 text-xs text-gray-500">JPG/PNG/WebP • Max 10MB</p>
 
         {/* Status */}
-        {error && (
-          <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>
-        )}
+        {error && <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>}
 
         {uploadedUrl && !error && (
-          <p className="mt-4 text-sm font-semibold text-green-700">
-            ✅ Image uploaded successfully
-          </p>
+          <p className="mt-4 text-sm font-semibold text-green-700">✅ Image uploaded successfully</p>
         )}
 
         {uploading && (
@@ -159,18 +151,14 @@ export default function DriveUploader({
             <p className="font-semibold">Preview</p>
             <button
               type="button"
-              className="text-sm text-gray-600 hover:text-black underline"
+              className="cursor-pointer text-sm text-gray-600 hover:text-black underline"
               onClick={() => setPreview(null)}
             >
               Remove preview
             </button>
           </div>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={preview}
-            alt="Upload preview"
-            className="w-full max-h-[420px] object-cover"
-          />
+          <img src={preview} alt="Upload preview" className="w-full max-h-[420px] object-cover" />
         </div>
       )}
     </div>

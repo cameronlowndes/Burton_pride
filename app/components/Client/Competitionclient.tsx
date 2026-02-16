@@ -234,8 +234,8 @@ export default function CompetitionPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 transition disabled:opacity-50"
-            >
+              className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 transition disabled:opacity-50 cursor-pointer">
+            
               {loading ? "Processing..." : "Submit & Pay £2"}
             </button>
 
