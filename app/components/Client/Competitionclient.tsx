@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 
 export default function CompetitionPage() {
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ✅ UI error message instead of alert()
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // optional: scroll to form on error
+  const formTopRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState({
     businessName: "",
@@ -52,20 +58,46 @@ export default function CompetitionPage() {
 
   const hasWinners = false;
 
+  const resetForNewEmail = () => {
+    setFormError(null);
+    setLoading(false);
+    setConsent(false);
+    setFormData({
+      businessName: "",
+      contactName: "",
+      email: "",
+      phone: "",
+      address: "",
+      website: "",
+    });
+
+    // scroll to form
+    setTimeout(() => {
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
-    if (!consent) return alert("You must agree to the terms before submitting!");
+    if (!consent) {
+      setFormError("You must agree to the Terms & Conditions before submitting.");
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
 
     const { businessName, contactName, email, phone, address } = formData;
     if (!businessName || !contactName || !email || !phone || !address) {
-      return alert("Please fill out all required fields!");
+      setFormError("Please fill out all required fields.");
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
     }
 
     try {
       setLoading(true);
 
-      // 1) Save entry
+      // 1) Save entry (server blocks duplicates)
       const entryRes = await fetch("/api/entry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -73,12 +105,18 @@ export default function CompetitionPage() {
       });
 
       const entryData = await entryRes.json();
-      if (!entryRes.ok) throw new Error(entryData?.error || "Failed to save entry");
+
+      // ✅ Show error in UI (no alert)
+      if (!entryRes.ok) {
+        setFormError(
+          entryData?.error ||
+            "We couldn’t create your entry. Please check your details and try again."
+        );
+        formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
 
       const entryId = entryData.entryId;
-
-      // ✅ No email here anymore.
-      // Email is sent ONLY after payment in /api/webhook
 
       // 2) Create Stripe checkout session
       const res = await fetch("/api/checkout", {
@@ -89,17 +127,24 @@ export default function CompetitionPage() {
 
       const data = await res.json();
 
-      if (data.url) window.location.href = data.url;
-      else alert("Stripe session failed. Please try again.");
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+
+      setFormError("Stripe session failed. Please try again.");
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || "Something went wrong.");
+      setFormError(err?.message || "Something went wrong. Please try again.");
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } finally {
       setLoading(false);
     }
   };
 
   const autoFillForm = () => {
+    setFormError(null);
     setFormData({
       businessName: "Test Business Ltd",
       contactName: "John Doe",
@@ -148,6 +193,39 @@ export default function CompetitionPage() {
       <div className="flex flex-col lg:flex-row items-start gap-12 w-full max-w-6xl">
         {/* LEFT */}
         <div className="flex-1 flex flex-col">
+          {/* Anchor for scroll-to-error */}
+          <div ref={formTopRef} />
+
+          {/* ✅ Error panel (replaces alerts) */}
+          {formError && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 w-full bg-red-500/15 border border-red-400/60 text-white rounded-2xl p-5 shadow-2xl backdrop-blur-md"
+            >
+              <p className="font-extrabold text-lg mb-1">⚠️ We couldn’t continue</p>
+              <p className="text-white/90 text-sm mb-4">{formError}</p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={resetForNewEmail}
+                  className="cursor-pointer px-6 py-3 rounded-xl font-bold bg-white text-red-700 hover:scale-[1.02] active:scale-[0.98] transition shadow-lg"
+                >
+                  Try again with a different email
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFormError(null)}
+                  className="cursor-pointer px-6 py-3 rounded-xl font-semibold bg-black/30 border border-white/20 hover:bg-black/40 transition"
+                >
+                  Close message
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           <motion.form
             onSubmit={handleSubmit}
             className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 flex flex-col gap-4 shadow-2xl border border-white/20"
@@ -175,7 +253,9 @@ export default function CompetitionPage() {
               placeholder="Email Address"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="p-3 rounded-lg border border-white/30 text-black"
+              className={`p-3 rounded-lg border text-black ${
+                formError ? "border-red-300" : "border-white/30"
+              }`}
               required
             />
 
@@ -215,18 +295,18 @@ export default function CompetitionPage() {
             <div className="flex justify-center mt-4">
               <a
                 href="/Competition/Terms"
-                className="px-6 py-3 rounded-xl font-semibold bg-white text-purple-700 shadow-lg hover:scale-105 transition"
+                className="cursor-pointer px-6 py-3 rounded-xl font-semibold bg-white text-purple-700 shadow-lg hover:scale-105 active:scale-95 transition"
               >
                 📄 View Terms & Conditions
               </a>
             </div>
 
-            <label className="flex items-center gap-3 mt-5 bg-white/10 p-4 rounded-xl border border-white/20">
+            <label className="cursor-pointer flex items-center gap-3 mt-5 bg-white/10 p-4 rounded-xl border border-white/20">
               <input
                 type="checkbox"
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
-                className="w-5 h-5"
+                className="w-5 h-5 cursor-pointer"
               />
               <span className="font-medium">I agree to the Terms & Conditions</span>
             </label>
@@ -234,21 +314,22 @@ export default function CompetitionPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-4 bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 transition disabled:opacity-50 cursor-pointer">
-            
+              className="mt-4 cursor-pointer bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               {loading ? "Processing..." : "Submit & Pay £2"}
             </button>
 
             <button
               type="button"
               onClick={autoFillForm}
-              className="mt-2 bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-300 transition"
+              className="mt-2 cursor-pointer bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-300 active:scale-[0.99] transition"
             >
               Auto-Fill Form (Test Only)
             </button>
           </motion.form>
         </div>
 
+        {/* RIGHT */}
         <motion.div className="flex-1 flex flex-col justify-center gap-6">
           <div className="bg-white/10 border border-white/20 rounded-3xl p-6 shadow-xl">
             <p className="text-lg sm:text-xl text-white/90 leading-relaxed">
@@ -337,7 +418,7 @@ export default function CompetitionPage() {
             {gallery.map((img) => (
               <div
                 key={img.src}
-                className="relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3]"
+                className="cursor-pointer relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3] hover:scale-[1.02] active:scale-[0.99] transition"
               >
                 <Image src={img.src} alt={img.alt} fill className="object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
@@ -349,7 +430,6 @@ export default function CompetitionPage() {
           </div>
         </motion.div>
 
-        {/* Winners (disabled until you set hasWinners = true) */}
         {hasWinners && (
           <motion.div className="rounded-3xl p-8 sm:p-10 shadow-2xl border border-white/25 bg-gradient-to-r from-yellow-400/20 via-white/10 to-purple-500/15">
             {/* unchanged winners UI */}
