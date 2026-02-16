@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "An entry with this email or phone number already exists. Please use the same details, or contact us if you need help.",
+            "An entry with this email address or phone number already exists. Please use a different email address, or contact us if you need any help.",
           code: "DUPLICATE_ENTRY",
           existingEntryId: existing.id,
           paymentStatus: existing.payment_status,
