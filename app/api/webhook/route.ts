@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   const session = event.data.object as Stripe.Checkout.Session;
 
   const sessionEmail =
-    session.customer_details?.email || session.customer_email || undefined;
+    session.customer_details?.email || session.customer_email || "";
 
   let entryId = session.metadata?.entryId;
 
@@ -62,10 +62,7 @@ export async function POST(req: Request) {
   const db = supabaseAdmin();
 
   // Mark as paid
-  await db
-    .from("competition_entries")
-    .update({ payment_status: "paid" })
-    .eq("id", entryId);
+  await db.from("competition_entries").update({ payment_status: "paid" }).eq("id", entryId);
 
   // Fetch entry
   const { data: entry, error: entryError } = await db
@@ -95,24 +92,22 @@ export async function POST(req: Request) {
 
   const resend = new Resend(resendKey);
 
-  // ✅ Proper Burton Pride sender
-  const FROM = process.env.EMAIL_FROM?.trim();
-  if (!FROM) {
-    console.error("❌ EMAIL_FROM missing in Vercel env vars");
-    return NextResponse.json({ received: true });
-  }
+  // ✅ LOCK sender to your verified domain (no onboarding fallback)
+  const FROM = "Burton Pride <noreply@windowsofhope.burtonpride.co.uk>";
 
-  const REPLY_TO =
-    process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
+  const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
+  const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  const adminEmail =
-    process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
+  // Choose customer email safely
+  const customerEmail = String(entry.email || sessionEmail || "").trim().toLowerCase();
+
+  console.log("📩 Customer email target:", customerEmail || "(none)");
+  console.log("📩 Admin email target:", adminEmail);
 
   // Convert Google Drive link for email preview
   const imageUrl = (() => {
     const url = String(entry.image_url || "").trim();
     if (!url) return "";
-
     if (url.includes("drive.google.com/uc?")) return url;
 
     const m = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
@@ -122,23 +117,28 @@ export async function POST(req: Request) {
   })();
 
   try {
-    // Email entrant
-    await resend.emails.send({
-      from: FROM,
-      to: entry.email || sessionEmail,
-      replyTo: REPLY_TO,
-      subject: "Payment received — you’re entered! 🎉",
-      html: `
-        <div style="font-family: Arial, sans-serif;">
-          <h2>You’re officially entered 🎉</h2>
-          <p>Hi ${entry.contact_name || "there"},</p>
-          <p>Your entry for <strong>${entry.business_name}</strong> is confirmed.</p>
-          <p>Thank you for supporting Burton Pride 🌈</p>
-        </div>
-      `,
-    });
+    // 1) Send customer email ONLY if we have a customer email
+    if (customerEmail) {
+      await resend.emails.send({
+        from: FROM,
+        to: customerEmail,
+        replyTo: REPLY_TO,
+        subject: "Payment received — you’re entered! 🎉",
+        html: `
+          <div style="font-family: Arial, sans-serif;">
+            <h2>You’re officially entered 🎉</h2>
+            <p>Hi ${entry.contact_name || "there"},</p>
+            <p>Your entry for <strong>${entry.business_name}</strong> is confirmed.</p>
+            <p>Thank you for supporting Burton Pride 🌈</p>
+          </div>
+        `,
+      });
+      console.log("✅ Customer email sent");
+    } else {
+      console.warn("⚠️ Customer email missing — skipped customer email send");
+    }
 
-    // Email Burton Pride admin
+    // 2) Always send admin email
     await resend.emails.send({
       from: FROM,
       to: adminEmail,
@@ -163,8 +163,9 @@ export async function POST(req: Request) {
         </div>
       `,
     });
+    console.log("✅ Admin email sent");
 
-    // Mark email sent
+    // Mark email sent (after admin email at least)
     await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
