@@ -113,7 +113,7 @@ export async function POST(req: Request) {
   // Public URL must be absolute for emails.
   const BASE_URL = getBaseUrl();
   const LOGO_URL =
-    process.env.EMAIL_LOGO_URL?.trim() || `${BASE_URL}/image/logo/WindowsHope.png`;
+    process.env.EMAIL_LOGO_URL?.trim() || `${BASE_URL}/image/logo/WindowsHope.svg`;
 
   const customerEmail = String(entry.email || sessionEmail || "").trim().toLowerCase();
   const imageUrl = drivePreviewUrl(entry.image_url || "");
