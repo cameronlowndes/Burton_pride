@@ -27,6 +27,20 @@ function drivePreviewUrl(url: string) {
   return u;
 }
 
+/** Build a public base url that works on Vercel preview + prod */
+function getBaseUrl() {
+  // Recommended: set NEXT_PUBLIC_URL in Vercel (prod + preview if you want)
+  const explicit = process.env.NEXT_PUBLIC_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+
+  // Vercel provides this automatically (no protocol)
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel}`.replace(/\/+$/, "");
+
+  // Last resort (won't work in most cases)
+  return "https://windowsofhope.burtonpride.co.uk";
+}
+
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) {
@@ -95,9 +109,11 @@ export async function POST(req: Request) {
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
   const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  // Public logo URL (set EMAIL_LOGO_URL in Vercel if you want)
+  // ✅ Logo served from /public/image/logo/WindowsHope.png
+  // Public URL must be absolute for emails.
+  const BASE_URL = getBaseUrl();
   const LOGO_URL =
-    process.env.EMAIL_LOGO_URL?.trim() || "https://windowsofhope.burtonpride.co.uk/logo.png";
+    process.env.EMAIL_LOGO_URL?.trim() || `${BASE_URL}/image/logo/WindowsHope.png`;
 
   const customerEmail = String(entry.email || sessionEmail || "").trim().toLowerCase();
   const imageUrl = drivePreviewUrl(entry.image_url || "");
@@ -211,12 +227,10 @@ Photo: ${imageUrl || "none"}`;
   `;
 
   try {
-    // Helpful headers for mailbox providers
     const headers = {
       "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
     } as Record<string, string>;
 
-    // Send customer email
     if (customerEmail) {
       await resend.emails.send({
         from: FROM,
@@ -232,7 +246,6 @@ Photo: ${imageUrl || "none"}`;
       console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
-    // Send admin email
     await resend.emails.send({
       from: FROM,
       to: adminEmail,
@@ -244,7 +257,6 @@ Photo: ${imageUrl || "none"}`;
     });
     console.log("✅ Admin email sent");
 
-    // Mark email sent
     await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
