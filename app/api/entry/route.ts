@@ -32,7 +32,6 @@ export async function POST(req: Request) {
     }
 
     if (existing) {
-      // If already exists, stop them paying again
       return NextResponse.json(
         {
           error:
@@ -66,7 +65,6 @@ export async function POST(req: Request) {
     if (error) {
       console.error("Supabase insert error:", error);
 
-      // If you later add a UNIQUE constraint/index, this catches race-condition duplicates
       const msg = String(error.message || "").toLowerCase();
       if (msg.includes("duplicate") || msg.includes("unique")) {
         return NextResponse.json(

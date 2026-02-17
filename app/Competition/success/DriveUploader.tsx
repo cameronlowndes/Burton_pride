@@ -5,9 +5,11 @@ import { useRef, useState } from "react";
 export default function DriveUploader({
   sessionId,
   email,
+  onUploaded,
 }: {
   sessionId: string;
   email: string;
+  onUploaded: (url: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -44,8 +46,6 @@ export default function DriveUploader({
     setUploading(true);
 
     try {
-      // We DON'T call Google directly from the browser anymore.
-      // We call our own API route which proxies to Google (no CORS).
       const base64 = await fileToBase64(file);
 
       const ext = file.name.split(".").pop() || "jpg";
@@ -69,7 +69,14 @@ export default function DriveUploader({
         throw new Error(data?.error || "Upload failed");
       }
 
-      setUploadedUrl(data.url);
+      // ✅ Prefer email-embeddable image URL if your API returns it
+      const finalUrl: string = (data.imageUrl || data.url || "").trim();
+      if (!finalUrl) throw new Error("Upload succeeded but no URL was returned.");
+
+      setUploadedUrl(finalUrl);
+
+      // ✅ Pass URL back to parent form so it can be saved + emailed
+      onUploaded(finalUrl);
     } catch (e: any) {
       setError(e?.message || "Upload failed");
     } finally {
