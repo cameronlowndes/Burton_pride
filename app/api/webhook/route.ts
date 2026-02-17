@@ -27,14 +27,17 @@ function drivePreviewUrl(url: string) {
   return u;
 }
 
-/** Build base URL automatically for Vercel preview + production */
+/** Build a public base url that works on Vercel preview + prod */
 function getBaseUrl() {
+  // Recommended: set NEXT_PUBLIC_URL in Vercel (prod + preview if you want)
   const explicit = process.env.NEXT_PUBLIC_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
 
+  // Vercel provides this automatically (no protocol)
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel}`.replace(/\/+$/, "");
 
+  // Last resort (won't work in most cases)
   return "https://windowsofhope.burtonpride.co.uk";
 }
 
@@ -101,15 +104,16 @@ export async function POST(req: Request) {
 
   const resend = new Resend(resendKey);
 
+  // Verified sender
   const FROM = "Burton Pride <noreply@windowsofhope.burtonpride.co.uk>";
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
   const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  // ✅ FIXED LOGO URL (PNG + works on preview + production)
+  // ✅ Logo served from /public/image/logo/WindowsHope.png
+  // Public URL must be absolute for emails.
   const BASE_URL = getBaseUrl();
   const LOGO_URL =
-    process.env.EMAIL_LOGO_URL?.trim() ||
-    `${BASE_URL}/image/logo/WindowsHope.png`;
+    process.env.EMAIL_LOGO_URL?.trim() || `${BASE_URL}/image/logo/WindowsHope.png`;
 
   const customerEmail = String(entry.email || sessionEmail || "").trim().toLowerCase();
   const imageUrl = drivePreviewUrl(entry.image_url || "");
@@ -121,6 +125,7 @@ export async function POST(req: Request) {
   const safeAddress = escapeHtml(entry.address || "");
   const safeWebsite = escapeHtml(entry.website || "");
 
+  // Shared footer (helps trust + deliverability)
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
       Burton Pride C.I.C • Burton-on-Trent<br/>
@@ -132,7 +137,7 @@ export async function POST(req: Request) {
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
       <div style="display:flex;align-items:center;gap:12px;">
         <img src="${LOGO_URL}" alt="Burton Pride" width="44" height="44"
-          style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
+          style="border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
         <div>
           <div style="font-size:16px;font-weight:700;">Burton Pride C.I.C</div>
           <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
@@ -141,6 +146,7 @@ export async function POST(req: Request) {
     </div>
   `;
 
+  // Customer email
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
@@ -157,6 +163,63 @@ If you need help, reply to this email.
           <p style="margin:0 0 14px;">
             We’ve received your payment. Your entry for <strong>${safeBusiness}</strong> is confirmed.
           </p>
+
+          <div style="background:#f9fafb;border:1px solid #eef2f7;border-radius:12px;padding:14px;margin:14px 0;">
+            <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">Your details</div>
+            <div style="font-size:14px;"><strong>Business:</strong> ${safeBusiness}</div>
+            <div style="font-size:14px;"><strong>Contact:</strong> ${safeContact}</div>
+            <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
+          </div>
+
+          <p style="margin:0;color:#374151;">
+            Thank you for supporting Burton Pride 🌈
+          </p>
+        </div>
+        ${footerHtml}
+      </div>
+    </div>
+  `;
+
+  // Admin email
+  const adminSubject = "New paid Windows of Hope entry (details inside)";
+  const adminText = `New PAID entry:
+Business: ${entry.business_name || ""}
+Contact: ${entry.contact_name || ""}
+Email: ${entry.email || ""}
+Phone: ${entry.phone || ""}
+Address: ${entry.address || ""}
+Website: ${entry.website || ""}
+Entry ID: ${entry.id}
+Photo: ${imageUrl || "none"}`;
+
+  const adminHtml = `
+    <div style="background:#f6f7fb;padding:28px 12px;font-family:Arial,sans-serif;">
+      <div style="max-width:700px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e9e9ef;">
+        ${headerHtml}
+        <div style="padding:22px 20px;color:#111827;">
+          <h2 style="margin:0 0 12px;font-size:22px;">New paid entry ✅</h2>
+
+          <div style="background:#f9fafb;border:1px solid #eef2f7;border-radius:12px;padding:14px;margin:14px 0;">
+            <div style="font-size:14px;"><strong>Business:</strong> ${safeBusiness}</div>
+            <div style="font-size:14px;"><strong>Contact:</strong> ${safeContact}</div>
+            <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
+            <div style="font-size:14px;"><strong>Phone:</strong> ${safePhone}</div>
+            <div style="font-size:14px;"><strong>Address:</strong> ${safeAddress}</div>
+            ${safeWebsite ? `<div style="font-size:14px;"><strong>Website:</strong> ${safeWebsite}</div>` : ""}
+            <div style="font-size:14px;"><strong>Entry ID:</strong> ${escapeHtml(entry.id)}</div>
+          </div>
+
+          ${
+            imageUrl
+              ? `
+                <h3 style="margin:18px 0 10px;font-size:16px;">Photo</h3>
+                <img src="${imageUrl}" alt="Uploaded photo" style="max-width:100%;border-radius:12px;border:1px solid #eee;" />
+                <div style="margin-top:8px;font-size:12px;">
+                  <a href="${imageUrl}">Open photo</a>
+                </div>
+              `
+              : `<p><em>No image uploaded.</em></p>`
+          }
         </div>
         ${footerHtml}
       </div>
@@ -178,17 +241,21 @@ If you need help, reply to this email.
         html: customerHtml,
         headers,
       });
+      console.log("✅ Customer email sent");
+    } else {
+      console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
     await resend.emails.send({
       from: FROM,
       to: adminEmail,
       replyTo: REPLY_TO,
-      subject: "New paid Windows of Hope entry",
-      text: "New entry received",
-      html: customerHtml,
+      subject: adminSubject,
+      text: adminText,
+      html: adminHtml,
       headers,
     });
+    console.log("✅ Admin email sent");
 
     await db
       .from("competition_entries")
