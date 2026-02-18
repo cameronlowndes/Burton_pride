@@ -131,19 +131,19 @@ export async function POST(req: Request) {
       If you need help, email us at prideburton@gmail.com.
     </div>
   `;
-
   const headerHtml = `
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
       <div style="display:flex;align-items:center;gap:12px;">
         <img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
           style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
         <div>
-          <div style="font-size:16px;font-weight:700;">Burton Pride C.I.C</div>
+          <div style="font-size:16px;font-weight:800;">Burton Pride C.I.C</div>
           <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
         </div>
       </div>
     </div>
   `;
+
 
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
@@ -215,7 +215,7 @@ Photo: ${imageUrl || "none"}`;
                   <a href="${imageUrl}">Open photo</a>
                 </div>
               `
-              : `<p><em>No image uploaded.</em></p>`
+              : `<p><em>Please check Google Drive for the image. If it isn’t there, please email the customer back to let them know the image is missing.</em></p>`
           }
         </div>
         ${footerHtml}
