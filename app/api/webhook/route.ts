@@ -2,6 +2,8 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import fs from "fs";
+import path from "path";
 
 export const runtime = "nodejs";
 
@@ -25,20 +27,6 @@ function drivePreviewUrl(url: string) {
   const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
   if (m?.[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
   return u;
-}
-
-/** Build a public base url that works on Vercel preview + prod */
-function getBaseUrl() {
-  // Recommended: set NEXT_PUBLIC_URL in Vercel (prod + preview if you want)
-  const explicit = process.env.NEXT_PUBLIC_URL?.trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-
-  // Vercel provides this automatically (no protocol)
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel}`.replace(/\/+$/, "");
-
-  // Last resort (won't work in most cases)
-  return "https://windowsofhope.burtonpride.co.uk";
 }
 
 export async function POST(req: Request) {
@@ -89,7 +77,9 @@ export async function POST(req: Request) {
 
   const { data: entry, error: entryError } = await db
     .from("competition_entries")
-    .select("id, business_name, contact_name, email, phone, address, website, image_url, confirmation_email_sent_at")
+    .select(
+      "id, business_name, contact_name, email, phone, address, website, image_url, confirmation_email_sent_at"
+    )
     .eq("id", entryId)
     .single();
 
@@ -109,13 +99,19 @@ export async function POST(req: Request) {
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
   const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  // ✅ Logo served from /public/image/logo/WindowsHope.png
-  // Public URL must be absolute for emails.
-  const BASE_URL = getBaseUrl();
-  const LOGO_URL =
-    process.env.EMAIL_LOGO_URL?.trim() || `${BASE_URL}/image/logo/WindowsHope.png`;
+  // ✅ Embed logo into email (CID). This GUARANTEES the logo shows.
+  // Make sure the file exists: /public/image/logo/WindowsHope.png
+  let logoBase64 = "";
+  try {
+    const logoPath = path.join(process.cwd(), "public", "image", "logo", "WindowsHope.png");
+    logoBase64 = fs.readFileSync(logoPath).toString("base64");
+  } catch (e: any) {
+    console.error("❌ Could not read logo file from /public/image/logo/WindowsHope.png:", e?.message || e);
+  }
 
-  const customerEmail = String(entry.email || sessionEmail || "").trim().toLowerCase();
+  const customerEmail = String(entry.email || sessionEmail || "")
+    .trim()
+    .toLowerCase();
   const imageUrl = drivePreviewUrl(entry.image_url || "");
 
   const safeBusiness = escapeHtml(entry.business_name || "");
@@ -129,18 +125,18 @@ export async function POST(req: Request) {
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
       Burton Pride C.I.C • Burton-on-Trent<br/>
-      If you need help, reply to this email.
+      If you need help, email us at prideburton@gmail.com.
     </div>
   `;
 
   const headerHtml = `
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
       <div style="display:flex;align-items:center;gap:12px;">
-        <img src="${LOGO_URL}" alt="Burton Pride" width="44" height="44"
-          style="border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
+        <img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
+          style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
         <div>
           <div style="font-size:16px;font-weight:700;">Burton Pride C.I.C</div>
-          <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
+          <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div> 
         </div>
       </div>
     </div>
@@ -150,7 +146,7 @@ export async function POST(req: Request) {
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
-If you need help, reply to this email.
+If you need help, email us at prideburton@gmail.com.
 — Burton Pride C.I.C`;
 
   const customerHtml = `
@@ -231,6 +227,19 @@ Photo: ${imageUrl || "none"}`;
       "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
     } as Record<string, string>;
 
+    const logoAttachment =
+      logoBase64
+        ? [
+            {
+              filename: "WindowsHope.png",
+              content: logoBase64,
+              contentType: "image/png",
+              content_id: "bp-logo", // matches cid:bp-logo in HTML
+            },
+          ]
+        : undefined;
+
+    // Send customer email
     if (customerEmail) {
       await resend.emails.send({
         from: FROM,
@@ -240,12 +249,14 @@ Photo: ${imageUrl || "none"}`;
         text: customerText,
         html: customerHtml,
         headers,
+        attachments: logoAttachment,
       });
       console.log("✅ Customer email sent");
     } else {
       console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
+    // Send admin email
     await resend.emails.send({
       from: FROM,
       to: adminEmail,
@@ -254,9 +265,11 @@ Photo: ${imageUrl || "none"}`;
       text: adminText,
       html: adminHtml,
       headers,
+      attachments: logoAttachment,
     });
     console.log("✅ Admin email sent");
 
+    // Mark email sent
     await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
