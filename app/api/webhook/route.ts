@@ -99,19 +99,23 @@ export async function POST(req: Request) {
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
   const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  // ✅ Embed logo into email (CID). This GUARANTEES the logo shows.
-  // Make sure the file exists: /public/image/logo/WindowsHope.png
+  // ✅ Load logo from /public and embed it inline with CID
+  // File must exist exactly: public/image/logo/WindowsHope.png
   let logoBase64 = "";
   try {
     const logoPath = path.join(process.cwd(), "public", "image", "logo", "WindowsHope.png");
     logoBase64 = fs.readFileSync(logoPath).toString("base64");
   } catch (e: any) {
-    console.error("❌ Could not read logo file from /public/image/logo/WindowsHope.png:", e?.message || e);
+    console.error(
+      "❌ Could not read logo file from /public/image/logo/WindowsHope.png:",
+      e?.message || e
+    );
   }
 
   const customerEmail = String(entry.email || sessionEmail || "")
     .trim()
     .toLowerCase();
+
   const imageUrl = drivePreviewUrl(entry.image_url || "");
 
   const safeBusiness = escapeHtml(entry.business_name || "");
@@ -121,7 +125,6 @@ export async function POST(req: Request) {
   const safeAddress = escapeHtml(entry.address || "");
   const safeWebsite = escapeHtml(entry.website || "");
 
-  // Shared footer (helps trust + deliverability)
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
       Burton Pride C.I.C • Burton-on-Trent<br/>
@@ -136,13 +139,12 @@ export async function POST(req: Request) {
           style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
         <div>
           <div style="font-size:16px;font-weight:700;">Burton Pride C.I.C</div>
-          <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div> 
+          <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
         </div>
       </div>
     </div>
   `;
 
-  // Customer email
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
@@ -176,7 +178,6 @@ If you need help, email us at prideburton@gmail.com.
     </div>
   `;
 
-  // Admin email
   const adminSubject = "New paid Windows of Hope entry (details inside)";
   const adminText = `New PAID entry:
 Business: ${entry.business_name || ""}
@@ -227,6 +228,7 @@ Photo: ${imageUrl || "none"}`;
       "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
     } as Record<string, string>;
 
+    // ✅ IMPORTANT: Resend expects `contentId` (camelCase) for CID images.
     const logoAttachment =
       logoBase64
         ? [
@@ -234,12 +236,11 @@ Photo: ${imageUrl || "none"}`;
               filename: "WindowsHope.png",
               content: logoBase64,
               contentType: "image/png",
-              content_id: "bp-logo", // matches cid:bp-logo in HTML
+              contentId: "bp-logo", // matches cid:bp-logo
             },
           ]
         : undefined;
 
-    // Send customer email
     if (customerEmail) {
       await resend.emails.send({
         from: FROM,
@@ -256,7 +257,6 @@ Photo: ${imageUrl || "none"}`;
       console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
-    // Send admin email
     await resend.emails.send({
       from: FROM,
       to: adminEmail,
@@ -269,7 +269,6 @@ Photo: ${imageUrl || "none"}`;
     });
     console.log("✅ Admin email sent");
 
-    // Mark email sent
     await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
