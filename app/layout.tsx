@@ -3,13 +3,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../styles/globals.css";
+import { Analytics } from "@vercel/analytics/react";
 
-import ConditionalNavbar from "./components/Rooting/ConditionalNavbar";
-import ConditionalFooter from "./components/Rooting/ConditionalFooter";
-import Watermark from "./components/Rooting/Watermark";
-
-
-import { Analytics } from "@vercel/analytics/react"; 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -36,18 +31,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased flex flex-col min-h-screen bg-transparent text-white m-0`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen m-0`}
       >
-        <ConditionalNavbar />
-
-        {/* Main gradient background */}
-        <div className="flex-grow bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 pb-24">
-          <main>{children}</main>
-        </div>
-
-        <ConditionalFooter />
-        <Watermark />
-
+        {children}
         <Analytics />
       </body>
     </html>

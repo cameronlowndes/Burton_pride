@@ -133,7 +133,7 @@ export async function POST(req: Request) {
   `;
   const headerHtml = `
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
-      <div style="display:flex;align-items:center;gap:12px;">
+      <div style="display:flex;align-items:center;gap:18px;">
         <img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
           style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
         <div>

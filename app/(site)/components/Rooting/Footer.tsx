@@ -13,18 +13,21 @@ export default function Footer() {
 
       {/* Main Content */}
       <div className="relative z-10 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+        
         {/* Copyright & Links */}
         <div className="text-center md:text-left space-y-2">
           <p className="font-bold text-lg md:text-xl drop-shadow-lg">
             &copy; {currentYear} Burton Pride | CIC No: 15490242
           </p>
-          <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-1">
+
+          <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-1 items-center">
             <Link
               href="/terms"
               className="hover:text-yellow-300 transition-colors duration-300 font-semibold"
             >
               Terms
             </Link>
+
             <a
               href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48"
               target="_blank"
@@ -33,6 +36,20 @@ export default function Footer() {
             >
               Donate
             </a>
+
+            {/* 🔐 Admin Login Button */}
+            <Link
+              href="/admin/login"
+              className="
+                bg-white/20 backdrop-blur-md border border-white/30
+                px-4 py-1.5 rounded-full text-sm font-semibold
+                hover:bg-white hover:text-purple-700
+                transition-all duration-300
+                shadow-md hover:shadow-xl
+              "
+            >
+              🔐 Admin Login
+            </Link>
           </div>
         </div>
 
@@ -46,6 +63,7 @@ export default function Footer() {
           >
             <FaFacebookF size={20} />
           </a>
+
           <a
             href="https://www.instagram.com/prideburton/"
             target="_blank"
@@ -56,37 +74,34 @@ export default function Footer() {
           </a>
         </div>
       </div>
-{/* Powered By - Mega Neon Watermark */}
-<div className="mt-14 relative z-30 flex justify-center">
-  {/* Outer neon ring that slowly spins */}
-  <div className="absolute inset-0 flex justify-center items-center">
-    <div className="w-64 h-64 sm:w-80 sm:h-80 rounded-full bg-gradient-to-r 
-                    from-fuchsia-500 via-yellow-400 to-cyan-500 
-                    opacity-40 blur-3xl animate-spin-slow" />
-  </div>
 
-  <a
-    href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
-    target="_blank"
-    rel="noopener noreferrer"
-    className="
-      relative text-center font-extrabold uppercase tracking-widest
-      text-4xl sm:text-5xl md:text-6xl
-      bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
-      bg-[length:200%_auto] bg-clip-text text-transparent
-      animate-gradient-x
-      drop-shadow-[0_0_25px_rgba(255,255,255,0.95)]
-      hover:scale-110 hover:drop-shadow-[0_0_35px_rgba(255,255,255,1)]
-      transition-transform duration-500
-    "
-  >
-    🚀 Built & Powered by Cameron Digital Works 🚀
-  </a>
-</div>
+      {/* Powered By - Mega Neon Watermark */}
+      <div className="mt-14 relative z-30 flex justify-center">
+        {/* Outer neon ring */}
+        <div className="absolute inset-0 flex justify-center items-center">
+          <div className="w-64 h-64 sm:w-80 sm:h-80 rounded-full bg-gradient-to-r 
+                          from-fuchsia-500 via-yellow-400 to-cyan-500 
+                          opacity-40 blur-3xl animate-spin-slow" />
+        </div>
 
-
-   
-      
+        <a
+          href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="
+            relative text-center font-extrabold uppercase tracking-widest
+            text-4xl sm:text-5xl md:text-6xl
+            bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
+            bg-[length:200%_auto] bg-clip-text text-transparent
+            animate-gradient-x
+            drop-shadow-[0_0_25px_rgba(255,255,255,0.95)]
+            hover:scale-110 hover:drop-shadow-[0_0_35px_rgba(255,255,255,1)]
+            transition-transform duration-500
+          "
+        >
+          🚀 Built & Powered by Cameron Digital Works 🚀
+        </a>
+      </div>
     </footer>
   );
 }
