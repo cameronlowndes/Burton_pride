@@ -1,17 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 export default function CompetitionPage() {
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // ✅ UI error message instead of alert()
   const [formError, setFormError] = useState<string | null>(null);
-
-  // optional: scroll to form on error
   const formTopRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState({
@@ -23,40 +20,46 @@ export default function CompetitionPage() {
     website: "",
   });
 
-  const gallery = useMemo(
-    () => [
-      { src: "/competition/window-1.jpg", alt: "Decorated window example 1" },
-      { src: "/competition/window-2.jpg", alt: "Decorated window example 2" },
-      { src: "/competition/window-3.jpg", alt: "Decorated window example 3" },
-      { src: "/competition/window-4.jpg", alt: "Decorated window example 4" },
-      { src: "/competition/window-5.jpg", alt: "Decorated window example 5" },
-      { src: "/competition/window-6.jpg", alt: "Decorated window example 6" },
-    ],
-    []
-  );
+  // ✅ image upload state
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
-  const winners = useMemo(
-    () => ({
-      first: {
-        name: "To be announced",
-        image: "/competition/winner-1.jpg",
-        detail: "Winner will be featured here once judging is complete.",
-      },
-      second: {
-        name: "To be announced",
-        image: "/competition/winner-2.jpg",
-        detail: "Winner will be featured here once judging is complete.",
-      },
-      third: {
-        name: "To be announced",
-        image: "/competition/winner-3.jpg",
-        detail: "Winner will be featured here once judging is complete.",
-      },
-    }),
-    []
-  );
+  // ✅ showcase images from DB (approved entries)
+  const [showcaseImages, setShowcaseImages] = useState<string[]>([]);
+  const [showcaseLoading, setShowcaseLoading] = useState(true);
 
-  const hasWinners = false;
+  useEffect(() => {
+    async function loadShowcase() {
+      try {
+        setShowcaseLoading(true);
+        const res = await fetch("/api/windows/showcase", { cache: "no-store" });
+        const text = await res.text();
+
+        let json: any;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          console.error("Showcase API returned non-JSON:", text);
+          setShowcaseImages([]);
+          return;
+        }
+
+        if (json?.ok) {
+          setShowcaseImages(json.images || []);
+        } else {
+          console.error("Showcase API error:", json?.error);
+          setShowcaseImages([]);
+        }
+      } catch (e) {
+        console.error("Failed to load showcase:", e);
+        setShowcaseImages([]);
+      } finally {
+        setShowcaseLoading(false);
+      }
+    }
+
+    loadShowcase();
+  }, []);
 
   const resetForNewEmail = () => {
     setFormError(null);
@@ -70,12 +73,33 @@ export default function CompetitionPage() {
       address: "",
       website: "",
     });
+    setImageFile(null);
+    setImagePreview(null);
 
-    // scroll to form
     setTimeout(() => {
       formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
   };
+
+  async function uploadImageToSupabase(entryId: string, file: File) {
+    const supabase = supabaseBrowser();
+
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `entries/${entryId}/${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("windows-of-hope")
+      .upload(path, file, {
+        upsert: true,
+        contentType: file.type,
+        cacheControl: "3600",
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from("windows-of-hope").getPublicUrl(path);
+    return data.publicUrl as string;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,19 +118,40 @@ export default function CompetitionPage() {
       return;
     }
 
+    if (!imageFile) {
+      setFormError("Please upload a photo of your window to complete your entry.");
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    if (!imageFile.type.startsWith("image/")) {
+      setFormError("Please upload an image file (JPG/PNG/WebP).");
+      return;
+    }
+    if (imageFile.size > 8 * 1024 * 1024) {
+      setFormError("Image is too large. Please keep it under 8MB.");
+      return;
+    }
+
     try {
       setLoading(true);
 
-      // 1) Save entry (server blocks duplicates)
+      // 1) Create entry first (so we get entryId)
       const entryRes = await fetch("/api/entry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...formData }),
       });
 
-      const entryData = await entryRes.json();
+      const entryText = await entryRes.text();
+      let entryData: any;
+      try {
+        entryData = JSON.parse(entryText);
+      } catch {
+        setFormError("Server error: /api/entry did not return JSON.");
+        return;
+      }
 
-      // ✅ Show error in UI (no alert)
       if (!entryRes.ok) {
         setFormError(
           entryData?.error ||
@@ -116,19 +161,47 @@ export default function CompetitionPage() {
         return;
       }
 
-      const entryId = entryData.entryId;
+      const entryId = entryData.entryId as string;
 
-      // 2) Create Stripe checkout session
+      // 2) Upload image to Supabase Storage
+      const imageUrl = await uploadImageToSupabase(entryId, imageFile);
+
+      // 3) Save imageUrl into DB row (requires this route)
+      const saveRes = await fetch("/api/entry/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId, imageUrl }),
+      });
+
+      const saveText = await saveRes.text();
+      let saveJson: any;
+      try {
+        saveJson = JSON.parse(saveText);
+      } catch {
+        throw new Error("Server error: /api/entry/image did not return JSON.");
+      }
+
+      if (!saveRes.ok) {
+        throw new Error(saveJson?.error || "Failed to save image to entry.");
+      }
+
+      // 4) Create Stripe checkout session
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...formData, entryId }),
       });
 
-      const data = await res.json();
+      const checkoutText = await res.text();
+      let checkoutJson: any;
+      try {
+        checkoutJson = JSON.parse(checkoutText);
+      } catch {
+        throw new Error("Server error: /api/checkout did not return JSON.");
+      }
 
-      if (data?.url) {
-        window.location.href = data.url;
+      if (checkoutJson?.url) {
+        window.location.href = checkoutJson.url;
         return;
       }
 
@@ -189,14 +262,10 @@ export default function CompetitionPage() {
         be featured, and help make Burton shine.
       </p>
 
-      {/* TOP SECTION */}
       <div className="flex flex-col lg:flex-row items-start gap-12 w-full max-w-6xl">
-        {/* LEFT */}
         <div className="flex-1 flex flex-col">
-          {/* Anchor for scroll-to-error */}
           <div ref={formTopRef} />
 
-          {/* ✅ Error panel (replaces alerts) */}
           {formError && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -285,14 +354,33 @@ export default function CompetitionPage() {
               className="p-3 rounded-lg border border-white/30 text-black"
             />
 
-            <div className="bg-white/10 border border-white/30 rounded-xl p-4 mt-2 text-center">
-              <p className="font-semibold text-white text-lg">📸 Image Upload Notice</p>
-              <p className="text-white/90 text-sm mt-1">
-                You will upload your competition image on the success page after payment.
+            {/* Image upload */}
+            <div className="bg-white/10 border border-white/20 rounded-2xl p-4">
+              <div className="font-extrabold text-lg">📸 Upload your window photo</div>
+              <p className="text-white/85 text-sm mt-1">
+                Please upload a clear photo of your decorated window (max 8MB).
               </p>
+
+              <input
+                type="file"
+                accept="image/*"
+                disabled={loading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setImageFile(file);
+                  setImagePreview(file ? URL.createObjectURL(file) : null);
+                }}
+                className="mt-3 block w-full text-sm"
+              />
+
+              {imagePreview && (
+                <div className="mt-4 rounded-2xl overflow-hidden border border-white/15">
+                  <img src={imagePreview} alt="Preview" className="w-full object-cover" />
+                </div>
+              )}
             </div>
 
-            <div className="flex justify-center mt-4">
+            <div className="flex justify-center mt-2">
               <a
                 href="/Competition/Terms"
                 className="cursor-pointer px-6 py-3 rounded-xl font-semibold bg-white text-purple-700 shadow-lg hover:scale-105 active:scale-95 transition"
@@ -301,7 +389,7 @@ export default function CompetitionPage() {
               </a>
             </div>
 
-            <label className="cursor-pointer flex items-center gap-3 mt-5 bg-white/10 p-4 rounded-xl border border-white/20">
+            <label className="cursor-pointer flex items-center gap-3 mt-2 bg-white/10 p-4 rounded-xl border border-white/20">
               <input
                 type="checkbox"
                 checked={consent}
@@ -314,7 +402,7 @@ export default function CompetitionPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-4 cursor-pointer bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mt-2 cursor-pointer bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? "Processing..." : "Submit & Pay £2"}
             </button>
@@ -341,9 +429,8 @@ export default function CompetitionPage() {
           <div className="bg-white/10 border border-white/20 rounded-3xl p-6 shadow-xl">
             <p className="font-semibold text-xl">What happens next?</p>
             <ol className="list-decimal list-inside text-white/85 mt-3 space-y-2">
-              <li>Submit your details and pay the £2 entry fee.</li>
-              <li>You’ll be taken to the success page.</li>
-              <li>Upload your window image to complete your entry.</li>
+              <li>Submit your details, upload your photo, and pay the £2 entry fee.</li>
+              <li>Your entry will be saved and reviewed by the committee.</li>
               <li>Judging takes place and winners are announced.</li>
             </ol>
           </div>
@@ -360,43 +447,8 @@ export default function CompetitionPage() {
         </motion.div>
       </div>
 
-      {/* Rest of your page stays the same... */}
+      {/* Showcase */}
       <div className="w-full max-w-6xl mt-12 flex flex-col gap-12">
-        {/* Prizes */}
-        <motion.div
-          className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-3xl p-8 sm:p-10 shadow-2xl"
-          initial={{ opacity: 0, y: 22 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-        >
-          <div className="text-center mb-8">
-            <h2 className="text-4xl sm:text-5xl font-extrabold drop-shadow-lg">🏆 Prizes</h2>
-            <p className="text-white/90 mt-3 max-w-3xl mx-auto">
-              The top windows will win prizes and be featured across Burton Pride channels.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-6">
-            <div className="bg-yellow-400 text-black rounded-2xl p-6 shadow-lg">
-              <p className="text-2xl font-extrabold mb-2">🥇 1st Place</p>
-              <p className="font-semibold">
-                Trophy + Winner Certificate + Featured on Burton Pride website & social media
-              </p>
-            </div>
-
-            <div className="bg-gray-200 text-black rounded-2xl p-6 shadow-lg">
-              <p className="text-2xl font-extrabold mb-2">🥈 2nd Place</p>
-              <p className="font-semibold">Certificate + Social media feature</p>
-            </div>
-
-            <div className="bg-orange-300 text-black rounded-2xl p-6 shadow-lg">
-              <p className="text-2xl font-extrabold mb-2">🥉 3rd Place</p>
-              <p className="font-semibold">Certificate of achievement</p>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Showcase */}
         <motion.div
           className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-3xl p-8 sm:p-10 shadow-2xl"
           initial={{ opacity: 0, y: 22 }}
@@ -406,35 +458,50 @@ export default function CompetitionPage() {
           <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
             <h2 className="text-4xl sm:text-5xl font-extrabold drop-shadow-lg">🪟 Window Showcase</h2>
             <span className="text-sm bg-white/15 border border-white/20 px-3 py-2 rounded-full">
-              Photos: /public/competition/
+              Live entries
             </span>
           </div>
 
           <p className="text-white/90 mb-8 max-w-4xl">
-            Show off your window here! These can be examples or real entries.
+            These are real entries approved by the committee. If none are approved yet, we’ll show the Burton Pride logo.
           </p>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
-            {gallery.map((img) => (
-              <div
-                key={img.src}
-                className="cursor-pointer relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3] hover:scale-[1.02] active:scale-[0.99] transition"
-              >
-                <Image src={img.src} alt={img.alt} fill className="object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
-                <div className="absolute bottom-2 left-2 text-xs font-semibold bg-black/35 px-2 py-1 rounded-lg">
-                  Showcase
+            {showcaseLoading ? (
+              <div className="col-span-full rounded-2xl border border-white/20 bg-white/5 p-6 text-white/80">
+                Loading showcase...
+              </div>
+            ) : showcaseImages.length > 0 ? (
+              showcaseImages.map((src, index) => (
+                <div
+                  key={`${src}-${index}`}
+                  className="cursor-pointer relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3] hover:scale-[1.02] active:scale-[0.99] transition"
+                >
+                  <Image src={src} alt="Window entry" fill className="object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
+                  <div className="absolute bottom-2 left-2 text-xs font-semibold bg-black/35 px-2 py-1 rounded-lg">
+                    Entry
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col">
+                <div className="relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3]">
+                  <Image
+                    src="/image/Logo.png"
+                    alt="Burton Pride Logo"
+                    fill
+                    className="object-contain p-10"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
+                  <div className="absolute bottom-2 left-2 text-xs font-semibold bg-black/35 px-2 py-1 rounded-lg">
+                    No entries yet
+                  </div>
                 </div>
               </div>
-            ))}
+            )}
           </div>
         </motion.div>
-
-        {hasWinners && (
-          <motion.div className="rounded-3xl p-8 sm:p-10 shadow-2xl border border-white/25 bg-gradient-to-r from-yellow-400/20 via-white/10 to-purple-500/15">
-            {/* unchanged winners UI */}
-          </motion.div>
-        )}
       </div>
     </motion.div>
   );
