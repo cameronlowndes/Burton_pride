@@ -12,13 +12,18 @@ export default function AboutClient() {
       animate="visible"
       variants={{
         hidden: {},
-        visible: { transition: { staggerChildren: 0.25 } },
+        visible: {
+          transition: { staggerChildren: 0.25 },
+        },
       }}
     >
       {/* About Section */}
       <motion.section
         className="text-center flex flex-col items-center gap-8 mt-10 max-w-4xl"
-        variants={{ hidden: { opacity: 0, y: 40 }, visible: { opacity: 1, y: 0 } }}
+        variants={{
+          hidden: { opacity: 0, y: 40 },
+          visible: { opacity: 1, y: 0 },
+        }}
         transition={{ duration: 0.8, ease: 'easeOut' }}
       >
         {/* Logo */}
@@ -54,10 +59,33 @@ export default function AboutClient() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
         >
-          Burton Pride is a vibrant celebration of{" "}
-          <span className="font-semibold">diversity</span>,{" "}
-          <span className="font-semibold">inclusion</span>, and{" "}
-          <span className="font-semibold">love</span>. Our mission is to foster a welcoming space for the LGBTQ+ community and allies in Burton, creating events that inspire unity and joy.
+          Burton Pride is proud to be a fully{' '}
+          <span className="font-semibold">grassroots-led organisation</span>,
+          built by the community for the community. We stand alongside and
+          support the <span className="font-semibold">LGBTQIA+</span> community
+          in Burton and beyond, creating inclusive spaces where everyone feels
+          safe, valued, and respected.
+
+          <br />
+          <br />
+
+          In a time when the world feels like it is changing rapidly, and when
+          conversations around rights and protections are becoming increasingly
+          uncertain, we believe it is more important than ever to stand together.
+          Reform UK has stated that it wants to remove or significantly change
+          the <span className="font-semibold">Equality Act 2010</span>,
+          legislation that provides essential protections against discrimination
+          for LGBTQIA+ people and many others across the UK.
+
+          <br />
+          <br />
+
+          As a grassroots Pride organisation, we believe it is our
+          responsibility to speak up when equality is at risk. Burton Pride
+          exists not only to celebrate love and diversity, but also to champion
+          fairness, dignity, and equal rights for all. We are here to unite our
+          community and make it clear that inclusion is not optional  it is
+          fundamental.
         </motion.p>
       </motion.section>
 
@@ -71,9 +99,35 @@ export default function AboutClient() {
         <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-white drop-shadow-lg">
           Our Mission
         </h2>
+
         <p className="text-lg sm:text-xl leading-relaxed">
-          We strive to uplift voices, promote equality, and create{" "}
-          <span className="font-semibold">safe spaces</span> where everyone feels valued and supported. Through community events, outreach programs, and advocacy, Burton Pride is committed to making a lasting impact.
+          Burton Pride’s mission is to stand firmly alongside the{' '}
+          <span className="font-semibold">LGBTQIA+</span> community,
+          especially during challenging times. As conversations grow around
+          policies and movements from Reform UK and the rise of far-right
+          voices in the UK, we recognise that many people within our
+          community feel uncertain and concerned about their rights and
+          protections.
+
+          <br />
+          <br />
+
+          We are proud to be a fully{' '}
+          <span className="font-semibold">grassroots-led organisation</span>,
+          rooted in our local community. What makes us Pride is not just
+          celebration  it is solidarity. We exist to support, uplift, and
+          stand with the LGBTQIA+ community, ensuring that every individual
+          feels seen, valued, and protected.
+
+          <br />
+          <br />
+
+          Burton Pride stands for{' '}
+          <span className="font-semibold">equality</span>,{' '}
+          <span className="font-semibold">dignity</span>, and{' '}
+          <span className="font-semibold">unity</span>. We will always stand
+          side by side with our community, advocating for fairness and
+          creating safe, inclusive spaces where everyone belongs.
         </p>
       </motion.section>
 
@@ -87,9 +141,33 @@ export default function AboutClient() {
         <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-white drop-shadow-lg">
           Get Involved
         </h2>
+
         <p className="text-lg sm:text-xl mb-8 leading-relaxed">
-          Whether you want to <span className="font-semibold">volunteer</span>, <span className="font-semibold">sponsor</span>, or simply show your <span className="font-semibold">support</span>, there are many ways to be part of Burton Pride. Together, we can create a future filled with love, acceptance, and celebration.
+          However you choose to get involved  whether that’s supporting us
+          on social media, turning up at our events, standing with us at a
+          protest, or making a donation to Burton Pride  every form of
+          support truly makes a difference.
+
+          <br />
+          <br />
+
+          As a fully grassroots{' '}
+          <span className="font-semibold">LGBTQIA+</span> organisation,
+          our strength comes from our community. We are incredibly proud of
+          the people who stand beside us, raise their voices, give their
+          time, and contribute what they can.
+
+          <br />
+          <br />
+
+          Every share, every donation, every protest attended, and every
+          act of solidarity helps us continue our work and protect what
+          matters most {' '}
+          <span className="font-semibold">equality</span>,{' '}
+          <span className="font-semibold">dignity</span>, and{' '}
+          <span className="font-semibold">inclusion</span> for all.
         </p>
+
         <Link
           href="/ContactUS"
           className="inline-block bg-white text-black px-8 py-4 rounded-full font-bold text-lg shadow-lg hover:scale-105 transition"

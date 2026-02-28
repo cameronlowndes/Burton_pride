@@ -163,7 +163,7 @@ export default function BurtonPrideClient2026() {
                 </tr>
                 <tr className="border-t border-white/20 bg-white/10">
                   <td className="px-6 py-4 text-lg">Charities &amp; C.I.C</td>
-                  <td className="px-6 py-4 text-right text-lg font-bold">£10</td>
+                  <td className="px-6 py-4 text-right text-lg font-bold">FREE!!</td>
                 </tr>
               </tbody>
             </table>
