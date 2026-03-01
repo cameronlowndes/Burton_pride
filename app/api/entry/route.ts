@@ -15,10 +15,13 @@ export async function POST(req: Request) {
     const imageUrl = body.imageUrl ? String(body.imageUrl).trim() : null;
 
     if (!businessName || !contactName || !email || !phone || !address) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
     }
 
-    // ✅ Check for duplicates (email OR phone)
+    // ✅ Check duplicates (email OR phone)
     const { data: existing, error: findErr } = await db
       .from("competition_entries")
       .select("id, email, phone, payment_status")
@@ -44,7 +47,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Insert new entry
+    // ✅ Insert new entry (let DB set created_at via default now())
     const { data, error } = await db
       .from("competition_entries")
       .insert([
@@ -59,7 +62,7 @@ export async function POST(req: Request) {
           payment_status: "pending",
         },
       ])
-      .select("id")
+      .select("id, created_at")
       .single();
 
     if (error) {
@@ -76,9 +79,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ entryId: data.id });
+    return NextResponse.json({ entryId: data.id, createdAt: data.created_at });
   } catch (err: any) {
     console.error(err);
-    return NextResponse.json({ error: err?.message ?? "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message ?? "Server error" },
+      { status: 500 }
+    );
   }
 }
