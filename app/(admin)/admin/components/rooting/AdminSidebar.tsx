@@ -105,7 +105,7 @@ export default function AdminSidebar() {
                 onNavigate={() => setOpen(false)}
               />
               <MobileLink
-                href="/admin/dashboard/email"
+                href="/admin/dashboard/update"
                 label="Emails"
                 onNavigate={() => setOpen(false)}
               />
@@ -194,7 +194,7 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
 
       <nav className="space-y-2">
         <SideNavLink href="/admin/dashboard" label="Dashboard" />
-        <SideNavLink href="/admin/dashboard/email" label="Emails" />
+        <SideNavLink href="/admin/dashboard/update" label="Emails" />
 
         {/* ✅ Events: click goes to Events page, arrow toggles submenu */}
         <div className="flex items-center gap-2">
