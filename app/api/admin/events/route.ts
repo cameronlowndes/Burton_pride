@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 async function requireAdmin() {
   const { userId } = await auth();
 
@@ -12,7 +15,6 @@ async function requireAdmin() {
     };
   }
 
-  // ✅ FIX: in your Clerk version clerkClient() returns the client
   const client = await clerkClient();
   const user = await client.users.getUser(userId);
 
@@ -47,84 +49,125 @@ async function requireAdmin() {
   return { ok: true as const, userId, email };
 }
 
-function slugify(input: string) {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-}
-
 export async function GET() {
   const check = await requireAdmin();
   if (!check.ok) return check.res;
 
-  const db = supabaseAdmin();
-  const { data, error } = await db
-    .from("events")
-    .select("*")
-    .order("start_at", { ascending: true });
-
-  if (error) {
-    console.error("❌ GET /events error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true, events: data ?? [] });
-}
-
-export async function POST(req: Request) {
-  const check = await requireAdmin();
-  if (!check.ok) return check.res;
-
-  let body: any = null;
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+    // 1) Load votes
+    const { data: rawVotes, error: voteErr } = await supabaseAdmin()
+      .from("competition_votes")
+      .select(
+        `
+        id,
+        created_at,
+        first_name,
+        last_name,
+        email,
+        voter_hash,
+        user_agent,
+        entry_id
+      `
+      )
+      .order("created_at", { ascending: false })
+      .limit(5000);
 
-  const title = String(body.title || "").trim();
-  const description = body.description ? String(body.description).trim() : null;
-  const location = body.location ? String(body.location).trim() : null;
-  const start_at = String(body.start_at || "").trim();
-  const end_at = body.end_at ? String(body.end_at).trim() : null;
-  const image_url = body.image_url ? String(body.image_url).trim() : null;
-  const ticket_url = body.ticket_url ? String(body.ticket_url).trim() : null;
-  const is_published = Boolean(body.is_published);
+    if (voteErr) {
+      return NextResponse.json({ ok: false, error: voteErr.message }, { status: 500 });
+    }
 
-  if (!title || !start_at) {
+    const votes = (rawVotes as any[]) || [];
+
+    // 2) Load entries for entry_ids (no join needed)
+    const entryIds = Array.from(
+      new Set(votes.map((v) => String(v.entry_id || "")).filter(Boolean))
+    );
+
+    const entryMap = new Map<string, { business_name: string | null; address: string | null }>();
+
+    if (entryIds.length) {
+      const { data: entries, error: entryErr } = await supabaseAdmin()
+        .from("competition_entries")
+        .select("id,business_name,address")
+        .in("id", entryIds);
+
+      if (entryErr) {
+        return NextResponse.json({ ok: false, error: entryErr.message }, { status: 500 });
+      }
+
+      for (const e of (entries as any[]) || []) {
+        entryMap.set(String(e.id), {
+          business_name: e.business_name ?? null,
+          address: e.address ?? null,
+        });
+      }
+    }
+
+    // 3) Stats
+    const totalVotes = votes.length;
+
+    const uniqueEmails = new Set(
+      votes.map((v) => String(v.email || "").trim().toLowerCase()).filter(Boolean)
+    ).size;
+
+    const uniqueDevices = new Set(
+      votes.map((v) => String(v.voter_hash || "")).filter(Boolean)
+    ).size;
+
+    // 4) Leaderboard
+    const lb = new Map<
+      string,
+      { entryId: string; businessName: string; address?: string; votes: number }
+    >();
+
+    for (const v of votes) {
+      const entryId = String(v.entry_id || "");
+      const entry = entryMap.get(entryId);
+
+      const businessName = entry?.business_name || "Unknown company";
+      const address = entry?.address || "";
+
+      const key = entryId || businessName;
+      const cur = lb.get(key);
+
+      if (!cur) {
+        lb.set(key, { entryId, businessName, address: address || undefined, votes: 1 });
+      } else {
+        cur.votes += 1;
+      }
+    }
+
+    const leaderboard = Array.from(lb.values()).sort((a, b) => b.votes - a.votes);
+
+    // 5) Shape votes for UI
+    const shapedVotes = votes.map((v) => {
+      const entryId = String(v.entry_id || "");
+      const entry = entryMap.get(entryId);
+
+      return {
+        id: v.id,
+        createdAt: v.created_at,
+        firstName: v.first_name ?? null,
+        lastName: v.last_name ?? null,
+        email: v.email ?? null,
+        voterHash: v.voter_hash ?? null,
+        userAgent: v.user_agent ?? null,
+        entryId,
+        companyName: entry?.business_name || "Unknown company",
+        companyAddress: entry?.address || null,
+      };
+    });
+
+    return NextResponse.json({
+      ok: true,
+      stats: { totalVotes, uniqueEmails, uniqueDevices },
+      leaderboard,
+      votes: shapedVotes,
+    });
+  } catch (err: any) {
     return NextResponse.json(
-      { error: "Title and start date/time are required" },
-      { status: 400 }
+      { ok: false, error: err?.message || String(err) },
+      { status: 500 }
     );
   }
-
-  const db = supabaseAdmin();
-  const slug = slugify(title);
-
-  const { data, error } = await db
-    .from("events")
-    .insert([
-      {
-        title,
-        slug,
-        description,
-        location,
-        start_at,
-        end_at,
-        image_url,
-        ticket_url,
-        is_published,
-      },
-    ])
-    .select("*")
-    .single();
-
-  if (error) {
-    console.error("❌ POST /events error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true, event: data });
 }

@@ -50,6 +50,32 @@ function formatDate(d: string) {
   });
 }
 
+/** Small helper so buttons are consistent everywhere */
+function ActionButton({
+  onClick,
+  children,
+  tone = "neutral",
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  tone?: "primary" | "neutral";
+}) {
+  const cls =
+    tone === "primary"
+      ? "bg-white text-black hover:bg-white/90"
+      : "bg-black/20 text-white hover:bg-black/30";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`cursor-pointer rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold transition ${cls}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function WindowsShowcaseEntriesAdminPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<WindowStatus | "all">("all");
@@ -199,16 +225,16 @@ export default function WindowsShowcaseEntriesAdminPage() {
           <button
             type="button"
             onClick={load}
-            className="rounded-xl px-4 py-2 text-sm font-semibold bg-white/10 hover:bg-white/15 transition border border-white/10"
+            className="cursor-pointer rounded-xl px-4 py-2 text-sm font-semibold bg-white/10 hover:bg-white/15 transition border border-white/10"
           >
-            Refresh
+            ⟳ Refresh
           </button>
 
           <Link
             href="/admin/dashboard/windows-showcase"
-            className="rounded-xl px-4 py-2 text-sm font-semibold bg-white/5 hover:bg-white/10 transition border border-white/10 text-white/85"
+            className="cursor-pointer rounded-xl px-4 py-2 text-sm font-semibold bg-white/5 hover:bg-white/10 transition border border-white/10 text-white/85"
           >
-            Back to dashboard →
+            ← Dashboard
           </Link>
         </div>
       </div>
@@ -237,7 +263,7 @@ export default function WindowsShowcaseEntriesAdminPage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as any)}
-            className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/25"
+            className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none focus:border-white/25 cursor-pointer"
           >
             <option value="all">All statuses</option>
             <option value="pending">Pending</option>
@@ -267,9 +293,7 @@ export default function WindowsShowcaseEntriesAdminPage() {
               key={e.id}
               entry={e}
               onOpen={() => openEntry(e.id)}
-              onApprove={() => updateEntry(e.id, { status: "approved" })}
-              onUndoApprove={() => updateEntry(e.id, { status: "pending" })}
-              onReject={() => updateEntry(e.id, { status: "rejected" })}
+              onSetStatus={(s) => updateEntry(e.id, { status: s })}
               onToggleFeature={() => updateEntry(e.id, { featured: !e.featured })}
             />
           ))}
@@ -283,9 +307,7 @@ export default function WindowsShowcaseEntriesAdminPage() {
         ) : (
           <EntryDetail
             entry={active}
-            onApprove={() => updateEntry(active.id, { status: "approved" })}
-            onUndoApprove={() => updateEntry(active.id, { status: "pending" })}
-            onReject={() => updateEntry(active.id, { status: "rejected" })}
+            onSetStatus={(s) => updateEntry(active.id, { status: s })}
             onToggleFeature={() =>
               updateEntry(active.id, { featured: !active.featured })
             }
@@ -299,21 +321,36 @@ export default function WindowsShowcaseEntriesAdminPage() {
 function WindowCard({
   entry,
   onOpen,
-  onApprove,
-  onUndoApprove,
-  onReject,
+  onSetStatus,
   onToggleFeature,
 }: {
   entry: WindowEntry;
   onOpen: () => void;
-  onApprove: () => void;
-  onUndoApprove: () => void;
-  onReject: () => void;
+  onSetStatus: (s: WindowStatus) => void;
   onToggleFeature: () => void;
 }) {
+  const approveLabel = entry.status === "approved" ? "↩ Undo" : "✓ Approve";
+  const approveClick =
+    entry.status === "approved"
+      ? () => onSetStatus("pending")
+      : () => onSetStatus("approved");
+
+  const showReject = entry.status !== "approved";
+  const rejectLabel = entry.status === "rejected" ? "↩ Undo" : "✕ Reject";
+  const rejectClick =
+    entry.status === "rejected"
+      ? () => onSetStatus("pending")
+      : () => onSetStatus("rejected");
+
+  const featureLabel = entry.featured ? "☆ Unfeature" : "★ Feature";
+
   return (
     <div className="rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl overflow-hidden">
-      <button type="button" onClick={onOpen} className="block w-full text-left">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="block w-full text-left cursor-pointer"
+      >
         <div className="aspect-[16/10] bg-black/30">
           {entry.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -362,34 +399,39 @@ function WindowCard({
           <button
             type="button"
             onClick={onOpen}
-            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/15 transition"
+            className="cursor-pointer rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/15 transition"
           >
             View →
           </button>
 
           <div className="flex gap-2">
-            <button
-              onClick={entry.status === "approved" ? onUndoApprove : onApprove}
-              className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
-            >
-              {entry.status === "approved" ? "Undo" : "Approve"}
-            </button>
-
-            {/* ✅ Reject hides when approved */}
-            {entry.status !== "approved" && (
+            {/* ✅ Hide Approve when REJECTED */}
+            {entry.status !== "rejected" && (
               <button
-                onClick={onReject}
-                className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
+                type="button"
+                onClick={approveClick}
+                className="cursor-pointer rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
               >
-                Reject
+                {approveLabel}
+              </button>
+            )}
+
+            {showReject && (
+              <button
+                type="button"
+                onClick={rejectClick}
+                className="cursor-pointer rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
+              >
+                {rejectLabel}
               </button>
             )}
 
             <button
+              type="button"
               onClick={onToggleFeature}
-              className="rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
+              className="cursor-pointer rounded-xl bg-black/20 border border-white/10 px-3 py-2 text-xs font-semibold hover:bg-black/30 transition"
             >
-              {entry.featured ? "Unfeature" : "Feature"}
+              {featureLabel}
             </button>
           </div>
         </div>
@@ -400,17 +442,29 @@ function WindowCard({
 
 function EntryDetail({
   entry,
-  onApprove,
-  onUndoApprove,
-  onReject,
+  onSetStatus,
   onToggleFeature,
 }: {
   entry: WindowEntry;
-  onApprove: () => void;
-  onUndoApprove: () => void;
-  onReject: () => void;
+  onSetStatus: (s: WindowStatus) => void;
   onToggleFeature: () => void;
 }) {
+  const approveLabel =
+    entry.status === "approved" ? "↩ Undo approval" : "✓ Approve";
+  const approveClick =
+    entry.status === "approved"
+      ? () => onSetStatus("pending")
+      : () => onSetStatus("approved");
+
+  const showReject = entry.status !== "approved";
+  const rejectLabel = entry.status === "rejected" ? "↩ Undo reject" : "✕ Reject";
+  const rejectClick =
+    entry.status === "rejected"
+      ? () => onSetStatus("pending")
+      : () => onSetStatus("rejected");
+
+  const featureLabel = entry.featured ? "☆ Unfeature" : "★ Feature";
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -448,38 +502,24 @@ function EntryDetail({
       </div>
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        <button
-          type="button"
-          onClick={onToggleFeature}
-          className="rounded-xl px-4 py-2 text-sm font-semibold bg-white/10 hover:bg-white/15 transition border border-white/10"
-        >
-          {entry.featured ? "Unfeature" : "Feature"}
-        </button>
+        <ActionButton onClick={onToggleFeature}>{featureLabel}</ActionButton>
 
-        {/* ✅ Reject hides when approved */}
-        {entry.status !== "approved" && (
-          <button
-            type="button"
-            onClick={onReject}
-            className="rounded-xl px-4 py-2 text-sm font-semibold bg-black/20 hover:bg-black/30 transition border border-white/10"
-          >
-            Reject
-          </button>
+        {showReject && (
+          <ActionButton onClick={rejectClick}>{rejectLabel}</ActionButton>
         )}
 
-        <button
-          type="button"
-          onClick={entry.status === "approved" ? onUndoApprove : onApprove}
-          className="rounded-xl px-4 py-2 text-sm font-semibold bg-white text-black hover:bg-white/90 transition"
-        >
-          {entry.status === "approved" ? "Undo approval" : "Approve"}
-        </button>
+        {/* ✅ Hide Approve when REJECTED */}
+        {entry.status !== "rejected" && (
+          <ActionButton onClick={approveClick} tone="primary">
+            {approveLabel}
+          </ActionButton>
+        )}
       </div>
 
       <div className="pt-2">
         <Link
           href="/Competition"
-          className="text-sm text-white/70 hover:text-white transition"
+          className="cursor-pointer text-sm text-white/70 hover:text-white transition"
         >
           View public competition page →
         </Link>
@@ -562,7 +602,7 @@ function Drawer({
       <div
         onClick={onClose}
         className={[
-          "absolute inset-0 bg-black/60 transition-opacity",
+          "absolute inset-0 bg-black/60 transition-opacity cursor-pointer",
           open ? "opacity-100" : "opacity-0",
         ].join(" ")}
       />

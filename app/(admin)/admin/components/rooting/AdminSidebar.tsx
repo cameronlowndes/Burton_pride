@@ -149,6 +149,11 @@ export default function AdminSidebar() {
                     label="Window Showcase"
                     onNavigate={() => setOpen(false)}
                   />
+                  <MobileSubLink
+                    href="/admin/dashboard/windows-showcase/votes"
+                    label="Window Votes"
+                    onNavigate={() => setOpen(false)}
+                  />
                 </div>
               )}
             </div>
@@ -223,6 +228,10 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
             <SubNavLink
               href="/admin/dashboard/windows-showcase/entries"
               label="Window Showcase"
+            />
+            <SubNavLink
+              href="/admin/dashboard/windows-showcase/votes"
+              label="Window Votes"
             />
           </div>
         )}

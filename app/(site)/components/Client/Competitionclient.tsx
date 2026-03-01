@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 export default function CompetitionPage() {
@@ -257,10 +258,27 @@ export default function CompetitionPage() {
         🌈 Windows Of Hope Competition 2026
       </motion.h1>
 
-      <p className="text-white/90 text-center max-w-3xl mb-12">
+      <p className="text-white/90 text-center max-w-3xl mb-6">
         Decorate your window with Pride, colour, and community spirit. Enter for a chance to win prizes,
         be featured, and help make Burton shine.
       </p>
+
+      {/* ✅ Vote + Leaderboard buttons (top) */}
+      <div className="flex flex-col sm:flex-row justify-center gap-4 mb-12">
+        <Link
+          href="/Competition/vote"
+          className="cursor-pointer px-8 py-4 rounded-full font-extrabold text-lg bg-white text-purple-700 shadow-lg hover:scale-105 active:scale-[0.99] transition border border-white/30 text-center"
+        >
+          🗳️ Vote for your favourite window
+        </Link>
+
+        <Link
+          href="/Competition/leaderboard"
+          className="cursor-pointer px-8 py-4 rounded-full font-extrabold text-lg bg-black/30 text-white shadow-lg hover:scale-105 active:scale-[0.99] transition border border-white/30 text-center"
+        >
+          🏆 View Leaderboard
+        </Link>
+      </div>
 
       <div className="flex flex-col lg:flex-row items-start gap-12 w-full max-w-6xl">
         <div className="flex-1 flex flex-col">
@@ -375,6 +393,7 @@ export default function CompetitionPage() {
 
               {imagePreview && (
                 <div className="mt-4 rounded-2xl overflow-hidden border border-white/15">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={imagePreview} alt="Preview" className="w-full object-cover" />
                 </div>
               )}
@@ -457,9 +476,23 @@ export default function CompetitionPage() {
         >
           <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
             <h2 className="text-4xl sm:text-5xl font-extrabold drop-shadow-lg">🪟 Window Showcase</h2>
-            <span className="text-sm bg-white/15 border border-white/20 px-3 py-2 rounded-full">
-              Live entries
-            </span>
+
+            {/* ✅ Vote + Leaderboard buttons (showcase) */}
+            <div className="flex gap-3 flex-wrap">
+              <Link
+                href="/Competition/vote"
+                className="cursor-pointer text-sm font-extrabold bg-white text-purple-700 shadow-lg hover:scale-105 active:scale-[0.99] transition border border-white/30 px-4 py-2 rounded-full"
+              >
+                🗳️ Vote now
+              </Link>
+
+              <Link
+                href="/Competition/leaderboard"
+                className="cursor-pointer text-sm font-extrabold bg-black/30 text-white shadow-lg hover:scale-105 active:scale-[0.99] transition border border-white/30 px-4 py-2 rounded-full"
+              >
+                🏆 Leaderboard
+              </Link>
+            </div>
           </div>
 
           <p className="text-white/90 mb-8 max-w-4xl">
