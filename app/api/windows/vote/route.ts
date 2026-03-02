@@ -61,7 +61,6 @@ export async function POST(req: Request) {
           path: "/",
           httpOnly: true,
           sameSite: "lax",
-          // ✅ don't force secure on localhost; only in production
           secure: process.env.NODE_ENV === "production",
           maxAge: 60 * 60 * 24 * 365,
         });
@@ -70,8 +69,10 @@ export async function POST(req: Request) {
       return res;
     };
 
+    const db = supabaseAdmin; // ✅ singleton client (no brackets)
+
     // ✅ Block if this device already voted
-    const { data: existing, error: existingErr } = await supabaseAdmin()
+    const { data: existing, error: existingErr } = await db
       .from("competition_votes")
       .select("entry_id")
       .eq("voter_hash", voterHash)
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
     }
 
     // ✅ Block if this email already voted
-    const { data: byEmail, error: emailErr } = await supabaseAdmin()
+    const { data: byEmail, error: emailErr } = await db
       .from("competition_votes")
       .select("entry_id")
       .eq("email", email)
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
     }
 
     // ✅ Block if this FIRST+LAST name already voted
-    const { data: byName, error: nameErr } = await supabaseAdmin()
+    const { data: byName, error: nameErr } = await db
       .from("competition_votes")
       .select("entry_id")
       .eq("first_name", firstName)
@@ -127,7 +128,7 @@ export async function POST(req: Request) {
     }
 
     // Only allow approved entries
-    const { data: entry, error: entryErr } = await supabaseAdmin()
+    const { data: entry, error: entryErr } = await db
       .from("competition_entries")
       .select("id,status")
       .eq("id", entryId)
@@ -142,21 +143,18 @@ export async function POST(req: Request) {
     }
 
     // Insert vote with details
-    const { error: insertErr } = await supabaseAdmin()
-      .from("competition_votes")
-      .insert({
-        entry_id: entryId,
-        voter_hash: voterHash,
-        user_agent: ua,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-      });
+    const { error: insertErr } = await db.from("competition_votes").insert({
+      entry_id: entryId,
+      voter_hash: voterHash,
+      user_agent: ua,
+      first_name: firstName,
+      last_name: lastName,
+      email,
+    });
 
     if (insertErr) {
       const msg = String(insertErr.message || "").toLowerCase();
 
-      // Better duplicate messages (best when your index names match)
       if (msg.includes("competition_votes_email_uniq")) {
         return withCookie(
           { ok: false, error: "This email address has already been used to vote." },

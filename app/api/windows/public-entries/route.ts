@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin()
+    const { data, error } = await supabaseAdmin
       .from("competition_entries")
       .select("id,business_name,address,image_url,status,created_at")
       .eq("status", "approved")

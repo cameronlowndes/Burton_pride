@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     // 1) Load approved entries (public-safe fields only)
-    const { data: entries, error: entryErr } = await supabaseAdmin()
+    const { data: entries, error: entryErr } = await supabaseAdmin
       .from("competition_entries")
       .select("id,business_name,address,image_url,status")
       .eq("status", "approved")
@@ -20,7 +20,7 @@ export async function GET() {
     const safeEntries = (entries as any[]) || [];
 
     // 2) Load votes (entry_id only) and count in JS
-    const { data: votes, error: voteErr } = await supabaseAdmin()
+    const { data: votes, error: voteErr } = await supabaseAdmin
       .from("competition_votes")
       .select("entry_id")
       .limit(200000); // plenty for normal use; raise if needed

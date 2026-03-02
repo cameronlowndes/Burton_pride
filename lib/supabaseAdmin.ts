@@ -1,24 +1,27 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 function requireEnv(name: string, value?: string) {
   if (!value) throw new Error(`${name} is missing`);
   return value;
 }
 
-/**
- * Server-only (admin) Supabase client.
- * Uses service role key. Never import this into client components.
- */
-export function supabaseAdmin() {
-  const url =
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
+const url =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SECRET_KEY; // fallback if you stored it under this name
+const serviceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SECRET_KEY;
 
-  return createClient(
+// ✅ Use a singleton so dev hot-reload doesn't recreate clients constantly
+declare global {
+  // eslint-disable-next-line no-var
+  var __supabaseAdmin: SupabaseClient | undefined;
+}
+
+export const supabaseAdmin =
+  globalThis.__supabaseAdmin ??
+  createClient(
     requireEnv("SUPABASE_URL", url),
     requireEnv("SUPABASE_SERVICE_ROLE_KEY", serviceRoleKey),
     {
@@ -29,4 +32,7 @@ export function supabaseAdmin() {
       },
     }
   );
+
+if (process.env.NODE_ENV !== "production") {
+  globalThis.__supabaseAdmin = supabaseAdmin;
 }

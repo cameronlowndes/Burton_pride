@@ -1,173 +1,97 @@
 import { NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { slugify } from "@/lib/slug";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-async function requireAdmin() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return {
-      ok: false as const,
-      res: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    };
-  }
-
-  const client = await clerkClient();
-  const user = await client.users.getUser(userId);
-
-  const email =
-    user.emailAddresses.find((e) => e.id === user.primaryEmailAddressId)
-      ?.emailAddress ||
-    user.emailAddresses[0]?.emailAddress ||
-    "";
-
-  const allowed = (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  if (allowed.length === 0) {
-    return {
-      ok: false as const,
-      res: NextResponse.json(
-        { error: "Admin emails not configured (ADMIN_EMAILS missing)" },
-        { status: 403 }
-      ),
-    };
-  }
-
-  if (!allowed.includes(email.toLowerCase())) {
-    return {
-      ok: false as const,
-      res: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    };
-  }
-
-  return { ok: true as const, userId, email };
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ error: message }, { status });
 }
 
-export async function GET() {
-  const check = await requireAdmin();
-  if (!check.ok) return check.res;
+// OPTIONAL: add simple “admin token” gate so random people can’t hit this endpoint.
+// Add ADMIN_API_TOKEN in env and send header x-admin-token from your admin UI fetch.
+// If you already have Clerk/NextAuth, we can swap this for real auth.
+function requireAdmin(req: Request) {
+  const token = process.env.ADMIN_API_TOKEN;
+  if (!token) return null; // if you don't set it, it won't enforce
+  const got = req.headers.get("x-admin-token");
+  if (got !== token) return "Unauthorized";
+  return null;
+}
 
+export async function GET(req: Request) {
+  const denied = requireAdmin(req);
+  if (denied) return jsonError(denied, 401);
+
+  const { data, error } = await supabaseAdmin
+    .from("events")
+    .select("id,title,slug,description,location,start_at,end_at,image_url,ticket_url,is_published")
+    .order("start_at", { ascending: true });
+
+  if (error) return jsonError(error.message, 500);
+  return NextResponse.json({ events: data ?? [] });
+}
+
+export async function POST(req: Request) {
+  const denied = requireAdmin(req);
+  if (denied) return jsonError(denied, 401);
+
+  let body: any;
   try {
-    // 1) Load votes
-    const { data: rawVotes, error: voteErr } = await supabaseAdmin()
-      .from("competition_votes")
-      .select(
-        `
-        id,
-        created_at,
-        first_name,
-        last_name,
-        email,
-        voter_hash,
-        user_agent,
-        entry_id
-      `
-      )
-      .order("created_at", { ascending: false })
-      .limit(5000);
-
-    if (voteErr) {
-      return NextResponse.json({ ok: false, error: voteErr.message }, { status: 500 });
-    }
-
-    const votes = (rawVotes as any[]) || [];
-
-    // 2) Load entries for entry_ids (no join needed)
-    const entryIds = Array.from(
-      new Set(votes.map((v) => String(v.entry_id || "")).filter(Boolean))
-    );
-
-    const entryMap = new Map<string, { business_name: string | null; address: string | null }>();
-
-    if (entryIds.length) {
-      const { data: entries, error: entryErr } = await supabaseAdmin()
-        .from("competition_entries")
-        .select("id,business_name,address")
-        .in("id", entryIds);
-
-      if (entryErr) {
-        return NextResponse.json({ ok: false, error: entryErr.message }, { status: 500 });
-      }
-
-      for (const e of (entries as any[]) || []) {
-        entryMap.set(String(e.id), {
-          business_name: e.business_name ?? null,
-          address: e.address ?? null,
-        });
-      }
-    }
-
-    // 3) Stats
-    const totalVotes = votes.length;
-
-    const uniqueEmails = new Set(
-      votes.map((v) => String(v.email || "").trim().toLowerCase()).filter(Boolean)
-    ).size;
-
-    const uniqueDevices = new Set(
-      votes.map((v) => String(v.voter_hash || "")).filter(Boolean)
-    ).size;
-
-    // 4) Leaderboard
-    const lb = new Map<
-      string,
-      { entryId: string; businessName: string; address?: string; votes: number }
-    >();
-
-    for (const v of votes) {
-      const entryId = String(v.entry_id || "");
-      const entry = entryMap.get(entryId);
-
-      const businessName = entry?.business_name || "Unknown company";
-      const address = entry?.address || "";
-
-      const key = entryId || businessName;
-      const cur = lb.get(key);
-
-      if (!cur) {
-        lb.set(key, { entryId, businessName, address: address || undefined, votes: 1 });
-      } else {
-        cur.votes += 1;
-      }
-    }
-
-    const leaderboard = Array.from(lb.values()).sort((a, b) => b.votes - a.votes);
-
-    // 5) Shape votes for UI
-    const shapedVotes = votes.map((v) => {
-      const entryId = String(v.entry_id || "");
-      const entry = entryMap.get(entryId);
-
-      return {
-        id: v.id,
-        createdAt: v.created_at,
-        firstName: v.first_name ?? null,
-        lastName: v.last_name ?? null,
-        email: v.email ?? null,
-        voterHash: v.voter_hash ?? null,
-        userAgent: v.user_agent ?? null,
-        entryId,
-        companyName: entry?.business_name || "Unknown company",
-        companyAddress: entry?.address || null,
-      };
-    });
-
-    return NextResponse.json({
-      ok: true,
-      stats: { totalVotes, uniqueEmails, uniqueDevices },
-      leaderboard,
-      votes: shapedVotes,
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message || String(err) },
-      { status: 500 }
-    );
+    body = await req.json();
+  } catch {
+    return jsonError("Invalid JSON body", 400);
   }
+
+  const title = String(body?.title ?? "").trim();
+  if (!title) return jsonError("Title is required", 400);
+
+  const startAt = String(body?.start_at ?? "").trim();
+  if (!startAt) return jsonError("start_at is required", 400);
+
+  const start = new Date(startAt);
+  if (Number.isNaN(start.getTime())) return jsonError("start_at is not a valid date", 400);
+
+  const endAt = body?.end_at ? String(body.end_at).trim() : "";
+  const end = endAt ? new Date(endAt) : null;
+  if (endAt && end && Number.isNaN(end.getTime())) return jsonError("end_at is not a valid date", 400);
+  if (end && end.getTime() < start.getTime()) return jsonError("end_at must be after start_at", 400);
+
+  const baseSlug = slugify(title);
+  if (!baseSlug) return jsonError("Title produces an invalid slug", 400);
+
+  // Ensure unique slug by adding -2, -3 etc.
+  let slug = baseSlug;
+  for (let i = 0; i < 10; i++) {
+    const { data: existing } = await supabaseAdmin
+      .from("events")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (!existing) break;
+    slug = `${baseSlug}-${i + 2}`;
+  }
+
+  const payload = {
+    title,
+    slug,
+    description: body?.description ? String(body.description).trim() : null,
+    location: body?.location ? String(body.location).trim() : null,
+    start_at: start.toISOString(),
+    end_at: end ? end.toISOString() : null,
+    image_url: body?.image_url ? String(body.image_url).trim() : null,
+    ticket_url: body?.ticket_url ? String(body.ticket_url).trim() : null,
+    is_published: !!body?.is_published,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from("events")
+    .insert(payload)
+    .select("id,title,slug,description,location,start_at,end_at,image_url,ticket_url,is_published")
+    .single();
+
+  if (error) return jsonError(error.message, 500);
+
+  return NextResponse.json({ event: data }, { status: 201 });
 }

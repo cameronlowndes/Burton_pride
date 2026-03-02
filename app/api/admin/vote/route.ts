@@ -6,8 +6,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const db = supabaseAdmin; // ✅ NO ()
+
     // 1) Votes (no join)
-    const { data: rawVotes, error: voteErr } = await supabaseAdmin()
+    const { data: rawVotes, error: voteErr } = await db
       .from("competition_votes")
       .select(
         `
@@ -38,7 +40,7 @@ export async function GET() {
     const entryMap = new Map<string, { business_name: string | null; address: string | null }>();
 
     if (entryIds.length) {
-      const { data: entries, error: entryErr } = await supabaseAdmin()
+      const { data: entries, error: entryErr } = await db
         .from("competition_entries")
         .select("id,business_name,address")
         .in("id", entryIds);

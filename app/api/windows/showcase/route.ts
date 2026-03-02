@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function GET() {
   try {
-    const db = supabaseAdmin();
+    const db = supabaseAdmin; // ✅ no ()
 
     const { data, error } = await db
       .from("competition_entries")
@@ -17,9 +17,7 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    const images = (data || [])
-      .map((r) => r.image_url)
-      .filter(Boolean);
+    const images = (data || []).map((r: any) => r.image_url).filter(Boolean);
 
     return NextResponse.json({ ok: true, images });
   } catch (err: any) {
