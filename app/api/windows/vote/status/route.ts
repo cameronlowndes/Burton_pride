@@ -21,7 +21,7 @@ export async function GET() {
 
     const voterHash = sha256(voterId);
 
-    const { data, error } = await supabaseAdmin()
+    const { data, error } = await supabaseAdmin
       .from("competition_votes")
       .select("entry_id")
       .eq("voter_hash", voterHash)
