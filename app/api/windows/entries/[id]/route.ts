@@ -37,7 +37,7 @@ export async function PATCH(
       );
     }
 
-    const { error } = await supabaseAdmin()
+    const { error } = await supabaseAdmin
       .from("competition_entries")
       .update(patch)
       .eq("id", id);
