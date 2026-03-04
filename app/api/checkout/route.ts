@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const db = supabaseAdmin();
+    const db = supabaseAdmin;
 
     const body = await req.json();
     const entryId = String(body.entryId || "").trim();

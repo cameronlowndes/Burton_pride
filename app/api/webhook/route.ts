@@ -71,7 +71,7 @@ export async function POST(req: Request) {
 
   if (!entryId) return NextResponse.json({ received: true });
 
-  const db = supabaseAdmin();
+  const db = supabaseAdmin;
 
   await db.from("competition_entries").update({ payment_status: "paid" }).eq("id", entryId);
 
