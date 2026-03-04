@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
   try {
-    const db = supabaseAdmin();
+    const db = supabaseAdmin;
 
     const body = await req.json();
     const businessName = String(body.businessName || "").trim();
