@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function GET() {
   try {
-    const db = supabaseAdmin; // ✅ no ()
+    const db = supabaseAdmin;
 
     const { data, error } = await db
       .from("competition_entries")

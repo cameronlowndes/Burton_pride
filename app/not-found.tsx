@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 
 export default function NotFound() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center text-white px-4 py-12 overflow-hidden">
+    <main className="min-h-screen flex flex-col items-center justify-center text-white bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 px-4 py-12 overflow-hidden">
       <motion.div
         className="text-center max-w-2xl"
         initial={{ opacity: 0, y: 40 }}

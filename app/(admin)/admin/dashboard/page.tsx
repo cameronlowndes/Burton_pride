@@ -1,10 +1,39 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+type DashEvent = {
+  id: string;
+  title: string;
+  start_at: string;
+  location: string | null;
+  is_published: boolean;
+};
+
+type DashboardResponse = {
+  stats: {
+    upcomingEvents: number;
+    emailsSent30d: number | null;
+    competitionEntries: number | null;
+    websiteMessages: number | null;
+  };
+  nextEvents: DashEvent[];
+};
+
+type QuickStartKey = "email" | "event" | "entries" | "forms";
+
+type QuickStartInfo = {
+  title: string;
+  desc: string;
+  href: string;
+  button: string;
+};
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, isLoaded } = useUser();
 
   const displayName =
@@ -13,11 +42,9 @@ export default function DashboardPage() {
     user?.primaryEmailAddress?.emailAddress ||
     "Committee Member";
 
-  const [quickStart, setQuickStart] = useState<
-    "email" | "event" | "entries" | "messages"
-  >("email");
+  const [quickStart, setQuickStart] = useState<QuickStartKey>("email");
 
-  const quickStartInfo = useMemo(() => {
+  const quickStartInfo: QuickStartInfo = useMemo(() => {
     switch (quickStart) {
       case "email":
         return {
@@ -26,6 +53,7 @@ export default function DashboardPage() {
           href: "/admin/dashboard/email",
           button: "Go to Emails",
         };
+
       case "event":
         return {
           title: "Create an event",
@@ -33,26 +61,66 @@ export default function DashboardPage() {
           href: "/admin/dashboard/events",
           button: "Go to Events",
         };
+
       case "entries":
         return {
           title: "Competition entries",
-          desc: "View Windows of Hope entries (coming soon).",
-          href: "/admin/dashboard",
-          button: "Coming soon",
-          disabled: true,
+          desc: "View and manage Windows of Hope entries.",
+          href: "/admin/dashboard/windows-of-hope",
+          button: "Open Windows of Hope",
         };
-      case "messages":
+
+      case "forms":
         return {
-          title: "Website messages",
-          desc: "View contact form messages (coming soon).",
-          href: "/admin/dashboard",
-          button: "Coming soon",
-          disabled: true,
+          title: "Website forms",
+          desc: "Open and manage every form on the website.",
+          href: "/admin/dashboard/forms",
+          button: "Open Forms",
         };
-      default:
-        return null;
     }
   }, [quickStart]);
+
+  // ✅ live dashboard data
+  const [dashLoading, setDashLoading] = useState(true);
+  const [dashError, setDashError] = useState<string | null>(null);
+  const [stats, setStats] = useState<DashboardResponse["stats"]>({
+    upcomingEvents: 0,
+    emailsSent30d: null,
+    competitionEntries: null,
+    websiteMessages: null,
+  });
+  const [nextEvents, setNextEvents] = useState<DashEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDash() {
+      try {
+        setDashLoading(true);
+        setDashError(null);
+
+        const res = await fetch("/api/admin/dashboard", { cache: "no-store" });
+        const json = (await res.json()) as DashboardResponse | { error?: string };
+
+        if (!res.ok) throw new Error((json as any)?.error || "Failed to load");
+
+        if (!cancelled) {
+          const ok = json as DashboardResponse;
+          setStats(ok.stats);
+          setNextEvents(ok.nextEvents || []);
+        }
+      } catch (e: any) {
+        if (!cancelled) setDashError(e?.message || "Something went wrong");
+      } finally {
+        if (!cancelled) setDashLoading(false);
+      }
+    }
+
+    loadDash();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -82,23 +150,25 @@ export default function DashboardPage() {
           >
             Create event
           </Link>
+           <Link
+            href="/"
+            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/20 transition"
+          >
+            Go back to the website
+          </Link>
         </div>
       </div>
 
-   {/* Beta notice */}
-<div className="rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl p-6">
-  <div>
-    <div className="font-extrabold text-lg">Admin Dashboard (BETA)</div>
-    <p className="text-sm text-white/75 mt-2">
-      This admin dashboard is currently in beta. You can expect bugs.
-      <br />
-      If you find an issue, please report it to{" "}
-      <span className="font-semibold text-white">
-       cameronlowndes@gmail.com
-      </span>.
-    </p>
-  </div>
-</div>
+      {/* Beta notice */}
+      <div className="rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl p-6">
+        <div className="font-extrabold text-lg">Admin Dashboard (BETA)</div>
+        <p className="text-sm text-white/75 mt-2">
+          This admin dashboard is currently in beta. You can expect bugs.
+          <br />
+          If you find an issue, please report it to{" "}
+          <span className="font-semibold text-white">cameronlowndes@gmail.com</span>.
+        </p>
+      </div>
 
       {/* Quick start selector */}
       <section className="grid gap-6 lg:grid-cols-3">
@@ -114,48 +184,43 @@ export default function DashboardPage() {
               desc="Send updates + announcements"
               active={quickStart === "email"}
               onClick={() => setQuickStart("email")}
+              onOpen={() => router.push("/admin/dashboard/email")}
             />
             <QuickPick
               title="Events"
               desc="Create & manage events"
               active={quickStart === "event"}
               onClick={() => setQuickStart("event")}
+              onOpen={() => router.push("/admin/dashboard/events")}
             />
             <QuickPick
               title="Entries"
-              desc="Windows of Hope (soon)"
+              desc="Windows of Hope entries"
               active={quickStart === "entries"}
               onClick={() => setQuickStart("entries")}
+              onOpen={() => router.push("/admin/dashboard/windows-of-hope")}
             />
             <QuickPick
-              title="Messages"
-              desc="Contact form (soon)"
-              active={quickStart === "messages"}
-              onClick={() => setQuickStart("messages")}
+              title="Forms"
+              desc="All website forms"
+              active={quickStart === "forms"}
+              onClick={() => setQuickStart("forms")}
+              onOpen={() => router.push("/admin/dashboard/forms")}
             />
           </div>
         </Card>
 
         <Card>
-          <h2 className="text-lg font-extrabold">{quickStartInfo?.title}</h2>
-          <p className="text-sm text-white/75 mt-2">{quickStartInfo?.desc}</p>
+          <h2 className="text-lg font-extrabold">{quickStartInfo.title}</h2>
+          <p className="text-sm text-white/75 mt-2">{quickStartInfo.desc}</p>
 
           <div className="mt-5">
-            {quickStartInfo?.disabled ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 opacity-60">
-                <div className="font-semibold">{quickStartInfo.button}</div>
-                <div className="text-xs text-white/60 mt-1">
-                  This section isn’t connected yet.
-                </div>
-              </div>
-            ) : (
-              <Link
-                href={quickStartInfo?.href || "/admin/dashboard"}
-                className="block text-center rounded-2xl bg-white/10 border border-white/15 px-4 py-3 text-sm font-extrabold hover:bg-white/20 transition"
-              >
-                {quickStartInfo?.button}
-              </Link>
-            )}
+            <Link
+              href={quickStartInfo.href}
+              className="block text-center rounded-2xl bg-white/10 border border-white/15 px-4 py-3 text-sm font-extrabold hover:bg-white/20 transition"
+            >
+              {quickStartInfo.button}
+            </Link>
           </div>
 
           <div className="mt-6 text-xs text-white/60">
@@ -168,12 +233,24 @@ export default function DashboardPage() {
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Emails sent (30 days)"
-          value="—"
+          value={stats.emailsSent30d ?? "—"}
           sub="Connect backend to show live data"
         />
-        <StatCard title="Upcoming events" value="—" sub="Pull from database later" />
-        <StatCard title="Competition entries" value="—" sub="Windows of Hope entries" />
-        <StatCard title="Website messages" value="—" sub="Contact form submissions" />
+        <StatCard
+          title="Upcoming events"
+          value={dashLoading ? "…" : String(stats.upcomingEvents)}
+          sub="Pulled from database"
+        />
+        <StatCard
+          title="Competition entries"
+          value={stats.competitionEntries ?? "—"}
+          sub="Windows of Hope entries"
+        />
+        <StatCard
+          title="Website messages"
+          value={stats.websiteMessages ?? "—"}
+          sub="Contact form submissions"
+        />
       </section>
 
       {/* Main grid */}
@@ -182,13 +259,24 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold">Recent activity</h2>
-            <span className="text-xs text-white/60">UI only for now</span>
+            <span className="text-xs text-white/60">
+              {dashLoading ? "Loading…" : dashError ? "Error" : "Live"}
+            </span>
           </div>
 
           <div className="mt-5 space-y-3">
-            <ActivityItem title="Admin portal created" meta="Today" />
-            <ActivityItem title="Dashboard layout added" meta="Today" />
-            <ActivityItem title="Login page ready (Clerk)" meta="Today" />
+            {dashError ? (
+              <ActivityItem title="Dashboard API error" meta={dashError} />
+            ) : (
+              <>
+                <ActivityItem title="Admin portal ready" meta="Now" />
+                <ActivityItem
+                  title="Upcoming events loaded from Supabase"
+                  meta={dashLoading ? "Loading…" : "Live"}
+                />
+                <ActivityItem title="Committee route protection enabled" meta="Live" />
+              </>
+            )}
           </div>
         </Card>
 
@@ -208,10 +296,9 @@ export default function DashboardPage() {
               desc="Create & manage events"
             />
             <ActionButton
-              href="/admin/dashboard"
-              title="Reports (soon)"
-              desc="Stats & exports later"
-              disabled
+              href="/admin/dashboard/forms"
+              title="Forms"
+              desc="Open all website forms"
             />
           </div>
         </Card>
@@ -231,9 +318,30 @@ export default function DashboardPage() {
           </div>
 
           <div className="mt-5 space-y-3">
-            <ListRow title="No events yet" meta="Add your first event" />
-            <ListRow title="—" meta="—" muted />
-            <ListRow title="—" meta="—" muted />
+            {dashError && <ListRow title="Error" meta={dashError} />}
+            {!dashLoading && !dashError && nextEvents.length === 0 && (
+              <ListRow title="No events yet" meta="Add your first event" />
+            )}
+            {dashLoading &&
+              !dashError &&
+              [0, 1, 2].map((i) => (
+                <ListRow key={i} title="Loading…" meta="Please wait" muted />
+              ))}
+            {!dashLoading &&
+              !dashError &&
+              nextEvents.map((ev) => (
+                <ListRow
+                  key={ev.id}
+                  title={ev.title}
+                  meta={new Date(ev.start_at).toLocaleString("en-GB", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                />
+              ))}
           </div>
         </Card>
 
@@ -284,7 +392,7 @@ function StatCard({
   sub,
 }: {
   title: string;
-  value: string;
+  value: string | number;
   sub: string;
 }) {
   return (
@@ -298,9 +406,9 @@ function StatCard({
 
 function ActivityItem({ title, meta }: { title: string; meta: string }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3 gap-4">
       <div className="font-semibold">{title}</div>
-      <div className="text-xs text-white/60">{meta}</div>
+      <div className="text-xs text-white/60 text-right break-words">{meta}</div>
     </div>
   );
 }
@@ -317,12 +425,12 @@ function ListRow({
   return (
     <div
       className={[
-        "flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
+        "flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3 gap-4",
         muted ? "opacity-40" : "",
       ].join(" ")}
     >
       <div className="font-semibold">{title}</div>
-      <div className="text-xs text-white/60">{meta}</div>
+      <div className="text-xs text-white/60 text-right">{meta}</div>
     </div>
   );
 }
@@ -363,25 +471,40 @@ function QuickPick({
   desc,
   active,
   onClick,
+  onOpen,
 }: {
   title: string;
   desc: string;
   active: boolean;
   onClick: () => void;
+  onOpen: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={[
-        "text-left rounded-3xl border backdrop-blur-xl shadow-xl p-5 transition",
+        "rounded-3xl border backdrop-blur-xl shadow-xl p-5 transition",
         active
           ? "border-white/25 bg-white/15"
           : "border-white/10 bg-white/10 hover:bg-white/15",
       ].join(" ")}
     >
-      <div className="font-extrabold">{title}</div>
-      <div className="text-xs text-white/70 mt-1">{desc}</div>
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full text-left"
+        aria-label={`Select ${title}`}
+      >
+        <div className="font-extrabold">{title}</div>
+        <div className="text-xs text-white/70 mt-1">{desc}</div>
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="mt-4 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm font-extrabold hover:bg-black/30 transition"
+      >
+        Open
+      </button>
+    </div>
   );
 }

@@ -195,6 +195,7 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
       <nav className="space-y-2">
         <SideNavLink href="/admin/dashboard" label="Dashboard" />
         <SideNavLink href="/admin/dashboard/update" label="Emails" />
+        
 
         {/* ✅ Events: click goes to Events page, arrow toggles submenu */}
         <div className="flex items-center gap-2">
@@ -235,6 +236,7 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
             />
           </div>
         )}
+        <SideNavLink href="/admin/dashboard/forms" label="Forms" />
 
         <div className="pt-6 mt-6 border-t border-white/20">
           <button
@@ -247,6 +249,7 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
               →
             </span>
           </button>
+          
         </div>
       </nav>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { createPortal } from "react-dom";
 
 type EventRow = {
   id: string;
@@ -74,6 +75,34 @@ export default function EventPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ needed so createPortal doesn’t run during SSR/hydration
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // ✅ lock page scroll when modal open
+  useEffect(() => {
+    if (!mounted) return;
+    if (!modalImage) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [modalImage, mounted]);
+
+  // ✅ ESC key closes modal
+  useEffect(() => {
+    if (!mounted) return;
+    if (!modalImage) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setModalImage(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modalImage, mounted]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -85,13 +114,9 @@ export default function EventPage() {
         const res = await fetch("/api/events", { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
 
-        if (!res.ok) {
-          throw new Error(json?.error || "Failed to load events");
-        }
+        if (!res.ok) throw new Error(json?.error || "Failed to load events");
 
-        if (!cancelled) {
-          setEvents(Array.isArray(json?.events) ? json.events : []);
-        }
+        if (!cancelled) setEvents(Array.isArray(json?.events) ? json.events : []);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Something went wrong");
       } finally {
@@ -105,13 +130,12 @@ export default function EventPage() {
     };
   }, []);
 
-  // 🔥 SHOW EVERYTHING RETURNED (NO FILTERING)
   const upcoming = useMemo(() => {
-    return (events || []).slice().sort(
-      (a, b) =>
-        new Date(a.start_at).getTime() -
-        new Date(b.start_at).getTime()
-    );
+    return (events || [])
+      .slice()
+      .sort(
+        (a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
+      );
   }, [events]);
 
   return (
@@ -138,22 +162,22 @@ export default function EventPage() {
               <div
                 key={ev.id}
                 className={`bg-white text-black p-6 rounded-lg shadow-md w-full max-w-sm transition-transform hover:scale-105 ${
-                  today
-                    ? "border-4 border-yellow-400 shadow-yellow-300"
-                    : ""
+                  today ? "border-4 border-yellow-400 shadow-yellow-300" : ""
                 }`}
               >
                 {ev.image_url && (
-                  <div
-                    className="mb-4 cursor-pointer"
+                  <button
+                    type="button"
+                    className="mb-4 w-full cursor-pointer"
                     onClick={() => setModalImage(ev.image_url!)}
+                    aria-label="Open event image"
                   >
                     <img
                       src={ev.image_url}
                       alt={`${ev.title} image`}
                       className="w-full h-48 object-cover rounded-md hover:opacity-90 transition"
                     />
-                  </div>
+                  </button>
                 )}
 
                 <h3 className="text-xl font-bold">{ev.title}</h3>
@@ -214,8 +238,8 @@ export default function EventPage() {
             🌈 No Upcoming Events Right Now
           </h3>
           <p className="text-lg text-white mb-6 max-w-2xl">
-            But don’t worry – Burton Pride is always working behind the scenes
-            to bring more events. 💖
+            But don’t worry – Burton Pride is always working behind the scenes to
+            bring more events. 💖
           </p>
           <Link
             href="https://www.facebook.com/profile.php?id=61556621159422"
@@ -227,21 +251,35 @@ export default function EventPage() {
         </div>
       )}
 
-      {modalImage && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center cursor-pointer p-4"
-          onClick={() => setModalImage(null)}
-        >
-          <img
-            src={modalImage}
-            alt="Enlarged Event"
-            className="max-h-[95vh] max-w-[95vw] w-auto h-auto rounded-lg object-contain shadow-2xl"
-          />
-          <p className="absolute bottom-4 text-center text-white text-sm w-full">
-            Click anywhere to close
-          </p>
-        </div>
-      )}
+      {/* ✅ TRUE fullscreen modal (Portal fixes “half out screen” issues) */}
+      {mounted &&
+        modalImage &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4"
+            onClick={() => setModalImage(null)}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="relative max-w-[95vw] max-h-[95vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+             
+
+              <img
+                src={modalImage}
+                alt="Enlarged Event"
+                className="block max-w-[95vw] max-h-[95vh] w-auto h-auto rounded-lg object-contain shadow-2xl"
+              />
+
+              <p className="mt-3 text-center text-white/80 text-sm">
+                Click outside or press ESC to close
+              </p>
+            </div>
+          </div>,
+          document.body
+        )}
     </section>
   );
 }
