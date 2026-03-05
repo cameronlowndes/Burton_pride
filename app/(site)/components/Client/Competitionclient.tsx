@@ -496,7 +496,7 @@ export default function CompetitionPage() {
           </div>
 
           <p className="text-white/90 mb-8 max-w-4xl">
-            These are real entries approved by the committee. If none are approved yet, we’ll show the Burton Pride logo.
+            These are real entries approved by the committee. If none are approved yet, we’ll show the Window Of Hope Logo.
           </p>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
@@ -521,7 +521,7 @@ export default function CompetitionPage() {
               <div className="col">
                 <div className="relative overflow-hidden rounded-2xl border border-white/20 bg-white/5 shadow-lg aspect-[4/3]">
                   <Image
-                    src="/image/Logo.png"
+                    src="/image/logo/WindowsOfHopeLogoReal.png"
                     alt="Burton Pride Logo"
                     fill
                     className="object-contain p-10"

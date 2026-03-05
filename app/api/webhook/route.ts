@@ -29,6 +29,69 @@ function drivePreviewUrl(url: string) {
   return u;
 }
 
+function getSiteUrl(req: Request) {
+  const envUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.SITE_URL?.trim() ||
+    "";
+  if (envUrl) return envUrl.replace(/\/+$/, "");
+
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
+
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  if (host) return `${proto}://${host}`.replace(/\/+$/, "");
+
+  return "";
+}
+
+async function loadLogoBase64(req: Request) {
+  // ✅ NEW LOGO PATH:
+  // public/logo/WindowsOfHopeLogoReal.png
+  const relPath = ["public", "logo", "WindowsOfHopeLogoReal.png"];
+  const diskPath = path.join(process.cwd(), ...relPath);
+
+  // 1) Try FS (local, and sometimes on deploy)
+  try {
+    if (fs.existsSync(diskPath)) {
+      return fs.readFileSync(diskPath).toString("base64");
+    }
+  } catch (e: any) {
+    console.error("❌ Logo fs read failed:", e?.message || e);
+  }
+
+  // 2) Fallback: fetch from deployed site (reliable on Vercel)
+  try {
+    const siteUrl = getSiteUrl(req);
+    if (!siteUrl) return "";
+
+    // public/ maps to /
+    const url = `${siteUrl}/logo/WindowsOfHopeLogoReal.png`;
+
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) {
+      console.error("❌ Logo fetch failed:", res.status, res.statusText, url);
+      return "";
+    }
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.toString("base64");
+  } catch (e: any) {
+    console.error("❌ Logo fetch error:", e?.message || e);
+    return "";
+  }
+}
+
+function parseEmailList(value: string | undefined) {
+  const raw = (value || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) {
@@ -49,7 +112,7 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
   } catch (err: any) {
     console.error("❌ Webhook signature verification failed:", err?.message || err);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+    return NextResponse.json({ error: `Webhook Error: ${err?.message || err}` }, { status: 400 });
   }
 
   if (event.type !== "checkout.session.completed") {
@@ -59,6 +122,7 @@ export async function POST(req: Request) {
   const session = event.data.object as Stripe.Checkout.Session;
   const sessionEmail = session.customer_details?.email || session.customer_email || "";
 
+  // ✅ Get entryId from metadata (session first, then payment intent)
   let entryId = session.metadata?.entryId;
   if (!entryId && session.payment_intent) {
     try {
@@ -73,7 +137,15 @@ export async function POST(req: Request) {
 
   const db = supabaseAdmin;
 
-  await db.from("competition_entries").update({ payment_status: "paid" }).eq("id", entryId);
+  // ✅ Update payment status
+  const { error: paidErr } = await db
+    .from("competition_entries")
+    .update({ payment_status: "paid" })
+    .eq("id", entryId);
+
+  if (paidErr) {
+    console.error("❌ Failed to update payment_status:", paidErr);
+  }
 
   const { data: entry, error: entryError } = await db
     .from("competition_entries")
@@ -83,34 +155,37 @@ export async function POST(req: Request) {
     .eq("id", entryId)
     .single();
 
-  if (entryError || !entry) return NextResponse.json({ received: true });
+  if (entryError || !entry) {
+    console.error("❌ Could not load entry:", entryError);
+    return NextResponse.json({ received: true });
+  }
 
+  // ✅ Prevent duplicates
   if (entry.confirmation_email_sent_at) {
     return NextResponse.json({ received: true });
   }
 
   const resendKey = process.env.RESEND_API_KEY;
-  if (!resendKey) return NextResponse.json({ received: true });
+  if (!resendKey) {
+    console.error("❌ Missing RESEND_API_KEY");
+    return NextResponse.json({ received: true });
+  }
 
   const resend = new Resend(resendKey);
 
-  // Verified sender
-  const FROM = "Burton Pride <noreply@windowsofhope.burtonpride.co.uk>";
+  // ✅ Sender must be verified in Resend
+  const FROM = process.env.EMAIL_FROM?.trim() || "Burton Pride <noreply@burtonpride.co.uk>";
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
-  const adminEmail = process.env.BURTON_PRIDE_NOTIFY_EMAIL?.trim() || "prideburton@gmail.com";
 
-  // ✅ Load logo from /public and embed it inline with CID
-  // File must exist exactly: public/image/logo/WindowsHope.png
-  let logoBase64 = "";
-  try {
-    const logoPath = path.join(process.cwd(), "public", "image", "logo", "WindowsHope.png");
-    logoBase64 = fs.readFileSync(logoPath).toString("base64");
-  } catch (e: any) {
-    console.error(
-      "❌ Could not read logo file from /public/image/logo/WindowsHope.png:",
-      e?.message || e
-    );
-  }
+  // ✅ Admin recipients (comma-separated supported)
+  const adminList =
+    parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS) ||
+    parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
+
+  const adminRecipients = adminList.length ? adminList : ["prideburton@gmail.com"];
+
+  // ✅ Load logo (FS first, then fetch)
+  const logoBase64 = await loadLogoBase64(req);
 
   const customerEmail = String(entry.email || sessionEmail || "")
     .trim()
@@ -128,14 +203,19 @@ export async function POST(req: Request) {
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
       Burton Pride C.I.C • Burton-on-Trent<br/>
-      If you need help, email us at prideburton@gmail.com.
+      If you need help, email us at ${escapeHtml(REPLY_TO)}.
     </div>
   `;
+
   const headerHtml = `
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
       <div style="display:flex;align-items:center;gap:18px;">
-        <img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
-          style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />
+        ${
+          logoBase64
+            ? `<img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
+                 style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />`
+            : `<div style="width:44px;height:44px;border-radius:10px;background:#fff;opacity:.9"></div>`
+        }
         <div>
           <div style="font-size:16px;font-weight:800;">Burton Pride C.I.C</div>
           <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
@@ -144,11 +224,10 @@ export async function POST(req: Request) {
     </div>
   `;
 
-
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
-If you need help, email us at prideburton@gmail.com.
+If you need help, email us at ${REPLY_TO}.
 — Burton Pride C.I.C`;
 
   const customerHtml = `
@@ -169,9 +248,7 @@ If you need help, email us at prideburton@gmail.com.
             <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
           </div>
 
-          <p style="margin:0;color:#374151;">
-            Thank you for supporting Burton Pride 🌈
-          </p>
+          <p style="margin:0;color:#374151;">Thank you for supporting Burton Pride 🌈</p>
         </div>
         ${footerHtml}
       </div>
@@ -223,24 +300,25 @@ Photo: ${imageUrl || "none"}`;
     </div>
   `;
 
+  const headers = {
+    "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
+  } as Record<string, string>;
+
+  // ✅ Resend CID attachment (only if we have a logo)
+  const attachments =
+    logoBase64
+      ? [
+          {
+            filename: "WindowsOfHopeLogoReal.png",
+            content: logoBase64,
+            contentType: "image/png",
+            contentId: "bp-logo", // matches cid:bp-logo
+          },
+        ]
+      : undefined;
+
   try {
-    const headers = {
-      "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
-    } as Record<string, string>;
-
-    // ✅ IMPORTANT: Resend expects `contentId` (camelCase) for CID images.
-    const logoAttachment =
-      logoBase64
-        ? [
-            {
-              filename: "WindowsHope.png",
-              content: logoBase64,
-              contentType: "image/png",
-              contentId: "bp-logo", // matches cid:bp-logo
-            },
-          ]
-        : undefined;
-
+    // Customer email
     if (customerEmail) {
       await resend.emails.send({
         from: FROM,
@@ -250,29 +328,33 @@ Photo: ${imageUrl || "none"}`;
         text: customerText,
         html: customerHtml,
         headers,
-        attachments: logoAttachment,
+        attachments,
       });
-      console.log("✅ Customer email sent");
+      console.log("✅ Customer email sent to:", customerEmail);
     } else {
       console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
+    // Admin email
     await resend.emails.send({
       from: FROM,
-      to: adminEmail,
+      to: adminRecipients,
       replyTo: REPLY_TO,
       subject: adminSubject,
       text: adminText,
       html: adminHtml,
       headers,
-      attachments: logoAttachment,
+      attachments,
     });
-    console.log("✅ Admin email sent");
+    console.log("✅ Admin email sent to:", adminRecipients.join(", "));
 
-    await db
+    // Mark confirmation as sent
+    const { error: sentErr } = await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
       .eq("id", entryId);
+
+    if (sentErr) console.error("❌ Failed to set confirmation_email_sent_at:", sentErr);
   } catch (err: any) {
     console.error("❌ Email send failed:", err?.message || err);
   }
