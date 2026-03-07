@@ -129,7 +129,7 @@ export async function POST(req: Request) {
 
   const imageUrl = drivePreviewUrl(entry.image_url || "");
   const voteUrl = "https://burtonpride.co.uk/Competition/Vote";
-  const qrImageUrl = "https://burton-pride-git-pridecompetitionentry-cameron-works-s-projects.vercel.app/PosterPicturePng/WindowsOfHopeQR.png";
+  const qrImageUrl = "https://drive.google.com/file/d/1YrBOAbYH2NpLpE3qDCJGMRNovrvcQ8l_/view?usp=drive_link";
 
   const safeBusiness = escapeHtml(entry.business_name || "");
   const safeContact = escapeHtml(entry.contact_name || "");
