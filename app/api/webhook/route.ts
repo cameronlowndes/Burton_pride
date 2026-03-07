@@ -27,6 +27,14 @@ function drivePreviewUrl(url: string) {
   return u;
 }
 
+function driveDownloadUrl(url: string) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (m?.[1]) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+  return u;
+}
+
 function parseEmailList(value: string | undefined) {
   const raw = (value || "").trim();
   if (!raw) return [];
@@ -127,7 +135,10 @@ export async function POST(req: Request) {
     .trim()
     .toLowerCase();
 
-  const imageUrl = drivePreviewUrl(entry.image_url || "");
+  const rawImageUrl = String(entry.image_url || "").trim();
+  const imageUrl = drivePreviewUrl(rawImageUrl);
+  const imageDownloadUrl = driveDownloadUrl(rawImageUrl);
+
   const voteUrl = "https://burtonpride.co.uk/Competition/Vote";
   const qrImageUrl = "https://drive.google.com/file/d/1YrBOAbYH2NpLpE3qDCJGMRNovrvcQ8l_/view?usp=drive_link";
 
@@ -139,6 +150,7 @@ export async function POST(req: Request) {
   const safeWebsite = escapeHtml(entry.website || "");
   const safeVoteUrl = escapeHtml(voteUrl);
   const safeQrImageUrl = escapeHtml(qrImageUrl);
+  const safeImageDownloadUrl = escapeHtml(imageDownloadUrl);
 
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
@@ -163,6 +175,9 @@ Your payment has been received and your entry for "${entry.business_name || ""}"
 
 Your uploaded window photo is shown below.
 Please display the QR poster so people can vote for your window.
+
+Download your image:
+${imageDownloadUrl || "Image download link unavailable"}
 
 Vote here:
 ${voteUrl}
@@ -205,6 +220,20 @@ If you need help, email us at ${REPLY_TO}.
                     alt="Your uploaded window photo"
                     style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid #e5e7eb;"
                   />
+                  ${
+                    imageDownloadUrl
+                      ? `
+                        <div style="margin-top:14px;text-align:center;">
+                          <a
+                            href="${safeImageDownloadUrl}"
+                            style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+                          >
+                            Download your window photo
+                          </a>
+                        </div>
+                      `
+                      : ""
+                  }
                 </div>
               `
               : `
@@ -266,7 +295,8 @@ Phone: ${entry.phone || ""}
 Address: ${entry.address || ""}
 Website: ${entry.website || ""}
 Entry ID: ${entry.id}
-Photo: ${imageUrl || "none"}`;
+Photo: ${imageUrl || "none"}
+Download photo: ${imageDownloadUrl || "none"}`;
 
   const adminHtml = `
     <div style="background:#f6f7fb;padding:28px 12px;font-family:Arial,sans-serif;">
@@ -290,6 +320,14 @@ Photo: ${imageUrl || "none"}`;
               ? `
                 <h3 style="margin:18px 0 10px;font-size:16px;">Photo</h3>
                 <img src="${imageUrl}" alt="Uploaded photo" style="max-width:100%;border-radius:12px;border:1px solid #eee;" />
+                <div style="margin-top:12px;">
+                  <a
+                    href="${safeImageDownloadUrl}"
+                    style="display:inline-block;padding:10px 16px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+                  >
+                    Download photo
+                  </a>
+                </div>
                 <div style="margin-top:8px;font-size:12px;">
                   <a href="${imageUrl}">Open photo</a>
                 </div>
