@@ -2,8 +2,6 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import fs from "fs";
-import path from "path";
 
 export const runtime = "nodejs";
 
@@ -27,60 +25,6 @@ function drivePreviewUrl(url: string) {
   const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
   if (m?.[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
   return u;
-}
-
-function getSiteUrl(req: Request) {
-  const envUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.SITE_URL?.trim() ||
-    "";
-  if (envUrl) return envUrl.replace(/\/+$/, "");
-
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
-
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
-  const proto = req.headers.get("x-forwarded-proto") || "https";
-  if (host) return `${proto}://${host}`.replace(/\/+$/, "");
-
-  return "";
-}
-
-async function loadLogoBase64(req: Request) {
-  // ✅ NEW LOGO PATH:
-  // public/logo/WindowsOfHopeLogoReal.png
-  const relPath = ["public", "logo", "WindowsOfHopeLogoReal.png"];
-  const diskPath = path.join(process.cwd(), ...relPath);
-
-  // 1) Try FS (local, and sometimes on deploy)
-  try {
-    if (fs.existsSync(diskPath)) {
-      return fs.readFileSync(diskPath).toString("base64");
-    }
-  } catch (e: any) {
-    console.error("❌ Logo fs read failed:", e?.message || e);
-  }
-
-  // 2) Fallback: fetch from deployed site (reliable on Vercel)
-  try {
-    const siteUrl = getSiteUrl(req);
-    if (!siteUrl) return "";
-
-    // public/ maps to /
-    const url = `${siteUrl}/logo/WindowsOfHopeLogoReal.png`;
-
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) {
-      console.error("❌ Logo fetch failed:", res.status, res.statusText, url);
-      return "";
-    }
-
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.toString("base64");
-  } catch (e: any) {
-    console.error("❌ Logo fetch error:", e?.message || e);
-    return "";
-  }
 }
 
 function parseEmailList(value: string | undefined) {
@@ -122,7 +66,6 @@ export async function POST(req: Request) {
   const session = event.data.object as Stripe.Checkout.Session;
   const sessionEmail = session.customer_details?.email || session.customer_email || "";
 
-  // ✅ Get entryId from metadata (session first, then payment intent)
   let entryId = session.metadata?.entryId;
   if (!entryId && session.payment_intent) {
     try {
@@ -137,7 +80,6 @@ export async function POST(req: Request) {
 
   const db = supabaseAdmin;
 
-  // ✅ Update payment status
   const { error: paidErr } = await db
     .from("competition_entries")
     .update({ payment_status: "paid" })
@@ -160,7 +102,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true });
   }
 
-  // ✅ Prevent duplicates
   if (entry.confirmation_email_sent_at) {
     return NextResponse.json({ received: true });
   }
@@ -173,19 +114,14 @@ export async function POST(req: Request) {
 
   const resend = new Resend(resendKey);
 
-  // ✅ Sender must be verified in Resend
   const FROM = process.env.EMAIL_FROM?.trim() || "Burton Pride <noreply@burtonpride.co.uk>";
   const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
 
-  // ✅ Admin recipients (comma-separated supported)
-  const adminList =
-    parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS) ||
-    parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
+  const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS).length
+    ? parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
+    : parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
 
   const adminRecipients = adminList.length ? adminList : ["prideburton@gmail.com"];
-
-  // ✅ Load logo (FS first, then fetch)
-  const logoBase64 = await loadLogoBase64(req);
 
   const customerEmail = String(entry.email || sessionEmail || "")
     .trim()
@@ -209,17 +145,9 @@ export async function POST(req: Request) {
 
   const headerHtml = `
     <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
-      <div style="display:flex;align-items:center;gap:18px;">
-        ${
-          logoBase64
-            ? `<img src="cid:bp-logo" alt="Burton Pride" width="44" height="44"
-                 style="display:block;border-radius:10px;background:#fff;padding:6px;object-fit:contain" />`
-            : `<div style="width:44px;height:44px;border-radius:10px;background:#fff;opacity:.9"></div>`
-        }
-        <div>
-          <div style="font-size:16px;font-weight:800;">Burton Pride C.I.C</div>
-          <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
-        </div>
+      <div>
+        <div style="font-size:16px;font-weight:800;">Burton Pride C.I.C</div>
+        <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
       </div>
     </div>
   `;
@@ -304,21 +232,7 @@ Photo: ${imageUrl || "none"}`;
     "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
   } as Record<string, string>;
 
-  // ✅ Resend CID attachment (only if we have a logo)
-  const attachments =
-    logoBase64
-      ? [
-          {
-            filename: "WindowsOfHopeLogoReal.png",
-            content: logoBase64,
-            contentType: "image/png",
-            contentId: "bp-logo", // matches cid:bp-logo
-          },
-        ]
-      : undefined;
-
   try {
-    // Customer email
     if (customerEmail) {
       await resend.emails.send({
         from: FROM,
@@ -328,14 +242,12 @@ Photo: ${imageUrl || "none"}`;
         text: customerText,
         html: customerHtml,
         headers,
-        attachments,
       });
       console.log("✅ Customer email sent to:", customerEmail);
     } else {
       console.warn("⚠️ Customer email missing — skipped customer email send");
     }
 
-    // Admin email
     await resend.emails.send({
       from: FROM,
       to: adminRecipients,
@@ -344,11 +256,9 @@ Photo: ${imageUrl || "none"}`;
       text: adminText,
       html: adminHtml,
       headers,
-      attachments,
     });
     console.log("✅ Admin email sent to:", adminRecipients.join(", "));
 
-    // Mark confirmation as sent
     const { error: sentErr } = await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })

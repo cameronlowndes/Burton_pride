@@ -237,23 +237,24 @@ export default function CompetitionPage() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.8 }}
     >
-      {/* Logo */}
+            {/* Logo */}
       <motion.div
-        className="rounded-full overflow-hidden shadow-2xl shadow-pink-400/50 border-4 border-white mb-8"
+        className="mb-8 flex items-center justify-center rounded-full border-4 border-white bg-white p-2 shadow-2xl shadow-pink-400/50"
         style={{ width: 180, height: 180 }}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", stiffness: 120 }}
       >
-        <Image
-          src="/image/Logo.png"
-          alt="Burton Pride Logo"
-          width={180}
-          height={180}
-          className="rounded-full object-cover"
-        />
+        <div className="relative h-full w-full rounded-full overflow-hidden">
+          <Image
+            src="/image/logo/WindowsOfHopeLogoReal.png"
+            alt="Windows Of Hope Logo"
+            fill
+            className="object-contain"
+            priority
+          />
+        </div>
       </motion.div>
-
       <motion.h1 className="text-5xl sm:text-6xl font-extrabold mb-4 text-center drop-shadow-lg">
         🌈 Windows Of Hope Competition 2026
       </motion.h1>

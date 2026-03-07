@@ -8,7 +8,7 @@ export default function AdminLoginPage() {
       <SignIn
         routing="path"
         path="/admin/login"
-        afterSignInUrl="/admin/dashboard"
+        forceRedirectUrl="/admin/dashboard"
         fallbackRedirectUrl="/admin/dashboard"
       />
     </div>
