@@ -36,6 +36,25 @@ function parseEmailList(value: string | undefined) {
     .filter(Boolean);
 }
 
+function getSiteUrl(req: Request) {
+  const envUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.SITE_URL?.trim() ||
+    "";
+
+  if (envUrl) return envUrl.replace(/\/+$/, "");
+
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
+
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+
+  if (host) return `${proto}://${host}`.replace(/\/+$/, "");
+
+  return "";
+}
+
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) {
@@ -128,6 +147,11 @@ export async function POST(req: Request) {
     .toLowerCase();
 
   const imageUrl = drivePreviewUrl(entry.image_url || "");
+  const siteUrl = getSiteUrl(req);
+  const voteUrl = siteUrl ? `${siteUrl}/Competition/vote` : "/Competition/vote";
+  const qrPosterUrl = siteUrl
+    ? `${siteUrl}/PosterPicturePng/WindowsOfHopeQR.png`
+    : "/PosterPicturePng/WindowsOfHopeQR.png";
 
   const safeBusiness = escapeHtml(entry.business_name || "");
   const safeContact = escapeHtml(entry.contact_name || "");
@@ -135,6 +159,8 @@ export async function POST(req: Request) {
   const safePhone = escapeHtml(entry.phone || "");
   const safeAddress = escapeHtml(entry.address || "");
   const safeWebsite = escapeHtml(entry.website || "");
+  const safeVoteUrl = escapeHtml(voteUrl);
+  const safeQrPosterUrl = escapeHtml(qrPosterUrl);
 
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
@@ -154,8 +180,17 @@ export async function POST(req: Request) {
 
   const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
   const customerText = `Hi ${entry.contact_name || "there"},
+
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
+
+Your uploaded window photo is shown below.
+Please display the QR poster so people can vote for your window.
+
+Vote here:
+${voteUrl}
+
 If you need help, email us at ${REPLY_TO}.
+
 — Burton Pride C.I.C`;
 
   const customerHtml = `
@@ -174,6 +209,64 @@ If you need help, email us at ${REPLY_TO}.
             <div style="font-size:14px;"><strong>Business:</strong> ${safeBusiness}</div>
             <div style="font-size:14px;"><strong>Contact:</strong> ${safeContact}</div>
             <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
+          </div>
+
+          ${
+            imageUrl
+              ? `
+                <div style="margin:18px 0;">
+                  <div style="font-size:16px;font-weight:700;margin:0 0 10px;">This is your window photo</div>
+                  <p style="margin:0 0 12px;color:#374151;">
+                    Please check this is the image you want displayed for the competition.
+                  </p>
+                  <img
+                    src="${imageUrl}"
+                    alt="Your uploaded window photo"
+                    style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid #e5e7eb;"
+                  />
+                </div>
+              `
+              : `
+                <div style="margin:18px 0;padding:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:12px;color:#9a3412;">
+                  We could not display your image in this email. If your image is missing, please reply to this email.
+                </div>
+              `
+          }
+
+          <div style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;text-align:center;">
+            <div style="font-size:16px;font-weight:700;margin-bottom:10px;">
+              Display this QR code so people can vote for your window
+            </div>
+
+            <p style="margin:0 0 14px;color:#374151;">
+              Print this poster or display it in your window so visitors can scan and vote.
+            </p>
+
+            <img
+              src="${safeQrPosterUrl}"
+              alt="Windows of Hope Voting QR Code"
+              style="max-width:260px;width:100%;border-radius:12px;border:1px solid #e5e7eb;"
+            />
+
+            <div style="margin-top:10px;font-size:12px;color:#6b7280;">
+              Scan to vote in the Windows of Hope competition
+            </div>
+          </div>
+
+          <div style="margin:18px 0;padding:16px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;">
+            <div style="font-size:16px;font-weight:700;margin:0 0 8px;">People can vote for your window</div>
+            <p style="margin:0 0 12px;color:#374151;">
+              Please share the competition voting page so people can vote for your window.
+            </p>
+            <a
+              href="${safeVoteUrl}"
+              style="display:inline-block;padding:12px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+            >
+              Vote for your favourite window
+            </a>
+            <div style="margin-top:10px;font-size:12px;color:#6b7280;word-break:break-all;">
+              ${safeVoteUrl}
+            </div>
           </div>
 
           <p style="margin:0;color:#374151;">Thank you for supporting Burton Pride 🌈</p>
