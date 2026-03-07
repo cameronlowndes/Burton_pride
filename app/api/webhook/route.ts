@@ -140,7 +140,10 @@ export async function POST(req: Request) {
   const imageDownloadUrl = driveDownloadUrl(rawImageUrl);
 
   const voteUrl = "https://burtonpride.co.uk/Competition/Vote";
-  const qrImageUrl = "https://drive.google.com/file/d/1YrBOAbYH2NpLpE3qDCJGMRNovrvcQ8l_/view?usp=drive_link";
+
+  const rawQrImageUrl =
+    "https://drive.google.com/file/d/1YrBOAbYH2NpLpE3qDCJGMRNovrvcQ8l_/view?usp=drive_link";
+  const qrDownloadUrl = driveDownloadUrl(rawQrImageUrl);
 
   const safeBusiness = escapeHtml(entry.business_name || "");
   const safeContact = escapeHtml(entry.contact_name || "");
@@ -149,8 +152,8 @@ export async function POST(req: Request) {
   const safeAddress = escapeHtml(entry.address || "");
   const safeWebsite = escapeHtml(entry.website || "");
   const safeVoteUrl = escapeHtml(voteUrl);
-  const safeQrImageUrl = escapeHtml(qrImageUrl);
   const safeImageDownloadUrl = escapeHtml(imageDownloadUrl);
+  const safeQrDownloadUrl = escapeHtml(qrDownloadUrl);
 
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
@@ -174,16 +177,15 @@ export async function POST(req: Request) {
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
 
 Your uploaded window photo is shown below.
-Please display the QR poster so people can vote for your window.
 
-Download your image:
+Download your window photo:
 ${imageDownloadUrl || "Image download link unavailable"}
+
+Download the QR poster:
+${qrDownloadUrl || "QR download link unavailable"}
 
 Vote here:
 ${voteUrl}
-
-QR poster:
-${qrImageUrl}
 
 If you need help, email us at ${REPLY_TO}.
 
@@ -245,22 +247,25 @@ If you need help, email us at ${REPLY_TO}.
 
           <div style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;text-align:center;">
             <div style="font-size:16px;font-weight:700;margin-bottom:10px;">
-              Display this QR code so people can vote for your window
+              Download your QR poster for voting
             </div>
 
             <p style="margin:0 0 14px;color:#374151;">
-              Print this poster or display it in your window so visitors can scan and vote.
+              Use this button to download the QR poster from Google Drive, then print it or display it in your window.
             </p>
 
-            <img
-              src="${safeQrImageUrl}"
-              alt="Windows of Hope Voting QR Code"
-              style="max-width:260px;width:100%;border-radius:12px;border:1px solid #e5e7eb;"
-            />
-
-            <div style="margin-top:10px;font-size:12px;color:#6b7280;">
-              Scan to vote in the Windows of Hope competition
-            </div>
+            ${
+              qrDownloadUrl
+                ? `
+                  <a
+                    href="${safeQrDownloadUrl}"
+                    style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+                  >
+                    Download QR poster
+                  </a>
+                `
+                : ""
+            }
           </div>
 
           <div style="margin:18px 0;padding:16px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;">
@@ -296,7 +301,8 @@ Address: ${entry.address || ""}
 Website: ${entry.website || ""}
 Entry ID: ${entry.id}
 Photo: ${imageUrl || "none"}
-Download photo: ${imageDownloadUrl || "none"}`;
+Download photo: ${imageDownloadUrl || "none"}
+Download QR poster: ${qrDownloadUrl || "none"}`;
 
   const adminHtml = `
     <div style="background:#f6f7fb;padding:28px 12px;font-family:Arial,sans-serif;">
@@ -333,6 +339,21 @@ Download photo: ${imageDownloadUrl || "none"}`;
                 </div>
               `
               : `<p><em>Please check Google Drive for the image. If it isn’t there, please email the customer back to let them know the image is missing.</em></p>`
+          }
+
+          ${
+            qrDownloadUrl
+              ? `
+                <div style="margin-top:18px;">
+                  <a
+                    href="${safeQrDownloadUrl}"
+                    style="display:inline-block;padding:10px 16px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+                  >
+                    Download QR poster
+                  </a>
+                </div>
+              `
+              : ""
           }
         </div>
         ${footerHtml}
