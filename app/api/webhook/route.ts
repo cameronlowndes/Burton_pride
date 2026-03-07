@@ -2,8 +2,6 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import fs from "fs";
-import path from "path";
 
 export const runtime = "nodejs";
 
@@ -36,46 +34,6 @@ function parseEmailList(value: string | undefined) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-}
-
-function getSiteUrl(req: Request) {
-  const envUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.SITE_URL?.trim() ||
-    "";
-
-  if (envUrl) return envUrl.replace(/\/+$/, "");
-
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
-
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
-  const proto = req.headers.get("x-forwarded-proto") || "https";
-
-  if (host) return `${proto}://${host}`.replace(/\/+$/, "");
-
-  return "";
-}
-
-function loadQrBase64() {
-  try {
-    const filePath = path.join(
-      process.cwd(),
-      "public",
-      "PosterPicturePng",
-      "WindowsOfHopeQR.png"
-    );
-
-    if (!fs.existsSync(filePath)) {
-      console.error("❌ QR image not found at:", filePath);
-      return "";
-    }
-
-    return fs.readFileSync(filePath).toString("base64");
-  } catch (e: any) {
-    console.error("❌ Failed to read QR image:", e?.message || e);
-    return "";
-  }
 }
 
 export async function POST(req: Request) {
@@ -170,10 +128,8 @@ export async function POST(req: Request) {
     .toLowerCase();
 
   const imageUrl = drivePreviewUrl(entry.image_url || "");
-  const siteUrl = getSiteUrl(req);
-  const cleanSiteUrl = siteUrl.replace(/\/+$/, "");
-  const voteUrl = cleanSiteUrl ? `${cleanSiteUrl}/Competition/vote` : "";
-  const qrBase64 = loadQrBase64();
+  const voteUrl = "https://burtonpride.co.uk/Competition/Vote";
+  const qrImageUrl = "https://burton-pride-git-pridecompetitionentry-cameron-works-s-projects.vercel.app/PosterPicturePng/WindowsOfHopeQR.png";
 
   const safeBusiness = escapeHtml(entry.business_name || "");
   const safeContact = escapeHtml(entry.contact_name || "");
@@ -182,6 +138,7 @@ export async function POST(req: Request) {
   const safeAddress = escapeHtml(entry.address || "");
   const safeWebsite = escapeHtml(entry.website || "");
   const safeVoteUrl = escapeHtml(voteUrl);
+  const safeQrImageUrl = escapeHtml(qrImageUrl);
 
   const footerHtml = `
     <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
@@ -208,7 +165,10 @@ Your uploaded window photo is shown below.
 Please display the QR poster so people can vote for your window.
 
 Vote here:
-${voteUrl || "Competition voting page"}
+${voteUrl}
+
+QR poster:
+${qrImageUrl}
 
 If you need help, email us at ${REPLY_TO}.
 
@@ -254,57 +214,41 @@ If you need help, email us at ${REPLY_TO}.
               `
           }
 
-          ${
-            qrBase64
-              ? `
-                <div style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;text-align:center;">
-                  <div style="font-size:16px;font-weight:700;margin-bottom:10px;">
-                    Display this QR code so people can vote for your window
-                  </div>
+          <div style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;text-align:center;">
+            <div style="font-size:16px;font-weight:700;margin-bottom:10px;">
+              Display this QR code so people can vote for your window
+            </div>
 
-                  <p style="margin:0 0 14px;color:#374151;">
-                    Print this poster or display it in your window so visitors can scan and vote.
-                  </p>
+            <p style="margin:0 0 14px;color:#374151;">
+              Print this poster or display it in your window so visitors can scan and vote.
+            </p>
 
-                  <img
-                    src="cid:windows-hope-qr"
-                    alt="Windows of Hope Voting QR Code"
-                    style="max-width:260px;width:100%;border-radius:12px;border:1px solid #e5e7eb;"
-                  />
+            <img
+              src="${safeQrImageUrl}"
+              alt="Windows of Hope Voting QR Code"
+              style="max-width:260px;width:100%;border-radius:12px;border:1px solid #e5e7eb;"
+            />
 
-                  <div style="margin-top:10px;font-size:12px;color:#6b7280;">
-                    Scan to vote in the Windows of Hope competition
-                  </div>
-                </div>
-              `
-              : `
-                <div style="margin:20px 0;padding:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:12px;color:#9a3412;">
-                  We could not attach the QR poster image to this email.
-                </div>
-              `
-          }
+            <div style="margin-top:10px;font-size:12px;color:#6b7280;">
+              Scan to vote in the Windows of Hope competition
+            </div>
+          </div>
 
-          ${
-            voteUrl
-              ? `
-                <div style="margin:18px 0;padding:16px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;">
-                  <div style="font-size:16px;font-weight:700;margin:0 0 8px;">People can vote for your window</div>
-                  <p style="margin:0 0 12px;color:#374151;">
-                    Please share the competition voting page so people can vote for your window.
-                  </p>
-                  <a
-                    href="${safeVoteUrl}"
-                    style="display:inline-block;padding:12px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-                  >
-                    Vote for your favourite window
-                  </a>
-                  <div style="margin-top:10px;font-size:12px;color:#6b7280;word-break:break-all;">
-                    ${safeVoteUrl}
-                  </div>
-                </div>
-              `
-              : ""
-          }
+          <div style="margin:18px 0;padding:16px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;">
+            <div style="font-size:16px;font-weight:700;margin:0 0 8px;">People can vote for your window</div>
+            <p style="margin:0 0 12px;color:#374151;">
+              Please share the competition voting page so people can vote for your window.
+            </p>
+            <a
+              href="${safeVoteUrl}"
+              style="display:inline-block;padding:12px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
+            >
+              Vote for your favourite window
+            </a>
+            <div style="margin-top:10px;font-size:12px;color:#6b7280;word-break:break-all;">
+              ${safeVoteUrl}
+            </div>
+          </div>
 
           <p style="margin:0;color:#374151;">Thank you for supporting Burton Pride 🌈</p>
         </div>
@@ -362,17 +306,6 @@ Photo: ${imageUrl || "none"}`;
     "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
   } as Record<string, string>;
 
-  const qrAttachment = qrBase64
-    ? [
-        {
-          filename: "WindowsOfHopeQR.png",
-          content: qrBase64,
-          contentType: "image/png",
-          contentId: "windows-hope-qr",
-        },
-      ]
-    : undefined;
-
   try {
     if (customerEmail) {
       await resend.emails.send({
@@ -383,7 +316,6 @@ Photo: ${imageUrl || "none"}`;
         text: customerText,
         html: customerHtml,
         headers,
-        attachments: qrAttachment,
       });
       console.log("✅ Customer email sent to:", customerEmail);
     } else {
