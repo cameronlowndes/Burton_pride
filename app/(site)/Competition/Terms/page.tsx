@@ -2,18 +2,18 @@ import type { Metadata } from "next";
 import CompetitionTerms from "../../components/Client/CompetitionclientTerms";
 
 export const metadata: Metadata = {
-  title: "Terms & Conditions For Windows Of Hope Competition 2026",
+  title: "Windows Of Hope Competition 2026 – Terms & Conditions",
   description:
-    "Join us for Burton Pride 2026 and be part of this amazing event!",
+    "Read the official Terms & Conditions for the Burton Pride Windows Of Hope Competition 2026. Learn the rules, eligibility, judging criteria, and entry requirements.",
   openGraph: {
-    title: "Burton Pride 2026",
+    title: "Windows Of Hope Competition 2026 – Terms & Conditions",
     description:
-      "Join us for Burton Pride 2026 and be part of this amazing event!",
+      "Official Terms & Conditions for the Burton Pride Windows Of Hope Competition 2026.",
     siteName: "Burton Pride",
     type: "website",
   },
 };
 
-export default function BurtonPride2026() {
+export default function WindowsOfHopeTermsPage() {
   return <CompetitionTerms />;
 }

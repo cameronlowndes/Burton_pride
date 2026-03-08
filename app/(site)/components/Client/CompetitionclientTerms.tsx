@@ -133,30 +133,32 @@ const TermsPage = () => {
                 <section>
                     <h2 className="text-2xl font-semibold mb-2">5. Image Storage</h2>
                     <p>
-                        All images submitted as part of the Windows of Hope Competition, including window display photos and any
-                        supporting images provided during entry, will be securely stored on the official Burton Pride C.I.C
-                        Google Drive.
+                       All images submitted as part of the Windows of Hope Competition, including window 
+                       display photos and any supporting images provided during entry, will be securely
+                        stored using Supabase cloud storage on the official Burton Pride C.I.C competition system.
                     </p>
                     <p className="mt-2">
-                        These images are collected solely for the purpose of managing the competition, reviewing entries,
-                        judging displays, and promoting the Windows of Hope Competition and Burton Pride C.I.C. Images may also
-                        be used on the Burton Pride website, social media platforms, press releases, and future promotional
-                        materials connected to the competition or Burton Pride events.
+                        These images are collected solely for the purpose of managing the competition,
+                         reviewing entries, judging displays, and promoting the Windows of Hope Competition 
+                         and Burton Pride C.I.C. Images may also be used on the Burton Pride website, 
+                         social media platforms, press releases, and future promotional materials 
+                         connected to the competition or Burton Pride events.
                     </p>
                     <p className="mt-2">
-                        Burton Pride C.I.C will take reasonable steps to ensure that all images are stored securely and are only
-                        accessible to authorised members of the Burton Pride C.I.C team who require access to manage the
-                        competition and related promotional activities.
+                       Burton Pride C.I.C will take reasonable steps to ensure that all images are stored 
+                       securely and are only accessible to authorised members of the Burton Pride C.I.C 
+                       team who require access to manage the competition and related promotional activities.
                     </p>
                     <p className="mt-2">
-                        Images will not be shared with third parties outside of Burton Pride C.I.C without permission unless
-                        required for promotional purposes directly related to Burton Pride C.I.C. If images are to be used
-                        outside normal promotion of Burton Pride activities, permission will be requested from the entrant
-                        where appropriate.
+                        Images will not be shared with third parties outside of Burton Pride C.I.C without
+                         permission unless required for promotional purposes directly related to Burton Pride C.I.C. 
+                         If images are to be used outside normal promotion of Burton Pride activities, permission 
+                         will be requested from the entrant where appropriate.
                     </p>
                     <p className="mt-2">
-                        By entering the competition and submitting images, you confirm that you give Burton Pride C.I.C
-                        permission to store, use, and display these images for competition management and promotional use.
+                       By entering the competition and submitting images, you confirm that you give Burton Pride C.I.C 
+                       permission to store, use, and display these images using secure cloud storage systems for
+                       competition management and promotional use.
                     </p>
                 </section>
 
@@ -223,11 +225,7 @@ const TermsPage = () => {
     payments, or how your data is stored, please contact Burton Pride C.I.C directly.
   </p>
 
-  <p className="mt-2">
-    Please ask for either Simon or Cameron when getting in touch, depending on the nature
-    of your enquiry, and a member of the Burton Pride C.I.C team will respond as soon as possible
-    to assist you.
-  </p>
+  
 
   <p className="mt-2">
     Burton Pride C.I.C is committed to handling all enquiries fairly, respectfully, and in a
@@ -263,7 +261,7 @@ const TermsPage = () => {
                 {/* download */}
                 <div className="mt-8 text-center">
                     <a
-                        href="/Document/Windows_of_Hope_Terms_2026.pdf"
+                        href="/Document/Windows_of_Hope_Terms_2026_PDF_Verison.pdf"
                         download
                         className="inline-block bg-yellow-400 text-black font-bold px-6 py-3 rounded-full hover:bg-yellow-300 transition transform hover:scale-105 shadow-lg"
                     >

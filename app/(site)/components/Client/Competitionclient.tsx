@@ -217,18 +217,7 @@ export default function CompetitionPage() {
     }
   };
 
-  const autoFillForm = () => {
-    setFormError(null);
-    setFormData({
-      businessName: "Test Business Ltd",
-      contactName: "John Doe",
-      email: "cameronlowndes@gmail.com",
-      phone: "0123456789",
-      address: "123 Test Street, Burton",
-      website: "https://example.com",
-    });
-    setConsent(true);
-  };
+
 
   return (
     <motion.div
@@ -427,13 +416,7 @@ export default function CompetitionPage() {
               {loading ? "Processing..." : "Submit & Pay £2"}
             </button>
 
-            <button
-              type="button"
-              onClick={autoFillForm}
-              className="mt-2 cursor-pointer bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-300 active:scale-[0.99] transition"
-            >
-              Auto-Fill Form (Test Only)
-            </button>
+         
           </motion.form>
         </div>
 
