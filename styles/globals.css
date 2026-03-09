@@ -127,6 +127,13 @@ body {
   transform: rotateY(180deg);
 }
 
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
 
 
 

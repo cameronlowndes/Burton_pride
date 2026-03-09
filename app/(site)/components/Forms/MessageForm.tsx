@@ -1,72 +1,161 @@
-'use client';
-import React, { useEffect } from "react";
-import { useForm, ValidationError } from "@formspree/react";
+// app/Forms/MessageForm.tsx
+"use client";
+
+import { FormEvent, useState } from "react";
 import { motion } from "framer-motion";
 
-export default function ContactForm() {
-  const [state, handleSubmit] = useForm("xyzpqnrq");
+type FormState = {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+};
 
-  // Redirect to Thank You page on successful submission
-  useEffect(() => {
-    if (state.succeeded) {
-      window.location.href = '/ThankYou'; // <-- your thank you page
+export default function MessageForm() {
+  const [form, setForm] = useState<FormState>({
+    name: "",
+    email: "",
+    subject: "",
+    message: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setSuccess(null);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          subject: form.subject,
+          message: form.message,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data?.error || "Something went wrong. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      setSuccess(data?.message || "Your message has been sent.");
+      setForm({
+        name: "",
+        email: "",
+        subject: "",
+        message: "",
+      });
+    } catch (err) {
+      console.error("Contact form submit error:", err);
+      setError("Could not send your message. Please try again.");
+    } finally {
+      setLoading(false);
     }
-  }, [state.succeeded]);
+  }
 
   return (
     <motion.form
       onSubmit={handleSubmit}
-      className="max-w-md mx-auto p-8 bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl border-4 border-white/30 flex flex-col gap-6 relative overflow-hidden"
-      initial={{ opacity: 0, y: 40 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
+      transition={{ duration: 0.4 }}
+      className="rounded-3xl bg-white/15 backdrop-blur-md border border-white/20 shadow-2xl p-6 sm:p-8 flex flex-col gap-5"
     >
-      {/* Animated Glow Background */}
-      <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-pink-400 via-purple-500 to-blue-400 opacity-20 blur-3xl animate-pulse -z-10"></div>
+      <div>
+        <label htmlFor="name" className="mb-2 block text-sm font-semibold text-white">
+          Name
+        </label>
+        <input
+          id="name"
+          type="text"
+          value={form.name}
+          onChange={(e) => updateField("name", e.target.value)}
+          placeholder="Your name"
+          required
+          className="w-full rounded-2xl border border-white/20 bg-white/90 px-4 py-3 text-gray-900 outline-none focus:ring-2 focus:ring-pink-400"
+        />
+      </div>
 
-      <h2 className="text-2xl font-bold mb-4 text-white drop-shadow-md text-center">Contact Us</h2>
+      <div>
+        <label htmlFor="email" className="mb-2 block text-sm font-semibold text-white">
+          Email
+        </label>
+        <input
+          id="email"
+          type="email"
+          value={form.email}
+          onChange={(e) => updateField("email", e.target.value)}
+          placeholder="you@example.com"
+          required
+          className="w-full rounded-2xl border border-white/20 bg-white/90 px-4 py-3 text-gray-900 outline-none focus:ring-2 focus:ring-pink-400"
+        />
+      </div>
 
-      <label htmlFor="name" className="font-medium text-white">Name</label>
-      <input
-        id="name"
-        type="text"
-        name="name"
-        placeholder="Your Name"
-        required
-        className="p-3 border-2 border-white/50 rounded-xl bg-white/20 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-pink-400"
-      />
+      <div>
+        <label htmlFor="subject" className="mb-2 block text-sm font-semibold text-white">
+          Subject
+        </label>
+        <input
+          id="subject"
+          type="text"
+          value={form.subject}
+          onChange={(e) => updateField("subject", e.target.value)}
+          placeholder="What is this about?"
+          className="w-full rounded-2xl border border-white/20 bg-white/90 px-4 py-3 text-gray-900 outline-none focus:ring-2 focus:ring-pink-400"
+        />
+      </div>
 
-      <label htmlFor="email" className="font-medium text-white">Email Address</label>
-      <input
-        id="email"
-        type="email"
-        name="email"
-        placeholder="your@email.com"
-        required
-        className="p-3 border-2 border-white/50 rounded-xl bg-white/20 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-purple-400"
-      />
-      <ValidationError prefix="Email" field="email" errors={state.errors} className="text-yellow-300" />
+      <div>
+        <label htmlFor="message" className="mb-2 block text-sm font-semibold text-white">
+          Message
+        </label>
+        <textarea
+          id="message"
+          value={form.message}
+          onChange={(e) => updateField("message", e.target.value)}
+          placeholder="Write your message here..."
+          required
+          rows={6}
+          className="w-full rounded-2xl border border-white/20 bg-white/90 px-4 py-3 text-gray-900 outline-none focus:ring-2 focus:ring-pink-400"
+        />
+      </div>
 
-      <label htmlFor="message" className="font-medium text-white">Message</label>
-      <textarea
-        id="message"
-        name="message"
-        placeholder="Write your message here..."
-        required
-        rows={5}
-        className="p-3 border-2 border-white/50 rounded-xl bg-white/20 placeholder-white/70 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-      />
-      <ValidationError prefix="Message" field="message" errors={state.errors} className="text-yellow-300" />
+      {success && (
+        <div className="rounded-2xl bg-green-500/20 border border-green-300/40 px-4 py-3 text-white">
+          {success}
+        </div>
+      )}
 
-      <motion.button
+      {error && (
+        <div className="rounded-2xl bg-red-500/20 border border-red-300/40 px-4 py-3 text-white">
+          {error}
+        </div>
+      )}
+
+      <button
         type="submit"
-        disabled={state.submitting}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        className="bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed"
+        disabled={loading}
+        className="rounded-2xl bg-white text-pink-600 font-bold px-6 py-3 shadow-lg hover:bg-gray-100 transition disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {state.submitting ? 'Sending...' : 'Send Message'}
-      </motion.button>
+        {loading ? "Sending..." : "Send Message"}
+      </button>
     </motion.form>
   );
 }

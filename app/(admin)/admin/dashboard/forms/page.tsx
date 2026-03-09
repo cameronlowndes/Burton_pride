@@ -21,7 +21,7 @@ export default function AdminFormsDashboardPage() {
         title: "Contact form",
         desc: "Messages sent from the Contact Us page.",
         href: "/ContactUS",
-        adminHref: "/admin/dashboard/forms/contact",
+        adminHref: "/admin/dashboard/forms/Contact",
         badge: "Live",
       },
       {
