@@ -29,7 +29,7 @@ export default function AdminFormsDashboardPage() {
         title: "Volunteer interest",
         desc: "Volunteer sign-up form responses.",
         href: "/JoinUS/Volunteer",
-        adminHref: "/admin/dashboard/forms/join-the-team",
+        adminHref: "/admin/dashboard/forms/Volunteer",
         badge: "Live",
       },
       {

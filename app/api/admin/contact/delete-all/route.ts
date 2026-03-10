@@ -6,10 +6,11 @@ export const runtime = "nodejs";
 
 export async function DELETE() {
   try {
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("contact_messages")
       .delete()
-      .neq("id", "");
+      .not("id", "is", null)
+      .select("id");
 
     if (error) {
       return NextResponse.json(
@@ -20,6 +21,7 @@ export async function DELETE() {
 
     return NextResponse.json({
       ok: true,
+      deletedCount: data?.length || 0,
       message: "All contact messages deleted successfully",
     });
   } catch (error) {
