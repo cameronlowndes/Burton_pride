@@ -101,6 +101,8 @@ export default function VolunteerAdminPage() {
     [items, selectedId]
   );
 
+  const disableStatusButtons = !!selectedItem?.is_read;
+
   useEffect(() => {
     void fetchItems();
   }, []);
@@ -305,15 +307,15 @@ export default function VolunteerAdminPage() {
   ) {
     return (
       <div className="overflow-hidden rounded-3xl border border-white/20 bg-white/10 backdrop-blur-md">
-        <div className="border-b border-white/10 px-5 py-4">
-          <h2 className="text-2xl font-bold text-white">{title}</h2>
+        <div className="border-b border-white/10 px-4 py-4 sm:px-5">
+          <h2 className="text-xl font-bold text-white sm:text-2xl">{title}</h2>
           <p className="text-sm text-white/80">
             {list.length} {readState === "unread" ? "unread" : "read"}
           </p>
         </div>
 
         {list.length === 0 ? (
-          <div className="px-5 py-5 text-white/80">
+          <div className="px-4 py-5 text-white/80 sm:px-5">
             {readState === "unread"
               ? "No unread volunteer forms."
               : "No read volunteer forms yet."}
@@ -326,28 +328,30 @@ export default function VolunteerAdminPage() {
               return (
                 <div
                   key={item.id}
-                  className={`w-full border-b border-white/10 px-5 py-4 transition last:border-b-0 ${
+                  className={`w-full border-b border-white/10 px-4 py-4 transition last:border-b-0 sm:px-5 ${
                     active ? "bg-white/15" : "hover:bg-white/10"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <button
                       type="button"
                       onClick={() => void openItem(item)}
                       className="min-w-0 flex-1 text-left"
                     >
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-xl font-semibold text-white">
+                        <p className="truncate text-lg font-semibold text-white sm:text-xl">
                           {item.full_name}
                         </p>
                         {!item.is_read ? (
-                          <span className="inline-block h-2.5 w-2.5 rounded-full bg-pink-400" />
+                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-pink-400" />
                         ) : null}
                       </div>
 
-                      <p className="truncate text-white/80">{item.email}</p>
+                      <p className="truncate text-sm text-white/80 sm:text-base">
+                        {item.email}
+                      </p>
 
-                      <p className="mt-2 truncate text-white/95">
+                      <p className="mt-2 line-clamp-2 text-white/95">
                         {item.why_volunteer || item.experience || "Volunteer form"}
                       </p>
 
@@ -356,7 +360,7 @@ export default function VolunteerAdminPage() {
                       </p>
                     </button>
 
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(
                           item.status
@@ -368,7 +372,7 @@ export default function VolunteerAdminPage() {
                       <button
                         type="button"
                         onClick={() => void deleteOne(item.id)}
-                        className="rounded-xl bg-pink-500/30 px-3 py-2 text-sm font-semibold text-pink-50 hover:bg-pink-500/40"
+                        className="w-full rounded-xl bg-pink-500/30 px-3 py-2 text-sm font-semibold text-pink-50 hover:bg-pink-500/40 sm:w-auto"
                       >
                         Delete
                       </button>
@@ -384,29 +388,31 @@ export default function VolunteerAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-r px-4 py-8 text-white sm:px-8">
-      <div className="mx-auto max-w-7xl">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h1 className="text-4xl font-bold sm:text-5xl">Volunteer Applications</h1>
-            <p className="mt-2 text-white/80">
+    <div className="min-h-screen overflow-x-hidden px-3 py-6 text-white sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-3xl font-bold sm:text-4xl lg:text-5xl">
+              Volunteer Applications
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-white/80 sm:text-base">
               Manage volunteer form submissions from your website.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <button
               type="button"
               onClick={() => void fetchItems(true)}
               disabled={refreshing || loading}
-              className="rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 disabled:opacity-60"
+              className="w-full rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 disabled:opacity-60 sm:w-auto"
             >
               {refreshing ? "Refreshing..." : "Refresh"}
             </button>
 
             <Link
               href="/admin/dashboard/forms/Volunteer/Volunteer-list-version"
-              className="inline-flex items-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20"
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto"
             >
               ← Form List
             </Link>
@@ -415,27 +421,27 @@ export default function VolunteerAdminPage() {
               <button
                 type="button"
                 onClick={() => setConfirmDeleteAll(true)}
-                className="rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700"
+                className="w-full rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 sm:w-auto"
               >
                 Delete All
               </button>
             ) : (
-              <>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
                   onClick={() => void handleDeleteAll()}
-                  className="rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800"
+                  className="w-full rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 sm:w-auto"
                 >
                   Confirm Delete All
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmDeleteAll(false)}
-                  className="rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white hover:bg-white/20"
+                  className="w-full rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white hover:bg-white/20 sm:w-auto"
                 >
                   Cancel
                 </button>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -446,49 +452,47 @@ export default function VolunteerAdminPage() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="space-y-6">
+        <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-6">
             {renderList("Inbox", unreadItems, "unread")}
             {renderList("Read Volunteers", readItems, "read")}
           </div>
 
-          <div className="rounded-3xl border border-white/20 bg-white/10 p-5 backdrop-blur-md sm:p-6">
+          <div className="min-w-0 rounded-3xl border border-white/20 bg-white/10 p-4 backdrop-blur-md sm:p-6">
             {loading ? (
               <p className="text-white/85">Loading volunteer applications...</p>
             ) : !selectedItem ? (
               <p className="text-white/85">Select a volunteer application to view it.</p>
             ) : (
               <>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      disabled={busyId === selectedItem.id || !selectedItem.is_read}
-                      onClick={() => void markUnread(selectedItem.id)}
-                      className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Mark Unread
-                    </button>
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <button
+                    type="button"
+                    disabled={busyId === selectedItem.id || !selectedItem.is_read}
+                    onClick={() => void markUnread(selectedItem.id)}
+                    className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Mark Unread
+                  </button>
 
-                    <a
-                      href={`mailto:${selectedItem.email}`}
-                      className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20"
-                    >
-                      Reply
-                    </a>
+                  <a
+                    href={`mailto:${selectedItem.email}`}
+                    className="rounded-2xl bg-white/15 px-4 py-2.5 text-center font-semibold text-white hover:bg-white/20"
+                  >
+                    Reply
+                  </a>
 
-                    <button
-                      type="button"
-                      disabled={busyId === selectedItem.id}
-                      onClick={() => void deleteOne(selectedItem.id)}
-                      className="rounded-2xl bg-red-600 px-4 py-2.5 font-semibold text-white hover:bg-red-700 disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={busyId === selectedItem.id}
+                    onClick={() => void deleteOne(selectedItem.id)}
+                    className="rounded-2xl bg-red-600 px-4 py-2.5 font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    Delete
+                  </button>
 
                   <span
-                    className={`rounded-full px-4 py-2 text-sm font-semibold ${statusBadgeClass(
+                    className={`inline-flex w-fit rounded-full px-4 py-2 text-sm font-semibold sm:ml-auto ${statusBadgeClass(
                       selectedItem.status
                     )}`}
                   >
@@ -502,25 +506,33 @@ export default function VolunteerAdminPage() {
                   </p>
                 ) : null}
 
-                <div className="mt-6">
-                  <h2 className="text-4xl font-bold text-white">{selectedItem.full_name}</h2>
-                  <p className="mt-1 text-xl text-white/80">{selectedItem.email}</p>
+                <div className="mt-6 min-w-0">
+                  <h2 className="break-words text-2xl font-bold text-white sm:text-3xl lg:text-4xl">
+                    {selectedItem.full_name}
+                  </h2>
+                  <p className="mt-1 break-all text-base text-white/80 sm:text-lg lg:text-xl">
+                    {selectedItem.email}
+                  </p>
                 </div>
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
                     <p className="text-sm font-semibold text-white/70">Phone</p>
-                    <p className="mt-2 text-lg text-white">{selectedItem.phone || "-"}</p>
+                    <p className="mt-2 break-words text-base text-white sm:text-lg">
+                      {selectedItem.phone || "-"}
+                    </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
                     <p className="text-sm font-semibold text-white/70">Date of birth</p>
-                    <p className="mt-2 text-lg text-white">{formatDob(selectedItem.date_of_birth)}</p>
+                    <p className="mt-2 text-base text-white sm:text-lg">
+                      {formatDob(selectedItem.date_of_birth)}
+                    </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:col-span-2">
                     <p className="text-sm font-semibold text-white/70">Availability</p>
-                    <p className="mt-2 whitespace-pre-wrap text-lg text-white">
+                    <p className="mt-2 whitespace-pre-wrap break-words text-base text-white sm:text-lg">
                       {selectedItem.availability || "-"}
                     </p>
                   </div>
@@ -528,7 +540,7 @@ export default function VolunteerAdminPage() {
 
                 <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">
                   <p className="text-sm font-semibold text-white/70">Relevant experience</p>
-                  <p className="mt-2 whitespace-pre-wrap text-white/95">
+                  <p className="mt-2 whitespace-pre-wrap break-words text-white/95">
                     {selectedItem.experience || "-"}
                   </p>
                 </div>
@@ -537,41 +549,51 @@ export default function VolunteerAdminPage() {
                   <p className="text-sm font-semibold text-white/70">
                     Why do you want to volunteer?
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-white/95">
+                  <p className="mt-2 whitespace-pre-wrap break-words text-white/95">
                     {selectedItem.why_volunteer || "-"}
                   </p>
                 </div>
 
                 <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
                   <p className="text-sm font-semibold text-white/70">Emergency contact</p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
                       <p className="text-sm text-white/70">Name</p>
-                      <p className="mt-1 text-white">
+                      <p className="mt-1 break-words text-white">
                         {selectedItem.emergency_contact_name || "-"}
                       </p>
                     </div>
 
                     <div>
                       <p className="text-sm text-white/70">Phone</p>
-                      <p className="mt-1 text-white">
+                      <p className="mt-1 break-words text-white">
                         {selectedItem.emergency_contact_phone || "-"}
                       </p>
                     </div>
 
                     <div>
                       <p className="text-sm text-white/70">Relationship</p>
-                      <p className="mt-1 text-white">
+                      <p className="mt-1 break-words text-white">
                         {selectedItem.emergency_contact_relationship || "-"}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-6 flex flex-wrap gap-3">
+                {disableStatusButtons ? (
+                  <p className="mt-6 text-sm text-white/70">
+                    Status buttons are disabled for applications in Read Volunteers.
+                  </p>
+                ) : null}
+
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
-                    disabled={busyId === selectedItem.id}
+                    disabled={
+                      disableStatusButtons ||
+                      busyId === selectedItem.id ||
+                      selectedItem.status === "new"
+                    }
                     onClick={() => void updateStatus(selectedItem.id, "new")}
                     className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -580,7 +602,11 @@ export default function VolunteerAdminPage() {
 
                   <button
                     type="button"
-                    disabled={busyId === selectedItem.id}
+                    disabled={
+                      disableStatusButtons ||
+                      busyId === selectedItem.id ||
+                      selectedItem.status === "in_progress"
+                    }
                     onClick={() => void updateStatus(selectedItem.id, "in_progress")}
                     className="rounded-2xl bg-yellow-500 px-4 py-3 font-semibold text-white hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -589,7 +615,11 @@ export default function VolunteerAdminPage() {
 
                   <button
                     type="button"
-                    disabled={busyId === selectedItem.id}
+                    disabled={
+                      disableStatusButtons ||
+                      busyId === selectedItem.id ||
+                      selectedItem.status === "done"
+                    }
                     onClick={() => void updateStatus(selectedItem.id, "done")}
                     className="rounded-2xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >

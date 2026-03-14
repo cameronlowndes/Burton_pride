@@ -16,6 +16,13 @@ type ContactMessage = {
   created_at: string;
 };
 
+type ContactApiResponse = {
+  ok?: boolean;
+  error?: string;
+  messages?: ContactMessage[];
+  message?: ContactMessage;
+};
+
 function formatDate(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -47,6 +54,22 @@ function statusBadgeClass(status: ContactStatus) {
   return "bg-blue-500/25 text-blue-100 border border-blue-300/30";
 }
 
+async function parseJsonResponse<T = ContactApiResponse>(res: Response): Promise<T> {
+  const text = await res.text();
+
+  try {
+    return text ? JSON.parse(text) : ({} as T);
+  } catch {
+    if (text.trim().startsWith("<")) {
+      throw new Error(
+        "The server returned HTML instead of JSON. This usually means the API route is missing, blocked by middleware, or redirected."
+      );
+    }
+
+    throw new Error("The server returned invalid JSON.");
+  }
+}
+
 export default function AdminContactPage() {
   const [messages, setMessages] = useState<ContactMessage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -63,54 +86,11 @@ export default function AdminContactPage() {
     [messages, selectedId]
   );
 
-  const unreadMessages = useMemo(
-    () => messages.filter((m) => !m.is_read),
-    [messages]
-  );
-
-  const readMessages = useMemo(
-    () => messages.filter((m) => m.is_read),
-    [messages]
-  );
-
-  async function loadMessages() {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const res = await fetch("/api/admin/contact", {
-        cache: "no-store",
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to load messages");
-      }
-
-      const list: ContactMessage[] = data?.messages || [];
-      setMessages(list);
-
-      if (list.length > 0) {
-        setSelectedId((current) => {
-          if (current && list.some((m) => m.id === current)) return current;
-          return list[0]?.id || null;
-        });
-        setPanel("message");
-      } else {
-        setSelectedId(null);
-        setPanel("read-empty");
-      }
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Failed to load messages");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const unreadMessages = useMemo(() => messages.filter((m) => !m.is_read), [messages]);
+  const readMessages = useMemo(() => messages.filter((m) => m.is_read), [messages]);
 
   useEffect(() => {
-    loadMessages();
+    void loadMessages();
   }, []);
 
   function showNotice(text: string) {
@@ -132,6 +112,42 @@ export default function AdminContactPage() {
     });
   }
 
+  async function loadMessages() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const res = await fetch("/api/admin/contact", {
+        cache: "no-store",
+      });
+
+      const data = await parseJsonResponse<ContactApiResponse>(res);
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Failed to load messages");
+      }
+
+      const list: ContactMessage[] = Array.isArray(data?.messages) ? data.messages : [];
+      setMessages(list);
+
+      if (list.length > 0) {
+        setSelectedId((current) => {
+          if (current && list.some((m) => m.id === current)) return current;
+          return list[0]?.id || null;
+        });
+        setPanel("message");
+      } else {
+        setSelectedId(null);
+        setPanel("read-empty");
+      }
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Failed to load messages");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function markRead(id: string, value: boolean) {
     try {
       setBusyId(id);
@@ -143,13 +159,13 @@ export default function AdminContactPage() {
         body: JSON.stringify({ is_read: value }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonResponse<ContactApiResponse>(res);
 
-      if (!res.ok) {
+      if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to update read status");
       }
 
-      const updated = data?.message as ContactMessage | undefined;
+      const updated = data?.message;
 
       updateMessageInState(id, (m) =>
         updated ? { ...m, ...updated } : { ...m, is_read: value }
@@ -173,36 +189,55 @@ export default function AdminContactPage() {
       setBusyId(id);
       setError(null);
 
-      const body: Partial<ContactMessage> & {
-        status: ContactStatus;
-        is_read?: boolean;
-      } = { status };
+      const currentMessage = messages.find((m) => m.id === id);
+      if (!currentMessage) {
+        throw new Error("Message not found");
+      }
 
-      if (status === "done") {
-        body.is_read = true;
+      const nextIsRead = status === "done" ? true : currentMessage.is_read;
+
+      updateMessageInState(id, (m) => ({
+        ...m,
+        status,
+        is_read: nextIsRead,
+      }));
+
+      if (selectedId === id) {
+        setSelectedId(id);
+        setPanel("message");
       }
 
       const res = await fetch(`/api/admin/contact/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          status,
+          is_read: nextIsRead,
+        }),
       });
 
-      const data = await res.json();
+      const data = await parseJsonResponse<ContactApiResponse>(res);
 
-      if (!res.ok) {
+      if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to update status");
       }
 
-      const updated = data?.message as ContactMessage | undefined;
+      const updated = data?.message;
 
       updateMessageInState(id, (m) => {
-        if (updated) return { ...m, ...updated };
+        if (updated) {
+          return {
+            ...m,
+            ...updated,
+            status,
+            is_read: updated.is_read ?? nextIsRead,
+          };
+        }
 
         return {
           ...m,
           status,
-          ...(status === "done" ? { is_read: true } : {}),
+          is_read: nextIsRead,
         };
       });
 
@@ -214,6 +249,7 @@ export default function AdminContactPage() {
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Failed to update status");
+      await loadMessages();
     } finally {
       setBusyId(null);
     }
@@ -228,9 +264,9 @@ export default function AdminContactPage() {
         method: "DELETE",
       });
 
-      const data = await res.json().catch(() => null);
+      const data = await parseJsonResponse<ContactApiResponse>(res);
 
-      if (!res.ok) {
+      if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to delete message");
       }
 
@@ -270,9 +306,9 @@ export default function AdminContactPage() {
         method: "DELETE",
       });
 
-      const data = await res.json().catch(() => null);
+      const data = await parseJsonResponse<ContactApiResponse>(res);
 
-      if (!res.ok) {
+      if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to delete all messages");
       }
 
@@ -298,22 +334,22 @@ export default function AdminContactPage() {
     return (
       <div
         key={m.id}
-        className={`border-b border-white/10 p-4 transition hover:bg-white/10 ${
-          active ? "bg-white/20" : ""
+        className={`w-full border-b border-white/10 px-4 py-4 transition last:border-b-0 ${
+          active ? "bg-white/20" : "hover:bg-white/10"
         }`}
       >
-        <div className="flex items-start gap-3">
+        <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
           <button
             type="button"
             onClick={() => {
               setSelectedId(m.id);
               setPanel("message");
             }}
-            className="cursor-pointer flex-1 min-w-0 text-left"
+            className="min-w-0 flex-1 cursor-pointer text-left"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate font-semibold">{m.name}</p>
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-lg font-semibold">{m.name}</p>
                 <p className="truncate text-sm opacity-80">{m.email}</p>
               </div>
 
@@ -326,9 +362,7 @@ export default function AdminContactPage() {
                   {statusLabel(m.status)}
                 </span>
 
-                {!m.is_read && (
-                  <span className="h-2 w-2 rounded-full bg-pink-400"></span>
-                )}
+                {!m.is_read && <span className="h-2.5 w-2.5 rounded-full bg-pink-400" />}
               </div>
             </div>
 
@@ -344,17 +378,17 @@ export default function AdminContactPage() {
               type="button"
               disabled={isDeleting || loading}
               onClick={() => setConfirmDeleteId(m.id)}
-              className="cursor-pointer shrink-0 rounded-xl bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/35 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full shrink-0 cursor-pointer rounded-xl bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/35 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               aria-label={`Delete message from ${m.name}`}
             >
               Delete
             </button>
           ) : (
-            <div className="flex shrink-0 flex-col gap-2">
+            <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto">
               <button
                 type="button"
                 disabled={isDeleting || loading}
-                onClick={() => deleteMessage(m.id)}
+                onClick={() => void deleteMessage(m.id)}
                 className="cursor-pointer rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isDeleting ? "Deleting..." : "Confirm"}
@@ -377,24 +411,27 @@ export default function AdminContactPage() {
 
   const selectedIsDeleting = selected ? busyId === selected.id : false;
   const selectedIsConfirmingDelete = selected ? confirmDeleteId === selected.id : false;
+  const disableStatusButtons = !!selected?.is_read;
 
   return (
-    <main className="min-h-screen p-6 text-white">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-8 flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold">Contact Messages</h1>
-            <p className="mt-2 text-white/75">
+    <main className="min-h-screen overflow-x-hidden  px-3 py-6 text-white sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl">
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 max-w-2xl">
+            <h1 className="text-4xl font-bold leading-tight sm:text-5xl">
+              Contact Messages
+            </h1>
+            <p className="mt-3 text-base text-white/80 sm:text-lg">
               Manage messages from your website contact form
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <button
               type="button"
-              onClick={loadMessages}
+              onClick={() => void loadMessages()}
               disabled={loading}
-              className="cursor-pointer rounded-xl bg-white/15 px-4 py-2 font-semibold transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full cursor-pointer rounded-2xl bg-white/15 px-5 py-3 font-semibold transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {loading ? "Loading..." : "Refresh"}
             </button>
@@ -404,17 +441,17 @@ export default function AdminContactPage() {
                 type="button"
                 onClick={() => setConfirmDeleteAll(true)}
                 disabled={loading || messages.length === 0}
-                className="cursor-pointer rounded-xl bg-red-600 px-4 py-2 font-semibold transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full cursor-pointer rounded-2xl bg-red-600 px-5 py-3 font-semibold transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 Delete All
               </button>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
-                  onClick={deleteAllMessages}
+                  onClick={() => void deleteAllMessages()}
                   disabled={loading}
-                  className="cursor-pointer rounded-xl bg-red-700 px-4 py-2 font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="cursor-pointer rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? "Deleting..." : "Confirm Delete All"}
                 </button>
@@ -423,7 +460,7 @@ export default function AdminContactPage() {
                   type="button"
                   onClick={() => setConfirmDeleteAll(false)}
                   disabled={loading}
-                  className="cursor-pointer rounded-xl bg-white/15 px-4 py-2 font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="cursor-pointer rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -444,19 +481,21 @@ export default function AdminContactPage() {
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
-          <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-6">
             <div className="overflow-hidden rounded-3xl border border-white/20 bg-white/10 backdrop-blur-md">
-              <div className="border-b border-white/20 p-4">
-                <h2 className="text-xl font-semibold">Inbox</h2>
+              <div className="border-b border-white/20 px-4 py-4 sm:px-5">
+                <h2 className="text-xl font-semibold sm:text-2xl">Inbox</h2>
                 <p className="text-sm opacity-80">
                   {loading ? "Loading..." : `${unreadMessages.length} unread`}
                 </p>
               </div>
 
-              <div className="max-h-[32vh] overflow-y-auto">
+              <div className="max-h-[42vh] overflow-y-auto">
                 {!loading && unreadMessages.length === 0 && (
-                  <div className="p-4 text-white/70">No unread messages.</div>
+                  <div className="px-4 py-5 text-white/70 sm:px-5">
+                    No unread messages.
+                  </div>
                 )}
 
                 {unreadMessages.map(renderMessageButton)}
@@ -479,17 +518,19 @@ export default function AdminContactPage() {
                     setPanel("read-empty");
                   }
                 }}
-                className="w-full cursor-pointer border-b border-white/20 p-4 text-left transition hover:bg-white/15"
+                className="w-full cursor-pointer border-b border-white/20 px-4 py-4 text-left transition hover:bg-white/15 sm:px-5"
               >
-                <h2 className="text-xl font-semibold">Read Contact</h2>
+                <h2 className="text-xl font-semibold sm:text-2xl">Read Contact</h2>
                 <p className="text-sm opacity-80">
                   {loading ? "Loading..." : `${readMessages.length} read`}
                 </p>
               </button>
 
-              <div className="max-h-[32vh] overflow-y-auto">
+              <div className="max-h-[42vh] overflow-y-auto">
                 {!loading && readMessages.length === 0 ? (
-                  <div className="p-4 text-white/70">No read messages.</div>
+                  <div className="px-4 py-5 text-white/70 sm:px-5">
+                    No read messages.
+                  </div>
                 ) : (
                   readMessages.map(renderMessageButton)
                 )}
@@ -497,7 +538,7 @@ export default function AdminContactPage() {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-white/20 bg-white/10 p-6 backdrop-blur-md">
+          <div className="min-w-0 rounded-3xl border border-white/20 bg-white/10 p-4 backdrop-blur-md sm:p-6">
             {panel === "read-empty" ? (
               <div className="flex min-h-[320px] items-center justify-center text-center">
                 <div>
@@ -511,13 +552,13 @@ export default function AdminContactPage() {
             ) : !selected ? (
               <p className="opacity-70">Select a message</p>
             ) : (
-              <div>
-                <div className="mb-6 flex flex-wrap items-center gap-3">
+              <div className="min-w-0">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <button
                     type="button"
                     disabled={busyId === selected.id || loading}
-                    onClick={() => markRead(selected.id, !selected.is_read)}
-                    className="cursor-pointer rounded-xl bg-white/20 px-4 py-2 transition hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => void markRead(selected.id, !selected.is_read)}
+                    className="cursor-pointer rounded-2xl bg-white/20 px-4 py-2.5 transition hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {busyId === selected.id
                       ? "Saving..."
@@ -528,7 +569,7 @@ export default function AdminContactPage() {
 
                   <a
                     href={`mailto:${selected.email}`}
-                    className="cursor-pointer rounded-xl bg-white/20 px-4 py-2 transition hover:bg-white/30"
+                    className="rounded-2xl bg-white/20 px-4 py-2.5 text-center transition hover:bg-white/30"
                   >
                     Reply
                   </a>
@@ -538,17 +579,17 @@ export default function AdminContactPage() {
                       type="button"
                       disabled={selectedIsDeleting || loading}
                       onClick={() => setConfirmDeleteId(selected.id)}
-                      className="cursor-pointer rounded-xl bg-red-500 px-4 py-2 transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="cursor-pointer rounded-2xl bg-red-500 px-4 py-2.5 transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Delete
                     </button>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                       <button
                         type="button"
                         disabled={selectedIsDeleting || loading}
-                        onClick={() => deleteMessage(selected.id)}
-                        className="cursor-pointer rounded-xl bg-red-600 px-4 py-2 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => void deleteMessage(selected.id)}
+                        className="cursor-pointer rounded-2xl bg-red-600 px-4 py-2.5 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {selectedIsDeleting ? "Deleting..." : "Confirm Delete"}
                       </button>
@@ -557,7 +598,7 @@ export default function AdminContactPage() {
                         type="button"
                         disabled={selectedIsDeleting || loading}
                         onClick={() => setConfirmDeleteId(null)}
-                        className="cursor-pointer rounded-xl bg-white/15 px-4 py-2 font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="cursor-pointer rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Cancel
                       </button>
@@ -565,7 +606,7 @@ export default function AdminContactPage() {
                   )}
 
                   <span
-                    className={`ml-auto rounded-full px-3 py-1 text-sm font-semibold ${statusBadgeClass(
+                    className={`inline-flex w-fit rounded-full px-3 py-1 text-sm font-semibold sm:ml-auto ${statusBadgeClass(
                       selected.status
                     )}`}
                   >
@@ -573,23 +614,36 @@ export default function AdminContactPage() {
                   </span>
                 </div>
 
-                <h2 className="text-2xl font-bold">{selected.name}</h2>
-                <p className="mb-2 opacity-80">{selected.email}</p>
+                <h2 className="break-words text-2xl font-bold sm:text-3xl">
+                  {selected.name}
+                </h2>
+                <p className="mb-2 break-all text-white/80">{selected.email}</p>
 
-                <p className="mb-4 font-semibold">
+                <p className="mb-4 break-words text-lg font-semibold">
                   {selected.subject || "No subject"}
                 </p>
 
-                <div className="mb-6 rounded-2xl border border-white/20 bg-white/10 p-5">
-                  <p className="whitespace-pre-wrap">{selected.message}</p>
+                <div className="mb-6 rounded-2xl border border-white/20 bg-white/10 p-4 sm:p-5">
+                  <p className="whitespace-pre-wrap break-words">{selected.message}</p>
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                {disableStatusButtons ? (
+                  <p className="mb-4 text-sm text-white/70">
+                    Status buttons are disabled for messages in Read Contact.
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
-                    disabled={busyId === selected.id || loading || selected.status === "new"}
-                    onClick={() => updateStatus(selected.id, "new")}
-                    className={`cursor-pointer rounded-xl px-4 py-2 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    disabled={
+                      disableStatusButtons ||
+                      busyId === selected.id ||
+                      loading ||
+                      selected.status === "new"
+                    }
+                    onClick={() => void updateStatus(selected.id, "new")}
+                    className={`rounded-2xl px-4 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected.status === "new"
                         ? "bg-blue-700 ring-2 ring-blue-300/40"
                         : "bg-blue-500 hover:bg-blue-600"
@@ -601,12 +655,13 @@ export default function AdminContactPage() {
                   <button
                     type="button"
                     disabled={
+                      disableStatusButtons ||
                       busyId === selected.id ||
                       loading ||
                       selected.status === "in_progress"
                     }
-                    onClick={() => updateStatus(selected.id, "in_progress")}
-                    className={`cursor-pointer rounded-xl px-4 py-2 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    onClick={() => void updateStatus(selected.id, "in_progress")}
+                    className={`rounded-2xl px-4 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected.status === "in_progress"
                         ? "bg-yellow-700 ring-2 ring-yellow-300/40"
                         : "bg-yellow-500 hover:bg-yellow-600"
@@ -617,9 +672,14 @@ export default function AdminContactPage() {
 
                   <button
                     type="button"
-                    disabled={busyId === selected.id || loading || selected.status === "done"}
-                    onClick={() => updateStatus(selected.id, "done")}
-                    className={`cursor-pointer rounded-xl px-4 py-2 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    disabled={
+                      disableStatusButtons ||
+                      busyId === selected.id ||
+                      loading ||
+                      selected.status === "done"
+                    }
+                    onClick={() => void updateStatus(selected.id, "done")}
+                    className={`rounded-2xl px-4 py-3 font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       selected.status === "done"
                         ? "bg-green-700 ring-2 ring-green-300/40"
                         : "bg-green-500 hover:bg-green-600"

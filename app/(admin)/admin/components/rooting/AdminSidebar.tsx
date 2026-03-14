@@ -109,6 +109,7 @@ export default function AdminSidebar() {
                 label="Emails"
                 onNavigate={() => setOpen(false)}
               />
+              
 
               {/* ✅ Events: click goes to Events page, arrow toggles submenu */}
               <div className="flex items-center gap-2">
@@ -157,6 +158,12 @@ export default function AdminSidebar() {
                 </div>
               )}
             </div>
+            <MobileLink
+                href="/admin/dashboard/forms"
+                label="Forms"
+                onNavigate={() => setOpen(false)}
+              />
+            
 
             {/* Logout */}
             <div className="pt-5 mt-5 border-t border-white/10">
