@@ -1,102 +1,360 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useForm, ValidationError } from "@formspree/react";
+import React, { useEffect, useState } from "react";
+import Image from "next/image";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
+
+type SubmitState = "idle" | "submitting" | "success" | "error";
+
+type ApiResponse = {
+  ok: boolean;
+  error?: string;
+};
 
 export default function SponsorForm() {
-    const [sponsorType, setSponsorType] = useState("");
-    const [state, handleSubmit] = useForm("mkozglqn"); // your Formspree ID
+  const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-    // Redirect to Thank You page on success
-    useEffect(() => {
-        if (state.succeeded) {
-            window.location.href = "/ThankYou";
-        }
-    }, [state.succeeded]);
+  const [form, setForm] = useState({
+    sponsor_name: "",
+    contact_name: "",
+    email: "",
+    phone: "",
+    sponsorship_type: "",
+    address_line1: "",
+    address_line2: "",
+    city: "",
+    county: "",
+    postcode: "",
+    country: "United Kingdom",
+    logo_link: "",
+    message: "",
+  });
 
-    return (
-        <form
-            onSubmit={(e) => handleSubmit(e)}
-            className="max-w-3xl mx-auto p-8 bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white rounded-3xl shadow-2xl border-4 border-white/30 flex flex-col gap-6"
-        >
-            {/* Sponsor Information */}
-            <h2 className="text-2xl font-bold mb-4 text-white drop-shadow-md">
-                Sponsor Information
-            </h2>
+  useEffect(() => {
+    if (submitState === "success") {
+      window.location.href = "/ThankYou";
+    }
+  }, [submitState]);
 
-            <input
-                type="text"
-                name="sponsor_name"
-                placeholder="Company / Sponsor Name"
-                required
-                className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
-            />
+  function updateField(
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) {
+    const { name, value } = e.target;
 
-            <input
-                type="text"
-                name="contact_name"
-                placeholder="Contact Name"
-                required
-                className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
-            />
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  }
 
-            <input
-                type="email"
-                name="email"
-                placeholder="Email Address"
-                required
-                className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
-            />
-            <ValidationError prefix="Email" field="email" errors={state.errors} className="text-yellow-300" />
+  async function uploadLogo(file: File) {
+    const allowedTypes = [
+      "image/png",
+      "image/jpeg",
+      "image/jpg",
+      "image/webp",
+      "image/svg+xml",
+    ];
 
-            <input
-                type="tel"
-                name="phone"
-                placeholder="Phone Number"
-                className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
-            />
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error("Please upload a PNG, JPG, JPEG, WEBP or SVG logo.");
+    }
 
-            <select
-                id="sponsorship_type"
-                name="sponsorship_type"
-                required
-                value={sponsorType}
-                onChange={(e) => setSponsorType(e.target.value)}
-                className="p-3 border border-white/20 rounded-lg bg-white/10 text-black"
-            >
-                <option value="">Select one</option>
-                <option value="Normal Sponsor">Normal Sponsor</option>
-                <option value="Sponsorship in Kind">Sponsorship in Kind</option>
-            </select>
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Logo must be 5MB or smaller.");
+    }
 
+    const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+    const baseName = file.name
+      .replace(/\.[^/.]+$/, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
 
-            {/* Optional Logo Upload */}
-            {sponsorType === "Normal Sponsor" && (
-                <input
-                    type="url"
-                    name="logo_link"
-                    placeholder="Company Logo (Cloud Storage Link)"
-                    className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
+    const path = `logos/${Date.now()}-${baseName || "sponsor-logo"}.${ext}`;
+
+    setUploadingLogo(true);
+
+    try {
+      const { error: uploadError } = await supabaseBrowser.storage
+        .from("sponsor-logos")
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(uploadError.message || "Failed to upload logo");
+      }
+
+      const { data } = supabaseBrowser.storage
+        .from("sponsor-logos")
+        .getPublicUrl(path);
+
+      if (!data?.publicUrl) {
+        throw new Error("Could not get public logo URL");
+      }
+
+      return data.publicUrl;
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setError(null);
+
+    try {
+      const publicUrl = await uploadLogo(file);
+
+      setForm((prev) => ({
+        ...prev,
+        logo_link: publicUrl,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to upload logo");
+    }
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSubmitState("submitting");
+    setError(null);
+
+    try {
+      const res = await fetch("/api/sponsors", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sponsor_name: form.sponsor_name.trim(),
+          contact_name: form.contact_name.trim(),
+          email: form.email.trim().toLowerCase(),
+          phone: form.phone.trim(),
+          sponsorship_type: form.sponsorship_type,
+          address_line1: form.address_line1.trim(),
+          address_line2: form.address_line2.trim(),
+          city: form.city.trim(),
+          county: form.county.trim(),
+          postcode: form.postcode.trim(),
+          country: form.country.trim(),
+          logo_link: form.logo_link.trim(),
+          message: form.message.trim(),
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: ApiResponse = { ok: false, error: "Unknown error" };
+
+      try {
+        data = text ? JSON.parse(text) : { ok: false, error: "Empty response" };
+      } catch {
+        throw new Error("Server returned invalid JSON");
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to submit sponsor form");
+      }
+
+      setSubmitState("success");
+    } catch (err) {
+      setSubmitState("error");
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    }
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="mx-auto flex max-w-3xl flex-col gap-6 rounded-3xl border-4 border-white/30 bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-8 text-white shadow-2xl"
+    >
+      <h2 className="mb-2 text-2xl font-bold text-white drop-shadow-md">
+        Sponsor Information
+      </h2>
+
+      <input
+        type="text"
+        name="sponsor_name"
+        placeholder="Company / Sponsor Name"
+        required
+        value={form.sponsor_name}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+      />
+
+      <input
+        type="text"
+        name="contact_name"
+        placeholder="Contact Name"
+        required
+        value={form.contact_name}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+      />
+
+      <input
+        type="email"
+        name="email"
+        placeholder="Email Address"
+        required
+        value={form.email}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+      />
+
+      <input
+        type="tel"
+        name="phone"
+        placeholder="Phone Number"
+        value={form.phone}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+      />
+
+      <select
+        name="sponsorship_type"
+        required
+        value={form.sponsorship_type}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white"
+      >
+        <option value="" className="text-black">
+          Select one
+        </option>
+        <option value="Normal Sponsor" className="text-black">
+          Normal Sponsor
+        </option>
+        <option value="Sponsorship in Kind" className="text-black">
+          Sponsorship in Kind
+        </option>
+      </select>
+
+      <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
+        <h3 className="mb-4 text-lg font-semibold">Business Address</h3>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <input
+            type="text"
+            name="address_line1"
+            placeholder="Address line 1"
+            value={form.address_line1}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70 sm:col-span-2"
+          />
+
+          <input
+            type="text"
+            name="address_line2"
+            placeholder="Address line 2"
+            value={form.address_line2}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70 sm:col-span-2"
+          />
+
+          <input
+            type="text"
+            name="city"
+            placeholder="Town / City"
+            value={form.city}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+          />
+
+          <input
+            type="text"
+            name="county"
+            placeholder="County"
+            value={form.county}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+          />
+
+          <input
+            type="text"
+            name="postcode"
+            placeholder="Postcode"
+            value={form.postcode}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+          />
+
+          <input
+            type="text"
+            name="country"
+            placeholder="Country"
+            value={form.country}
+            onChange={updateField}
+            className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
+        <h3 className="mb-3 text-lg font-semibold">Company Logo</h3>
+
+        <input
+          type="file"
+          accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml"
+          onChange={handleLogoChange}
+          className="block w-full rounded-lg border border-white/20 bg-white/10 p-3 text-sm text-white file:mr-4 file:rounded-lg file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-pink-600"
+        />
+
+        {uploadingLogo ? (
+          <p className="mt-3 text-sm text-white/80">Uploading logo...</p>
+        ) : null}
+
+        {form.logo_link ? (
+          <div className="mt-4 rounded-2xl border border-green-300/30 bg-green-500/20 p-4">
+            <p className="text-sm font-semibold text-white">Logo uploaded successfully</p>
+
+            <div className="mt-3 overflow-hidden rounded-xl bg-white p-3">
+              <div className="relative h-24 w-40">
+                <Image
+                  src={form.logo_link}
+                  alt="Uploaded sponsor logo preview"
+                  fill
+                  className="object-contain"
+                  unoptimized
                 />
-            )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
-            {/* Message */}
-            <textarea
-                name="message"
-                placeholder="Message / Requirements"
-                rows={4}
-                className="p-3 border border-white/20 rounded-lg bg-white/10 placeholder-white/70 text-white"
-            />
-            <ValidationError prefix="Message" field="message" errors={state.errors} className="text-yellow-300" />
+      <textarea
+        name="message"
+        placeholder="Message / Requirements"
+        rows={4}
+        value={form.message}
+        onChange={updateField}
+        className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70"
+      />
 
-            {/* Submit Button */}
-            <button
-                type="submit"
-                disabled={state.submitting}
-                className="bg-white text-pink-600 font-bold py-3 px-6 rounded-lg hover:bg-white/90 transition transform hover:scale-105 shadow-lg cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-                Submit
-            </button>
-        </form>
-    );
+      {error ? (
+        <div className="rounded-xl border border-red-300/30 bg-red-500/20 px-4 py-3 text-sm text-white">
+          {error}
+        </div>
+      ) : null}
+
+      <button
+        type="submit"
+        disabled={submitState === "submitting" || uploadingLogo}
+        className="cursor-pointer rounded-lg bg-white px-6 py-3 font-bold text-pink-600 shadow-lg transition hover:scale-105 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {submitState === "submitting"
+          ? "Submitting..."
+          : uploadingLogo
+          ? "Uploading Logo..."
+          : "Submit"}
+      </button>
+    </form>
+  );
 }

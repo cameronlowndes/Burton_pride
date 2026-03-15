@@ -1,23 +1,27 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type VolunteerStatus = "new" | "in_progress" | "done";
+type SponsorStatus = "new" | "in_progress" | "done";
 
-type VolunteerApplication = {
+type SponsorApplication = {
   id: string;
-  full_name: string;
+  sponsor_name: string;
+  contact_name: string;
   email: string;
   phone: string | null;
-  date_of_birth: string | null;
-  availability: string | null;
-  experience: string | null;
-  why_volunteer: string | null;
-  emergency_contact_name: string | null;
-  emergency_contact_phone: string | null;
-  emergency_contact_relationship: string | null;
-  status: VolunteerStatus;
+  sponsorship_type: string;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  county: string | null;
+  postcode: string | null;
+  country: string | null;
+  logo_link: string | null;
+  message: string | null;
+  status: SponsorStatus;
   is_read: boolean;
   created_at: string;
 };
@@ -25,7 +29,7 @@ type VolunteerApplication = {
 type ApiResponse = {
   ok: boolean;
   error?: string;
-  volunteers?: VolunteerApplication[];
+  sponsors?: SponsorApplication[];
 };
 
 function formatDate(value: string) {
@@ -41,25 +45,13 @@ function formatDate(value: string) {
   });
 }
 
-function formatDob(value: string | null) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-
-  return d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function statusLabel(status: VolunteerStatus) {
+function statusLabel(status: SponsorStatus) {
   if (status === "in_progress") return "In Progress";
   if (status === "done") return "Done";
   return "New";
 }
 
-function statusBadgeClass(status: VolunteerStatus) {
+function statusBadgeClass(status: SponsorStatus) {
   if (status === "done") {
     return "bg-green-500/25 text-green-100 border border-green-300/30";
   }
@@ -84,8 +76,54 @@ async function parseJsonResponse(res: Response) {
   }
 }
 
-export default function VolunteerAdminPage() {
-  const [items, setItems] = useState<VolunteerApplication[]>([]);
+function getAddressFields(item: SponsorApplication) {
+  return [
+    {
+      label: "Address line 1",
+      value: item.address_line1?.trim() || "",
+    },
+    {
+      label: "Address line 2",
+      value: item.address_line2?.trim() || "",
+    },
+    {
+      label: "City / Town",
+      value: item.city?.trim() || "",
+    },
+    {
+      label: "County",
+      value: item.county?.trim() || "",
+    },
+    {
+      label: "Postcode",
+      value: item.postcode?.trim() || "",
+    },
+    {
+      label: "Country",
+      value: item.country?.trim() || "",
+    },
+  ].filter((field) => field.value);
+}
+
+function getGoogleMapsUrl(item: SponsorApplication) {
+  const address = [
+    item.address_line1?.trim(),
+    item.address_line2?.trim(),
+    item.city?.trim(),
+    item.county?.trim(),
+    item.postcode?.trim(),
+    item.country?.trim(),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  if (!address) return null;
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+export default function SponsorAdminPage() {
+  const [items, setItems] = useState<SponsorApplication[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,6 +140,8 @@ export default function VolunteerAdminPage() {
   );
 
   const disableStatusButtons = !!selectedItem?.is_read;
+  const selectedAddressFields = selectedItem ? getAddressFields(selectedItem) : [];
+  const googleMapsUrl = selectedItem ? getGoogleMapsUrl(selectedItem) : null;
 
   useEffect(() => {
     void fetchItems();
@@ -114,7 +154,7 @@ export default function VolunteerAdminPage() {
 
       setError(null);
 
-      const res = await fetch("/api/admin/volunteers", {
+      const res = await fetch("/api/admin/sponsors", {
         method: "GET",
         cache: "no-store",
       });
@@ -122,11 +162,11 @@ export default function VolunteerAdminPage() {
       const data: ApiResponse = await parseJsonResponse(res);
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to load volunteer applications");
+        throw new Error(data?.error || "Failed to load sponsor applications");
       }
 
-      const nextItems: VolunteerApplication[] = Array.isArray(data?.volunteers)
-        ? data.volunteers
+      const nextItems: SponsorApplication[] = Array.isArray(data?.sponsors)
+        ? data.sponsors
         : [];
 
       setItems(nextItems);
@@ -147,19 +187,62 @@ export default function VolunteerAdminPage() {
     }
   }
 
-  async function openItem(item: VolunteerApplication) {
+  async function openItem(item: SponsorApplication) {
     setSelectedId(item.id);
+  }
 
-    if (item.is_read) return;
-
+  async function updateStatus(id: string, status: SponsorStatus) {
     const previousItems = items;
+    setBusyId(id);
+    setError(null);
+
+    const shouldMarkRead = status === "done";
 
     setItems((prev) =>
-      prev.map((entry) => (entry.id === item.id ? { ...entry, is_read: true } : entry))
+      prev.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              status,
+              is_read: shouldMarkRead ? true : entry.is_read,
+            }
+          : entry
+      )
     );
 
     try {
-      const res = await fetch(`/api/admin/volunteers/${item.id}`, {
+      const res = await fetch(`/api/admin/sponsors/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(shouldMarkRead ? { status, is_read: true } : { status }),
+      });
+
+      const data = await parseJsonResponse(res);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to update sponsor status");
+      }
+    } catch (err) {
+      setItems(previousItems);
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function markRead(id: string) {
+    const previousItems = items;
+    setBusyId(id);
+    setError(null);
+
+    setItems((prev) =>
+      prev.map((entry) => (entry.id === id ? { ...entry, is_read: true } : entry))
+    );
+
+    try {
+      const res = await fetch(`/api/admin/sponsors/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -170,38 +253,7 @@ export default function VolunteerAdminPage() {
       const data = await parseJsonResponse(res);
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to mark volunteer application as read");
-      }
-    } catch (err) {
-      setItems(previousItems);
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    }
-  }
-
-  async function updateStatus(id: string, status: VolunteerStatus) {
-    const previousItems = items;
-    setBusyId(id);
-    setError(null);
-
-    setItems((prev) =>
-      prev.map((entry) =>
-        entry.id === id ? { ...entry, status, is_read: true } : entry
-      )
-    );
-
-    try {
-      const res = await fetch(`/api/admin/volunteers/${id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status, is_read: true }),
-      });
-
-      const data = await parseJsonResponse(res);
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to update volunteer status");
+        throw new Error(data?.error || "Failed to mark sponsor as read");
       }
     } catch (err) {
       setItems(previousItems);
@@ -221,7 +273,7 @@ export default function VolunteerAdminPage() {
     );
 
     try {
-      const res = await fetch(`/api/admin/volunteers/${id}`, {
+      const res = await fetch(`/api/admin/sponsors/${id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -232,7 +284,7 @@ export default function VolunteerAdminPage() {
       const data = await parseJsonResponse(res);
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to mark volunteer application as unread");
+        throw new Error(data?.error || "Failed to mark sponsor as unread");
       }
     } catch (err) {
       setItems(previousItems);
@@ -244,7 +296,7 @@ export default function VolunteerAdminPage() {
 
   async function deleteOne(id: string) {
     const confirmed = window.confirm(
-      "Delete this volunteer application? This cannot be undone."
+      "Delete this sponsor application? This cannot be undone."
     );
 
     if (!confirmed) return;
@@ -261,14 +313,14 @@ export default function VolunteerAdminPage() {
     }
 
     try {
-      const res = await fetch(`/api/admin/volunteers/${id}`, {
+      const res = await fetch(`/api/admin/sponsors/${id}`, {
         method: "DELETE",
       });
 
       const data = await parseJsonResponse(res);
 
       if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to delete volunteer application");
+        throw new Error(data?.error || "Failed to delete sponsor application");
       }
     } catch (err) {
       setItems(previousItems);
@@ -279,30 +331,41 @@ export default function VolunteerAdminPage() {
   }
 
   async function handleDeleteAll() {
+    const ids = items.map((item) => item.id);
+    if (!ids.length) return;
+
     setError(null);
+    setBusyId("delete-all");
+
+    const previousItems = items;
 
     try {
-      const res = await fetch("/api/admin/volunteers/delete-all", {
-        method: "DELETE",
-      });
+      for (const id of ids) {
+        const res = await fetch(`/api/admin/sponsors/${id}`, {
+          method: "DELETE",
+        });
 
-      const data = await parseJsonResponse(res);
+        const data = await parseJsonResponse(res);
 
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to delete all volunteer applications");
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || "Failed to delete all sponsor applications");
+        }
       }
 
       setItems([]);
       setSelectedId(null);
       setConfirmDeleteAll(false);
     } catch (err) {
+      setItems(previousItems);
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusyId(null);
     }
   }
 
   function renderList(
     title: string,
-    list: VolunteerApplication[],
+    list: SponsorApplication[],
     readState: "unread" | "read"
   ) {
     return (
@@ -317,8 +380,8 @@ export default function VolunteerAdminPage() {
         {list.length === 0 ? (
           <div className="px-4 py-5 text-white/80 sm:px-5">
             {readState === "unread"
-              ? "No unread volunteer forms."
-              : "No read volunteer forms yet."}
+              ? "No unread sponsor forms."
+              : "No read sponsor forms yet."}
           </div>
         ) : (
           <div>
@@ -340,7 +403,7 @@ export default function VolunteerAdminPage() {
                     >
                       <div className="flex items-center gap-2">
                         <p className="truncate text-lg font-semibold text-white sm:text-xl">
-                          {item.full_name}
+                          {item.sponsor_name}
                         </p>
                         {!item.is_read ? (
                           <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-pink-400" />
@@ -348,11 +411,11 @@ export default function VolunteerAdminPage() {
                       </div>
 
                       <p className="truncate text-sm text-white/80 sm:text-base">
-                        {item.email}
+                        {item.contact_name} • {item.email}
                       </p>
 
                       <p className="mt-2 line-clamp-2 text-white/95">
-                        {item.why_volunteer || item.experience || "Volunteer form"}
+                        {item.message || item.sponsorship_type || "Sponsor application"}
                       </p>
 
                       <p className="mt-2 text-sm text-white/70">
@@ -393,10 +456,10 @@ export default function VolunteerAdminPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <h1 className="text-3xl font-bold sm:text-4xl lg:text-5xl">
-              Volunteer Applications
+              Sponsor Applications
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-white/80 sm:text-base">
-              Manage volunteer form submissions from your website.
+              Manage sponsor form submissions from your website.
             </p>
           </div>
 
@@ -411,10 +474,10 @@ export default function VolunteerAdminPage() {
             </button>
 
             <Link
-              href="/admin/dashboard/forms/Volunteer/Volunteer-list-version"
-              className="inline-flex w-full items-center justify-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto"
+              href="/Admin/Dashboard/Forms/Sponsors/Sponsors-list-version"
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto"
             >
-              ← Form List
+              List Version
             </Link>
 
             {!confirmDeleteAll ? (
@@ -430,7 +493,8 @@ export default function VolunteerAdminPage() {
                 <button
                   type="button"
                   onClick={() => void handleDeleteAll()}
-                  className="w-full rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 sm:w-auto"
+                  disabled={busyId === "delete-all"}
+                  className="w-full rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 disabled:opacity-60 sm:w-auto"
                 >
                   Confirm Delete All
                 </button>
@@ -443,6 +507,13 @@ export default function VolunteerAdminPage() {
                 </button>
               </div>
             )}
+
+            <Link
+              href="/admin/dashboard"
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto"
+            >
+              ← Dashboard
+            </Link>
           </div>
         </div>
 
@@ -455,25 +526,36 @@ export default function VolunteerAdminPage() {
         <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
           <div className="min-w-0 space-y-6">
             {renderList("Inbox", unreadItems, "unread")}
-            {renderList("Read Volunteers", readItems, "read")}
+            {renderList("Read Sponsors", readItems, "read")}
           </div>
 
           <div className="min-w-0 rounded-3xl border border-white/20 bg-white/10 p-4 backdrop-blur-md sm:p-6">
             {loading ? (
-              <p className="text-white/85">Loading volunteer applications...</p>
+              <p className="text-white/85">Loading sponsor applications...</p>
             ) : !selectedItem ? (
-              <p className="text-white/85">Select a volunteer application to view it.</p>
+              <p className="text-white/85">Select a sponsor application to view it.</p>
             ) : (
               <>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                  <button
-                    type="button"
-                    disabled={busyId === selectedItem.id || !selectedItem.is_read}
-                    onClick={() => void markUnread(selectedItem.id)}
-                    className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Mark Unread
-                  </button>
+                  {!selectedItem.is_read ? (
+                    <button
+                      type="button"
+                      disabled={busyId === selectedItem.id}
+                      onClick={() => void markRead(selectedItem.id)}
+                      className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Mark Read
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busyId === selectedItem.id}
+                      onClick={() => void markUnread(selectedItem.id)}
+                      className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Mark Unread
+                    </button>
+                  )}
 
                   <a
                     href={`mailto:${selectedItem.email}`}
@@ -500,19 +582,39 @@ export default function VolunteerAdminPage() {
                   </span>
                 </div>
 
-                {!selectedItem.is_read ? (
-                  <p className="mt-3 text-sm text-white/70">
-                    Mark Unread is disabled for inbox volunteer applications.
-                  </p>
-                ) : null}
+                <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
+                    {selectedItem.logo_link ? (
+                      <div className="relative mx-auto h-40 w-full overflow-hidden rounded-xl bg-white">
+                        <Image
+                          src={selectedItem.logo_link}
+                          alt={`${selectedItem.sponsor_name} logo`}
+                          fill
+                          className="object-contain p-3"
+                          unoptimized
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-40 items-center justify-center rounded-xl bg-white/5 text-center text-sm text-white/70">
+                        No logo uploaded
+                      </div>
+                    )}
+                  </div>
 
-                <div className="mt-6 min-w-0">
-                  <h2 className="break-words text-2xl font-bold text-white sm:text-3xl lg:text-4xl">
-                    {selectedItem.full_name}
-                  </h2>
-                  <p className="mt-1 break-all text-base text-white/80 sm:text-lg lg:text-xl">
-                    {selectedItem.email}
-                  </p>
+                  <div className="min-w-0">
+                    <h2 className="break-words text-2xl font-bold text-white sm:text-3xl lg:text-4xl">
+                      {selectedItem.sponsor_name}
+                    </h2>
+                    <p className="mt-1 break-words text-base text-white/80 sm:text-lg">
+                      {selectedItem.contact_name}
+                    </p>
+                    <p className="mt-1 break-all text-base text-white/80 sm:text-lg">
+                      {selectedItem.email}
+                    </p>
+                    <p className="mt-2 text-sm text-white/70">
+                      Submitted on {formatDate(selectedItem.created_at)}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -524,65 +626,63 @@ export default function VolunteerAdminPage() {
                   </div>
 
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
-                    <p className="text-sm font-semibold text-white/70">Date of birth</p>
-                    <p className="mt-2 text-base text-white sm:text-lg">
-                      {formatDob(selectedItem.date_of_birth)}
+                    <p className="text-sm font-semibold text-white/70">Sponsorship type</p>
+                    <p className="mt-2 break-words text-base text-white sm:text-lg">
+                      {selectedItem.sponsorship_type || "-"}
                     </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4 sm:col-span-2">
-                    <p className="text-sm font-semibold text-white/70">Availability</p>
-                    <p className="mt-2 whitespace-pre-wrap break-words text-base text-white sm:text-lg">
-                      {selectedItem.availability || "-"}
-                    </p>
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-white/70">
+                        <span>📍</span>
+                        <span>Business address</span>
+                      </p>
+
+                      {googleMapsUrl ? (
+                        <a
+                          href={googleMapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                        >
+                          Open in Google Maps
+                        </a>
+                      ) : null}
+                    </div>
+
+                    {selectedAddressFields.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        {selectedAddressFields.map((field) => (
+                          <div
+                            key={field.label}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                          >
+                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">
+                              {field.label}
+                            </p>
+                            <p className="mt-2 break-words text-base leading-relaxed text-white sm:text-lg">
+                              {field.value}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-base text-white sm:text-lg">-</p>
+                    )}
                   </div>
                 </div>
 
                 <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">
-                  <p className="text-sm font-semibold text-white/70">Relevant experience</p>
+                  <p className="text-sm font-semibold text-white/70">Message / requirements</p>
                   <p className="mt-2 whitespace-pre-wrap break-words text-white/95">
-                    {selectedItem.experience || "-"}
+                    {selectedItem.message || "-"}
                   </p>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
-                  <p className="text-sm font-semibold text-white/70">
-                    Why do you want to volunteer?
-                  </p>
-                  <p className="mt-2 whitespace-pre-wrap break-words text-white/95">
-                    {selectedItem.why_volunteer || "-"}
-                  </p>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 p-4">
-                  <p className="text-sm font-semibold text-white/70">Emergency contact</p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div>
-                      <p className="text-sm text-white/70">Name</p>
-                      <p className="mt-1 break-words text-white">
-                        {selectedItem.emergency_contact_name || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-white/70">Phone</p>
-                      <p className="mt-1 break-words text-white">
-                        {selectedItem.emergency_contact_phone || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-white/70">Relationship</p>
-                      <p className="mt-1 break-words text-white">
-                        {selectedItem.emergency_contact_relationship || "-"}
-                      </p>
-                    </div>
-                  </div>
                 </div>
 
                 {disableStatusButtons ? (
                   <p className="mt-6 text-sm text-white/70">
-                    Status buttons are disabled for applications in Read Volunteers.
+                    Status buttons are disabled for applications in Read Sponsors.
                   </p>
                 ) : null}
 

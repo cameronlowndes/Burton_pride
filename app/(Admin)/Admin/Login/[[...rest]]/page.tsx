@@ -7,9 +7,9 @@ export default function AdminLoginPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <SignIn
         routing="path"
-        path="/admin/login"
-        forceRedirectUrl="/admin/dashboard"
-        fallbackRedirectUrl="/admin/dashboard"
+        path="/Admin/Login"
+        forceRedirectUrl="/Admin/Dashboard"
+        fallbackRedirectUrl="/Admin/Dashboard"
       />
     </div>
   );

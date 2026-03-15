@@ -39,7 +39,7 @@ export default function Footer() {
 
             {/* 🔐 Admin Login Button */}
             <Link
-              href="/admin/login"
+              href="/Admin/Login"
               className="
                 bg-white/20 backdrop-blur-md border border-white/30
                 px-4 py-1.5 rounded-full text-sm font-semibold

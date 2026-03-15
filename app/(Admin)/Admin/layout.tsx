@@ -11,8 +11,8 @@ export default function AdminLayout({
 }) {
   const pathname = usePathname();
 
-  const isLoginPage = pathname === "/admin/login";
-  const isDashboardRoute = pathname?.startsWith("/admin/dashboard");
+  const isLoginPage = pathname === "/Admin/Login";
+  const isDashboardRoute = pathname?.startsWith("/Admin/Dashboard");
   const showAdminNav = !isLoginPage && isDashboardRoute;
 
   const { user, isLoaded } = useUser();

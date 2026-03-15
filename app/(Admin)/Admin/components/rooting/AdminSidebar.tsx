@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 
-const EVENTS_ROOT = "/admin/dashboard/events";
+const EVENTS_ROOT = "/Admin/Dashboard/Events";
 
 export default function AdminSidebar() {
   const { signOut } = useClerk();
@@ -105,7 +105,7 @@ export default function AdminSidebar() {
                 onNavigate={() => setOpen(false)}
               />
               <MobileLink
-                href="/admin/dashboard/update"
+                href="/Admin/Dashboard/Update"
                 label="Emails"
                 onNavigate={() => setOpen(false)}
               />
@@ -146,12 +146,12 @@ export default function AdminSidebar() {
                   </div>
 
                   <MobileSubLink
-                    href="/admin/dashboard/windows-showcase/entries"
+                    href="/Admin/Dashboard/Windows-showcase/Entries"
                     label="Window Showcase"
                     onNavigate={() => setOpen(false)}
                   />
                   <MobileSubLink
-                    href="/admin/dashboard/windows-showcase/votes"
+                    href="/Admin/Dashboard/Windows-showcase/Votes"
                     label="Window Votes"
                     onNavigate={() => setOpen(false)}
                   />
@@ -159,7 +159,7 @@ export default function AdminSidebar() {
               )}
             </div>
             <MobileLink
-                href="/admin/dashboard/forms"
+                href="/Admin/Dashboard/Forms"
                 label="Forms"
                 onNavigate={() => setOpen(false)}
               />
@@ -169,7 +169,7 @@ export default function AdminSidebar() {
             <div className="pt-5 mt-5 border-t border-white/10">
               <button
                 type="button"
-                onClick={() => signOut({ redirectUrl: "/admin/login" })}
+                onClick={() => signOut({ redirectUrl: "/Admin/Login" })}
                 className="w-full text-left rounded-xl px-4 py-3 text-sm font-semibold transition text-white/80 hover:text-white hover:bg-white/10"
               >
                 Log out →
@@ -200,8 +200,8 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
       </div>
 
       <nav className="space-y-2">
-        <SideNavLink href="/admin/dashboard" label="Dashboard" />
-        <SideNavLink href="/admin/dashboard/update" label="Emails" />
+        <SideNavLink href="/Admin/Dashboard" label="Dashboard" />
+        <SideNavLink href="/Admin/Dashboard/Update" label="Emails" />
         
 
         {/* ✅ Events: click goes to Events page, arrow toggles submenu */}
@@ -234,16 +234,16 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
               Windows of Hope
             </div>
             <SubNavLink
-              href="/admin/dashboard/windows-showcase/entries"
+              href="/Admin/Dashboard/Windows-showcase/Entries"
               label="Window Showcase"
             />
             <SubNavLink
-              href="/admin/dashboard/windows-showcase/votes"
+              href="/Admin/Dashboard/Windows-showcase/Votes"
               label="Window Votes"
             />
           </div>
         )}
-        <SideNavLink href="/admin/dashboard/forms" label="Forms" />
+        <SideNavLink href="/Admin/Dashboard/Forms" label="Forms" />
 
         <div className="pt-6 mt-6 border-t border-white/20">
           <button

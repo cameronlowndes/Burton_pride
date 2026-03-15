@@ -21,7 +21,7 @@ export default function AdminFormsDashboardPage() {
         title: "Contact form",
         desc: "Messages sent from the Contact Us page.",
         href: "/ContactUS",
-        adminHref: "/admin/dashboard/forms/Contact",
+        adminHref: "/Admin/Dashboard/Forms/Contact",
         badge: "Live",
       },
       {
@@ -29,7 +29,7 @@ export default function AdminFormsDashboardPage() {
         title: "Volunteer interest",
         desc: "Volunteer sign-up form responses.",
         href: "/JoinUS/Volunteer",
-        adminHref: "/admin/dashboard/forms/Volunteer",
+        adminHref: "/Admin/Dashboard/Forms/Volunteer",
         badge: "Live",
       },
       {
@@ -37,7 +37,7 @@ export default function AdminFormsDashboardPage() {
         title: "Sponsor enquiry",
         desc: "Sponsor signup / enquiries form.",
         href: "/Collaborate",
-        adminHref: "/admin/dashboard/forms/sponsors",
+        adminHref: "/Admin/Dashboard/Forms/Sponsors",
         badge: "Live",
       },
       {
@@ -45,7 +45,7 @@ export default function AdminFormsDashboardPage() {
         title: "Windows of Hope entry",
         desc: "Competition entry submissions.",
         href: "/competition",
-        adminHref: "/admin/dashboard/windows-showcase/votes",
+        adminHref: "/Admin/Dashboard/Windows-showcase/Votes",
         badge: "Live",
       },
       {

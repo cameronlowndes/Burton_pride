@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 type VolunteerStatus = "new" | "in_progress" | "done";
 
@@ -94,6 +96,7 @@ function Pill({ children }: { children: React.ReactNode }) {
 
 export default function VolunteerAdminPage() {
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [stats, setStats] = useState<ApiResponse["stats"] | null>(null);
@@ -139,63 +142,237 @@ export default function VolunteerAdminPage() {
     }
   }
 
-  function escapeCsv(value: string | null | undefined) {
-    const text = String(value ?? "");
-    if (text.includes(",") || text.includes('"') || text.includes("\n")) {
-      return `"${text.replace(/"/g, '""')}"`;
+  async function exportToExcelStyled() {
+    if (!filteredVolunteers.length) return;
+
+    try {
+      setExporting(true);
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Burton Pride Admin Portal";
+      workbook.created = new Date();
+
+      const worksheet = workbook.addWorksheet("Volunteers", {
+        views: [{ state: "frozen", ySplit: 1 }],
+      });
+
+      worksheet.columns = [
+        { header: "Applied At", key: "applied_at", width: 22 },
+        { header: "Full Name", key: "full_name", width: 24 },
+        { header: "Email", key: "email", width: 30 },
+        { header: "Phone", key: "phone", width: 16 },
+        { header: "Date Of Birth", key: "date_of_birth", width: 16 },
+        { header: "Availability", key: "availability", width: 24 },
+        { header: "Experience", key: "experience", width: 28 },
+        { header: "Why Volunteer", key: "why_volunteer", width: 30 },
+        { header: "Emergency Contact Name", key: "emergency_contact_name", width: 24 },
+        { header: "Emergency Contact Phone", key: "emergency_contact_phone", width: 22 },
+        {
+          header: "Emergency Contact Relationship",
+          key: "emergency_contact_relationship",
+          width: 26,
+        },
+        { header: "Status", key: "status", width: 14 },
+        { header: "Is Read", key: "is_read", width: 12 },
+      ];
+
+      filteredVolunteers.forEach((v) => {
+        worksheet.addRow({
+          applied_at: formatDate(v.created_at),
+          full_name: v.full_name || "",
+          email: v.email || "",
+          phone: v.phone || "",
+          date_of_birth: formatDob(v.date_of_birth),
+          availability: v.availability || "",
+          experience: v.experience || "",
+          why_volunteer: v.why_volunteer || "",
+          emergency_contact_name: v.emergency_contact_name || "",
+          emergency_contact_phone: v.emergency_contact_phone || "",
+          emergency_contact_relationship: v.emergency_contact_relationship || "",
+          status: statusLabel(v.status),
+          is_read: v.is_read ? "Yes" : "No",
+        });
+      });
+
+      const headerRow = worksheet.getRow(1);
+      headerRow.height = 24;
+
+      headerRow.eachCell((cell) => {
+        cell.font = {
+          bold: true,
+          color: { argb: "FFFFFFFF" },
+          size: 12,
+        };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "center",
+        };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF7C3AED" },
+        };
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFD1D5DB" } },
+          left: { style: "thin", color: { argb: "FFD1D5DB" } },
+          bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
+          right: { style: "thin", color: { argb: "FFD1D5DB" } },
+        };
+      });
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+
+        row.height = 22;
+
+        row.eachCell((cell, colNumber) => {
+          cell.alignment = {
+            vertical: "top",
+            horizontal:
+              colNumber === 12 || colNumber === 13 ? "center" : "left",
+            wrapText: true,
+          };
+
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFE5E7EB" } },
+            left: { style: "thin", color: { argb: "FFE5E7EB" } },
+            bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+            right: { style: "thin", color: { argb: "FFE5E7EB" } },
+          };
+
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: {
+              argb: rowNumber % 2 === 0 ? "FFF9FAFB" : "FFFFFFFF",
+            },
+          };
+
+          if (colNumber === 12) {
+            const value = String(cell.value || "");
+
+            if (value === "Done") {
+              cell.font = { bold: true, color: { argb: "FF166534" } };
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFDCFCE7" },
+              };
+            } else if (value === "In Progress") {
+              cell.font = { bold: true, color: { argb: "FF92400E" } };
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFFEF3C7" },
+              };
+            } else if (value === "New") {
+              cell.font = { bold: true, color: { argb: "FF1D4ED8" } };
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFDBEAFE" },
+              };
+            }
+          }
+
+          if (colNumber === 13) {
+            const value = String(cell.value || "");
+
+            if (value === "Yes") {
+              cell.font = { bold: true, color: { argb: "FF166534" } };
+            } else {
+              cell.font = { bold: true, color: { argb: "FFBE185D" } };
+            }
+          }
+        });
+      });
+
+      worksheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: 13 },
+      };
+
+      const lastColumnLetter = "M";
+      worksheet.addTable({
+        name: "VolunteerApplicationsTable",
+        ref: "A1",
+        headerRow: true,
+        style: {
+          theme: "TableStyleMedium9",
+          showRowStripes: true,
+        },
+        columns: [
+          { name: "Applied At" },
+          { name: "Full Name" },
+          { name: "Email" },
+          { name: "Phone" },
+          { name: "Date Of Birth" },
+          { name: "Availability" },
+          { name: "Experience" },
+          { name: "Why Volunteer" },
+          { name: "Emergency Contact Name" },
+          { name: "Emergency Contact Phone" },
+          { name: "Emergency Contact Relationship" },
+          { name: "Status" },
+          { name: "Is Read" },
+        ],
+        rows: filteredVolunteers.map((v) => [
+          formatDate(v.created_at),
+          v.full_name || "",
+          v.email || "",
+          v.phone || "",
+          formatDob(v.date_of_birth),
+          v.availability || "",
+          v.experience || "",
+          v.why_volunteer || "",
+          v.emergency_contact_name || "",
+          v.emergency_contact_phone || "",
+          v.emergency_contact_relationship || "",
+          statusLabel(v.status),
+          v.is_read ? "Yes" : "No",
+        ]),
+      });
+
+      worksheet.getCell("A1").note = "Volunteer applications export";
+      worksheet.getRow(1).font = {
+        bold: true,
+        color: { argb: "FFFFFFFF" },
+      };
+
+      for (let i = 2; i <= filteredVolunteers.length + 1; i += 1) {
+        const row = worksheet.getRow(i);
+
+        const longestText = Math.max(
+          String(row.getCell(6).value || "").length,
+          String(row.getCell(7).value || "").length,
+          String(row.getCell(8).value || "").length
+        );
+
+        if (longestText > 80) row.height = 54;
+        else if (longestText > 40) row.height = 38;
+        else row.height = 24;
+      }
+
+      worksheet.getColumn(1).alignment = { horizontal: "left", vertical: "top" };
+      worksheet.getColumn(2).alignment = { horizontal: "left", vertical: "top" };
+      worksheet.getColumn(3).alignment = { horizontal: "left", vertical: "top" };
+      worksheet.getColumn(4).alignment = { horizontal: "left", vertical: "top" };
+      worksheet.getColumn(5).alignment = { horizontal: "left", vertical: "top" };
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      saveAs(
+        blob,
+        `volunteer-applications-${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+    } catch (err: any) {
+      setError(err?.message || "Failed to export Excel file");
+    } finally {
+      setExporting(false);
     }
-    return text;
-  }
-
-  function exportToCsv() {
-    const headers = [
-      "Applied At",
-      "Full Name",
-      "Email",
-      "Phone",
-      "Date Of Birth",
-      "Availability",
-      "Experience",
-      "Why Volunteer",
-      "Emergency Contact Name",
-      "Emergency Contact Phone",
-      "Emergency Contact Relationship",
-      "Status",
-      "Is Read",
-    ];
-
-    const rows = filteredVolunteers.map((v) => [
-      v.created_at,
-      v.full_name,
-      v.email,
-      v.phone,
-      v.date_of_birth,
-      v.availability,
-      v.experience,
-      v.why_volunteer,
-      v.emergency_contact_name,
-      v.emergency_contact_phone,
-      v.emergency_contact_relationship,
-      v.status,
-      v.is_read ? "Yes" : "No",
-    ]);
-
-    const csv = [
-      headers.join(","),
-      ...rows.map((row) => row.map((cell) => escapeCsv(cell)).join(",")),
-    ].join("\n");
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `volunteer-applications-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
@@ -248,6 +425,7 @@ export default function VolunteerAdminPage() {
             <Pill>API: /api/admin/volunteers</Pill>
             <Pill>Max rows: 5000</Pill>
             {loading ? <Pill>Loading…</Pill> : <Pill>Loaded</Pill>}
+            {exporting ? <Pill>Exporting…</Pill> : null}
           </div>
         </div>
 
@@ -262,19 +440,19 @@ export default function VolunteerAdminPage() {
 
           <button
             type="button"
-            onClick={exportToCsv}
-            disabled={loading || filteredVolunteers.length === 0}
+            onClick={exportToExcelStyled}
+            disabled={loading || exporting || filteredVolunteers.length === 0}
             className="cursor-pointer rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            ⭳ Export CSV
+            {exporting ? "Exporting..." : "⭳ Export Styled Excel"}
           </button>
 
           <Link
-              href="/admin/dashboard/forms/Volunteer"
-              className="inline-flex items-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20"
-            >
-              ← message version
-            </Link>
+            href="/admin/dashboard/forms/Volunteer"
+            className="inline-flex items-center rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20"
+          >
+            ← message version
+          </Link>
 
           <Link
             href="/admin/dashboard"
@@ -388,19 +566,25 @@ export default function VolunteerAdminPage() {
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <div className="text-xs uppercase tracking-wider text-white/50">Date of birth</div>
+                    <div className="text-xs uppercase tracking-wider text-white/50">
+                      Date of birth
+                    </div>
                     <div className="mt-1 font-semibold">{formatDob(v.date_of_birth)}</div>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:col-span-2 xl:col-span-3">
-                    <div className="text-xs uppercase tracking-wider text-white/50">Availability</div>
+                    <div className="text-xs uppercase tracking-wider text-white/50">
+                      Availability
+                    </div>
                     <div className="mt-1 whitespace-pre-wrap text-white/90">
                       {v.availability || "—"}
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:col-span-2 xl:col-span-3">
-                    <div className="text-xs uppercase tracking-wider text-white/50">Experience</div>
+                    <div className="text-xs uppercase tracking-wider text-white/50">
+                      Experience
+                    </div>
                     <div className="mt-1 whitespace-pre-wrap text-white/90">
                       {v.experience || "—"}
                     </div>

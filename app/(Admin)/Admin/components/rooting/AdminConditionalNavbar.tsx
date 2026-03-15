@@ -6,8 +6,9 @@ import AdminSidebar from "./AdminSidebar";
 export default function AdminConditionalNavbar() {
   const pathname = usePathname();
 
-  // show only on dashboard routes
-  if (!pathname?.startsWith("/admin/dashboard")) return null;
+  const normalisedPath = pathname?.toLowerCase() || "";
+
+  if (!normalisedPath.startsWith("/admin/dashboard")) return null;
 
   return <AdminSidebar />;
 }

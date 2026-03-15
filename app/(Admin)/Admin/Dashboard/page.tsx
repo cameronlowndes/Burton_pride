@@ -50,7 +50,7 @@ export default function DashboardPage() {
         return {
           title: "Send an email",
           desc: "Send updates, announcements, and committee comms.",
-          href: "/admin/dashboard/email",
+          href: "/admin/dashboard/email", // change if your Email route is capitalised too
           button: "Go to Emails",
         };
 
@@ -58,7 +58,7 @@ export default function DashboardPage() {
         return {
           title: "Create an event",
           desc: "Create & manage events for Burton Pride.",
-          href: "/admin/dashboard/events",
+          href: "/Admin/Dashboard/Events",
           button: "Go to Events",
         };
 
@@ -66,7 +66,7 @@ export default function DashboardPage() {
         return {
           title: "Competition entries",
           desc: "View and manage Windows of Hope entries.",
-          href: "/admin/dashboard/windows-of-hope",
+          href: "/admin/dashboard/windows-of-hope", // change if route folder name differs
           button: "Open Windows of Hope",
         };
 
@@ -74,13 +74,12 @@ export default function DashboardPage() {
         return {
           title: "Website forms",
           desc: "Open and manage every form on the website.",
-          href: "/admin/dashboard/forms",
+          href: "/admin/Dashboard/Forms",
           button: "Open Forms",
         };
     }
   }, [quickStart]);
 
-  // ✅ live dashboard data
   const [dashLoading, setDashLoading] = useState(true);
   const [dashError, setDashError] = useState<string | null>(null);
   const [stats, setStats] = useState<DashboardResponse["stats"]>({
@@ -124,10 +123,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold">Dashboard</h1>
+          <h1 className="text-2xl font-extrabold sm:text-3xl">Dashboard</h1>
           <p className="text-white/80">
             Welcome{" "}
             <span className="font-semibold">
@@ -140,29 +138,28 @@ export default function DashboardPage() {
         <div className="flex gap-3">
           <Link
             href="/admin/dashboard/email"
-            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/20 transition"
+            className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/20"
           >
             Send email
           </Link>
           <Link
-            href="/admin/dashboard/events"
-            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/20 transition"
+            href="/Admin/Dashboard/Events"
+            className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/20"
           >
             Create event
           </Link>
-           <Link
+          <Link
             href="/"
-            className="rounded-2xl bg-white/10 border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/20 transition"
+            className="rounded-2xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/20"
           >
             Go back to the website
           </Link>
         </div>
       </div>
 
-      {/* Beta notice */}
-      <div className="rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl p-6">
-        <div className="font-extrabold text-lg">Admin Dashboard (BETA)</div>
-        <p className="text-sm text-white/75 mt-2">
+      <div className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
+        <div className="text-lg font-extrabold">Admin Dashboard (BETA)</div>
+        <p className="mt-2 text-sm text-white/75">
           This admin dashboard is currently in beta. You can expect bugs.
           <br />
           If you find an issue, please report it to{" "}
@@ -170,7 +167,6 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Quick start selector */}
       <section className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <div className="flex items-center justify-between">
@@ -191,7 +187,7 @@ export default function DashboardPage() {
               desc="Create & manage events"
               active={quickStart === "event"}
               onClick={() => setQuickStart("event")}
-              onOpen={() => router.push("/admin/dashboard/events")}
+              onOpen={() => router.push("/Admin/Dashboard/Events")}
             />
             <QuickPick
               title="Entries"
@@ -205,19 +201,19 @@ export default function DashboardPage() {
               desc="All website forms"
               active={quickStart === "forms"}
               onClick={() => setQuickStart("forms")}
-              onOpen={() => router.push("/admin/dashboard/forms")}
+              onOpen={() => router.push("/admin/Dashboard/Forms")}
             />
           </div>
         </Card>
 
         <Card>
           <h2 className="text-lg font-extrabold">{quickStartInfo.title}</h2>
-          <p className="text-sm text-white/75 mt-2">{quickStartInfo.desc}</p>
+          <p className="mt-2 text-sm text-white/75">{quickStartInfo.desc}</p>
 
           <div className="mt-5">
             <Link
               href={quickStartInfo.href}
-              className="block text-center rounded-2xl bg-white/10 border border-white/15 px-4 py-3 text-sm font-extrabold hover:bg-white/20 transition"
+              className="block rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-center text-sm font-extrabold transition hover:bg-white/20"
             >
               {quickStartInfo.button}
             </Link>
@@ -229,7 +225,6 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      {/* Stats */}
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Emails sent (30 days)"
@@ -253,9 +248,7 @@ export default function DashboardPage() {
         />
       </section>
 
-      {/* Main grid */}
       <section className="grid gap-6 lg:grid-cols-3">
-        {/* Left: Activity */}
         <Card className="lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold">Recent activity</h2>
@@ -280,7 +273,6 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Right: Quick actions */}
         <Card>
           <h2 className="text-lg font-extrabold">Quick actions</h2>
 
@@ -291,12 +283,12 @@ export default function DashboardPage() {
               desc="Send updates + announcements"
             />
             <ActionButton
-              href="/admin/dashboard/events"
+              href="/Admin/Dashboard/Events"
               title="Events"
               desc="Create & manage events"
             />
             <ActionButton
-              href="/admin/dashboard/forms"
+              href="/admin/Dashboard/Forms"
               title="Forms"
               desc="Open all website forms"
             />
@@ -304,14 +296,13 @@ export default function DashboardPage() {
         </Card>
       </section>
 
-      {/* Secondary grid */}
       <section className="grid gap-6 lg:grid-cols-2">
         <Card>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold">Upcoming events</h2>
             <Link
-              href="/admin/dashboard/events"
-              className="text-sm font-semibold text-white/70 hover:text-white transition"
+              href="/Admin/Dashboard/Events"
+              className="text-sm font-semibold text-white/70 transition hover:text-white"
             >
               Manage →
             </Link>
@@ -350,7 +341,7 @@ export default function DashboardPage() {
             <h2 className="text-lg font-extrabold">Emails queue</h2>
             <Link
               href="/admin/dashboard/email"
-              className="text-sm font-semibold text-white/70 hover:text-white transition"
+              className="text-sm font-semibold text-white/70 transition hover:text-white"
             >
               Open →
             </Link>
@@ -377,7 +368,7 @@ function Card({
   return (
     <div
       className={[
-        "rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl p-6",
+        "rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl",
         className,
       ].join(" ")}
     >
@@ -396,7 +387,7 @@ function StatCard({
   sub: string;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/10 backdrop-blur-xl shadow-xl p-5">
+    <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
       <div className="text-xs text-white/70">{title}</div>
       <div className="mt-2 text-3xl font-extrabold">{value}</div>
       <div className="mt-2 text-xs text-white/60">{sub}</div>
@@ -406,9 +397,9 @@ function StatCard({
 
 function ActivityItem({ title, meta }: { title: string; meta: string }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3 gap-4">
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
       <div className="font-semibold">{title}</div>
-      <div className="text-xs text-white/60 text-right break-words">{meta}</div>
+      <div className="break-words text-right text-xs text-white/60">{meta}</div>
     </div>
   );
 }
@@ -425,12 +416,12 @@ function ListRow({
   return (
     <div
       className={[
-        "flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3 gap-4",
+        "flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3",
         muted ? "opacity-40" : "",
       ].join(" ")}
     >
       <div className="font-semibold">{title}</div>
-      <div className="text-xs text-white/60 text-right">{meta}</div>
+      <div className="text-right text-xs text-white/60">{meta}</div>
     </div>
   );
 }
@@ -450,7 +441,7 @@ function ActionButton({
     return (
       <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 opacity-60">
         <div className="font-extrabold">{title}</div>
-        <div className="text-xs text-white/60 mt-1">{desc}</div>
+        <div className="mt-1 text-xs text-white/60">{desc}</div>
       </div>
     );
   }
@@ -458,10 +449,10 @@ function ActionButton({
   return (
     <Link
       href={href}
-      className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 hover:bg-black/30 transition"
+      className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 transition hover:bg-black/30"
     >
       <div className="font-extrabold">{title}</div>
-      <div className="text-xs text-white/60 mt-1">{desc}</div>
+      <div className="mt-1 text-xs text-white/60">{desc}</div>
     </Link>
   );
 }
@@ -482,7 +473,7 @@ function QuickPick({
   return (
     <div
       className={[
-        "rounded-3xl border backdrop-blur-xl shadow-xl p-5 transition",
+        "rounded-3xl border p-5 shadow-xl backdrop-blur-xl transition",
         active
           ? "border-white/25 bg-white/15"
           : "border-white/10 bg-white/10 hover:bg-white/15",
@@ -495,16 +486,16 @@ function QuickPick({
         aria-label={`Select ${title}`}
       >
         <div className="font-extrabold">{title}</div>
-        <div className="text-xs text-white/70 mt-1">{desc}</div>
+        <div className="mt-1 text-xs text-white/70">{desc}</div>
       </button>
 
       <button
         type="button"
         onClick={onOpen}
-        className="mt-4 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm font-extrabold hover:bg-black/30 transition"
+        className="mt-4 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-2 text-sm font-extrabold transition hover:bg-black/30"
       >
         Open
       </button>
     </div>
   );
-}
+} 

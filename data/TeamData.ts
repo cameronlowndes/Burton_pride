@@ -53,13 +53,21 @@ I witnessed for many years how neurodiverse people and members of the LGBTQ+ com
         storyTitle: 'Why I Joined Burton Pride', 
         story: `
 
-I joined Burton Pride because I deeply believe in the power of community. Pride is not just a celebration it’s about connection, support, and belonging. For me, Pride should always be community-first, not company-first. I want to help build something that reflects the people it serves, a place where everyone feels seen, included, and valued.
+I joined Burton Pride because I deeply believe in the power of community. Pride is not just a celebration  it’s about connection, support, and belonging. For me, Pride should always be community-first, not company-first. I want to help build something that truly reflects the people it serves: a place where everyone feels seen, included, respected, and valued for who they are.
 
-As someone who has been active in politics with the Green Party, I’ve always wanted to give back in a way that makes a real difference. Burton Pride gives me that chance. It’s a way to invest my time, my skills, and my energy into something bigger than myself into a community that deserves to be celebrated and supported every day. Giving back isn’t just about helping others it’s about strengthening the connections that make our town and our people stronger, kinder, and more united.
+At a time when LGBTQIA+ communities across the UK and around the world are facing increasing challenges, the importance of strong local communities has never been clearer. Pride began as a movement rooted in solidarity, visibility, and the fight for equality, and that spirit must always remain at the heart of what we do. Burton Pride is not just about a single event each year it’s about creating a lasting space where people feel safe, supported, and proud to be themselves.
 
-Every day I dedicate myself to building and strengthening this community. From managing our social media to developing the website and coordinating the main event, every task I take on is done with the people in mind. My commitment is simple: everything I do within Burton Pride is for the community, and for making sure that everyone who participates feels a sense of pride and belonging.
+As someone who has been active in politics with the Green Party, I have always believed in fairness, equality, and standing up for communities. Being involved with Burton Pride gives me the opportunity to turn those values into real action. It allows me to give back in a meaningful way by investing my time, my skills, and my energy into something bigger than myself into a community that deserves to be celebrated, protected, and supported every single day.
 
-Being part of Burton Pride isn’t just volunteering it’s being part of something bigger than myself. I promise that as long as I’m involved, the community will remain my guiding force. My efforts, my energy, and my dedication will always be focused on giving back, creating an inclusive environment, and helping build a Pride that truly belongs to everyone.`
+Every day I dedicate myself to building and strengthening this community. From managing our social media presence, to developing and improving the website, to helping coordinate the main Pride event itself, every task I take on is done with one thing in mind: the people. My commitment is simple everything I do within Burton Pride is for the community, and for making sure that everyone who takes part feels welcomed, represented, and proud of where they belong.
+
+Burton Pride is more than an organisation to me; it is a community that I care deeply about. It represents the strength that comes from people standing together, supporting one another, and refusing to let anyone be left behind. It reminds us that Pride is not just about visibility, but about building a future where everyone can live openly and without fear.
+
+Being part of Burton Pride isn’t just volunteering  it’s being part of something far bigger than myself. It’s about helping to build a legacy of inclusion, respect, and community spirit that will continue long into the future.
+
+As long as I am part of Burton Pride, the community will always remain my guiding force. My efforts, my energy, and my dedication will always be focused on giving back, strengthening our connections, and building a Pride that truly belongs to everyone.
+
+Because at its heart, Burton Pride will always be about the people  our community.`
       },
       {
         name: 'Citrine Stone',
