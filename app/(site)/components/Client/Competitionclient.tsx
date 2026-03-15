@@ -83,7 +83,7 @@ export default function CompetitionPage() {
   };
 
   async function uploadImageToSupabase(entryId: string, file: File) {
-    const supabase = supabaseBrowser();
+    const supabase = supabaseBrowser;
 
     const ext = file.name.split(".").pop() || "jpg";
     const path = `entries/${entryId}/${Date.now()}.${ext}`;
