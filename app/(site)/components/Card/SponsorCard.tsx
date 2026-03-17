@@ -1,175 +1,180 @@
 "use client";
-import { useState, useEffect } from "react";
-import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 
-type SponsorCardProps = {
-  imageSrc: string;
-  altText: string;
-  name: string;
-  description: string;
-  link?: string;
-  story?: string[];
+import { useEffect, useMemo, useState } from "react";
+
+type SponsorshipType = "Normal Sponsor" | "Sponsorship in Kind";
+
+type Sponsor = {
+  id: string;
+  sponsor_name: string;
+  sponsorship_type: SponsorshipType | string;
+  website: string | null;
+  logo_url: string | null;
 };
 
-const sponsors: SponsorCardProps[] = [
-  {
-    imageSrc: "/image/CompanyLogoPng/WincantonLogo.png",
-    altText: "Wincanton",
-    name: "Wincanton",
-    description: "Proud to support Burton Pride.",
-  },
-  {
-    imageSrc: "/image/CompanyLogoPng/DavidWilson.Png",
-    altText: "David Wilson Homes",
-    name: "David Wilson Home",
-    description: "Proud to support Burton Pride.",
-    link: "https://www.dwh.co.uk",
-  },
-  {
-    imageSrc: "/image/CompanyLogoPng/Central_Co-op_logo.png",
-    altText: "Central England Co-op",
-    name: "Central England Co-Op",
-    description: "Proud to support Burton Pride.",
-    link: "https://www.centralcoop.co.uk",
-  },
-  {
-    imageSrc: "/image/CompanyLogoPng/EastMidland.png",
-    altText: "East Midlands Airport",
-    name: "East Midlands Airport",
-    description: "Proud to support Burton Pride.",
-    link: "https://www.eastmidlandsairport.com",
-  },
-  {
-    imageSrc: "/image/CompanyLogoPng/BeenCoffee.png",
-    altText: "Been Coffee",
-    name: "Been Coffee",
-    description: "Proud to support Burton Pride.",
-    link: "https://www.been.coffee",
-    story: [
-      "Tucked just off the beaten path, Been Coffee is an award-winning independent coffee shop known for doing things a little differently - and a lot more thoughtfully.",
-      "We’re passionate about serving specialty coffee that’s expertly roasted and brewed with care, alongside a menu of loose-leaf teas, locally sourced food, and house-made treats.",
-      "But we’re more than a coffee shop. We’re a community space, a dog-friendly haven, and a place where sustainability meets sincerity.",
-      "We believe a great coffee shop should be more than good coffee. It should be a space that reflects the values of the people who gather there: welcoming, thoughtful, inclusive, and real.",
-      "So whether you’re here for a quick espresso, a slow morning, or a spontaneous catch-up with a friend, there’s always a seat - and a warm smile - waiting for you at Been.",
-    ],
-  },
-  {
-    imageSrc: "/image/CompanyLogoPng/SocialRoots&GreenShootsPrideLogo.png",
-    altText: "Soical Roots & Green Shoots",
-    name: "Soical Roots & Green Shoots",
-    description: "We’re proud to celebrate and support Burton Pride.",
-    link: "https://www.youtube.com/@SocialRootsGreenShoots/featured",
-  },
-];
+type ApiResponse = {
+  ok: boolean;
+  sponsors?: Sponsor[];
+  error?: string;
+};
+
+function sectionTitle(type: SponsorshipType) {
+  return type === "Sponsorship in Kind" ? "Sponsorship in Kind" : "Sponsors";
+}
+
+function sponsorTypeLabel(type: string) {
+  if (type === "Sponsorship in Kind") return "Sponsorship in Kind";
+  return "Normal Sponsor";
+}
 
 export default function SponsorCard() {
-  const [isMobile, setIsMobile] = useState(false);
-  const [flippedIndex, setFlippedIndex] = useState<number | null>(null);
-  const router = useRouter();
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    let active = true;
+
+    async function loadSponsors() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const res = await fetch("/api/sponsors/approved", {
+          cache: "no-store",
+        });
+
+        const data: ApiResponse = await res.json();
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "Failed to load sponsors");
+        }
+
+        if (active) {
+          setSponsors(data.sponsors || []);
+        }
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : "Something went wrong");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadSponsors();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleStoryClick = (index: number) => {
-    if (isMobile && sponsors[index].story) {
-      const query = encodeURIComponent(JSON.stringify(sponsors[index].story));
-      router.push(`/SponsorStory?name=${sponsors[index].name}&story=${query}`);
-    } else {
-      setFlippedIndex(flippedIndex === index ? null : index);
-    }
-  };
+  const grouped = useMemo(() => {
+    return {
+      "Normal Sponsor": sponsors.filter(
+        (s) => s.sponsorship_type === "Normal Sponsor"
+      ),
+      "Sponsorship in Kind": sponsors.filter(
+        (s) => s.sponsorship_type === "Sponsorship in Kind"
+      ),
+    };
+  }, [sponsors]);
 
-  const buttonClasses = `
-    inline-block
-    bg-gradient-to-r from-pink-600 via-pink-700 to-pink-800
-    text-white
-    px-6 py-2
-    rounded-full
-    font-semibold
-    shadow-lg
-    transition
-    duration-300
-    focus:outline-none focus:ring-4 focus:ring-pink-300
-    select-none
-    cursor-pointer
-  `;
+  if (loading) {
+    return (
+      <div className="py-10 text-center text-white/80">
+        Loading sponsors...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="py-10 text-center text-red-200">
+        {error}
+      </div>
+    );
+  }
+
+  if (sponsors.length === 0) {
+    return (
+      <div className="py-10 text-center text-white/80">
+        No approved sponsors yet.
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {sponsors.map((sponsor, index) => (
-          <div
-            key={index}
-            className={`
-              cursor-pointer bg-white/10 backdrop-blur-md text-white border border-white/20 rounded-2xl p-6 flex flex-col items-center
-              transition-all duration-500
-              sm:hover:scale-105 sm:hover:shadow-[0_12px_45px_rgba(255,255,255,0.5)]
-              shadow-[0_8px_25px_rgba(0,0,0,0.4)]
-            `}
-          >
-            <div className="w-40 h-32 mb-4 relative">
-              <Image
-                src={sponsor.imageSrc}
-                alt={sponsor.altText}
-                fill
-                style={{ objectFit: "contain" }}
-                className="rounded-lg shadow-md"
-              />
+    <div className="space-y-12">
+      {(["Normal Sponsor", "Sponsorship in Kind"] as const).map((type) => {
+        const items = grouped[type];
+        if (items.length === 0) return null;
+
+        return (
+          <section key={type} className="space-y-6">
+            <h3 className="text-center text-2xl font-bold text-white">
+              {sectionTitle(type)}
+            </h3>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {items.map((sponsor) => {
+                const content = (
+                  <div className="group overflow-hidden rounded-3xl border border-white/20 bg-white/10 p-5 shadow-xl backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:bg-white/15">
+                    <div className="flex h-44 items-center justify-center rounded-2xl bg-white p-4 shadow-inner">
+                      {sponsor.logo_url ? (
+                        <img
+                          src={sponsor.logo_url}
+                          alt={sponsor.sponsor_name}
+                          className="max-h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-center text-lg font-semibold text-slate-700">
+                          {sponsor.sponsor_name}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-center">
+                      <h4 className="text-xl font-bold text-white">
+                        {sponsor.sponsor_name}
+                      </h4>
+
+                      <div className="inline-flex rounded-full border border-yellow-300/30 bg-yellow-400/20 px-3 py-1 text-sm font-medium text-yellow-100">
+                        {sponsorTypeLabel(sponsor.sponsorship_type)}
+                      </div>
+
+                      {sponsor.website && (
+                        <div className="pt-2">
+                          <span className="text-sm text-white/70 group-hover:text-white/90">
+                            Visit sponsor website
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+
+                return sponsor.website ? (
+                  <a
+                    key={sponsor.id}
+                    href={sponsor.website}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={sponsor.sponsor_name}
+                    className="block"
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <div key={sponsor.id}>{content}</div>
+                );
+              })}
             </div>
-            <h2 className="text-xl font-bold text-center mb-2">{sponsor.name}</h2>
-            <p className="text-center mb-4 text-gray-200">{sponsor.description}</p>
-
-            {sponsor.link && (
-              <Link href={sponsor.link} target="_blank" className={buttonClasses}>
-                Visit Sponsor
-              </Link>
-            )}
-
-            {sponsor.story && (
-              <button
-                className={buttonClasses + " mt-4"}
-                onClick={() => handleStoryClick(index)}
-              >
-                Read Story →
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop modal for story */}
-      {flippedIndex !== null && sponsors[flippedIndex]?.story && !isMobile && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-pink-900 via-purple-900 to-blue-900 bg-opacity-90 p-6"
-          onClick={() => setFlippedIndex(null)}
-        >
-          <div
-            className="relative max-w-3xl max-h-[80vh] overflow-y-auto rounded-3xl p-8 shadow-2xl bg-white/90 text-black border border-white/20"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="text-3xl font-bold text-center mb-6">
-              {sponsors[flippedIndex].name}
-            </h2>
-            <div className="text-gray-800 text-lg leading-relaxed space-y-6">
-              {sponsors[flippedIndex].story!.map((paragraph, i) => (
-                <p key={i}>{paragraph}</p>
-              ))}
-            </div>
-            <button
-              onClick={() => setFlippedIndex(null)}
-              className="mt-8 block mx-auto text-pink-600 text-lg font-bold hover:underline cursor-pointer"
-            >
-              ← Back
-            </button>
-          </div>
-        </div>
-      )}
-    </>
+          </section>
+        );
+      })}
+    </div>
   );
 }

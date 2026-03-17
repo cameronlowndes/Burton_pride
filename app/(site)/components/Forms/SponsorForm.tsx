@@ -91,7 +91,7 @@ export default function SponsorForm() {
       }
 
       const { data } = supabaseBrowser.storage
-        .from("sponsor_applications")
+        .from("sponsor-logos")
         .getPublicUrl(path);
 
       if (!data?.publicUrl) {

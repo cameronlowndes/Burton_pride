@@ -21,9 +21,9 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
 
     if (
-      body?.status === "new" ||
-      body?.status === "in_progress" ||
-      body?.status === "done"
+      body?.status === "pending" ||
+      body?.status === "approved" ||
+      body?.status === "rejected"
     ) {
       updates.status = body.status;
     }

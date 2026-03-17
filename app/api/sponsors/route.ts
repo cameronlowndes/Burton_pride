@@ -15,25 +15,35 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+function cleanString(value: unknown) {
+  return String(value || "").trim();
+}
+
+function cleanNullableString(value: unknown) {
+  const cleaned = String(value || "").trim();
+  return cleaned || null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const sponsor_name = String(body?.sponsor_name || "").trim();
-    const contact_name = String(body?.contact_name || "").trim();
-    const email = String(body?.email || "").trim().toLowerCase();
-    const phone = String(body?.phone || "").trim();
-    const sponsorship_type = String(body?.sponsorship_type || "").trim();
+    const sponsor_name = cleanString(body?.sponsor_name);
+    const contact_name = cleanString(body?.contact_name);
+    const email = cleanString(body?.email).toLowerCase();
+    const phone = cleanNullableString(body?.phone);
+    const sponsorship_type = cleanString(body?.sponsorship_type);
 
-    const address_line1 = String(body?.address_line1 || "").trim();
-    const address_line2 = String(body?.address_line2 || "").trim();
-    const city = String(body?.city || "").trim();
-    const county = String(body?.county || "").trim();
-    const postcode = String(body?.postcode || "").trim();
-    const country = String(body?.country || "").trim();
+    const address_line1 = cleanNullableString(body?.address_line1);
+    const address_line2 = cleanNullableString(body?.address_line2);
+    const city = cleanNullableString(body?.city);
+    const county = cleanNullableString(body?.county);
+    const postcode = cleanNullableString(body?.postcode);
+    const country = cleanNullableString(body?.country);
 
-    const logo_link = String(body?.logo_link || "").trim();
-    const message = String(body?.message || "").trim();
+    const website = cleanNullableString(body?.website);
+    const logo_link = cleanNullableString(body?.logo_link);
+    const message = cleanNullableString(body?.message);
 
     if (!sponsor_name || !contact_name || !email || !sponsorship_type) {
       return NextResponse.json(
@@ -60,8 +70,11 @@ export async function POST(req: Request) {
         county,
         postcode,
         country,
+        website,
         logo_link,
         message,
+        status: "pending",
+        is_read: false,
       });
 
     if (insertError) {
@@ -81,7 +94,8 @@ export async function POST(req: Request) {
     const safePostcode = escapeHtml(postcode || "Not provided");
     const safeCountry = escapeHtml(country || "Not provided");
     const safeMessage = escapeHtml(message || "No message provided");
-    const safeLogoLink = escapeHtml(logo_link);
+    const safeLogoLink = escapeHtml(logo_link || "");
+    const safeWebsite = escapeHtml(website || "");
 
     const sponsorEmailResult = await resend.emails.send({
       from: "Burton Pride <noreply@burtonpride.co.uk>",
@@ -177,6 +191,9 @@ County: ${county || "Not provided"}
 Postcode: ${postcode || "Not provided"}
 Country: ${country || "Not provided"}
 
+Website:
+${website || "Not provided"}
+
 Message / Requirements:
 ${message || "No message provided"}
 
@@ -212,6 +229,16 @@ ${logo_link || "No logo uploaded"}`,
               <tr>
                 <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Sponsorship Type</td>
                 <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorshipType}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Website</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                  ${
+                    website
+                      ? `<a href="${safeWebsite}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">${safeWebsite}</a>`
+                      : "Not provided"
+                  }
+                </td>
               </tr>
             </table>
 
@@ -260,11 +287,15 @@ ${logo_link || "No logo uploaded"}`,
     });
 
     if ((sponsorEmailResult as any)?.error) {
-      throw new Error((sponsorEmailResult as any).error.message || "Failed to send sponsor email");
+      throw new Error(
+        (sponsorEmailResult as any).error.message || "Failed to send sponsor email"
+      );
     }
 
     if ((adminEmailResult as any)?.error) {
-      throw new Error((adminEmailResult as any).error.message || "Failed to send admin email");
+      throw new Error(
+        (adminEmailResult as any).error.message || "Failed to send admin email"
+      );
     }
 
     return NextResponse.json({ ok: true });

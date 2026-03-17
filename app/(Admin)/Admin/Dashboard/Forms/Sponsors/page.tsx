@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type SponsorStatus = "new" | "in_progress" | "done";
+type SponsorStatus = "pending" | "approved" | "rejected";
 
 type SponsorApplication = {
   id: string;
@@ -46,19 +46,25 @@ function formatDate(value: string) {
 }
 
 function statusLabel(status: SponsorStatus) {
-  if (status === "in_progress") return "In Progress";
-  if (status === "done") return "Done";
-  return "New";
+  if (status === "approved") return "Approved";
+  if (status === "rejected") return "Rejected";
+  return "Pending";
 }
 
 function statusBadgeClass(status: SponsorStatus) {
-  if (status === "done") {
+  if (status === "approved") {
     return "bg-green-500/25 text-green-100 border border-green-300/30";
   }
-  if (status === "in_progress") {
-    return "bg-yellow-500/25 text-yellow-100 border border-yellow-300/30";
+  if (status === "rejected") {
+    return "bg-red-500/25 text-red-100 border border-red-300/30";
   }
-  return "bg-blue-500/25 text-blue-100 border border-blue-300/30";
+  return "bg-yellow-500/25 text-yellow-100 border border-yellow-300/30";
+}
+
+function sponsorshipTypeLabel(type: string) {
+  if (type === "sponsorship_in_kind") return "Sponsorship in Kind";
+  if (type === "normal_sponsorship") return "Normal Sponsorship";
+  return type || "-";
 }
 
 async function parseJsonResponse(res: Response) {
@@ -139,7 +145,6 @@ export default function SponsorAdminPage() {
     [items, selectedId]
   );
 
-  const disableStatusButtons = !!selectedItem?.is_read;
   const selectedAddressFields = selectedItem ? getAddressFields(selectedItem) : [];
   const googleMapsUrl = selectedItem ? getGoogleMapsUrl(selectedItem) : null;
 
@@ -196,15 +201,12 @@ export default function SponsorAdminPage() {
     setBusyId(id);
     setError(null);
 
-    const shouldMarkRead = status === "done";
-
     setItems((prev) =>
       prev.map((entry) =>
         entry.id === id
           ? {
               ...entry,
               status,
-              is_read: shouldMarkRead ? true : entry.is_read,
             }
           : entry
       )
@@ -216,7 +218,7 @@ export default function SponsorAdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(shouldMarkRead ? { status, is_read: true } : { status }),
+        body: JSON.stringify({ status }),
       });
 
       const data = await parseJsonResponse(res);
@@ -415,7 +417,7 @@ export default function SponsorAdminPage() {
                       </p>
 
                       <p className="mt-2 line-clamp-2 text-white/95">
-                        {item.message || item.sponsorship_type || "Sponsor application"}
+                        {item.message || sponsorshipTypeLabel(item.sponsorship_type) || "Sponsor application"}
                       </p>
 
                       <p className="mt-2 text-sm text-white/70">
@@ -628,7 +630,7 @@ export default function SponsorAdminPage() {
                   <div className="rounded-2xl border border-white/15 bg-white/10 p-4">
                     <p className="text-sm font-semibold text-white/70">Sponsorship type</p>
                     <p className="mt-2 break-words text-base text-white sm:text-lg">
-                      {selectedItem.sponsorship_type || "-"}
+                      {sponsorshipTypeLabel(selectedItem.sponsorship_type)}
                     </p>
                   </div>
 
@@ -680,50 +682,41 @@ export default function SponsorAdminPage() {
                   </p>
                 </div>
 
-                {disableStatusButtons ? (
-                  <p className="mt-6 text-sm text-white/70">
-                    Status buttons are disabled for applications in Read Sponsors.
-                  </p>
-                ) : null}
-
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button
                     type="button"
                     disabled={
-                      disableStatusButtons ||
                       busyId === selectedItem.id ||
-                      selectedItem.status === "new"
+                      selectedItem.status === "pending"
                     }
-                    onClick={() => void updateStatus(selectedItem.id, "new")}
-                    className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    New
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={
-                      disableStatusButtons ||
-                      busyId === selectedItem.id ||
-                      selectedItem.status === "in_progress"
-                    }
-                    onClick={() => void updateStatus(selectedItem.id, "in_progress")}
+                    onClick={() => void updateStatus(selectedItem.id, "pending")}
                     className="rounded-2xl bg-yellow-500 px-4 py-3 font-semibold text-white hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    In Progress
+                    Pending
                   </button>
 
                   <button
                     type="button"
                     disabled={
-                      disableStatusButtons ||
                       busyId === selectedItem.id ||
-                      selectedItem.status === "done"
+                      selectedItem.status === "approved"
                     }
-                    onClick={() => void updateStatus(selectedItem.id, "done")}
+                    onClick={() => void updateStatus(selectedItem.id, "approved")}
                     className="rounded-2xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Done
+                    Approve
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      busyId === selectedItem.id ||
+                      selectedItem.status === "rejected"
+                    }
+                    onClick={() => void updateStatus(selectedItem.id, "rejected")}
+                    className="rounded-2xl bg-red-600 px-4 py-3 font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Reject
                   </button>
                 </div>
               </>
