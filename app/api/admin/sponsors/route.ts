@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const runtime = "nodejs";
-
 export async function GET() {
   try {
     const { data, error } = await supabaseAdmin
@@ -22,6 +20,7 @@ export async function GET() {
         country,
         logo_link,
         message,
+        story,
         status,
         is_read,
         created_at
@@ -35,17 +34,9 @@ export async function GET() {
       );
     }
 
-    const sponsors = Array.isArray(data) ? data : [];
-
     return NextResponse.json({
       ok: true,
-      sponsors,
-      stats: {
-        totalApplications: sponsors.length,
-        newApplications: sponsors.filter((row) => row.status === "new").length,
-        inProgressApplications: sponsors.filter((row) => row.status === "in_progress").length,
-        doneApplications: sponsors.filter((row) => row.status === "done").length,
-      },
+      sponsors: data ?? [],
     });
   } catch (error) {
     return NextResponse.json(

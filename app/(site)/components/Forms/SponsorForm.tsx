@@ -11,6 +11,12 @@ type ApiResponse = {
   error?: string;
 };
 
+const sponsorshipOptions = [
+  "Normal Sponsor",
+  "Sponsorship in Kind",
+  "Story",
+] as const;
+
 const emptyForm = {
   sponsor_name: "",
   contact_name: "",
@@ -25,6 +31,7 @@ const emptyForm = {
   country: "United Kingdom",
   logo_link: "",
   message: "",
+  story: "",
 };
 
 export default function SponsorForm() {
@@ -43,6 +50,14 @@ export default function SponsorForm() {
     setForm((prev) => ({
       ...prev,
       [name]: value,
+    }));
+  }
+
+  function setSponsorshipType(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      sponsorship_type: value,
+      story: value === "Story" ? prev.story : "",
     }));
   }
 
@@ -127,6 +142,18 @@ export default function SponsorForm() {
     setSubmitState("submitting");
     setError(null);
 
+    if (!form.sponsorship_type.trim()) {
+      setSubmitState("error");
+      setError("Please select a sponsorship type.");
+      return;
+    }
+
+    if (form.sponsorship_type === "Story" && !form.story.trim()) {
+      setSubmitState("error");
+      setError("Please tell us your story before submitting.");
+      return;
+    }
+
     try {
       const res = await fetch("/api/sponsors", {
         method: "POST",
@@ -147,6 +174,7 @@ export default function SponsorForm() {
           country: form.country.trim(),
           logo_link: form.logo_link.trim(),
           message: form.message.trim(),
+          story: form.story.trim(),
         }),
       });
 
@@ -181,7 +209,7 @@ export default function SponsorForm() {
   return (
     <>
       {showSuccessToast && (
-        <div className="pointer-events-none fixed inset-0 z-[9999] flex items-start justify-center px-4 pt-6 sm:justify-end sm:items-start sm:pr-6">
+        <div className="pointer-events-none fixed inset-0 z-[9999] flex items-start justify-center px-4 pt-6 sm:items-start sm:justify-end sm:pr-6">
           <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-green-300/30 bg-green-600/95 p-4 text-white shadow-2xl backdrop-blur-md">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-lg font-bold">
@@ -256,23 +284,72 @@ export default function SponsorForm() {
           className="rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70 outline-none focus:border-white/50"
         />
 
-        <select
-          name="sponsorship_type"
-          required
-          value={form.sponsorship_type}
-          onChange={updateField}
-          className="rounded-lg border border-white/20 bg-white/10 p-3 text-white outline-none focus:border-white/50"
-        >
-          <option value="" className="text-black">
-            Select one
-          </option>
-          <option value="Normal Sponsor" className="text-black">
-            Normal Sponsor
-          </option>
-          <option value="Sponsorship in Kind" className="text-black">
-            Sponsorship in Kind
-          </option>
-        </select>
+        <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
+          <h3 className="mb-3 text-lg font-semibold">Sponsorship Type</h3>
+          <p className="mb-4 text-sm text-white/75">
+            Choose the sponsorship option that best fits you.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {sponsorshipOptions.map((option) => {
+              const active = form.sponsorship_type === option;
+
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setSponsorshipType(option)}
+                  className={[
+                    "rounded-2xl border px-4 py-4 text-left transition",
+                    active
+                      ? "border-white bg-white text-pink-600 shadow-lg"
+                      : "border-white/20 bg-white/10 text-white hover:bg-white/20",
+                  ].join(" ")}
+                >
+                  <div className="text-base font-bold">{option}</div>
+                  <div
+                    className={
+                      active ? "mt-1 text-sm text-pink-500" : "mt-1 text-sm text-white/70"
+                    }
+                  >
+                    {option === "Normal Sponsor" &&
+                      "Standard sponsorship support for Burton Pride."}
+                    {option === "Sponsorship in Kind" &&
+                      "Support through products, services, or donations."}
+                    {option === "Story" &&
+                      "Share your story with us and tell us why you want to be involved."}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <input
+            type="hidden"
+            name="sponsorship_type"
+            value={form.sponsorship_type}
+            required
+          />
+        </div>
+
+        {form.sponsorship_type === "Story" && (
+          <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
+            <h3 className="mb-2 text-lg font-semibold">Your Story</h3>
+            <p className="mb-3 text-sm text-white/75">
+              Tell us your story and why you would like to be part of Burton Pride.
+            </p>
+
+            <textarea
+              name="story"
+              placeholder="Write your story here..."
+              rows={6}
+              required
+              value={form.story}
+              onChange={updateField}
+              className="w-full rounded-lg border border-white/20 bg-white/10 p-3 text-white placeholder-white/70 outline-none focus:border-white/50"
+            />
+          </div>
+        )}
 
         <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
           <h3 className="mb-4 text-lg font-semibold">Business Address</h3>

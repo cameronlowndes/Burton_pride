@@ -21,6 +21,7 @@ type SponsorApplication = {
   country: string | null;
   logo_link: string | null;
   message: string | null;
+  story: string | null;
   status: SponsorStatus;
   is_read: boolean;
   created_at: string;
@@ -53,18 +54,31 @@ function statusLabel(status: SponsorStatus) {
 
 function statusBadgeClass(status: SponsorStatus) {
   if (status === "approved") {
-    return "bg-green-500/25 text-green-100 border border-green-300/30";
+    return "border border-green-300/30 bg-green-500/25 text-green-100";
   }
   if (status === "rejected") {
-    return "bg-red-500/25 text-red-100 border border-red-300/30";
+    return "border border-red-300/30 bg-red-500/25 text-red-100";
   }
-  return "bg-yellow-500/25 text-yellow-100 border border-yellow-300/30";
+  return "border border-yellow-300/30 bg-yellow-500/25 text-yellow-100";
 }
 
 function sponsorshipTypeLabel(type: string) {
   if (type === "sponsorship_in_kind") return "Sponsorship in Kind";
   if (type === "normal_sponsorship") return "Normal Sponsorship";
+  if (type === "Story") return "Story";
   return type || "-";
+}
+
+function getPreviewText(item: SponsorApplication) {
+  if (item.sponsorship_type === "Story") {
+    return item.story?.trim() || item.message?.trim() || "Story submission";
+  }
+
+  if (item.message?.trim()) {
+    return item.message.trim();
+  }
+
+  return sponsorshipTypeLabel(item.sponsorship_type) || "Sponsor application";
 }
 
 async function parseJsonResponse(res: Response) {
@@ -147,6 +161,8 @@ export default function SponsorAdminPage() {
 
   const selectedAddressFields = selectedItem ? getAddressFields(selectedItem) : [];
   const googleMapsUrl = selectedItem ? getGoogleMapsUrl(selectedItem) : null;
+  const selectedStory =
+    selectedItem?.story?.trim() || selectedItem?.message?.trim() || "";
 
   useEffect(() => {
     void fetchItems();
@@ -201,12 +217,15 @@ export default function SponsorAdminPage() {
     setBusyId(id);
     setError(null);
 
+    const shouldMarkAsRead = status === "approved";
+
     setItems((prev) =>
       prev.map((entry) =>
         entry.id === id
           ? {
               ...entry,
               status,
+              is_read: shouldMarkAsRead ? true : entry.is_read,
             }
           : entry
       )
@@ -218,7 +237,10 @@ export default function SponsorAdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(shouldMarkAsRead ? { is_read: true } : {}),
+        }),
       });
 
       const data = await parseJsonResponse(res);
@@ -416,8 +438,8 @@ export default function SponsorAdminPage() {
                         {item.contact_name} • {item.email}
                       </p>
 
-                      <p className="mt-2 line-clamp-2 text-white/95">
-                        {item.message || sponsorshipTypeLabel(item.sponsorship_type) || "Sponsor application"}
+                      <p className="mt-2 line-clamp-2 whitespace-pre-wrap break-words text-white/95">
+                        {getPreviewText(item)}
                       </p>
 
                       <p className="mt-2 text-sm text-white/70">
@@ -674,6 +696,15 @@ export default function SponsorAdminPage() {
                     )}
                   </div>
                 </div>
+
+                {selectedItem.sponsorship_type === "Story" && (
+                  <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">
+                    <p className="text-sm font-semibold text-white/70">Story</p>
+                    <p className="mt-2 whitespace-pre-wrap break-words text-white/95">
+                      {selectedStory || "No story was provided."}
+                    </p>
+                  </div>
+                )}
 
                 <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">
                   <p className="text-sm font-semibold text-white/70">Message / requirements</p>

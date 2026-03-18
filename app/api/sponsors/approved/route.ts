@@ -13,12 +13,16 @@ export async function GET() {
         sponsorship_type,
         logo_link,
         website,
+        story,
+        message,
+        slug,
         status
       `)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
     if (error) {
+      console.error("Supabase error:", error);
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 }
@@ -27,11 +31,14 @@ export async function GET() {
 
     const sponsors =
       data?.map((row) => ({
-        id: row.id,
-        sponsor_name: row.sponsor_name,
-        sponsorship_type: row.sponsorship_type,
+        id: String(row.id),
+        sponsor_name: row.sponsor_name ?? "",
+        sponsorship_type: row.sponsorship_type ?? null,
+        logo_link: row.logo_link ?? null,
         website: row.website ?? null,
-        logo_url: row.logo_link ?? null,
+        story: row.story ?? row.message ?? null,
+        slug: row.slug ?? null,
+        status: row.status ?? null,
       })) ?? [];
 
     return NextResponse.json({
@@ -39,6 +46,8 @@ export async function GET() {
       sponsors,
     });
   } catch (error) {
+    console.error("Sponsors approved route error:", error);
+
     return NextResponse.json(
       {
         ok: false,

@@ -24,6 +24,28 @@ function cleanNullableString(value: unknown) {
   return cleaned || null;
 }
 
+function slugify(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function normaliseWebsite(value: string | null) {
+  if (!value) return null;
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://")
+  ) {
+    return value;
+  }
+  return `https://${value}`;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -41,9 +63,15 @@ export async function POST(req: Request) {
     const postcode = cleanNullableString(body?.postcode);
     const country = cleanNullableString(body?.country);
 
-    const website = cleanNullableString(body?.website);
+    const websiteInput = cleanNullableString(body?.website);
+    const website = normaliseWebsite(websiteInput);
+
     const logo_link = cleanNullableString(body?.logo_link);
     const message = cleanNullableString(body?.message);
+
+    // NEW
+    const story = cleanNullableString(body?.story);
+    const slug = cleanNullableString(body?.slug) || slugify(sponsor_name);
 
     if (!sponsor_name || !contact_name || !email || !sponsorship_type) {
       return NextResponse.json(
@@ -51,6 +79,16 @@ export async function POST(req: Request) {
           ok: false,
           error:
             "Sponsor name, contact name, email and sponsorship type are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!email.includes("@")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Please enter a valid email address.",
         },
         { status: 400 }
       );
@@ -73,6 +111,8 @@ export async function POST(req: Request) {
         website,
         logo_link,
         message,
+        story, // NEW
+        slug,  // NEW
         status: "pending",
         is_read: false,
       });
@@ -94,8 +134,10 @@ export async function POST(req: Request) {
     const safePostcode = escapeHtml(postcode || "Not provided");
     const safeCountry = escapeHtml(country || "Not provided");
     const safeMessage = escapeHtml(message || "No message provided");
+    const safeStory = escapeHtml(story || "No sponsor story provided");
     const safeLogoLink = escapeHtml(logo_link || "");
     const safeWebsite = escapeHtml(website || "");
+    const safeSlug = escapeHtml(slug || "");
 
     const sponsorEmailResult = await resend.emails.send({
       from: "Burton Pride <noreply@burtonpride.co.uk>",
@@ -182,6 +224,7 @@ Contact Name: ${contact_name}
 Email: ${email}
 Phone: ${phone || "Not provided"}
 Sponsorship Type: ${sponsorship_type}
+Slug: ${slug}
 
 Business Address:
 Address Line 1: ${address_line1 || "Not provided"}
@@ -196,6 +239,9 @@ ${website || "Not provided"}
 
 Message / Requirements:
 ${message || "No message provided"}
+
+Sponsor Story:
+${story || "No sponsor story provided"}
 
 Logo Link:
 ${logo_link || "No logo uploaded"}`,
@@ -231,6 +277,10 @@ ${logo_link || "No logo uploaded"}`,
                 <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorshipType}</td>
               </tr>
               <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Slug</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSlug}</td>
+              </tr>
+              <tr>
                 <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Website</td>
                 <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
                   ${
@@ -258,6 +308,13 @@ ${logo_link || "No logo uploaded"}`,
               <h2 style="font-size: 18px; margin-bottom: 12px;">Message / Requirements</h2>
               <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap;">
                 ${safeMessage}
+              </div>
+            </div>
+
+            <div style="margin-top: 24px;">
+              <h2 style="font-size: 18px; margin-bottom: 12px;">Sponsor Story</h2>
+              <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap;">
+                ${safeStory}
               </div>
             </div>
 
