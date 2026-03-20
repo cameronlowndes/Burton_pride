@@ -510,7 +510,7 @@ export default function SponsorAdminListPage() {
           </Link>
 
           <Link
-            href="/admin/dashboard"
+            href="/Admin/Dashboard"
             className="cursor-pointer rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
           >
             ← Dashboard
