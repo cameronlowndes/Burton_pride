@@ -504,6 +504,12 @@ export default function SponsorAdminPage() {
               List Version
             </Link>
 
+            <Link
+          href="/Admin/Dashboard/Forms/Sponsors/OrganiseSponsor"
+            className="inline-flex w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto">
+             Sponsor Order
+             </Link>
+
             {!confirmDeleteAll ? (
               <button
                 type="button"
@@ -529,6 +535,8 @@ export default function SponsorAdminPage() {
                 >
                   Cancel
                 </button>
+
+                
               </div>
             )}
 
@@ -757,4 +765,4 @@ export default function SponsorAdminPage() {
       </div>
     </div>
   );
-}
+}  

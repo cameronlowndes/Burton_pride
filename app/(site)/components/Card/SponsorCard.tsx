@@ -30,7 +30,11 @@ export default function SponsorCard({ sponsor, onDesktopOpen }: Props) {
   const router = useRouter();
   const isMobile = useIsMobile();
 
-  const hasStory = Boolean(sponsor.story?.trim());
+  // ✅ Only allow story for "story" sponsors
+  const isStorySponsor =
+    (sponsor.sponsorship_type || "").toLowerCase() === "story";
+
+  const hasStory = Boolean(sponsor.story?.trim()) && isStorySponsor;
 
   function handleOpenStory() {
     if (!hasStory) return;
@@ -46,6 +50,8 @@ export default function SponsorCard({ sponsor, onDesktopOpen }: Props) {
 
   return (
     <div className="group rounded-3xl border border-white/20 bg-white/10 p-5 shadow-xl backdrop-blur-md transition duration-300 hover:-translate-y-1 hover:bg-white/15">
+      
+      {/* Logo */}
       <div className="relative mb-4 h-40 w-full overflow-hidden rounded-2xl bg-white">
         {sponsor.logo_link ? (
           <Image
@@ -61,10 +67,12 @@ export default function SponsorCard({ sponsor, onDesktopOpen }: Props) {
         )}
       </div>
 
+      {/* Name */}
       <h3 className="text-center text-2xl font-bold text-white">
         {sponsor.sponsor_name}
       </h3>
 
+      {/* Type Badge */}
       <div className="mt-3 flex justify-center">
         <span
           className={`rounded-full px-3 py-1 text-xs font-semibold ${sponsorBadgeClass(
@@ -75,7 +83,8 @@ export default function SponsorCard({ sponsor, onDesktopOpen }: Props) {
         </span>
       </div>
 
-      {hasStory ? (
+      {/* ✅ ONLY show button if story sponsor */}
+      {hasStory && (
         <button
           onClick={handleOpenStory}
           disabled={isMobile && !sponsor.slug}
@@ -83,10 +92,6 @@ export default function SponsorCard({ sponsor, onDesktopOpen }: Props) {
         >
           Read Their Story
         </button>
-      ) : (
-        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center text-sm font-medium text-white/60">
-          No story available
-        </div>
       )}
     </div>
   );

@@ -16,9 +16,12 @@ export async function GET() {
         story,
         message,
         slug,
-        status
+        status,
+        display_order,
+        created_at
       `)
       .eq("status", "approved")
+      .order("display_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -39,6 +42,8 @@ export async function GET() {
         story: row.story ?? row.message ?? null,
         slug: row.slug ?? null,
         status: row.status ?? null,
+        display_order:
+          typeof row.display_order === "number" ? row.display_order : null,
       })) ?? [];
 
     return NextResponse.json({
