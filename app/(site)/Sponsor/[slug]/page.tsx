@@ -8,7 +8,27 @@ async function getSponsor(slug: string): Promise<Sponsor | null> {
   const { data, error } = await supabaseAdmin
     .from("sponsor_applications")
     .select(
-      "id, sponsor_name, sponsorship_type, logo_link, story, message, slug, status"
+      `
+        id,
+        sponsor_name,
+        contact_name,
+        email,
+        phone,
+        sponsorship_type,
+        address_line1,
+        address_line2,
+        city,
+        county,
+        postcode,
+        country,
+        logo_link,
+        message,
+        story,
+        slug,
+        status,
+        created_at,
+        display_order
+      `
     )
     .eq("slug", slug)
     .eq("status", "approved")
@@ -19,11 +39,23 @@ async function getSponsor(slug: string): Promise<Sponsor | null> {
   return {
     id: String(data.id),
     sponsor_name: data.sponsor_name ?? "",
+    contact_name: data.contact_name ?? "",
+    email: data.email ?? "",
+    phone: data.phone ?? null,
     sponsorship_type: data.sponsorship_type ?? null,
+    address_line1: data.address_line1 ?? null,
+    address_line2: data.address_line2 ?? null,
+    city: data.city ?? null,
+    county: data.county ?? null,
+    postcode: data.postcode ?? null,
+    country: data.country ?? null,
     logo_link: data.logo_link ?? null,
+    message: data.message ?? null,
     story: data.story ?? data.message ?? null,
     slug: data.slug ?? null,
-    status: data.status ?? null,
+    status: data.status ?? "approved",
+    created_at: data.created_at ?? "",
+    display_order: data.display_order ?? null,
   };
 }
 
@@ -38,7 +70,7 @@ export default async function SponsorStoryPage({
   if (!sponsor) notFound();
 
   return (
-    <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 pt-28 pb-10 text-white sm:px-6 md:px-8 md:pt-32">
+    <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 pb-10 pt-28 text-white sm:px-6 md:px-8 md:pt-32">
       <div className="mx-auto max-w-3xl rounded-[32px] border border-white/20 bg-white/10 p-6 shadow-2xl backdrop-blur-xl md:p-10">
         <div className="relative mx-auto mb-8 h-48 w-full max-w-sm overflow-hidden rounded-3xl bg-white">
           {sponsor.logo_link ? (
