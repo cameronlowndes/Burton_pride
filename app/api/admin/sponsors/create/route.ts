@@ -11,21 +11,44 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+function getSupabaseClient() {
+  return typeof supabaseAdmin === "function" ? supabaseAdmin : supabaseAdmin;
+}
+
 export async function POST(req: Request) {
   try {
+    const supabase = getSupabaseClient();
     const formData = await req.formData();
 
     const sponsor_name = String(formData.get("sponsor_name") || "").trim();
+    const contact_name = String(formData.get("contact_name") || "").trim();
+    const email =
+      String(formData.get("email") || "").trim().toLowerCase() ||
+      `no-email+${Date.now()}@burtonpride.local`;
+    const phone = String(formData.get("phone") || "").trim();
     const sponsorship_type = String(formData.get("sponsorship_type") || "").trim();
     const website = String(formData.get("website") || "").trim();
     const story = String(formData.get("story") || "").trim();
     const notes = String(formData.get("notes") || "").trim();
     const slug = String(formData.get("slug") || "").trim();
+    const address_line1 = String(formData.get("address_line1") || "").trim();
+    const address_line2 = String(formData.get("address_line2") || "").trim();
+    const city = String(formData.get("city") || "").trim();
+    const county = String(formData.get("county") || "").trim();
+    const postcode = String(formData.get("postcode") || "").trim();
+    const country = String(formData.get("country") || "").trim();
     const logoFile = formData.get("logo");
 
     if (!sponsor_name) {
       return NextResponse.json(
         { ok: false, error: "Sponsor name is required." },
+        { status: 400 }
+      );
+    }
+
+    if (!contact_name) {
+      return NextResponse.json(
+        { ok: false, error: "Contact name is required." },
         { status: 400 }
       );
     }
@@ -39,17 +62,18 @@ export async function POST(req: Request) {
 
     let logo_link: string | null = null;
 
-    if (logoFile && logoFile instanceof File && logoFile.size > 0) {
+    if (logoFile instanceof File && logoFile.size > 0) {
       const safeName = slugify(sponsor_name || "sponsor");
-      const ext = logoFile.name.includes(".")
-        ? logoFile.name.split(".").pop()?.toLowerCase() || "png"
+      const originalName = logoFile.name || "logo.png";
+      const ext = originalName.includes(".")
+        ? originalName.split(".").pop()?.toLowerCase() || "png"
         : "png";
 
       const filePath = `sponsors/${Date.now()}-${safeName}.${ext}`;
       const arrayBuffer = await logoFile.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      const { error: uploadError } = await supabaseAdmin.storage
+      const { error: uploadError } = await supabase.storage
         .from("sponsor-logos")
         .upload(filePath, buffer, {
           contentType: logoFile.type || "image/png",
@@ -57,14 +81,13 @@ export async function POST(req: Request) {
         });
 
       if (uploadError) {
-        console.error("Storage upload error:", uploadError);
         return NextResponse.json(
           { ok: false, error: uploadError.message },
           { status: 400 }
         );
       }
 
-      const { data: publicUrlData } = supabaseAdmin.storage
+      const { data: publicUrlData } = supabase.storage
         .from("sponsor-logos")
         .getPublicUrl(filePath);
 
@@ -73,31 +96,60 @@ export async function POST(req: Request) {
 
     const finalSlug = slug || slugify(sponsor_name);
 
-    const { error: insertError } = await supabaseAdmin
-      .from("sponsors")
-      .insert({
+    const insertPayload = {
+      sponsor_name,
+      contact_name,
+      email,
+      phone: phone || null,
+      sponsorship_type,
+      website: website || null,
+      story: story || null,
+      notes: notes || null,
+      slug: finalSlug || null,
+      logo_link,
+      address_line1: address_line1 || null,
+      address_line2: address_line2 || null,
+      city: city || null,
+      county: county || null,
+      postcode: postcode || null,
+      country: country || null,
+      status: "approved",
+      is_read: true,
+      display_order: 9999,
+    };
+
+    console.log("Insert sponsor payload:", insertPayload);
+
+    const { data, error } = await supabase
+      .from("sponsor_applications")
+      .insert(insertPayload)
+      .select(`
+        id,
         sponsor_name,
         sponsorship_type,
-        website: website || null,
-        story: story || null,
-        notes: notes || null,
-        slug: finalSlug || null,
         logo_link,
-      });
+        story,
+        slug,
+        display_order
+      `)
+      .single();
 
-    if (insertError) {
-      console.error("Insert sponsor error:", insertError);
+    if (error) {
+      console.error("Insert sponsor error:", error);
       return NextResponse.json(
-        { ok: false, error: insertError.message },
+        { ok: false, error: error.message },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, sponsor: data });
   } catch (error) {
     console.error("Create sponsor API error:", error);
     return NextResponse.json(
-      { ok: false, error: "Something went wrong creating sponsor." },
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : "Something went wrong",
+      },
       { status: 500 }
     );
   }

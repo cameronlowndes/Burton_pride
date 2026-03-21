@@ -15,7 +15,6 @@ export async function GET() {
         website,
         story,
         message,
-        slug,
         status,
         display_order,
         created_at
@@ -40,7 +39,6 @@ export async function GET() {
         logo_link: row.logo_link ?? null,
         website: row.website ?? null,
         story: row.story ?? row.message ?? null,
-        slug: row.slug ?? null,
         status: row.status ?? null,
         display_order:
           typeof row.display_order === "number" ? row.display_order : null,

@@ -48,14 +48,6 @@ export default function AdminFormsDashboardPage() {
         adminHref: "/Admin/Dashboard/Windows-showcase/Votes",
         badge: "Live",
       },
-      {
-        key: "stalls",
-        title: "Stalls / Traders form",
-        desc: "Stallholder booking / trader applications.",
-        href: "/meet-us",
-        adminHref: "/admin/dashboard/forms/stalls",
-        badge: "Coming soon",
-      },
     ],
     []
   );

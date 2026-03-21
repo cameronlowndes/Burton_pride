@@ -1,52 +1,92 @@
-'use client';
+"use client";
 
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
-const Countdown = () => {
-  // 🎯 Target date: 27 June 2026, 12:00 PM UK time (BST = UTC+1)
-  const targetDate = new Date("2026-06-27T11:00:00Z"); // 11:00 UTC = 12:00 BST
-  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+type CountdownRow = {
+  id: string;
+  enabled: boolean;
+  title: string;
+  subtitle: string;
+  target_date: string;
+  event_message: string | null;
+  show_event_message: boolean;
+  updated_at: string;
+};
+
+export default function Countdown() {
+  const [countdown, setCountdown] = useState<CountdownRow | null>(null);
+  const [timeLeft, setTimeLeft] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+  });
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    let active = true;
+
+    fetch("/api/countdown", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        if (data?.ok && data?.countdown) {
+          setCountdown(data.countdown);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!countdown?.target_date) return;
+
+    const targetDate = new Date(countdown.target_date);
+
+    const updateCountdown = () => {
       const now = new Date();
       const distance = targetDate.getTime() - now.getTime();
 
       if (distance <= 0) {
-        clearInterval(interval);
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
-      } else {
-        setTimeLeft({
-          days: Math.floor(distance / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-          minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
-          seconds: Math.floor((distance % (1000 * 60)) / 1000),
-        });
+        return;
       }
-    }, 1000);
+
+      setTimeLeft({
+        days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+        minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+        seconds: Math.floor((distance % (1000 * 60)) / 1000),
+      });
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [countdown]);
+
+  if (!countdown || !countdown.enabled) return null;
 
   return (
     <section
       id="countdown"
       className="mt-16 text-center w-full max-w-4xl mx-auto px-6 py-10 rounded-2xl bg-gradient-to-br from-purple-700 via-pink-600 to-yellow-400 text-white shadow-2xl relative overflow-hidden"
     >
-      {/* Rainbow animated background overlay */}
-      <div className="absolute inset-0 bg-[conic-gradient(from_180deg,red,orange,yellow,green,blue,indigo,violet,red)] opacity-20 blur-2xl animate-spin-slow"></div>
+      <div className="absolute inset-0 bg-[conic-gradient(from_180deg,red,orange,yellow,green,blue,indigo,violet,red)] opacity-20 blur-2xl animate-spin-slow" />
 
       <div className="relative z-10">
         <h2 className="text-4xl sm:text-5xl font-extrabold mb-6 drop-shadow-lg">
-          🌈 Countdown to <span className="text-yellow-300">Burton Pride 2026</span>
+          {countdown.title}
         </h2>
 
         <p className="text-lg mb-8 font-medium text-white/90">
-          Time remaining until the Pride Event kicks off 🎉
+          {countdown.subtitle}
         </p>
 
-        {/* Countdown grid */}
         <div className="flex flex-wrap justify-center items-center gap-6">
           {[
             { label: "Days", value: timeLeft.days },
@@ -76,18 +116,18 @@ const Countdown = () => {
             </motion.div>
           ))}
         </div>
-{/* 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
-          className="mt-8 text-lg font-semibold text-black bg-yellow-300 px-6 py-3 rounded-full shadow-md inline-block animate-pulse"
-        >
-          🎉 Free Event – Everyone’s Welcome!
-        </motion.div> */}
+
+        {countdown.show_event_message && countdown.event_message ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1 }}
+            className="mt-8 text-lg font-semibold text-black bg-yellow-300 px-6 py-3 rounded-full shadow-md inline-block animate-pulse"
+          >
+            {countdown.event_message}
+          </motion.div>
+        ) : null}
       </div>
     </section>
   );
-};
-
-export default Countdown;
+}

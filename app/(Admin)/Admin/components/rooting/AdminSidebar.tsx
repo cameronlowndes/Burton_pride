@@ -230,9 +230,6 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
 
         {eventsOpen && (
           <div className="ml-2 pl-2 border-l border-white/10 space-y-1">
-            <div className="px-4 pt-2 pb-1 text-xs uppercase tracking-wider text-white/60">
-              Windows of Hope
-            </div>
             <SubNavLink
               href="/Admin/Dashboard/Windows-showcase/Entries"
               label="Window Showcase"
@@ -240,6 +237,11 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
             <SubNavLink
               href="/Admin/Dashboard/Windows-showcase/Votes"
               label="Window Votes"
+              />
+            <SubNavLink
+              href="/Admin/Dashboard/Events/Countdown"
+              label="Countdown"
+              
             />
           </div>
         )}

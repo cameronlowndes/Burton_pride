@@ -149,7 +149,14 @@ export default function SponsorAdminListPage() {
     setError(null);
 
     try {
-      const res = await fetch("/api/admin/sponsors", { cache: "no-store" });
+      const res = await fetch("/api/admin/sponsors", {
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      });
+
       const text = await res.text();
 
       let json: ApiResponse | null = null;
@@ -170,8 +177,8 @@ export default function SponsorAdminListPage() {
         return;
       }
 
+      setSponsors(Array.isArray(json.sponsors) ? json.sponsors : []);
       setStats(json.stats || null);
-      setSponsors(json.sponsors || []);
     } catch (e: any) {
       setError(e?.message || "Failed to load sponsor applications");
       setStats(null);
@@ -180,6 +187,80 @@ export default function SponsorAdminListPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const filteredSponsors = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    return sponsors.filter((s) => {
+      const matchesStatus = statusFilter === "all" ? true : s.status === statusFilter;
+      const matchesRead =
+        readFilter === "all" ? true : readFilter === "read" ? s.is_read : !s.is_read;
+
+      if (!matchesStatus || !matchesRead) return false;
+      if (!q) return true;
+
+      const sponsorName = (s.sponsor_name || "").toLowerCase();
+      const contactName = (s.contact_name || "").toLowerCase();
+      const email = (s.email || "").toLowerCase();
+      const phone = (s.phone || "").toLowerCase();
+      const sponsorshipType = (s.sponsorship_type || "").toLowerCase();
+      const address1 = (s.address_line1 || "").toLowerCase();
+      const address2 = (s.address_line2 || "").toLowerCase();
+      const city = (s.city || "").toLowerCase();
+      const county = (s.county || "").toLowerCase();
+      const postcode = (s.postcode || "").toLowerCase();
+      const country = (s.country || "").toLowerCase();
+      const message = (s.message || "").toLowerCase();
+      const story = (s.story || "").toLowerCase();
+
+      return (
+        sponsorName.includes(q) ||
+        contactName.includes(q) ||
+        email.includes(q) ||
+        phone.includes(q) ||
+        sponsorshipType.includes(q) ||
+        address1.includes(q) ||
+        address2.includes(q) ||
+        city.includes(q) ||
+        county.includes(q) ||
+        postcode.includes(q) ||
+        country.includes(q) ||
+        message.includes(q) ||
+        story.includes(q)
+      );
+    });
+  }, [sponsors, query, statusFilter, readFilter]);
+
+  const calculatedStats = useMemo(() => {
+    return {
+      totalApplications: sponsors.length,
+      pendingApplications: sponsors.filter((s) => s.status === "pending").length,
+      approvedApplications: sponsors.filter((s) => s.status === "approved").length,
+      rejectedApplications: sponsors.filter((s) => s.status === "rejected").length,
+    };
+  }, [sponsors]);
+
+  const displayStats = useMemo(() => {
+    const apiHasRealStats =
+      stats &&
+      typeof stats.totalApplications === "number" &&
+      typeof stats.pendingApplications === "number" &&
+      typeof stats.approvedApplications === "number" &&
+      typeof stats.rejectedApplications === "number";
+
+    if (!apiHasRealStats) return calculatedStats;
+
+    const apiLooksWrong =
+      sponsors.length > 0 &&
+      stats.totalApplications === 0 &&
+      calculatedStats.totalApplications > 0;
+
+    return apiLooksWrong ? calculatedStats : stats;
+  }, [stats, calculatedStats, sponsors.length]);
 
   async function exportToExcelStyled() {
     if (!filteredSponsors.length) return;
@@ -335,137 +416,18 @@ export default function SponsorAdminListPage() {
         to: { row: 1, column: 18 },
       };
 
-      worksheet.addTable({
-        name: "SponsorApplicationsTable",
-        ref: "A1",
-        headerRow: true,
-        style: {
-          theme: "TableStyleMedium9",
-          showRowStripes: true,
-        },
-        columns: [
-          { name: "Submitted At" },
-          { name: "Sponsor Name" },
-          { name: "Contact Name" },
-          { name: "Email" },
-          { name: "Phone" },
-          { name: "Sponsorship Type" },
-          { name: "Story" },
-          { name: "Address Line 1" },
-          { name: "Address Line 2" },
-          { name: "City / Town" },
-          { name: "County" },
-          { name: "Postcode" },
-          { name: "Country" },
-          { name: "Google Maps" },
-          { name: "Logo Link" },
-          { name: "Message / Requirements" },
-          { name: "Status" },
-          { name: "Is Read" },
-        ],
-        rows: filteredSponsors.map((s) => [
-          formatDate(s.created_at),
-          s.sponsor_name || "",
-          s.contact_name || "",
-          s.email || "",
-          s.phone || "",
-          sponsorshipTypeLabel(s.sponsorship_type),
-          getStoryText(s) || "",
-          s.address_line1 || "",
-          s.address_line2 || "",
-          s.city || "",
-          s.county || "",
-          s.postcode || "",
-          s.country || "",
-          getGoogleMapsUrl(s) || "",
-          s.logo_link || "",
-          s.message || "",
-          statusLabel(s.status),
-          s.is_read ? "Yes" : "No",
-        ]),
-      });
-
-      for (let i = 2; i <= filteredSponsors.length + 1; i += 1) {
-        const row = worksheet.getRow(i);
-
-        const longestText = Math.max(
-          String(row.getCell(16).value || "").length,
-          String(row.getCell(7).value || "").length,
-          String(row.getCell(8).value || "").length,
-          String(row.getCell(9).value || "").length
-        );
-
-        if (longestText > 80) row.height = 54;
-        else if (longestText > 40) row.height = 38;
-        else row.height = 24;
-      }
-
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
 
-      saveAs(
-        blob,
-        `sponsor-applications-${new Date().toISOString().slice(0, 10)}.xlsx`
-      );
+      saveAs(blob, `sponsor-applications-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err: any) {
       setError(err?.message || "Failed to export Excel file");
     } finally {
       setExporting(false);
     }
   }
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  const filteredSponsors = useMemo(() => {
-    const q = query.trim().toLowerCase();
-
-    return sponsors.filter((s) => {
-      const matchesStatus = statusFilter === "all" ? true : s.status === statusFilter;
-      const matchesRead =
-        readFilter === "all"
-          ? true
-          : readFilter === "read"
-          ? s.is_read
-          : !s.is_read;
-
-      if (!matchesStatus || !matchesRead) return false;
-      if (!q) return true;
-
-      const sponsorName = (s.sponsor_name || "").toLowerCase();
-      const contactName = (s.contact_name || "").toLowerCase();
-      const email = (s.email || "").toLowerCase();
-      const phone = (s.phone || "").toLowerCase();
-      const sponsorshipType = (s.sponsorship_type || "").toLowerCase();
-      const address1 = (s.address_line1 || "").toLowerCase();
-      const address2 = (s.address_line2 || "").toLowerCase();
-      const city = (s.city || "").toLowerCase();
-      const county = (s.county || "").toLowerCase();
-      const postcode = (s.postcode || "").toLowerCase();
-      const country = (s.country || "").toLowerCase();
-      const message = (s.message || "").toLowerCase();
-      const story = (s.story || "").toLowerCase();
-
-      return (
-        sponsorName.includes(q) ||
-        contactName.includes(q) ||
-        email.includes(q) ||
-        phone.includes(q) ||
-        sponsorshipType.includes(q) ||
-        address1.includes(q) ||
-        address2.includes(q) ||
-        city.includes(q) ||
-        county.includes(q) ||
-        postcode.includes(q) ||
-        country.includes(q) ||
-        message.includes(q) ||
-        story.includes(q)
-      );
-    });
-  }, [sponsors, query, statusFilter, readFilter]);
 
   return (
     <div className="p-6 text-white">
@@ -519,10 +481,22 @@ export default function SponsorAdminListPage() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <Stat label="Total applications" value={loading ? "…" : stats?.totalApplications ?? 0} />
-        <Stat label="Pending" value={loading ? "…" : stats?.pendingApplications ?? 0} />
-        <Stat label="Approved" value={loading ? "…" : stats?.approvedApplications ?? 0} />
-        <Stat label="Rejected" value={loading ? "…" : stats?.rejectedApplications ?? 0} />
+        <Stat
+          label="Total applications"
+          value={loading ? "…" : displayStats.totalApplications}
+        />
+        <Stat
+          label="Pending"
+          value={loading ? "…" : displayStats.pendingApplications}
+        />
+        <Stat
+          label="Approved"
+          value={loading ? "…" : displayStats.approvedApplications}
+        />
+        <Stat
+          label="Rejected"
+          value={loading ? "…" : displayStats.rejectedApplications}
+        />
       </div>
 
       {error ? (
