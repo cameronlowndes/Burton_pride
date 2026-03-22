@@ -62,13 +62,44 @@ type ApiResponse = {
   sponsor?: SponsorPayload;
 };
 
+const SPONSOR_TYPE_NORMAL = "normal_sponsorship";
+const SPONSOR_TYPE_KIND = "sponsorship_in_kind";
+const SPONSOR_TYPE_STORY = "Story";
+
+function normalizeSponsorType(value?: string | null) {
+  const raw = String(value ?? "").trim().toLowerCase();
+
+  if (
+    raw === "story" ||
+    raw === "sponsor_story" ||
+    raw === "sponsor-story"
+  ) {
+    return SPONSOR_TYPE_STORY;
+  }
+
+  if (
+    raw === "sponsorship_in_kind" ||
+    raw === "sponsorship in kind" ||
+    raw === "in_kind" ||
+    raw === "inkind"
+  ) {
+    return SPONSOR_TYPE_KIND;
+  }
+
+  return SPONSOR_TYPE_NORMAL;
+}
+
+function isStorySponsorType(value?: string | null) {
+  return normalizeSponsorType(value) === SPONSOR_TYPE_STORY;
+}
+
 function getEmptySponsorForm(): SponsorForm {
   return {
     sponsor_name: "",
     contact_name: "",
     email: "",
     phone: "",
-    sponsorship_type: "normal_sponsorship",
+    sponsorship_type: SPONSOR_TYPE_NORMAL,
     website: "",
     story: "",
     notes: "",
@@ -115,16 +146,22 @@ function slugify(value: string) {
 }
 
 function sponsorPayloadToForm(sponsor?: SponsorPayload | null): SponsorForm {
+  const normalizedType = normalizeSponsorType(sponsor?.sponsorship_type);
+
   return {
     sponsor_name: sponsor?.sponsor_name ?? "",
     contact_name: sponsor?.contact_name ?? "",
     email: sponsor?.email ?? "",
     phone: sponsor?.phone ?? "",
-    sponsorship_type: sponsor?.sponsorship_type ?? "normal_sponsorship",
+    sponsorship_type: normalizedType,
     website: sponsor?.website ?? "",
     story: sponsor?.story ?? "",
     notes: sponsor?.notes ?? "",
-    slug: sponsor?.slug ?? "",
+    slug:
+      sponsor?.slug?.trim() ||
+      (normalizedType === SPONSOR_TYPE_STORY
+        ? slugify(sponsor?.sponsor_name ?? "")
+        : ""),
     address_line1: sponsor?.address_line1 ?? "",
     address_line2: sponsor?.address_line2 ?? "",
     city: sponsor?.city ?? "",
@@ -150,9 +187,11 @@ function formatSubmittedAt(value?: string | null) {
 }
 
 function getSponsorTypeLabel(value?: string | null) {
-  if (value === "normal_sponsorship") return "Normal Sponsorship";
-  if (value === "sponsorship_in_kind") return "Sponsorship in Kind";
-  if (value === "Story") return "Story";
+  const normalizedType = normalizeSponsorType(value);
+
+  if (normalizedType === SPONSOR_TYPE_NORMAL) return "Normal Sponsorship";
+  if (normalizedType === SPONSOR_TYPE_KIND) return "Sponsorship in Kind";
+  if (normalizedType === SPONSOR_TYPE_STORY) return "Story";
   return value ?? "";
 }
 
@@ -188,8 +227,8 @@ export default function AdminSponsorsPage() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  const isStoryType = createForm.sponsorship_type === "Story";
-  const isEditStoryType = editForm.sponsorship_type === "Story";
+  const isStoryType = isStorySponsorType(createForm.sponsorship_type);
+  const isEditStoryType = isStorySponsorType(editForm.sponsorship_type);
 
   useEffect(() => {
     async function loadSponsors() {
@@ -207,7 +246,12 @@ export default function AdminSponsorsPage() {
           throw new Error(data.error || "Failed to load sponsors");
         }
 
-        setSponsors(data.sponsors ?? []);
+        setSponsors(
+          (data.sponsors ?? []).map((sponsor) => ({
+            ...sponsor,
+            sponsorship_type: normalizeSponsorType(sponsor.sponsorship_type),
+          }))
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load sponsors");
       } finally {
@@ -231,9 +275,7 @@ export default function AdminSponsorsPage() {
   }, [logoFile]);
 
   useEffect(() => {
-    if (!editLogoFile) {
-      return;
-    }
+    if (!editLogoFile) return;
 
     const objectUrl = URL.createObjectURL(editLogoFile);
     setEditLogoPreview(objectUrl);
@@ -338,8 +380,20 @@ export default function AdminSponsorsPage() {
     setCreateForm((current) => {
       const next = { ...current, [key]: value };
 
-      if (key === "sponsor_name" && !current.slug.trim()) {
-        next.slug = slugify(String(value));
+      if (key === "sponsorship_type") {
+        next.sponsorship_type = normalizeSponsorType(String(value));
+        if (normalizeSponsorType(String(value)) !== SPONSOR_TYPE_STORY) {
+          next.slug = "";
+        } else if (!next.slug.trim() && next.sponsor_name.trim()) {
+          next.slug = slugify(next.sponsor_name);
+        }
+      }
+
+      if (key === "sponsor_name") {
+        const nextName = String(value);
+        if (isStorySponsorType(next.sponsorship_type) && !current.slug.trim()) {
+          next.slug = slugify(nextName);
+        }
       }
 
       return next;
@@ -353,8 +407,20 @@ export default function AdminSponsorsPage() {
     setEditForm((current) => {
       const next = { ...current, [key]: value };
 
-      if (key === "sponsor_name" && !current.slug.trim()) {
-        next.slug = slugify(String(value));
+      if (key === "sponsorship_type") {
+        next.sponsorship_type = normalizeSponsorType(String(value));
+        if (normalizeSponsorType(String(value)) !== SPONSOR_TYPE_STORY) {
+          next.slug = "";
+        } else if (!next.slug.trim() && next.sponsor_name.trim()) {
+          next.slug = slugify(next.sponsor_name);
+        }
+      }
+
+      if (key === "sponsor_name") {
+        const nextName = String(value);
+        if (isStorySponsorType(next.sponsorship_type) && !current.slug.trim()) {
+          next.slug = slugify(nextName);
+        }
       }
 
       return next;
@@ -373,7 +439,7 @@ export default function AdminSponsorsPage() {
       const contactName = createForm.contact_name.trim();
       const email = createForm.email.trim().toLowerCase();
       const phone = createForm.phone.trim();
-      const sponsorType = createForm.sponsorship_type.trim();
+      const sponsorType = normalizeSponsorType(createForm.sponsorship_type);
       const website = createForm.website.trim();
       const story = createForm.story.trim();
       const notes = createForm.notes.trim();
@@ -384,9 +450,9 @@ export default function AdminSponsorsPage() {
       const postcode = createForm.postcode.trim();
       const country = createForm.country.trim();
       const slug =
-        isStoryType && createForm.slug.trim()
+        sponsorType === SPONSOR_TYPE_STORY && createForm.slug.trim()
           ? createForm.slug.trim()
-          : isStoryType
+          : sponsorType === SPONSOR_TYPE_STORY
             ? slugify(sponsorName)
             : "";
 
@@ -394,7 +460,7 @@ export default function AdminSponsorsPage() {
       if (!contactName) throw new Error("Contact name is required.");
       if (!email) throw new Error("Email is required.");
       if (!sponsorType) throw new Error("Sponsorship type is required.");
-      if (isStoryType && !story) {
+      if (sponsorType === SPONSOR_TYPE_STORY && !story) {
         throw new Error("Story is required for Story sponsors.");
       }
 
@@ -434,7 +500,9 @@ export default function AdminSponsorsPage() {
         ? {
             id: String(data.sponsor.id),
             sponsor_name: data.sponsor.sponsor_name ?? sponsorName,
-            sponsorship_type: data.sponsor.sponsorship_type ?? sponsorType,
+            sponsorship_type: normalizeSponsorType(
+              data.sponsor.sponsorship_type ?? sponsorType
+            ),
             logo_link: data.sponsor.logo_link ?? null,
             story: data.sponsor.story ?? (story || null),
             slug: data.sponsor.slug ?? (slug || null),
@@ -484,7 +552,9 @@ export default function AdminSponsorsPage() {
         throw new Error(data.error || "Failed to load sponsor details");
       }
 
-      setEditForm(sponsorPayloadToForm(data.sponsor));
+      const mappedForm = sponsorPayloadToForm(data.sponsor);
+
+      setEditForm(mappedForm);
       setEditLogoFile(null);
       setEditLogoPreview(data.sponsor.logo_link ?? null);
     } catch (err) {
@@ -515,7 +585,7 @@ export default function AdminSponsorsPage() {
       const contactName = editForm.contact_name.trim();
       const email = editForm.email.trim().toLowerCase();
       const phone = editForm.phone.trim();
-      const sponsorType = editForm.sponsorship_type.trim();
+      const sponsorType = normalizeSponsorType(editForm.sponsorship_type);
       const website = editForm.website.trim();
       const story = editForm.story.trim();
       const notes = editForm.notes.trim();
@@ -526,9 +596,9 @@ export default function AdminSponsorsPage() {
       const postcode = editForm.postcode.trim();
       const country = editForm.country.trim();
       const slug =
-        isEditStoryType && editForm.slug.trim()
+        sponsorType === SPONSOR_TYPE_STORY && editForm.slug.trim()
           ? editForm.slug.trim()
-          : isEditStoryType
+          : sponsorType === SPONSOR_TYPE_STORY
             ? slugify(sponsorName)
             : "";
 
@@ -536,7 +606,7 @@ export default function AdminSponsorsPage() {
       if (!contactName) throw new Error("Contact name is required.");
       if (!email) throw new Error("Email is required.");
       if (!sponsorType) throw new Error("Sponsorship type is required.");
-      if (isEditStoryType && !story) {
+      if (sponsorType === SPONSOR_TYPE_STORY && !story) {
         throw new Error("Story is required for Story sponsors.");
       }
 
@@ -580,7 +650,9 @@ export default function AdminSponsorsPage() {
             ? {
                 ...item,
                 sponsor_name: returned?.sponsor_name ?? sponsorName,
-                sponsorship_type: returned?.sponsorship_type ?? sponsorType,
+                sponsorship_type: normalizeSponsorType(
+                  returned?.sponsorship_type ?? sponsorType
+                ),
                 logo_link:
                   returned?.logo_link ??
                   (editLogoFile ? editLogoPreview : item.logo_link),
@@ -885,10 +957,7 @@ export default function AdminSponsorsPage() {
         { wch: 14 },
       ];
 
-      worksheet["!rows"] = [
-        { hpt: 24 },
-        ...rows.map(() => ({ hpt: 22 })),
-      ];
+      worksheet["!rows"] = [{ hpt: 24 }, ...rows.map(() => ({ hpt: 22 }))];
 
       worksheet["!autofilter"] = {
         ref: `A1:R${rows.length + 1}`,
@@ -1176,7 +1245,7 @@ export default function AdminSponsorsPage() {
                           {sponsor.sponsor_name}
                         </h2>
                         <p className="truncate text-sm text-white/70">
-                          {sponsor.sponsorship_type || "Sponsor"}
+                          {getSponsorTypeLabel(sponsor.sponsorship_type) || "Sponsor"}
                         </p>
                         <p className="mt-1 text-xs text-white/50">
                           Drag to reorder
@@ -1326,13 +1395,13 @@ export default function AdminSponsorsPage() {
                     }
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none"
                   >
-                    <option value="normal_sponsorship" className="text-black">
+                    <option value={SPONSOR_TYPE_NORMAL} className="text-black">
                       Normal Sponsorship
                     </option>
-                    <option value="sponsorship_in_kind" className="text-black">
+                    <option value={SPONSOR_TYPE_KIND} className="text-black">
                       Sponsorship in Kind
                     </option>
-                    <option value="Story" className="text-black">
+                    <option value={SPONSOR_TYPE_STORY} className="text-black">
                       Story
                     </option>
                   </select>
@@ -1653,13 +1722,13 @@ export default function AdminSponsorsPage() {
                       }
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none"
                     >
-                      <option value="normal_sponsorship" className="text-black">
+                      <option value={SPONSOR_TYPE_NORMAL} className="text-black">
                         Normal Sponsorship
                       </option>
-                      <option value="sponsorship_in_kind" className="text-black">
+                      <option value={SPONSOR_TYPE_KIND} className="text-black">
                         Sponsorship in Kind
                       </option>
-                      <option value="Story" className="text-black">
+                      <option value={SPONSOR_TYPE_STORY} className="text-black">
                         Story
                       </option>
                     </select>

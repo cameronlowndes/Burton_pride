@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-
-export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
@@ -9,166 +7,26 @@ type RouteContext = {
   }>;
 };
 
-async function uploadSponsorLogo(file: File, sponsorId: string) {
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  const originalName = file.name || "logo";
-  const extension = originalName.includes(".")
-    ? originalName.split(".").pop()?.toLowerCase() || "png"
-    : "png";
-
-  const safeExtension = extension.replace(/[^a-z0-9]/g, "") || "png";
-  const filePath = `sponsors/${sponsorId}/${Date.now()}-logo.${safeExtension}`;
-
-  const { error: uploadError } = await supabaseAdmin.storage
-    .from("sponsor-logos")
-    .upload(filePath, buffer, {
-      contentType: file.type || "image/png",
-      upsert: true,
-    });
-
-  if (uploadError) {
-    throw new Error(uploadError.message || "Failed to upload logo");
-  }
-
-  const { data: publicUrlData } = supabaseAdmin.storage
-    .from("sponsor-logos")
-    .getPublicUrl(filePath);
-
-  return publicUrlData.publicUrl;
-}
-
-export async function GET(_req: Request, context: RouteContext) {
+export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
 
-    const { data, error } = await supabaseAdmin
-      .from("sponsor_applications")
-      .select(
-        `
-          id,
-          sponsor_name,
-          contact_name,
-          email,
-          phone,
-          sponsorship_type,
-          logo_link,
-          message
-        `
-      )
-      .eq("id", id)
-      .single();
-
-    if (error || !data) {
+    if (!id) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: error?.message || "Sponsor not found",
-        },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      sponsor: data,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "Something went wrong",
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PUT(req: Request, context: RouteContext) {
-  try {
-    const { id } = await context.params;
-    const formData = await req.formData();
-
-    const sponsor_name = String(formData.get("sponsor_name") || "").trim();
-    const contact_name = String(formData.get("contact_name") || "").trim();
-    const email = String(formData.get("email") || "").trim().toLowerCase();
-    const phone = String(formData.get("phone") || "").trim();
-    const sponsorship_type = String(formData.get("sponsorship_type") || "").trim();
-    const message = String(formData.get("message") || "").trim();
-    const logo = formData.get("logo");
-
-    if (!sponsor_name) {
-      return NextResponse.json(
-        { ok: false, error: "Sponsor name is required" },
+        { ok: false, error: "Sponsor id is required." },
         { status: 400 }
       );
-    }
-
-    if (!contact_name) {
-      return NextResponse.json(
-        { ok: false, error: "Contact name is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!email) {
-      return NextResponse.json(
-        { ok: false, error: "Email is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!sponsorship_type) {
-      return NextResponse.json(
-        { ok: false, error: "Sponsorship type is required" },
-        { status: 400 }
-      );
-    }
-
-    let logo_link: string | undefined;
-
-    if (logo instanceof File && logo.size > 0) {
-      logo_link = await uploadSponsorLogo(logo, id);
-    }
-
-    const updates: Record<string, unknown> = {
-      sponsor_name,
-      contact_name,
-      email,
-      phone: phone || null,
-      sponsorship_type,
-      message: message || null,
-    };
-
-    if (logo_link) {
-      updates.logo_link = logo_link;
     }
 
     const { data, error } = await supabaseAdmin
       .from("sponsor_applications")
-      .update(updates)
+      .select("*")
       .eq("id", id)
-      .select(
-        `
-          id,
-          sponsor_name,
-          contact_name,
-          email,
-          phone,
-          sponsorship_type,
-          logo_link,
-          message
-        `
-      )
       .single();
 
     if (error) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: error.message || "Failed to update sponsor",
-        },
+        { ok: false, error: error.message || "Failed to load sponsor." },
         { status: 500 }
       );
     }
@@ -181,14 +39,82 @@ export async function PUT(req: Request, context: RouteContext) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Something went wrong",
+        error: error instanceof Error ? error.message : "Unexpected error.",
       },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(_req: Request, context: RouteContext) {
+export async function PUT(req: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    const formData = await req.formData();
+
+    const sponsor_name = String(formData.get("sponsor_name") ?? "").trim();
+    const contact_name = String(formData.get("contact_name") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const phone = String(formData.get("phone") ?? "").trim();
+    const sponsorship_type = String(formData.get("sponsorship_type") ?? "").trim();
+    const website = String(formData.get("website") ?? "").trim();
+    const story = String(formData.get("story") ?? "").trim();
+    const notes = String(formData.get("notes") ?? "").trim();
+    const slug = String(formData.get("slug") ?? "").trim();
+    const address_line1 = String(formData.get("address_line1") ?? "").trim();
+    const address_line2 = String(formData.get("address_line2") ?? "").trim();
+    const city = String(formData.get("city") ?? "").trim();
+    const county = String(formData.get("county") ?? "").trim();
+    const postcode = String(formData.get("postcode") ?? "").trim();
+    const country = String(formData.get("country") ?? "").trim();
+
+    const updatePayload = {
+      sponsor_name,
+      contact_name,
+      email,
+      phone: phone || null,
+      sponsorship_type: sponsorship_type || null,
+      website: website || null,
+      story: story || null,
+      notes: notes || null,
+      slug: slug || null,
+      address_line1: address_line1 || null,
+      address_line2: address_line2 || null,
+      city: city || null,
+      county: county || null,
+      postcode: postcode || null,
+      country: country || "United Kingdom",
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from("sponsor_applications")
+      .update(updatePayload)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: error.message || "Failed to update sponsor." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      sponsor: data,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : "Unexpected error.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(_req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
 
@@ -199,10 +125,7 @@ export async function DELETE(_req: Request, context: RouteContext) {
 
     if (error) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: error.message || "Failed to delete sponsor application",
-        },
+        { ok: false, error: error.message || "Failed to delete sponsor." },
         { status: 500 }
       );
     }
@@ -212,7 +135,7 @@ export async function DELETE(_req: Request, context: RouteContext) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Something went wrong",
+        error: error instanceof Error ? error.message : "Unexpected error.",
       },
       { status: 500 }
     );

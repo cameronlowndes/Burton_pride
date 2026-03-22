@@ -141,9 +141,7 @@ export default function AdminSidebar() {
 
               {eventsOpenMobile && (
                 <div className="ml-2 pl-3 border-l border-white/10 space-y-1">
-                  <div className="px-2 pt-2 pb-1 text-xs uppercase tracking-wider text-white/60">
-                    Windows of Hope
-                  </div>
+                 
 
                   <MobileSubLink
                     href="/Admin/Dashboard/Windows-showcase/Entries"
@@ -155,6 +153,11 @@ export default function AdminSidebar() {
                     label="Window Votes"
                     onNavigate={() => setOpen(false)}
                   />
+                  <MobileSubLink
+                    href="/Admin/Dashboard/Events/Countdown"
+                    label="Countdown"
+                    onNavigate={() => setOpen(false)}
+                  />
                 </div>
               )}
             </div>
@@ -163,6 +166,33 @@ export default function AdminSidebar() {
                 label="Forms"
                 onNavigate={() => setOpen(false)}
               />
+              <MobileLink
+                href="/Admin/Dashboard/CommitteeTeam"
+                label="Committee Team"
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileLink
+                href="/Admin/Dashboard/PageEditor"
+                label="Page Editor"
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileLink
+                href="/Admin/Dashboard/Stripe"
+                label="Stripe"
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileLink
+                href="/Admin/Dashboard/profile"
+                label="Profile"
+                onNavigate={() => setOpen(false)}
+              />
+              <MobileLink
+                href="/Admin/Dashboard/settings"
+                label="Settings"
+                onNavigate={() => setOpen(false)}
+              />  
+              
+
             
 
             {/* Logout */}
@@ -246,6 +276,11 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
           </div>
         )}
         <SideNavLink href="/Admin/Dashboard/Forms" label="Forms" />
+        <SideNavLink href="/Admin/Dashboard/CommitteeTeam" label="Committee Team" />
+        <SideNavLink href="/Admin/Dashboard/PageEditor" label="Page Editor" />
+          <SideNavLink href="/Admin/Dashboard/Stripe" label="Stripe" />
+            <SideNavLink href="/Admin/Dashboard/profile" label="Profile" />
+              <SideNavLink href="/Admin/Dashboard/settings" label="Settings" />
 
         <div className="pt-6 mt-6 border-t border-white/20">
           <button
