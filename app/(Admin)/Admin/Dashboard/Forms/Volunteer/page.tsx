@@ -28,6 +28,13 @@ type ApiResponse = {
   volunteers?: VolunteerApplication[];
 };
 
+type DeleteModalState = {
+  open: boolean;
+  mode: "single" | "all";
+  id?: string;
+  name?: string;
+};
+
 function formatDate(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -91,7 +98,12 @@ export default function VolunteerAdminPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
+  const [deleteModal, setDeleteModal] = useState<DeleteModalState>({
+    open: false,
+    mode: "single",
+  });
+  const [confirmDeleting, setConfirmDeleting] = useState(false);
 
   const unreadItems = useMemo(() => items.filter((item) => !item.is_read), [items]);
   const readItems = useMemo(() => items.filter((item) => item.is_read), [items]);
@@ -256,61 +268,84 @@ export default function VolunteerAdminPage() {
     }
   }
 
-  async function deleteOne(id: string) {
-    const confirmed = window.confirm(
-      "Delete this volunteer application? This cannot be undone."
-    );
-
-    if (!confirmed) return;
-
-    const previousItems = items;
-    setBusyId(id);
-    setError(null);
-
-    const remaining = items.filter((entry) => entry.id !== id);
-    setItems(remaining);
-
-    if (selectedId === id) {
-      setSelectedId(remaining[0]?.id ?? null);
-    }
-
-    try {
-      const res = await fetch(`/api/admin/volunteers/${id}`, {
-        method: "DELETE",
-      });
-
-      const data = await parseJsonResponse(res);
-
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to delete volunteer application");
-      }
-    } catch (err) {
-      setItems(previousItems);
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setBusyId(null);
-    }
+  function openDeleteSingle(id: string, name: string) {
+    setDeleteModal({
+      open: true,
+      mode: "single",
+      id,
+      name,
+    });
   }
 
-  async function handleDeleteAll() {
+  function openDeleteAll() {
+    setDeleteModal({
+      open: true,
+      mode: "all",
+    });
+  }
+
+  function closeDeleteModal() {
+    if (confirmDeleting) return;
+    setDeleteModal({
+      open: false,
+      mode: "single",
+    });
+  }
+
+  async function confirmDelete() {
     setError(null);
 
     try {
-      const res = await fetch("/api/admin/volunteers/delete-all", {
-        method: "DELETE",
-      });
+      setConfirmDeleting(true);
 
-      const data = await parseJsonResponse(res);
+      if (deleteModal.mode === "single") {
+        const id = deleteModal.id;
+        if (!id) {
+          throw new Error("Volunteer id is missing");
+        }
 
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Failed to delete all volunteer applications");
+        const previousItems = items;
+        const remaining = items.filter((entry) => entry.id !== id);
+
+        setItems(remaining);
+
+        if (selectedId === id) {
+          setSelectedId(remaining[0]?.id ?? null);
+        }
+
+        const res = await fetch(`/api/admin/volunteers/${id}`, {
+          method: "DELETE",
+        });
+
+        const data = await parseJsonResponse(res);
+
+        if (!res.ok || !data?.ok) {
+          setItems(previousItems);
+          throw new Error(data?.error || "Failed to delete volunteer application");
+        }
+      } else {
+        const res = await fetch("/api/admin/volunteers/delete-all", {
+          method: "DELETE",
+        });
+
+        const data = await parseJsonResponse(res);
+
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || "Failed to delete all volunteer applications");
+        }
+
+        setItems([]);
+        setSelectedId(null);
       }
 
-      setItems([]);
-      setSelectedId(null);
-      setConfirmDeleteAll(false);
+      setDeleteModal({
+        open: false,
+        mode: "single",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setConfirmDeleting(false);
     }
   }
 
@@ -385,8 +420,9 @@ export default function VolunteerAdminPage() {
 
                       <button
                         type="button"
-                        onClick={() => void deleteOne(item.id)}
-                        className="w-full rounded-xl bg-pink-500/30 px-3 py-2 text-sm font-semibold text-pink-50 hover:bg-pink-500/40 sm:w-auto"
+                        onClick={() => openDeleteSingle(item.id, item.full_name)}
+                        disabled={confirmDeleting}
+                        className="w-full rounded-xl bg-pink-500/30 px-3 py-2 text-sm font-semibold text-pink-50 hover:bg-pink-500/40 disabled:opacity-50 sm:w-auto"
                       >
                         Delete
                       </button>
@@ -418,7 +454,7 @@ export default function VolunteerAdminPage() {
             <button
               type="button"
               onClick={() => void fetchItems(true)}
-              disabled={refreshing || loading}
+              disabled={refreshing || loading || confirmDeleting}
               className="w-full rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 disabled:opacity-60 sm:w-auto"
             >
               {refreshing ? "Refreshing..." : "Refresh"}
@@ -431,32 +467,14 @@ export default function VolunteerAdminPage() {
               ← Form List
             </Link>
 
-            {!confirmDeleteAll ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteAll(true)}
-                className="w-full rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 sm:w-auto"
-              >
-                Delete All
-              </button>
-            ) : (
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => void handleDeleteAll()}
-                  className="w-full rounded-2xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 sm:w-auto"
-                >
-                  Confirm Delete All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDeleteAll(false)}
-                  className="w-full rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white hover:bg-white/20 sm:w-auto"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={openDeleteAll}
+              disabled={confirmDeleting || items.length === 0}
+              className="w-full rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 disabled:opacity-60 sm:w-auto"
+            >
+              Delete All
+            </button>
           </div>
         </div>
 
@@ -483,7 +501,7 @@ export default function VolunteerAdminPage() {
                   {!selectedItem.is_read ? (
                     <button
                       type="button"
-                      disabled={busyId === selectedItem.id}
+                      disabled={busyId === selectedItem.id || confirmDeleting}
                       onClick={() => void markRead(selectedItem.id)}
                       className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -492,7 +510,7 @@ export default function VolunteerAdminPage() {
                   ) : (
                     <button
                       type="button"
-                      disabled={busyId === selectedItem.id}
+                      disabled={busyId === selectedItem.id || confirmDeleting}
                       onClick={() => void markUnread(selectedItem.id)}
                       className="rounded-2xl bg-white/15 px-4 py-2.5 font-semibold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                     >
@@ -509,8 +527,10 @@ export default function VolunteerAdminPage() {
 
                   <button
                     type="button"
-                    disabled={busyId === selectedItem.id}
-                    onClick={() => void deleteOne(selectedItem.id)}
+                    disabled={confirmDeleting}
+                    onClick={() =>
+                      openDeleteSingle(selectedItem.id, selectedItem.full_name)
+                    }
                     className="rounded-2xl bg-red-600 px-4 py-2.5 font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                   >
                     Delete
@@ -611,7 +631,8 @@ export default function VolunteerAdminPage() {
                     disabled={
                       disableStatusButtons ||
                       busyId === selectedItem.id ||
-                      selectedItem.status === "new"
+                      selectedItem.status === "new" ||
+                      confirmDeleting
                     }
                     onClick={() => void updateStatus(selectedItem.id, "new")}
                     className="rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -624,7 +645,8 @@ export default function VolunteerAdminPage() {
                     disabled={
                       disableStatusButtons ||
                       busyId === selectedItem.id ||
-                      selectedItem.status === "in_progress"
+                      selectedItem.status === "in_progress" ||
+                      confirmDeleting
                     }
                     onClick={() => void updateStatus(selectedItem.id, "in_progress")}
                     className="rounded-2xl bg-yellow-500 px-4 py-3 font-semibold text-white hover:bg-yellow-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -637,7 +659,8 @@ export default function VolunteerAdminPage() {
                     disabled={
                       disableStatusButtons ||
                       busyId === selectedItem.id ||
-                      selectedItem.status === "done"
+                      selectedItem.status === "done" ||
+                      confirmDeleting
                     }
                     onClick={() => void updateStatus(selectedItem.id, "done")}
                     className="rounded-2xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -650,6 +673,74 @@ export default function VolunteerAdminPage() {
           </div>
         </div>
       </div>
+
+      {deleteModal.open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-red-400/20 bg-[#0b1220] shadow-2xl">
+            <div className="border-b border-white/10 px-6 py-5">
+              <h2 className="text-2xl font-bold text-white">
+                {deleteModal.mode === "single"
+                  ? "Delete Volunteer Application"
+                  : "Delete All Volunteer Applications"}
+              </h2>
+              <p className="mt-2 text-sm text-white/70">
+                {deleteModal.mode === "single"
+                  ? "This will permanently remove this volunteer application."
+                  : "This will permanently remove all volunteer applications."}
+              </p>
+            </div>
+
+            <div className="px-6 py-6">
+              <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4">
+                <p className="text-sm font-semibold text-red-100">
+                  {deleteModal.mode === "single"
+                    ? "You are about to delete:"
+                    : "You are about to delete everything:"}
+                </p>
+
+                <div className="mt-2 text-white">
+                  {deleteModal.mode === "single" ? (
+                    <span className="font-semibold">{deleteModal.name || "Volunteer"}</span>
+                  ) : (
+                    <span>
+                      <span className="font-semibold">{items.length}</span> volunteer
+                      application{items.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-3 text-sm text-red-200">This cannot be undone.</p>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeDeleteModal}
+                  disabled={confirmDeleting}
+                  className="rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white hover:bg-white/15 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void confirmDelete()}
+                  disabled={confirmDeleting}
+                  className="rounded-2xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {confirmDeleting
+                    ? deleteModal.mode === "single"
+                      ? "Deleting..."
+                      : "Deleting All..."
+                    : deleteModal.mode === "single"
+                    ? "Delete"
+                    : "Delete All"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
