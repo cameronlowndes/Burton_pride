@@ -45,14 +45,14 @@ export default function ContactContent() {
         <p className="text-lg mb-6">
           Or message us directly at{' '}
           <a 
-            href="mailto:prideburton@gmail.com" 
+            href="mailto:Info@burtonpride.co.uk" 
             className="underline font-semibold hover:text-yellow-300 cursor-pointer"
           >
-            prideburton@gmail.com
+           Info@burtonpride.co.uk
           </a>.
         </p>
         <a
-          href="mailto:prideburton@gmail.com?subject=Inquiry&body=Hello, I would like to inquire about..."
+          href="mailto:Info@burtonpride.co.uk?subject=Inquiry&body=Hello, I would like to inquire about..."
           className="bg-white text-pink-600 px-8 py-4 rounded-full font-semibold text-lg shadow-lg hover:bg-gray-100 transition duration-300 ease-in-out mb-10 inline-block cursor-pointer"
           aria-label="Send an email to Burton Pride"
         >

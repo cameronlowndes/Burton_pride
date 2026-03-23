@@ -106,10 +106,10 @@ export default function BurtonPrideClient2026() {
           <p>
             Questions? Contact us at{" "}
             <a
-              href="mailto:prideburton@gmail.com"
+              href="mailto:Info@burtonpride.co.uk"
               className="underline text-yellow-300"
             >
-              prideburton@gmail.com
+              Info@burtonpride.co.uk
             </a>
           </p>
         </div>

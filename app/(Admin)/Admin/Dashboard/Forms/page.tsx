@@ -48,6 +48,14 @@ export default function AdminFormsDashboardPage() {
         adminHref: "/Admin/Dashboard/Windows-showcase/Votes",
         badge: "Live",
       },
+      {
+        key: "FeedBack",
+        title: "Feedback form",
+        desc: "General feedback submissions.",
+        href: "/FeedBack",
+        adminHref: "/Admin/Dashboard/Forms/Feedback",
+        badge: "Live",
+      },
     ],
     []
   );

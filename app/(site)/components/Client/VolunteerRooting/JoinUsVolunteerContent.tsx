@@ -44,7 +44,7 @@ export default function JoinUsVolunteerContent() {
           <p>Nearly all tasks that Burton Pride asks its volunteers to take on require interaction with the public, including potential contact with children and vulnerable adults.</p>
           <p>Your trust is important to us. Burton Pride requires this information to comply with legal obligations. Your actions as a volunteer significantly impact our operations and the lives of those we serve.</p>
           <p>Rest assured, Burton Pride C.I.C. values your privacy. We will only share your information if requested by the appropriate authority.</p>
-          <p>If you have any questions, please don’t hesitate to contact us at <a href="mailto:prideburton@gmail.com" className="underline text-yellow-300">prideburton@gmail.com</a>. We would love to hear from you.</p>
+          <p>If you have any questions, please don’t hesitate to contact us at <a href="mailto:Info@burtonpride.co.uk" className="underline text-yellow-300">Info@burtonpride.co.uk</a>. We would love to hear from you.</p>
         </div>
 
         {/* Volunteer Form (Right) */}

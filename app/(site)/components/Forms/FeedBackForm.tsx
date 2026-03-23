@@ -1,136 +1,198 @@
 'use client';
-import { useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { useForm, ValidationError } from '@formspree/react';
-import Image from 'next/image';
 
-export default function FeedBack() {
-  const [state, handleSubmit] = useForm('xjkaqgyr');
+import { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 
-  // Redirect to Thank You page on success
-  useEffect(() => {
-    if (state.succeeded) {
-      window.location.href = '/ThankYou'; // <-- your thank you page path
+type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
+
+type ApiResponse = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+};
+
+const emptyForm = {
+  name: '',
+  email: '',
+  message: '',
+};
+
+export default function FeedBackForm() {
+  const [form, setForm] = useState(emptyForm);
+  const [submitState, setSubmitState] = useState<SubmitState>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+
+  function updateField(
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) {
+    const { name, value } = e.target;
+
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  }
+
+  function resetForm() {
+    setForm(emptyForm);
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSubmitState('submitting');
+    setError(null);
+
+    if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
+      setSubmitState('error');
+      setError('Please complete all fields before submitting.');
+      return;
     }
-  }, [state.succeeded]);
 
-  const containerVariants = {
-    hidden: {},
-    visible: { transition: { staggerChildren: 0.3 } },
-  };
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim().toLowerCase(),
+          message: form.message.trim(),
+        }),
+      });
 
-  const fadeUpVariant = {
-    hidden: { opacity: 0, y: 40 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: 'easeOut' } },
-  };
+      const text = await res.text();
+
+      let data: ApiResponse = { ok: false, error: 'Unknown error' };
+
+      try {
+        data = text ? JSON.parse(text) : { ok: false, error: 'Empty response' };
+      } catch {
+        throw new Error('Server returned invalid JSON');
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to send feedback');
+      }
+
+      setSubmitState('success');
+      setShowSuccessToast(true);
+      resetForm();
+
+      setTimeout(() => {
+        setShowSuccessToast(false);
+        setSubmitState('idle');
+      }, 4500);
+    } catch (err) {
+      setSubmitState('error');
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    }
+  }
 
   return (
-    <motion.div
-      className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24"
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-    >
-      {/* Hero Section */}
-      <motion.header
-        className="text-center flex flex-col items-center gap-6 mt-16"
-        variants={fadeUpVariant}
-      >
-        <motion.div
-          className="rounded-full overflow-hidden shadow-2xl shadow-pink-400/50 border-4 border-white"
-          style={{ width: 160, height: 160 }}
-        >
-          <Image
-            src="/image/Logo.png"
-            alt="Burton Pride Logo"
-            width={160}
-            height={160}
-            className="rounded-full object-cover"
+    <>
+      <AnimatePresence>
+        {showSuccessToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -16, scale: 0.96 }}
+            transition={{ duration: 0.25 }}
+            className="pointer-events-none fixed inset-0 z-[9999] flex items-start justify-center px-4 pt-6 sm:justify-end sm:pr-6"
+          >
+            <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-green-300/30 bg-green-600/95 p-4 text-white shadow-2xl backdrop-blur-md">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-lg font-bold">
+                  ✓
+                </div>
+
+                <div className="flex-1">
+                  <h4 className="text-base font-bold">Feedback sent successfully</h4>
+                  <p className="mt-1 text-sm text-white/90">
+                    Thank you for your feedback. We have received your message.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSuccessToast(false)}
+                  className="rounded-md px-2 py-1 text-white/80 transition hover:bg-white/10 hover:text-white"
+                  aria-label="Close message"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <form onSubmit={onSubmit} className="relative z-10 flex flex-col gap-6">
+        <div>
+          <label htmlFor="name" className="mb-2 block font-semibold">
+            Full Name
+          </label>
+          <input
+            id="name"
+            type="text"
+            name="name"
+            required
+            value={form.name}
+            onChange={updateField}
+            className="w-full rounded-xl border-2 border-pink-400 bg-white p-4 text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            placeholder="Your full name"
           />
-        </motion.div>
-
-        <h1 className="text-4xl sm:text-6xl font-bold drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]">
-          Burton Pride Feedback
-        </h1>
-        <p className="text-lg sm:text-xl max-w-2xl">
-          We’d love to hear your thoughts about this year’s Pride!  
-          Your feedback helps us make next year’s celebration even brighter 🌈
-        </p>
-      </motion.header>
-
-      {/* Info + Form Section */}
-      <motion.section
-        className="mt-12 w-full max-w-6xl flex flex-col md:flex-row gap-10"
-        variants={fadeUpVariant}
-      >
-        {/* Info Card */}
-        <div className="md:w-1/2 bg-white/20 p-6 rounded-2xl shadow-2xl text-white text-lg space-y-4">
-          <h2 className="text-2xl font-bold mb-2 text-yellow-300">Why Your Feedback Matters 🌟</h2>
-          <p>
-            Every year, Burton Pride grows thanks to your voice. Your feedback helps us improve accessibility, inclusivity, and the overall experience for everyone attending.
-          </p>
-          <p>
-            Whether it’s your first Pride or your tenth, we value your honest thoughts. Tell us what you loved, what could be better, or any new ideas you’d like to see next year.
-          </p>
-          <p>
-            Your feedback shapes the future of Burton Pride — it helps us celebrate diversity, create safe spaces, and keep spreading love in our community.
-          </p>
-          <p>
-            Got more to say? Email us anytime at{" "}
-            <a href="mailto:prideburton@gmail.com" className="underline text-yellow-300">
-              prideburton@gmail.com
-            </a>{" "}
-            — we’d love to hear from you!
-          </p>
         </div>
 
-        {/* Feedback Form Card */}
-        <motion.div
-          className="md:w-1/2 bg-white/80 backdrop-blur-sm border-4 border-white/50 rounded-2xl shadow-2xl p-8 sm:p-10 text-black relative overflow-hidden hover:shadow-pink-400/70 transition-all duration-300"
-          variants={fadeUpVariant}
+        <div>
+          <label htmlFor="email" className="mb-2 block font-semibold">
+            Email Address
+          </label>
+          <input
+            id="email"
+            type="email"
+            name="email"
+            required
+            value={form.email}
+            onChange={updateField}
+            className="w-full rounded-xl border-2 border-pink-400 bg-white p-4 text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            placeholder="you@example.com"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="message" className="mb-2 block font-semibold">
+            Your Feedback
+          </label>
+          <textarea
+            id="message"
+            name="message"
+            rows={6}
+            required
+            value={form.message}
+            onChange={updateField}
+            className="w-full rounded-xl border-2 border-purple-400 bg-white p-4 text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            placeholder="Share your thoughts about Burton Pride..."
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-300/40 bg-red-500/15 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <motion.button
+          type="submit"
+          disabled={submitState === 'submitting'}
+          whileHover={{ scale: submitState === 'submitting' ? 1 : 1.05 }}
+          whileTap={{ scale: submitState === 'submitting' ? 1 : 0.95 }}
+          className="rounded-full bg-gradient-to-r from-pink-500 to-purple-600 px-6 py-3 font-bold text-white shadow-lg transition-all duration-300 hover:from-pink-400 hover:to-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {/* Gradient Glow Background */}
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-pink-400 via-purple-500 to-blue-400 opacity-20 blur-3xl animate-pulse -z-10"></div>
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-6 relative z-10">
-            <label htmlFor="email" className="font-semibold">
-              Email Address
-            </label>
-            <input
-              id="email"
-              type="email"
-              name="email"
-              required
-              className="w-full p-4 rounded-xl border-2 border-pink-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-pink-500"
-              placeholder="you@example.com"
-            />
-            <ValidationError prefix="Email" field="email" errors={state.errors} />
-
-            <label htmlFor="message" className="font-semibold">
-              Your Feedback
-            </label>
-            <textarea
-              id="message"
-              name="message"
-              rows={6}
-              required
-              className="w-full p-4 rounded-xl border-2 border-purple-400 bg-white text-black placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-              placeholder="Share your thoughts about Burton Pride..."
-            ></textarea>
-            <ValidationError prefix="Message" field="message" errors={state.errors} />
-
-            <motion.button
-              type="submit"
-              disabled={state.submitting}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300"
-            >
-              {state.submitting ? 'Sending...' : 'Submit Feedback'}
-            </motion.button>
-          </form>
-        </motion.div>
-      </motion.section>
-    </motion.div>
+          {submitState === 'submitting' ? 'Sending...' : 'Submit Feedback'}
+        </motion.button>
+      </form>
+    </>
   );
 }

@@ -6,6 +6,12 @@ export const runtime = "nodejs";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+const ADMIN_EMAILS = [
+  "prideburton@gmail.com",
+  "info@burtonpride.co.uk",
+  "olga@burtonpride.co.uk",
+];
+
 function escapeHtml(value: string) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -37,10 +43,7 @@ function slugify(value: string) {
 
 function normaliseWebsite(value: string | null) {
   if (!value) return null;
-  if (
-    value.startsWith("http://") ||
-    value.startsWith("https://")
-  ) {
+  if (value.startsWith("http://") || value.startsWith("https://")) {
     return value;
   }
   return `https://${value}`;
@@ -68,8 +71,6 @@ export async function POST(req: Request) {
 
     const logo_link = cleanNullableString(body?.logo_link);
     const message = cleanNullableString(body?.message);
-
-    // NEW
     const story = cleanNullableString(body?.story);
     const slug = cleanNullableString(body?.slug) || slugify(sponsor_name);
 
@@ -111,15 +112,26 @@ export async function POST(req: Request) {
         website,
         logo_link,
         message,
-        story, // NEW
-        slug,  // NEW
+        story,
+        slug,
         status: "pending",
         is_read: false,
       });
 
     if (insertError) {
-      throw new Error(insertError.message || "Failed to save sponsor enquiry");
+      console.error("Sponsor enquiry save failed:", insertError);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: insertError.message || "Failed to save sponsor enquiry",
+        },
+        { status: 500 }
+      );
     }
+
+    const fromEmail =
+      process.env.FROM_EMAIL ||
+      "Burton Pride <noreply@burtonpride.co.uk>";
 
     const safeSponsorName = escapeHtml(sponsor_name);
     const safeContactName = escapeHtml(contact_name);
@@ -133,17 +145,26 @@ export async function POST(req: Request) {
     const safeCounty = escapeHtml(county || "Not provided");
     const safePostcode = escapeHtml(postcode || "Not provided");
     const safeCountry = escapeHtml(country || "Not provided");
-    const safeMessage = escapeHtml(message || "No message provided");
-    const safeStory = escapeHtml(story || "No sponsor story provided");
+    const safeMessage = escapeHtml(message || "No message provided").replace(
+      /\n/g,
+      "<br>"
+    );
+    const safeStory = escapeHtml(story || "No sponsor story provided").replace(
+      /\n/g,
+      "<br>"
+    );
     const safeLogoLink = escapeHtml(logo_link || "");
     const safeWebsite = escapeHtml(website || "");
     const safeSlug = escapeHtml(slug || "");
 
-    const sponsorEmailResult = await resend.emails.send({
-      from: "Burton Pride <noreply@burtonpride.co.uk>",
-      to: email,
-      subject: "Thank you for your interest in supporting Burton Pride",
-      text: `Thank you for your interest in supporting Burton Pride.
+    // Sponsor confirmation email
+    try {
+      const { error: sponsorEmailError } = await resend.emails.send({
+        from: fromEmail,
+        to: email,
+        replyTo: "info@burtonpride.co.uk",
+        subject: "Thank you for your interest in supporting Burton Pride",
+        text: `Thank you for your interest in supporting Burton Pride.
 
 Burton Pride is a community-led organisation dedicated to celebrating, supporting, and uplifting the LGBTQIA+ community in Burton and the surrounding areas.
 
@@ -159,65 +180,75 @@ Thank you again for your support and for helping us continue building a stronger
 
 Kind regards,
 Burton Pride C.I.C`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.7; color: #111827; max-width: 700px; margin: 0 auto;">
-          <div style="padding: 24px; background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6); border-radius: 16px 16px 0 0; color: white;">
-            <h1 style="margin: 0; font-size: 24px;">Burton Pride</h1>
-            <p style="margin: 8px 0 0 0;">Thank you for your interest in supporting our work</p>
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.7; color: #111827; max-width: 700px; margin: 0 auto;">
+            <div style="padding: 24px; background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6); border-radius: 16px 16px 0 0; color: white;">
+              <h1 style="margin: 0; font-size: 24px;">Burton Pride</h1>
+              <p style="margin: 8px 0 0 0;">Thank you for your interest in supporting our work</p>
+            </div>
+
+            <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 16px 16px; background: #ffffff;">
+              <p>Thank you for your interest in supporting Burton Pride.</p>
+
+              <p>
+                Burton Pride is a community-led organisation dedicated to celebrating,
+                supporting, and uplifting the LGBTQIA+ community in Burton and the
+                surrounding areas.
+              </p>
+
+              <p>
+                We strongly believe in the power of community and the importance of
+                creating safe, inclusive spaces where everyone can feel respected,
+                valued, and proud of who they are.
+              </p>
+
+              <p>
+                With the support of local businesses and organisations such as your
+                company, we are able to continue building events, initiatives, and
+                opportunities that strengthen the LGBTQIA+ community while bringing
+                people together across our town.
+              </p>
+
+              <p>
+                Every partnership helps us grow a more inclusive, supportive, and
+                visible community for everyone.
+              </p>
+
+              <p>
+                We truly appreciate your company's interest in working with Burton Pride
+                and supporting our mission. A member of our team will review your
+                sponsorship enquiry and get back to you as soon as possible.
+              </p>
+
+              <p>
+                Thank you again for your support and for helping us continue building a
+                stronger, more inclusive, and more connected community in Burton.
+              </p>
+
+              <p style="margin-top: 24px;">
+                Kind regards,<br />
+                <strong>Burton Pride C.I.C</strong>
+              </p>
+            </div>
           </div>
+        `,
+      });
 
-          <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 16px 16px; background: #ffffff;">
-            <p>Thank you for your interest in supporting Burton Pride.</p>
+      if (sponsorEmailError) {
+        console.error("Sponsor confirmation email failed:", sponsorEmailError);
+      }
+    } catch (sponsorEmailError) {
+      console.error("Sponsor confirmation email failed:", sponsorEmailError);
+    }
 
-            <p>
-              Burton Pride is a community-led organisation dedicated to celebrating,
-              supporting, and uplifting the LGBTQIA+ community in Burton and the
-              surrounding areas.
-            </p>
-
-            <p>
-              We strongly believe in the power of community and the importance of
-              creating safe, inclusive spaces where everyone can feel respected,
-              valued, and proud of who they are.
-            </p>
-
-            <p>
-              With the support of local businesses and organisations such as your
-              company, we are able to continue building events, initiatives, and
-              opportunities that strengthen the LGBTQIA+ community while bringing
-              people together across our town.
-            </p>
-
-            <p>
-              Every partnership helps us grow a more inclusive, supportive, and
-              visible community for everyone.
-            </p>
-
-            <p>
-              We truly appreciate your company's interest in working with Burton Pride
-              and supporting our mission. A member of our team will review your
-              sponsorship enquiry and get back to you as soon as possible.
-            </p>
-
-            <p>
-              Thank you again for your support and for helping us continue building a
-              stronger, more inclusive, and more connected community in Burton.
-            </p>
-
-            <p style="margin-top: 24px;">
-              Kind regards,<br />
-              <strong>Burton Pride C.I.C</strong>
-            </p>
-          </div>
-        </div>
-      `,
-    });
-
-    const adminEmailResult = await resend.emails.send({
-      from: "Burton Pride <noreply@burtonpride.co.uk>",
-      to: "prideburton@gmail.com",
-      subject: `New Sponsor Enquiry - ${sponsor_name}`,
-      text: `A new sponsor enquiry has been submitted.
+    // Admin email to all Burton Pride addresses
+    try {
+      const { error: adminEmailError } = await resend.emails.send({
+        from: fromEmail,
+        to: ADMIN_EMAILS,
+        replyTo: email,
+        subject: `New Sponsor Enquiry - ${sponsor_name}`,
+        text: `A new sponsor enquiry has been submitted.
 
 Company / Sponsor Name: ${sponsor_name}
 Contact Name: ${contact_name}
@@ -244,119 +275,129 @@ Sponsor Story:
 ${story || "No sponsor story provided"}
 
 Logo Link:
-${logo_link || "No logo uploaded"}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 760px; margin: 0 auto;">
-          <div style="padding: 24px; background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6); border-radius: 16px 16px 0 0; color: white;">
-            <h1 style="margin: 0; font-size: 24px;">New Sponsor Enquiry</h1>
-            <p style="margin: 8px 0 0 0;">A new sponsor form has been submitted on the Burton Pride website.</p>
-          </div>
+${logo_link || "No logo uploaded"}
 
-          <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 16px 16px; background: #ffffff;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold; width: 220px;">Company / Sponsor Name</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Contact Name</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeContactName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Email</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
-                  <a href="mailto:${safeEmail}" style="color: #2563eb; text-decoration: none;">${safeEmail}</a>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Phone</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safePhone}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Sponsorship Type</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorshipType}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Slug</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSlug}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Website</td>
-                <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
-                  ${
-                    website
-                      ? `<a href="${safeWebsite}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">${safeWebsite}</a>`
-                      : "Not provided"
-                  }
-                </td>
-              </tr>
-            </table>
-
-            <div style="margin-top: 24px;">
-              <h2 style="font-size: 18px; margin-bottom: 12px;">Business Address</h2>
-              <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb;">
-                <p style="margin: 0 0 8px 0;">${safeAddressLine1}</p>
-                <p style="margin: 0 0 8px 0;">${safeAddressLine2}</p>
-                <p style="margin: 0 0 8px 0;">${safeCity}</p>
-                <p style="margin: 0 0 8px 0;">${safeCounty}</p>
-                <p style="margin: 0 0 8px 0;">${safePostcode}</p>
-                <p style="margin: 0;">${safeCountry}</p>
-              </div>
+This notification was sent to:
+- prideburton@gmail.com
+- info@burtonpride.co.uk
+- olga@burtonpride.co.uk`,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 760px; margin: 0 auto;">
+            <div style="padding: 24px; background: linear-gradient(90deg, #ec4899, #8b5cf6, #3b82f6); border-radius: 16px 16px 0 0; color: white;">
+              <h1 style="margin: 0; font-size: 24px;">New Sponsor Enquiry</h1>
+              <p style="margin: 8px 0 0 0;">A new sponsor form has been submitted on the Burton Pride website.</p>
             </div>
 
-            <div style="margin-top: 24px;">
-              <h2 style="font-size: 18px; margin-bottom: 12px;">Message / Requirements</h2>
-              <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap;">
-                ${safeMessage}
-              </div>
-            </div>
+            <div style="padding: 24px; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 16px 16px; background: #ffffff;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold; width: 220px;">Company / Sponsor Name</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Contact Name</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeContactName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Email</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                    <a href="mailto:${safeEmail}" style="color: #2563eb; text-decoration: none;">${safeEmail}</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Phone</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safePhone}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Sponsorship Type</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSponsorshipType}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Slug</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${safeSlug}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; font-weight: bold;">Website</td>
+                  <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
+                    ${
+                      website
+                        ? `<a href="${safeWebsite}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">${safeWebsite}</a>`
+                        : "Not provided"
+                    }
+                  </td>
+                </tr>
+              </table>
 
-            <div style="margin-top: 24px;">
-              <h2 style="font-size: 18px; margin-bottom: 12px;">Sponsor Story</h2>
-              <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap;">
-                ${safeStory}
+              <div style="margin-top: 24px;">
+                <h2 style="font-size: 18px; margin-bottom: 12px;">Business Address</h2>
+                <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb;">
+                  <p style="margin: 0 0 8px 0;">${safeAddressLine1}</p>
+                  <p style="margin: 0 0 8px 0;">${safeAddressLine2}</p>
+                  <p style="margin: 0 0 8px 0;">${safeCity}</p>
+                  <p style="margin: 0 0 8px 0;">${safeCounty}</p>
+                  <p style="margin: 0 0 8px 0;">${safePostcode}</p>
+                  <p style="margin: 0;">${safeCountry}</p>
+                </div>
               </div>
-            </div>
 
-            ${
-              logo_link
-                ? `
-                  <div style="margin-top: 24px;">
-                    <h2 style="font-size: 18px; margin-bottom: 12px;">Logo</h2>
-                    <p style="margin: 0 0 12px 0;">
-                      <a href="${safeLogoLink}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">View uploaded logo</a>
-                    </p>
-                    <div style="padding: 16px; border-radius: 12px; background: #ffffff; border: 1px solid #e5e7eb; display: inline-block;">
-                      <img src="${safeLogoLink}" alt="Sponsor logo" style="max-width: 220px; max-height: 120px; object-fit: contain;" />
+              <div style="margin-top: 24px;">
+                <h2 style="font-size: 18px; margin-bottom: 12px;">Message / Requirements</h2>
+                <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap; line-height: 1.6;">
+                  ${safeMessage}
+                </div>
+              </div>
+
+              <div style="margin-top: 24px;">
+                <h2 style="font-size: 18px; margin-bottom: 12px;">Sponsor Story</h2>
+                <div style="padding: 16px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; white-space: pre-wrap; line-height: 1.6;">
+                  ${safeStory}
+                </div>
+              </div>
+
+              ${
+                logo_link
+                  ? `
+                    <div style="margin-top: 24px;">
+                      <h2 style="font-size: 18px; margin-bottom: 12px;">Logo</h2>
+                      <p style="margin: 0 0 12px 0;">
+                        <a href="${safeLogoLink}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: none;">View uploaded logo</a>
+                      </p>
+                      <div style="padding: 16px; border-radius: 12px; background: #ffffff; border: 1px solid #e5e7eb; display: inline-block;">
+                        <img src="${safeLogoLink}" alt="Sponsor logo" style="max-width: 220px; max-height: 120px; object-fit: contain;" />
+                      </div>
                     </div>
-                  </div>
-                `
-                : `
-                  <div style="margin-top: 24px;">
-                    <h2 style="font-size: 18px; margin-bottom: 12px;">Logo</h2>
-                    <p style="margin: 0;">No logo uploaded.</p>
-                  </div>
-                `
-            }
+                  `
+                  : `
+                    <div style="margin-top: 24px;">
+                      <h2 style="font-size: 18px; margin-bottom: 12px;">Logo</h2>
+                      <p style="margin: 0;">No logo uploaded.</p>
+                    </div>
+                  `
+              }
+
+              <p style="margin-top: 24px; color: #475569; font-size: 14px;">
+                This notification was sent to prideburton@gmail.com, info@burtonpride.co.uk, and olga@burtonpride.co.uk.
+              </p>
+
+              <p style="margin-top: 8px; color: #475569; font-size: 14px;">
+                Replying to this email will reply directly to the sponsor.
+              </p>
+            </div>
           </div>
-        </div>
-      `,
-    });
+        `,
+      });
 
-    if ((sponsorEmailResult as any)?.error) {
-      throw new Error(
-        (sponsorEmailResult as any).error.message || "Failed to send sponsor email"
-      );
-    }
-
-    if ((adminEmailResult as any)?.error) {
-      throw new Error(
-        (adminEmailResult as any).error.message || "Failed to send admin email"
-      );
+      if (adminEmailError) {
+        console.error("Admin sponsor email failed:", adminEmailError);
+      }
+    } catch (adminEmailError) {
+      console.error("Admin sponsor email failed:", adminEmailError);
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    console.error("Sponsor route error:", error);
+
     const message =
       error instanceof Error ? error.message : "Something went wrong";
 

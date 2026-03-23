@@ -6,6 +6,12 @@ export const runtime = "nodejs";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+const ADMIN_EMAILS = [
+  "prideburton@gmail.com",
+  "info@burtonpride.co.uk",
+  "olga@burtonpride.co.uk",
+];
+
 function escapeHtml(value: string) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -58,7 +64,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data, error } = await supabaseAdmin
+    const { error: insertError } = await supabaseAdmin
       .from("volunteer_applications")
       .insert([
         {
@@ -75,22 +81,25 @@ export async function POST(req: Request) {
           status: "new",
           is_read: false,
         },
-      ])
-      .select("id, created_at")
-      .single();
+      ]);
 
-    if (error) {
+    if (insertError) {
+      console.error("Volunteer application save failed:", insertError);
+
       return NextResponse.json(
         {
           ok: false,
-          error: error.message || "Failed to save volunteer application.",
+          error:
+            insertError.message || "Failed to save volunteer application.",
         },
         { status: 500 }
       );
     }
 
     const whatsappLink = process.env.VOLUNTEER_WHATSAPP_LINK;
-    const adminEmail = "prideburton@gmail.com";
+    const fromEmail =
+      process.env.FROM_EMAIL ||
+      "Burton Pride <noreply@burtonpride.co.uk>";
 
     const safeName = escapeHtml(full_name);
     const safeEmail = escapeHtml(email);
@@ -98,7 +107,7 @@ export async function POST(req: Request) {
     const safeDob = escapeHtml(date_of_birth || "Not provided");
     const safeAvailability = escapeHtml(availability || "Not provided");
     const safeExperience = escapeHtml(experience || "Not provided");
-    const safeWhyVolunteer = escapeHtml(why_volunteer);
+    const safeWhyVolunteer = escapeHtml(why_volunteer).replace(/\n/g, "<br>");
     const safeEmergencyName = escapeHtml(emergency_contact_name);
     const safeEmergencyPhone = escapeHtml(emergency_contact_phone);
     const safeEmergencyRelationship = escapeHtml(
@@ -107,11 +116,10 @@ export async function POST(req: Request) {
 
     // Volunteer confirmation email
     try {
-      await resend.emails.send({
-        from:
-          process.env.FROM_EMAIL ||
-          "Burton Pride <noreply@burtonpride.co.uk>",
+      const { error: volunteerEmailError } = await resend.emails.send({
+        from: fromEmail,
         to: email,
+        replyTo: "info@burtonpride.co.uk",
         subject: "Thank you for applying to volunteer with Burton Pride",
         html: `
           <div style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;padding:24px;color:#0f172a;">
@@ -167,17 +175,19 @@ export async function POST(req: Request) {
           </div>
         `,
       });
+
+      if (volunteerEmailError) {
+        console.error("Volunteer confirmation email failed:", volunteerEmailError);
+      }
     } catch (emailError) {
-      console.error("Volunteer email failed:", emailError);
+      console.error("Volunteer confirmation email failed:", emailError);
     }
 
-    // Admin notification email
+    // Admin notification email to all Burton Pride admin addresses
     try {
-      await resend.emails.send({
-        from:
-          process.env.FROM_EMAIL ||
-          "Burton Pride <noreply@burtonpride.co.uk>",
-        to: adminEmail,
+      const { error: adminEmailError } = await resend.emails.send({
+        from: fromEmail,
+        to: ADMIN_EMAILS,
         replyTo: email,
         subject: `New volunteer application: ${full_name}`,
         html: `
@@ -210,6 +220,10 @@ export async function POST(req: Request) {
                 <p><strong>Relationship:</strong> ${safeEmergencyRelationship}</p>
 
                 <p style="margin-top:24px;color:#475569;font-size:14px;">
+                  This notification was sent to prideburton@gmail.com, info@burtonpride.co.uk, and olga@burtonpride.co.uk.
+                </p>
+
+                <p style="margin-top:8px;color:#475569;font-size:14px;">
                   Replying to this email will reply directly to the volunteer.
                 </p>
               </div>
@@ -217,6 +231,10 @@ export async function POST(req: Request) {
           </div>
         `,
       });
+
+      if (adminEmailError) {
+        console.error("Admin email failed:", adminEmailError);
+      }
     } catch (adminEmailError) {
       console.error("Admin email failed:", adminEmailError);
     }
@@ -226,6 +244,8 @@ export async function POST(req: Request) {
       message: "Volunteer application submitted successfully.",
     });
   } catch (error) {
+    console.error("Volunteer route error:", error);
+
     return NextResponse.json(
       {
         ok: false,

@@ -11,18 +11,36 @@ type ApiResponse = {
   error?: string;
 };
 
-const sponsorshipOptions = [
-  "Normal Sponsor",
-  "Sponsorship in Kind",
-  "Story",
-] as const;
+type SponsorshipOption = {
+  label: string;
+  value: "normal_sponsorship" | "sponsorship_in_kind" | "Story";
+  description: string;
+};
+
+const sponsorshipOptions: SponsorshipOption[] = [
+  {
+    label: "Normal Sponsor",
+    value: "normal_sponsorship",
+    description: "Standard sponsorship support for Burton Pride.",
+  },
+  {
+    label: "Sponsorship in Kind",
+    value: "sponsorship_in_kind",
+    description: "Support through products, services, or donations.",
+  },
+  {
+    label: "Story",
+    value: "Story",
+    description: "Share your story with us and tell us why you want to be involved.",
+  },
+];
 
 const emptyForm = {
   sponsor_name: "",
   contact_name: "",
   email: "",
   phone: "",
-  sponsorship_type: "",
+  sponsorship_type: "" as "" | "normal_sponsorship" | "sponsorship_in_kind" | "Story",
   address_line1: "",
   address_line2: "",
   city: "",
@@ -53,7 +71,9 @@ export default function SponsorForm() {
     }));
   }
 
-  function setSponsorshipType(value: string) {
+  function setSponsorshipType(
+    value: "" | "normal_sponsorship" | "sponsorship_in_kind" | "Story"
+  ) {
     setForm((prev) => ({
       ...prev,
       sponsorship_type: value,
@@ -142,7 +162,7 @@ export default function SponsorForm() {
     setSubmitState("submitting");
     setError(null);
 
-    if (!form.sponsorship_type.trim()) {
+    if (!form.sponsorship_type) {
       setSubmitState("error");
       setError("Please select a sponsorship type.");
       return;
@@ -165,7 +185,7 @@ export default function SponsorForm() {
           contact_name: form.contact_name.trim(),
           email: form.email.trim().toLowerCase(),
           phone: form.phone.trim(),
-          sponsorship_type: form.sponsorship_type.trim(),
+          sponsorship_type: form.sponsorship_type,
           address_line1: form.address_line1.trim(),
           address_line2: form.address_line2.trim(),
           city: form.city.trim(),
@@ -207,9 +227,9 @@ export default function SponsorForm() {
   }
 
   return (
-    <>
+    <div className="relative mx-auto max-w-3xl pt-20">
       {showSuccessToast && (
-        <div className="pointer-events-none fixed inset-0 z-[9999] flex items-start justify-center px-4 pt-6 sm:items-start sm:justify-end sm:pr-6">
+        <div className="pointer-events-none absolute -top-2 left-0 right-0 z-50 flex justify-center px-4">
           <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-green-300/30 bg-green-600/95 p-4 text-white shadow-2xl backdrop-blur-md">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20 text-lg font-bold">
@@ -239,7 +259,7 @@ export default function SponsorForm() {
 
       <form
         onSubmit={onSubmit}
-        className="mx-auto flex max-w-3xl flex-col gap-6 rounded-3xl border-4 border-white/30 bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-8 text-white shadow-2xl"
+        className="flex flex-col gap-6 rounded-3xl border-4 border-white/30 bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-8 text-white shadow-2xl"
       >
         <h2 className="mb-2 text-2xl font-bold text-white drop-shadow-md">
           Sponsor Information
@@ -292,13 +312,13 @@ export default function SponsorForm() {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {sponsorshipOptions.map((option) => {
-              const active = form.sponsorship_type === option;
+              const active = form.sponsorship_type === option.value;
 
               return (
                 <button
-                  key={option}
+                  key={option.value}
                   type="button"
-                  onClick={() => setSponsorshipType(option)}
+                  onClick={() => setSponsorshipType(option.value)}
                   className={[
                     "rounded-2xl border px-4 py-4 text-left transition",
                     active
@@ -306,18 +326,13 @@ export default function SponsorForm() {
                       : "border-white/20 bg-white/10 text-white hover:bg-white/20",
                   ].join(" ")}
                 >
-                  <div className="text-base font-bold">{option}</div>
+                  <div className="text-base font-bold">{option.label}</div>
                   <div
                     className={
                       active ? "mt-1 text-sm text-pink-500" : "mt-1 text-sm text-white/70"
                     }
                   >
-                    {option === "Normal Sponsor" &&
-                      "Standard sponsorship support for Burton Pride."}
-                    {option === "Sponsorship in Kind" &&
-                      "Support through products, services, or donations."}
-                    {option === "Story" &&
-                      "Share your story with us and tell us why you want to be involved."}
+                    {option.description}
                   </div>
                 </button>
               );
@@ -473,6 +488,6 @@ export default function SponsorForm() {
             : "Submit"}
         </button>
       </form>
-    </>
+    </div>
   );
 }
