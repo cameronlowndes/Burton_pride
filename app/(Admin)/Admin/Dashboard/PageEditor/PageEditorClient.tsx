@@ -12,6 +12,7 @@ import {
   Clock3,
   AlertCircle,
   Lock,
+  RotateCcw,
 } from "lucide-react";
 
 type SitePage = {
@@ -248,6 +249,23 @@ export default function SitePagesAdminPage() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  function resetPageDetails(page: SitePage) {
+    updatePage(
+      page.id,
+      {
+        nav_label: "",
+        template: "",
+        hidden_title: "",
+        hidden_message: "",
+        coming_soon_title: "",
+        coming_soon_message: "",
+        password_protected: false,
+        page_password: "",
+      },
+      `${page.title} details reset`
+    );
   }
 
   return (
@@ -817,6 +835,16 @@ export default function SitePagesAdminPage() {
                               {page.show_in_nav ? "Show in nav" : "Hidden from nav"}
                             </button>
                           </div>
+
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => resetPageDetails(page)}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Reset details
+                          </button>
 
                           {isSaving ? (
                             <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-xs text-sky-100">

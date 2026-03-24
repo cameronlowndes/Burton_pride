@@ -1,149 +1,164 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import path from "path";
+import { promises as fs } from "fs";
+import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import fs from "node:fs/promises";
-import path from "node:path";
 
-export const runtime = "nodejs";
-
-const ADMIN_EMAILS = [
-  "cameronlowndes@burtonpride.co.uk",
-  
-];
-
-type FoundPage = {
+type DiscoveredPage = {
   title: string;
   route: string;
   page_key: string;
+  nav_label: string;
+  sort_order: number;
 };
 
-function isAdminEmail(email: string) {
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+const APP_DIR = path.join(process.cwd(), "app");
+
+/**
+ * ONLY folders inside here will be scanned.
+ * Keep admin pages out of the site page manager.
+ *
+ * Use the one that matches your project:
+ * - "site"      => app/site
+ * - "(site)"    => app/(site)
+ */
+const ALLOWED_PUBLIC_ROOTS = ["site", "(site)"];
+
+/**
+ * Files/folders that should never be treated as public website pages.
+ */
+const BLOCKED_SEGMENTS = new Set([
+  "admin",
+  "api",
+  "_components",
+  "_lib",
+  "_utils",
+  "_hooks",
+  "_data",
+  "_actions",
+  "components",
+  "lib",
+  "utils",
+  "hooks",
+  "actions",
+]);
+
+const BLOCKED_FILES = new Set([
+  "layout.tsx",
+  "layout.ts",
+  "template.tsx",
+  "template.ts",
+  "loading.tsx",
+  "loading.ts",
+  "error.tsx",
+  "error.ts",
+  "not-found.tsx",
+  "not-found.ts",
+  "default.tsx",
+  "default.ts",
+  "route.ts",
+]);
+
+function prettifySegment(value: string) {
+  return value
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function titleFromRoute(route: string) {
+function buildTitleFromRoute(route: string) {
   if (route === "/") return "Home";
 
-  return route
+  const parts = route
     .split("/")
     .filter(Boolean)
-    .map((part) =>
-      part
-        .replace(/-/g, " ")
-        .replace(/\b\w/g, (char) => char.toUpperCase())
-    )
-    .join(" ");
+    .map((part) => prettifySegment(part));
+
+  return parts.join(" / ");
 }
 
-function pageKeyFromRoute(route: string) {
-  if (route === "/") return "home";
+function buildNavLabelFromRoute(route: string) {
+  if (route === "/") return "Home";
 
-  return route
-    .replace(/^\/+/, "")
-    .replaceAll("/", "_")
-    .replaceAll("-", "_");
+  const last = route.split("/").filter(Boolean).pop() || "Page";
+  return prettifySegment(last);
 }
 
-function isRouteGroup(segment: string) {
-  return segment.startsWith("(") && segment.endsWith(")");
+function normaliseRouteFromSegments(segments: string[]) {
+  const cleaned = segments
+    .filter(Boolean)
+    .filter((segment) => {
+      if (segment.startsWith("(") && segment.endsWith(")")) return false; // route groups
+      if (segment.startsWith("@")) return false; // parallel routes
+      return true;
+    });
+
+  const route = `/${cleaned.join("/")}`.replace(/\/+/g, "/");
+  return route === "/" ? "/" : route.replace(/\/$/, "");
 }
 
-function shouldIgnoreSegment(segment: string) {
-  if (!segment) return false;
-
-  // DO NOT ignore route groups like (site)
-  // They should be removed from the URL, not skipped entirely.
-  if (segment.startsWith("@")) return true; // parallel routes
-  if (segment.startsWith("[")) return true; // dynamic routes
-  if (segment === "api") return true;
-  if (segment === "admin") return true;
-  if (segment.startsWith("_")) return true;
-
+function shouldSkipFolder(name: string) {
+  if (!name) return true;
+  if (name.startsWith("_")) return true;
+  if (BLOCKED_SEGMENTS.has(name)) return true;
   return false;
 }
 
-async function findAppRoot() {
-  const rootDir = process.cwd();
-
-  const possibleAppRoots = [
-    path.join(rootDir, "app"),
-    path.join(rootDir, "src", "app"),
-  ];
-
-  for (const candidate of possibleAppRoots) {
-    try {
-      const stat = await fs.stat(candidate);
-      if (stat.isDirectory()) {
-        return candidate;
-      }
-    } catch {
-      // keep checking next location
-    }
-  }
-
-  return null;
+function isPageFile(name: string) {
+  return name === "page.tsx" || name === "page.ts";
 }
 
-async function scanDir(
-  dir: string,
-  appRoot: string,
-  pages: FoundPage[]
-): Promise<void> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
+async function pathExists(targetPath: string) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  const hasPageFile = entries.some(
-    (entry) =>
-      entry.isFile() &&
-      (entry.name === "page.tsx" ||
-        entry.name === "page.ts" ||
-        entry.name === "page.jsx" ||
-        entry.name === "page.js")
-  );
+async function walkForPages(
+  dir: string,
+  routeSegments: string[] = []
+): Promise<DiscoveredPage[]> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const found: DiscoveredPage[] = [];
+
+  const hasPageFile = entries.some((entry) => entry.isFile() && isPageFile(entry.name));
 
   if (hasPageFile) {
-    const relativeDir = path.relative(appRoot, dir);
+    const route = normaliseRouteFromSegments(routeSegments);
 
-    const rawSegments =
-      relativeDir === ""
-        ? []
-        : relativeDir.split(path.sep).filter(Boolean);
-
-    const ignored = rawSegments.some(shouldIgnoreSegment);
-
-    if (!ignored) {
-      const visibleSegments = rawSegments.filter(
-        (segment) => !isRouteGroup(segment)
-      );
-
-      const route =
-        visibleSegments.length === 0 ? "/" : `/${visibleSegments.join("/")}`;
-
-      pages.push({
-        title: titleFromRoute(route),
-        route,
-        page_key: pageKeyFromRoute(route),
-      });
-    }
+    found.push({
+      title: buildTitleFromRoute(route),
+      route,
+      page_key:
+        route === "/"
+          ? "home"
+          : route
+              .replace(/^\//, "")
+              .replace(/\//g, "_")
+              .replace(/-/g, "_")
+              .toLowerCase(),
+      nav_label: buildNavLabelFromRoute(route),
+      sort_order: route === "/" ? 0 : routeSegments.length * 10,
+    });
   }
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const fullPath = path.join(dir, entry.name);
+    const folderName = entry.name;
 
-    if (
-      entry.name === "api" ||
-      entry.name === "admin" ||
-      entry.name === "_components" ||
-      entry.name === "_lib" ||
-      entry.name === "node_modules" ||
-      entry.name === ".next"
-    ) {
-      continue;
-    }
+    if (shouldSkipFolder(folderName)) continue;
 
-    await scanDir(fullPath, appRoot, pages);
+    const fullPath = path.join(dir, folderName);
+
+    found.push(
+      ...(await walkForPages(fullPath, [...routeSegments, folderName]))
+    );
   }
+
+  return found;
 }
 
 export async function POST() {
@@ -157,105 +172,115 @@ export async function POST() {
       );
     }
 
-    const user = await currentUser();
-    const email =
-      user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
+    const supabase = supabaseAdmin;
 
-    if (!email || !isAdminEmail(email)) {
-      return NextResponse.json(
-        { ok: false, error: "Forbidden" },
-        { status: 403 }
-      );
+    const discovered: DiscoveredPage[] = [];
+
+    for (const root of ALLOWED_PUBLIC_ROOTS) {
+      const rootPath = path.join(APP_DIR, root);
+
+      if (await pathExists(rootPath)) {
+        const pages = await walkForPages(rootPath, root === "site" ? ["site"] : []);
+        discovered.push(...pages);
+      }
     }
 
-    const appRoot = await findAppRoot();
+    /**
+     * If using app/(site), the URL should NOT include /(site)
+     * so we scanned it with [].
+     *
+     * If using app/site and you do NOT want "/site/about" style routes,
+     * change the line above to:
+     * const pages = await walkForPages(rootPath, []);
+     *
+     * Leave as ["site"] only if your real URLs are /site/...
+     */
 
-    if (!appRoot) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Could not find app folder. Checked /app and /src/app.",
-        },
-        { status: 500 }
-      );
+    const dedupedMap = new Map<string, DiscoveredPage>();
+
+    for (const page of discovered) {
+      if (!page.route.startsWith("/admin") && !page.route.startsWith("/api")) {
+        dedupedMap.set(page.route, page);
+      }
     }
 
-    const foundPages: FoundPage[] = [];
-    await scanDir(appRoot, appRoot, foundPages);
-
-    const uniquePages = Array.from(
-      new Map(foundPages.map((page) => [page.route, page])).values()
-    ).sort((a, b) => a.route.localeCompare(b.route));
-
-    const db = supabaseAdmin;
-
-    const { data: existingRows, error: existingError } = await db
-      .from("site_pages")
-      .select("route");
-
-    if (existingError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: existingError.message || "Failed to load existing site pages",
-        },
-        { status: 500 }
-      );
-    }
-
-    const existingRoutes = new Set((existingRows || []).map((row) => row.route));
-
-    const missingPages = uniquePages.filter(
-      (page) => !existingRoutes.has(page.route)
+    const dedupedPages = Array.from(dedupedMap.values()).sort((a, b) =>
+      a.route.localeCompare(b.route)
     );
 
-    let inserted: FoundPage[] = [];
+    const { data: existingRows, error: existingError } = await supabase
+      .from("site_pages")
+      .select("id, route");
 
-    if (missingPages.length > 0) {
-      const payload = missingPages.map((page, index) => ({
-        title: page.title,
-        route: page.route,
-        page_key: page.page_key,
-        status: "live",
-        is_enabled: true,
-        show_in_nav: false,
-        nav_label: page.title,
-        template: null,
-        sort_order: 100 + index,
-      }));
+    if (existingError) {
+      throw new Error(existingError.message);
+    }
 
-      const { data: insertedRows, error: insertError } = await db
-        .from("site_pages")
-        .insert(payload)
-        .select("title, route, page_key");
+    const existingByRoute = new Map(
+      (existingRows || []).map((row) => [row.route, row])
+    );
 
-      if (insertError) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: insertError.message || "Failed to insert new pages",
-          },
-          { status: 500 }
-        );
+    let inserted = 0;
+    let updated = 0;
+
+    for (const page of dedupedPages) {
+      const existing = existingByRoute.get(page.route);
+
+      if (!existing) {
+        const { error: insertError } = await supabase.from("site_pages").insert({
+          title: page.title,
+          route: page.route,
+          page_key: page.page_key,
+          status: "live",
+          is_enabled: true,
+          show_in_nav: false,
+          nav_label: page.nav_label,
+          template: null,
+          sort_order: page.sort_order,
+          hidden_title: "This page is not available",
+          hidden_message:
+            "This page has been hidden by the admin portal and is not currently available.",
+          coming_soon_title: "Coming soon",
+          coming_soon_message:
+            "We are updating this page right now. Please check back soon.",
+          password_protected: false,
+        });
+
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+
+        inserted += 1;
+      } else {
+        const { error: updateError } = await supabase
+          .from("site_pages")
+          .update({
+            title: page.title,
+            page_key: page.page_key,
+            nav_label: page.nav_label,
+          })
+          .eq("id", existing.id);
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+
+        updated += 1;
       }
-
-      inserted = insertedRows || [];
     }
 
     return NextResponse.json({
       ok: true,
-      appRoot,
-      scanned: uniquePages.length,
-      inserted: inserted.length,
-      pages: uniquePages,
-      newPages: inserted,
+      scanned: dedupedPages.length,
+      inserted,
+      updated,
+      pages: dedupedPages,
     });
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error ? error.message : "Unexpected server error",
+        error: error instanceof Error ? error.message : "Failed to sync pages",
       },
       { status: 500 }
     );

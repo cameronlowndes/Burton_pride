@@ -1,61 +1,170 @@
 "use client";
-import React, { useState, useRef, useEffect } from "react";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FaBars, FaTimes, FaCaretDown } from "react-icons/fa";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
+type NavbarChild = {
+  id: string;
+  label: string;
+  href: string | null;
+  item_type: "link" | "dropdown";
+  parent_id: string | null;
+  sort_order: number;
+  is_enabled: boolean;
+  open_in_new_tab: boolean;
+};
+
+type NavbarItem = {
+  id: string;
+  label: string;
+  href: string | null;
+  item_type: "link" | "dropdown";
+  parent_id: string | null;
+  sort_order: number;
+  is_enabled: boolean;
+  open_in_new_tab: boolean;
+  children?: NavbarChild[];
+};
+
+type NavbarApiResponse = {
+  ok: boolean;
+  error?: string;
+  items?: NavbarItem[];
+};
+
 export default function Navbar() {
-  // State
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isEventsOpen, setIsEventsOpen] = useState(false);
-  const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [items, setItems] = useState<NavbarItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Refs
-  const eventsRef = useRef<HTMLDivElement>(null);
-  const aboutRef = useRef<HTMLDivElement>(null);
-
-  // Router
+  const dropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const pathname = usePathname();
 
-  // Close dropdowns when clicking outside
+  useEffect(() => {
+    async function loadNavbar() {
+      try {
+        setLoading(true);
+
+        const res = await fetch("/api/navbar", {
+          cache: "no-store",
+        });
+
+        const json: NavbarApiResponse = await res.json();
+
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || "Failed to load navbar");
+        }
+
+        setItems(json.items || []);
+      } catch (error) {
+        console.error("Navbar load failed:", error);
+        setItems([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadNavbar();
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        eventsRef.current &&
-        !eventsRef.current.contains(event.target as Node) &&
-        aboutRef.current &&
-        !aboutRef.current.contains(event.target as Node)
-      ) {
-        setIsEventsOpen(false);
-        setIsAboutOpen(false);
+      const target = event.target as Node;
+
+      const clickedInsideAnyDropdown = Object.values(dropdownRefs.current).some(
+        (ref) => ref && ref.contains(target)
+      );
+
+      if (!clickedInsideAnyDropdown) {
+        setOpenDropdownId(null);
       }
     };
+
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Helpers
-  const isActive = (path: string) => pathname === path;
+  useEffect(() => {
+    setIsMenuOpen(false);
+    setOpenDropdownId(null);
+  }, [pathname]);
+
   const rainbowClass = "font-bold rainbow-underline";
 
-  const toggleAbout = () => {
-    setIsAboutOpen((prev) => !prev);
-    setIsEventsOpen(false);
+  const isActive = (path: string) => {
+    if (!path) return false;
+    return pathname === path;
   };
 
-  const toggleEvents = () => {
-    setIsEventsOpen((prev) => !prev);
-    setIsAboutOpen(false);
+  const isDropdownActive = (item: NavbarItem) => {
+    if (!item.children?.length) return false;
+    return item.children.some((child) => child.href && pathname === child.href);
   };
+
+  const toggleDropdown = (id: string) => {
+    setOpenDropdownId((prev) => (prev === id ? null : id));
+  };
+
+  const topItems = useMemo(() => {
+    return items.filter((item) => item.is_enabled !== false);
+  }, [items]);
+
+  function renderNavLink(item: NavbarItem | NavbarChild, mobile = false) {
+    if (!item.href) return null;
+
+    const commonClass = mobile
+      ? `block transform py-2 text-lg font-semibold transition hover:scale-105 ${
+          isActive(item.href) ? rainbowClass : ""
+        }`
+      : isActive(item.href)
+      ? rainbowClass
+      : "hover:underline";
+
+    const isExternal =
+      item.href.startsWith("http://") || item.href.startsWith("https://");
+
+    if (isExternal || item.open_in_new_tab) {
+      return (
+        <Link
+          key={item.id}
+          href={item.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={commonClass}
+          onClick={() => {
+            if (mobile) setIsMenuOpen(false);
+          }}
+        >
+          {item.label}
+        </Link>
+      );
+    }
+
+    return (
+      <Link
+        key={item.id}
+        href={item.href}
+        className={commonClass}
+        onClick={() => {
+          if (mobile) setIsMenuOpen(false);
+        }}
+      >
+        {item.label}
+      </Link>
+    );
+  }
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 flex w-full items-center justify-between bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-8 py-3 text-white shadow-md backdrop-blur-md">
-      {/* Logo with watermark */}
+    <nav className="fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-8 py-3 text-white shadow-md backdrop-blur-md">
       <div className="flex flex-col leading-tight">
         <Link href="/" className="text-xl font-bold text-white drop-shadow-md">
           Burton Pride
         </Link>
+
         <Link
           href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
           target="_blank"
@@ -66,145 +175,80 @@ export default function Navbar() {
         </Link>
       </div>
 
-      {/* Desktop Menu */}
       <div className="hidden gap-6 md:flex">
-        <Link
-          href="/"
-          className={isActive("/") ? rainbowClass : "hover:underline"}
-        >
-          Home
-        </Link>
+        {!loading &&
+          topItems.map((item) => {
+            if (item.item_type === "dropdown") {
+              const active = isDropdownActive(item);
 
-        {/* About Dropdown */}
-        <div ref={aboutRef} className="relative">
-          <button
-            onClick={toggleAbout}
-            className={`flex items-center gap-1 cursor-pointer ${pathname.startsWith("/about") ||
-                pathname.startsWith("/OurCoreValues")
-                ? rainbowClass
-                : "hover:underline"
-              }`}
-          >
-            About <FaCaretDown className="text-sm" />
-          </button>
-          {isAboutOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute left-0 mt-2 w-48 rounded-md border border-gray-200 bg-white text-black shadow-lg z-20"
-            >
-              <Link href="/about" className="block px-4 py-2 hover:bg-gray-100">
-                About Us
-              </Link>
-              <Link
-                href="/about/OurCoreValues"
-                className="block px-4 py-2 hover:bg-gray-100"
-              >
-                Our Values
-              </Link>
-            </motion.div>
-          )}
-        </div>
+              return (
+                <div
+                  key={item.id}
+                  ref={(el) => {
+                    dropdownRefs.current[item.id] = el;
+                  }}
+                  className="relative"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleDropdown(item.id)}
+                    className={`flex cursor-pointer items-center gap-1 ${
+                      active ? rainbowClass : "hover:underline"
+                    }`}
+                  >
+                    {item.label}
+                    <FaCaretDown className="text-sm" />
+                  </button>
 
-        {/* Events Dropdown */}
-        <div ref={eventsRef} className="relative">
-          <button
-            onClick={toggleEvents}
-            className={`flex items-center gap-1 cursor-pointer ${pathname.startsWith("/events") || pathname === "/Pride2025"
-                ? rainbowClass
-                : "hover:underline"
-              }`}
-          >
-            Events <FaCaretDown className="text-sm" />
-          </button>
-          {isEventsOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute left-0 mt-2 w-48 rounded-md border border-gray-200 bg-white text-black shadow-lg z-20"
-            >
-              <Link
-                href="/events"
-                className="block px-4 py-2 hover:bg-gray-100"
-              >
-                All Events
-              </Link>
+                  <AnimatePresence>
+                    {openDropdownId === item.id && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="absolute left-0 z-20 mt-2 w-56 rounded-md border border-gray-200 bg-white text-black shadow-lg"
+                      >
+                        {(item.children || []).map((child) => {
+                          if (!child.href) return null;
 
-              <Link
-                href="https://www.tickettailor.com/events/burtonpride"
-                className="block px-4 py-2 hover:bg-gray-100"
-              >
-                Tickets
-              </Link>
+                          const external =
+                            child.href.startsWith("http://") ||
+                            child.href.startsWith("https://");
 
-              <Link
-                href="/events/Pride2025"
-                className="block px-4 py-2 hover:bg-gray-100"
-              >
-                Pride Event 2025
-              </Link>
+                          return (
+                            <Link
+                              key={child.id}
+                              href={child.href}
+                              target={
+                                external || child.open_in_new_tab
+                                  ? "_blank"
+                                  : undefined
+                              }
+                              rel={
+                                external || child.open_in_new_tab
+                                  ? "noopener noreferrer"
+                                  : undefined
+                              }
+                              className="block px-4 py-2 hover:bg-gray-100"
+                            >
+                              {child.label}
+                            </Link>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            }
 
-              <Link
-                href="/events/NightParty"
-                className="block px-4 py-2 hover:bg-gray-100"
-              >
-                Pride Party 2025
-              </Link>
-
-            </motion.div>
-          )}
-        </div>
-
-        <Link
-          href="/MeetUS"
-          className={isActive("/MeetUS") ? rainbowClass : "hover:underline"}
-        >
-          Meet Us
-        </Link>
-        <Link
-          href="/ContactUS"
-          className={isActive("/ContactUS") ? rainbowClass : "hover:underline"}
-        >
-          Contact Us
-        </Link>
-        <Link
-          href="/JoinUS"
-          className={isActive("/JoinUS") ? rainbowClass : "hover:underline"}
-        >
-          Join The Team
-        </Link>
-        <Link
-          href="/Sponsor"
-          className={isActive("/Sponsor") ? rainbowClass : "hover:underline"}
-        >
-          See Your Sponsors
-        </Link>
-
-        {/* External Link */}
-        <Link
-          href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="
-            relative font-extrabold tracking-wide
-            text-transparent bg-clip-text
-            bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
-            bg-[length:200%_auto] animate-gradient-x
-            drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
-            transition-transform duration-300 ease-out
-            hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
-          "
-        >
-          Cameron&nbsp;Digital&nbsp;Works
-        </Link>
+            return renderNavLink(item, false);
+          })}
       </div>
 
-      {/* Mobile Menu Button */}
       <div className="md:hidden">
         <button
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
+          onClick={() => setIsMenuOpen((prev) => !prev)}
           className="relative z-50 text-2xl rainbow-text"
           aria-label="Toggle menu"
         >
@@ -212,7 +256,6 @@ export default function Navbar() {
         </button>
       </div>
 
-      {/* Mobile Dropdown */}
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
@@ -220,141 +263,70 @@ export default function Navbar() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
-            className="absolute top-full left-0 z-40 flex w-full flex-col items-center gap-4 bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 py-6 text-white shadow-xl backdrop-blur-lg"
+            className="absolute left-0 top-full z-40 flex w-full flex-col items-center gap-4 bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 py-6 text-white shadow-xl backdrop-blur-lg"
           >
-            {/* Main Links */}
-            <Link
-              href="/"
-              className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${isActive("/") ? rainbowClass : ""
-                }`}
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Home
-            </Link>
+            {!loading &&
+              topItems.map((item) => {
+                if (item.item_type === "dropdown") {
+                  const isOpen = openDropdownId === item.id;
 
-            {/* About in Mobile */}
-            <div className="flex w-full flex-col items-center gap-2">
-              <button
-                onClick={toggleAbout}
-                className="flex items-center gap-1 text-lg font-semibold transition transform hover:scale-105"
-              >
-                About <FaCaretDown />
-              </button>
-              <AnimatePresence>
-                {isAboutOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="flex w-48 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
-                  >
-                    <Link
-                      href="/about"
-                      className="px-4 py-2 hover:bg-gray-100"
-                      onClick={() => setIsMenuOpen(false)}
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex w-full flex-col items-center gap-2"
                     >
-                      About Us
-                    </Link>
-                    <Link
-                      href="/about/OurCoreValues"
-                      className="px-4 py-2 hover:bg-gray-100"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Our Values
-                    </Link>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                      <button
+                        onClick={() => toggleDropdown(item.id)}
+                        className="flex items-center gap-1 text-lg font-semibold transition hover:scale-105"
+                      >
+                        {item.label} <FaCaretDown />
+                      </button>
 
-            {/* Events in Mobile */}
-            <div className="flex w-full flex-col items-center gap-2">
-              <button
-                onClick={toggleEvents}
-                className="flex items-center gap-1 text-lg font-semibold transition transform hover:scale-105"
-              >
-                Events <FaCaretDown />
-              </button>
-              <AnimatePresence>
-                {isEventsOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="flex w-48 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
-                  >
-                    <Link
-                      href="/events"
-                      className="px-4 py-2 hover:bg-gray-100"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      All Events
-                    </Link>
-                    
-                    <Link
-                      href="https://www.tickettailor.com/events/burtonpride"
-                      className="block px-4 py-2 hover:bg-gray-100"
-                    >
-                      Tickets
-                    </Link>
+                      <AnimatePresence>
+                        {isOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="flex w-56 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
+                          >
+                            {(item.children || []).map((child) => {
+                              if (!child.href) return null;
 
-                    <Link
-                      href="/events/Pride2025"
-                      className="px-4 py-2 hover:bg-gray-100"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Pride Event 2025
-                    </Link>
+                              const external =
+                                child.href.startsWith("http://") ||
+                                child.href.startsWith("https://");
 
-                    <Link
-                      href="/events/NightParty"
-                      className="px-4 py-2 hover:bg-gray-100"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      Pride Party 2025
-                    </Link>
+                              return (
+                                <Link
+                                  key={child.id}
+                                  href={child.href}
+                                  target={
+                                    external || child.open_in_new_tab
+                                      ? "_blank"
+                                      : undefined
+                                  }
+                                  rel={
+                                    external || child.open_in_new_tab
+                                      ? "noopener noreferrer"
+                                      : undefined
+                                  }
+                                  className="px-4 py-2 hover:bg-gray-100"
+                                  onClick={() => setIsMenuOpen(false)}
+                                >
+                                  {child.label}
+                                </Link>
+                              );
+                            })}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                }
 
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Other Mobile Links */}
-            {[
-              { name: "Meet Us", href: "/MeetUS" },
-              { name: "Contact Us", href: "/ContactUS" },
-              { name: "Join The Team", href: "/JoinUS" },
-              { name: "See Your Sponsors", href: "/Sponsor" },
-            ].map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`block transform py-2 text-lg font-semibold transition hover:scale-105 ${isActive(link.href) ? rainbowClass : ""
-                  }`}
-                onClick={() => setIsMenuOpen(false)}
-              >
-                {link.name}
-              </Link>
-            ))}
-
-            {/* External Link */}
-            <Link
-              href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="
-                relative font-extrabold tracking-wide
-                text-transparent bg-clip-text
-                bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
-                bg-[length:200%_auto] animate-gradient-x
-                drop-shadow-[0_0_12px_rgba(255,255,255,0.8)]
-                transition-transform duration-300 ease-out
-                hover:scale-110 hover:drop-shadow-[0_0_20px_rgba(255,255,255,1)]
-              "
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Cameron&nbsp;Digital&nbsp;Works
-            </Link>
+                return renderNavLink(item, true);
+              })}
           </motion.div>
         )}
       </AnimatePresence>
