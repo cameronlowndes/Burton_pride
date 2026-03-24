@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { motion } from "framer-motion";
 import SponsorForm from "../Forms/SponsorForm";
-import BoardSection from "../Card/BoardSection";
+import CommitteeSection from "../Card/CommitteeSection";
 
 export default function Collaborate() {
   const containerVariants = {
@@ -110,7 +110,7 @@ export default function Collaborate() {
       </motion.section>
 
       <div className="w-full mt-24">
-        <BoardSection/>
+        <CommitteeSection />
       </div>
     </motion.div>
   );
