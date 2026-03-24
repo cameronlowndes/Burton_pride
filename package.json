@@ -16,6 +16,7 @@
     "@vercel/analytics": "^1.5.0",
     "animate.css": "^4.1.1",
     "autoprefixer": "^10.4.21",
+    "bcryptjs": "^3.0.3",
     "cloudinary": "^2.9.0",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",

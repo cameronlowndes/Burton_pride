@@ -4,7 +4,12 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-const MAIN_ADMIN_EMAIL = "cameronlowndes@gmail.com";
+const MAIN_ADMIN_EMAILS = [
+  "cameronlowndes@burtonpride.co.uk",
+  "simonwhale@burtonpride.co.uk",
+ " isaactimmins@burtonpride.co.uk",
+  "olga@burtonpride.co.uk"
+];
 
 function clean(value: unknown) {
   return String(value || "").trim();
@@ -30,15 +35,22 @@ function cleanPercent(value: unknown, fallback = 50) {
 
 function cleanBoolean(value: unknown, fallback = true) {
   if (typeof value === "boolean") return value;
+
   if (typeof value === "string") {
-    if (value.toLowerCase() === "true") return true;
-    if (value.toLowerCase() === "false") return false;
+    const lowered = value.toLowerCase().trim();
+    if (lowered === "true") return true;
+    if (lowered === "false") return false;
   }
+
   return fallback;
 }
 
 const memberSelect =
   "id, full_name, email, image_url, role, pronouns, section_title, story_title, story, display_order, is_published, image_position_x, image_position_y";
+
+function isAdminEmail(email: string) {
+  return MAIN_ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
 
 export async function GET(req: Request) {
   try {
@@ -62,13 +74,14 @@ export async function GET(req: Request) {
       );
     }
 
+    const db = supabaseAdmin;
     const { searchParams } = new URL(req.url);
     const requestedId = searchParams.get("id");
-    const isMainAdmin = email === MAIN_ADMIN_EMAIL;
+    const isMainAdmin = isAdminEmail(email);
 
     if (isMainAdmin) {
       if (requestedId) {
-        const { data, error } = await supabaseAdmin
+        const { data, error } = await db
           .from("committee_members")
           .select(memberSelect)
           .eq("id", requestedId)
@@ -88,14 +101,17 @@ export async function GET(req: Request) {
         });
       }
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await db
         .from("committee_members")
         .select(memberSelect)
         .order("display_order", { ascending: true });
 
       if (error) {
         return NextResponse.json(
-          { ok: false, error: error.message || "Failed to load committee members" },
+          {
+            ok: false,
+            error: error.message || "Failed to load committee members",
+          },
           { status: 500 }
         );
       }
@@ -107,7 +123,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await db
       .from("committee_members")
       .select(memberSelect)
       .eq("email", email)
@@ -129,7 +145,8 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unexpected server error",
+        error:
+          error instanceof Error ? error.message : "Unexpected server error",
       },
       { status: 500 }
     );
@@ -158,7 +175,8 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const isMainAdmin = email === MAIN_ADMIN_EMAIL;
+    const db = supabaseAdmin;
+    const isMainAdmin = isAdminEmail(email);
     const body = await req.json();
     const targetId = clean(body?.id);
 
@@ -185,7 +203,7 @@ export async function PATCH(req: Request) {
         image_position_y: cleanPercent(body?.image_position_y, 50),
       };
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await db
         .from("committee_members")
         .update(adminUpdates)
         .eq("id", targetId)
@@ -221,7 +239,7 @@ export async function PATCH(req: Request) {
       image_position_y: cleanPercent(body?.image_position_y, 50),
     };
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await db
       .from("committee_members")
       .update(memberUpdates)
       .eq("email", email)
@@ -244,7 +262,8 @@ export async function PATCH(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unexpected server error",
+        error:
+          error instanceof Error ? error.message : "Unexpected server error",
       },
       { status: 500 }
     );
