@@ -68,14 +68,15 @@ export default function AboutClient() {
 
           <br />
           <br />
-
-          In a time when the world feels like it is changing rapidly, and when
-          conversations around rights and protections are becoming increasingly
-          uncertain, we believe it is more important than ever to stand together.
-          Reform UK has stated that it wants to remove or significantly change
-          the <span className="font-semibold">Equality Act 2010</span>,
-          legislation that provides essential protections against discrimination
-          for LGBTQIA+ people and many others across the UK.
+<p>
+  In a time when the world feels like it is changing rapidly, and when
+  conversations around rights and protections are becoming increasingly
+  uncertain, we believe it is more important than ever to stand together.
+  There are growing discussions about potential changes to the{" "}
+  <span className="font-semibold">Equality Act 2010</span> legislation
+  that provides essential protections against discrimination for LGBTQIA+
+  people and many others across the UK.
+</p>
 
           <br />
           <br />
@@ -100,14 +101,13 @@ export default function AboutClient() {
           Our Mission
         </h2>
 
-        <p className="text-lg sm:text-xl leading-relaxed">
-          Burton Pride’s mission is to stand firmly alongside the{' '}
-          <span className="font-semibold">LGBTQIA+</span> community,
-          especially during challenging times. As conversations grow around
-          policies and movements from Reform UK and the rise of far-right
-          voices in the UK, we recognise that many people within our
-          community feel uncertain and concerned about their rights and
-          protections.
+     <p className="text-lg sm:text-xl leading-relaxed">
+  Burton Pride’s mission is to stand firmly alongside the{" "}
+  <span className="font-semibold">LGBTQIA+</span> community, especially
+  during challenging times. As conversations around rights, policies, and
+  protections continue to evolve, we recognise that many people within our
+  community may feel uncertain and concerned about their future and the
+  safeguards that protect them.
 
           <br />
           <br />
