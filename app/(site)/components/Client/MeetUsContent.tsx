@@ -13,7 +13,7 @@ type Member = {
   role: string;
   pronouns: string | null;
   section_title: string;
-  story_title: string | null;
+  story_title?: string | null;
   story: string | null;
   display_order: number;
   is_published: boolean;
@@ -83,7 +83,7 @@ function TeamStoryModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md sm:p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md sm:p-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -95,18 +95,20 @@ function TeamStoryModal({
             exit={{ opacity: 0, scale: 0.97, y: 18 }}
             transition={{ duration: 0.22, ease: "easeOut" }}
             onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-slate-200  p-6 text-slate-900 shadow-[0_24px_80px_rgba(0,0,0,0.30)] sm:p-8"
+            className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/20 bg-gradient-to-br from-violet-700/95 via-purple-700/95 to-fuchsia-700/95 p-6 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-8"
           >
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.12),transparent_30%)]" />
+
             <button
               type="button"
               onClick={onClose}
-              className="absolute right-4 top-4 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+              className="absolute right-4 top-4 z-10 rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/25"
             >
               Close
             </button>
 
-            <div className="flex flex-col items-center text-center">
-              <div className="relative mb-5 h-28 w-28 overflow-hidden rounded-full border-4 border-pink-200 shadow-lg">
+            <div className="relative z-10 flex flex-col items-center text-center">
+              <div className="relative mb-5 h-28 w-28 overflow-hidden rounded-full border-4 border-white/70 shadow-[0_0_30px_rgba(255,255,255,0.18)]">
                 <Image
                   src={member.image_url || "/image/Logo.png"}
                   alt={member.full_name}
@@ -119,23 +121,23 @@ function TeamStoryModal({
                 />
               </div>
 
-              <h2 className="text-3xl font-extrabold sm:text-4xl">
+              <h2 className="text-3xl font-extrabold text-white drop-shadow sm:text-4xl">
                 {member.full_name}
               </h2>
 
-              <p className="mt-2 text-lg font-semibold text-slate-700">
+              <p className="mt-2 text-lg font-semibold text-white/85">
                 {member.role}
               </p>
 
               <div className="mt-4 flex flex-wrap justify-center gap-3">
                 {member.pronouns && (
-                  <span className="rounded-full bg-pink-100 px-4 py-2 text-sm font-semibold text-pink-700">
+                  <span className="rounded-full border border-pink-200/30 bg-white/15 px-4 py-2 text-sm font-semibold text-white">
                     {member.pronouns}
                   </span>
                 )}
 
                 {member.section_title && (
-                  <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+                  <span className="rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-semibold text-white/95">
                     {member.section_title}
                   </span>
                 )}
@@ -144,20 +146,20 @@ function TeamStoryModal({
               {member.email && (
                 <a
                   href={`mailto:${member.email}`}
-                  className="mt-5 rounded-2xl border border-slate-200  px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="mt-5 rounded-2xl border border-white/25 bg-black/20 px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/30"
                 >
                   {member.email}
                 </a>
               )}
 
               {member.story_title && (
-                <h3 className="mt-8 text-2xl font-bold text-slate-900">
+                <h3 className="mt-8 text-2xl font-bold text-white">
                   {member.story_title}
                 </h3>
               )}
             </div>
 
-            <div className="mt-6 space-y-5 text-base leading-8 text-slate-700 sm:text-lg">
+            <div className="relative z-10 mt-6 space-y-5 text-base leading-8 text-white/90 sm:text-lg">
               {(member.story ?? "")
                 .split("\n")
                 .filter((p) => p.trim())
@@ -166,7 +168,7 @@ function TeamStoryModal({
                 ))}
 
               {!member.story?.trim() && (
-                <p className="italic text-slate-500">Story coming soon.</p>
+                <p className="italic text-white/70">Story coming soon.</p>
               )}
             </div>
           </motion.div>
@@ -189,7 +191,7 @@ function CardButtons({
     <div className="mt-auto flex flex-col gap-3 pt-6">
       <Link
         href={`/team/${slugifyName(member.full_name)}`}
-        className="inline-flex items-center justify-center rounded-full border  px-6 py-3 text-sm font-bold text-white transition"
+        className="inline-flex items-center justify-center rounded-full border border-white/25 bg-white/10 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/20"
       >
         View Profile
       </Link>
@@ -206,7 +208,7 @@ function CardButtons({
         <button
           type="button"
           disabled
-          className="inline-flex cursor-not-allowed items-center justify-center rounded-full border px-6 py-3 text-sm font-bold text-white/60"
+          className="inline-flex cursor-not-allowed items-center justify-center rounded-full border border-white/15 bg-white/10 px-6 py-3 text-sm font-bold text-white/60"
         >
           Story Coming Soon
         </button>
@@ -234,7 +236,7 @@ function CommitteeMemberCard({
       className="h-full"
     >
       <div className="flex h-full flex-col overflow-hidden rounded-[32px] border border-violet-300/40 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 text-white shadow-[0_20px_60px_rgba(0,0,0,0.14)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_24px_70px_rgba(0,0,0,0.18)]">
-        <div className="relative aspect-[4/3] w-full ">
+        <div className="relative aspect-[4/3] w-full">
           <Image
             src={member.image_url || "/image/Logo.png"}
             alt={member.full_name}
@@ -259,7 +261,7 @@ function CommitteeMemberCard({
 
           {member.pronouns && (
             <div className="mt-4">
-              <span className="rounded-full  px-4 py-2 text-sm font-semibold text-white">
+              <span className="rounded-full px-4 py-2 text-sm font-semibold text-white">
                 {member.pronouns}
               </span>
             </div>
@@ -332,18 +334,23 @@ export default function MeetUsContent() {
     }));
   }, [members]);
 
-  const boardSection = sections.find((section) => section.title === "Committed Board");
-  const otherSections = sections.filter((section) => section.title !== "Committed Board");
+  const boardSection = sections.find(
+    (section) => section.title === "Committed Board"
+  );
+  const otherSections = sections.filter(
+    (section) => section.title !== "Committed Board"
+  );
 
   return (
     <>
       <div className="min-h-screen px-4 pb-24 pt-8 text-slate-900 sm:px-8 lg:px-12">
         <div className="mx-auto max-w-7xl">
-         <motion.header
-  initial={{ opacity: 0, y: 22 }}
-  animate={{ opacity: 1, y: 0 }}
-  transition={{ duration: 0.6, ease: "easeOut" }}
-  className="relative mt-16 overflow-hidden rounded-[36px] border border-slate-200 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 px-6 py-12 text-white shadow-[0_25px_80px_rgba(0,0,0,0.12)] sm:mt-10 sm:px-10 sm:py-16 lg:px-14">
+          <motion.header
+            initial={{ opacity: 0, y: 22 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="relative mt-16 overflow-hidden rounded-[36px] border border-slate-200 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 px-6 py-12 text-white shadow-[0_25px_80px_rgba(0,0,0,0.12)] sm:mt-10 sm:px-10 sm:py-16 lg:px-14"
+          >
             <div className="relative z-10 flex flex-col items-center text-center">
               <div className="mb-6 overflow-hidden rounded-full border-4 border-white/80 shadow-[0_0_45px_rgba(255,255,255,0.35)]">
                 <Image
