@@ -30,12 +30,13 @@ type SitePage = {
   hidden_message: string | null;
   coming_soon_title: string | null;
   coming_soon_message: string | null;
+  locked_title: string | null;
+  locked_message: string | null;
   password_protected: boolean;
   page_password?: string;
   created_at: string;
   updated_at: string;
 };
-
 type ApiResponse = {
   ok: boolean;
   error?: string;
@@ -204,22 +205,24 @@ export default function SitePagesAdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          id,
-          title: optimistic.title,
-          status: optimistic.status,
-          is_enabled: optimistic.is_enabled,
-          show_in_nav: optimistic.show_in_nav,
-          nav_label: optimistic.nav_label,
-          template: optimistic.template,
-          sort_order: optimistic.sort_order,
-          hidden_title: optimistic.hidden_title,
-          hidden_message: optimistic.hidden_message,
-          coming_soon_title: optimistic.coming_soon_title,
-          coming_soon_message: optimistic.coming_soon_message,
-          password_protected: optimistic.password_protected,
-          page_password: optimistic.page_password || "",
-        }),
+      body: JSON.stringify({
+  id,
+  title: optimistic.title,
+  status: optimistic.status,
+  is_enabled: optimistic.is_enabled,
+  show_in_nav: optimistic.show_in_nav,
+  nav_label: optimistic.nav_label,
+  template: optimistic.template,
+  sort_order: optimistic.sort_order,
+  hidden_title: optimistic.hidden_title,
+  hidden_message: optimistic.hidden_message,
+  coming_soon_title: optimistic.coming_soon_title,
+  coming_soon_message: optimistic.coming_soon_message,
+  locked_title: optimistic.locked_title,
+  locked_message: optimistic.locked_message,
+  password_protected: optimistic.password_protected,
+  page_password: optimistic.page_password || "",
+}),
       });
 
       const json = await res.json();
