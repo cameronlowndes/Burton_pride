@@ -102,7 +102,7 @@ export default function AdminSidebar() {
                 onNavigate={() => setOpen(false)}
               />
               <MobileLink
-                href="/Admin/Dashboard/Email"
+                href="/Admin/Email"
                 label="Emails"
                 onNavigate={() => setOpen(false)}
               />
@@ -267,7 +267,7 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
 
       <nav className="space-y-2">
         <SideNavLink href="/Admin/Dashboard" label="Dashboard" />
-        <SideNavLink href="/Admin/Dashboard/Email" label="Emails" />
+        <SideNavLink href="/Admin/Email" label="Emails" />
 
         <div className="flex items-center gap-2">
           <Link
