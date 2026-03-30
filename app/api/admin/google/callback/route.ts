@@ -1,89 +1,98 @@
 import { NextRequest, NextResponse } from "next/server";
+import { google } from "googleapis";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function GET(req: NextRequest) {
   try {
+    const code = req.nextUrl.searchParams.get("code");
+    const error = req.nextUrl.searchParams.get("error");
+
+    if (error) {
+      return NextResponse.redirect(
+        new URL(`/Admin/Email?error=${encodeURIComponent(error)}`, req.url)
+      );
+    }
+
+    if (!code) {
+      return NextResponse.redirect(
+        new URL("/Admin/Email?error=no_code", req.url)
+      );
+    }
+
     const { userId } = await auth();
 
     if (!userId) {
-      return NextResponse.redirect(new URL("/admin/login", req.url));
+      return NextResponse.redirect(new URL("/Admin/Login", req.url));
     }
 
-    const code = req.nextUrl.searchParams.get("code");
-
-    if (!code) {
-      return NextResponse.redirect(new URL("/Admin/Dashboard/Email?error=no_code", req.url));
-    }
-
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        code,
-        client_id: process.env.GOOGLE_CLIENT_ID || "",
-        client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
-        redirect_uri: process.env.GOOGLE_OAUTH_REDIRECT_URI || "",
-        grant_type: "authorization_code",
-      }).toString(),
-    });
-
-    const tokenData = await tokenRes.json();
-
-    if (!tokenRes.ok || !tokenData.access_token) {
-      console.error("Google token error:", tokenData);
+    if (
+      !process.env.GOOGLE_CLIENT_ID ||
+      !process.env.GOOGLE_CLIENT_SECRET ||
+      !process.env.GOOGLE_OAUTH_REDIRECT_URI
+    ) {
       return NextResponse.redirect(
-        new URL("/Admin/Dashboard/Email?error=token_failed", req.url)
+        new URL("/Admin/Email?error=missing_google_env", req.url)
       );
     }
 
-    const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_OAUTH_REDIRECT_URI
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    const oauth2 = google.oauth2({
+      version: "v2",
+      auth: oauth2Client,
     });
 
-    const userData = await userRes.json();
+    const userInfo = await oauth2.userinfo.get();
+    const email = userInfo.data.email?.trim() || null;
 
-    if (!userRes.ok || !userData.email) {
-      console.error("Google user info error:", userData);
+    if (!email) {
       return NextResponse.redirect(
-        new URL("/Admin/Dashboard/Email?error=userinfo_failed", req.url)
+        new URL("/Admin/Email?error=no_google_email", req.url)
       );
     }
 
-    const expiresAt =
-      typeof tokenData.expires_in === "number"
-        ? Date.now() + tokenData.expires_in * 1000
-        : null;
+    const supabase = supabaseAdmin;
 
-    const { error } = await supabaseAdmin
-      .from("admin_google_accounts")
-      .upsert({
-        user_id: userId,
-        google_email: userData.email,
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token ?? null,
-        expires_at: expiresAt,
+    const payload = {
+      user_id: userId,
+      email,
+      google_email: email,
+      access_token: tokens.access_token ?? null,
+      refresh_token: tokens.refresh_token ?? null,
+      expires_at: tokens.expiry_date ?? null,
+      created_at: new Date().toISOString(),
+    };
+
+    const { error: upsertError } = await supabase
+      .from("google_connections")
+      .upsert(payload, {
+        onConflict: "user_id",
       });
 
-    if (error) {
-      console.error("Supabase save error:", error);
+    if (upsertError) {
+      console.error("Failed to save google connection:", upsertError);
+
       return NextResponse.redirect(
-        new URL("/Admin/Dashboard/Email?error=save_failed", req.url)
+        new URL("/Admin/Email?error=save_failed", req.url)
       );
     }
 
     return NextResponse.redirect(
-      new URL("/Admin/Dashboard/Email?connected=1", req.url)
+      new URL("/Admin/Email?connected=1", req.url)
     );
   } catch (error) {
-    console.error("Google callback unexpected error:", error);
+    console.error("Google callback route error:", error);
 
     return NextResponse.redirect(
-      new URL("/Admin/Dashboard/Email?error=unexpected", req.url)
+      new URL("/Admin/Email?error=callback_failed", req.url)
     );
   }
 }

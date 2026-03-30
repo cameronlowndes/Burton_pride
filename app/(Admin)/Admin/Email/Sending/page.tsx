@@ -63,6 +63,8 @@ type Notice =
   | { type: "error"; message: string }
   | null;
 
+const TEST_EMAIL = "burtonpridetest@gmail.com";
+
 const initialForm = {
   to: "",
   cc: "",
@@ -261,6 +263,43 @@ export default function AdminSendEmailPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function fillTestEmail() {
+    setForm((prev) => ({
+      ...prev,
+      to: TEST_EMAIL,
+      subject:
+        prev.subject.trim() || "Test Email from Burton Pride Admin Portal",
+      message:
+        prev.message.trim() ||
+        `Hello,
+
+This is a test email sent from the Burton Pride admin portal.
+
+If you have received this email, the email system is working correctly.
+
+Kind regards,
+Burton Pride C.I.C`,
+      html:
+        prev.html.trim() ||
+        `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+          <h2 style="margin: 0 0 16px;">Test Email from Burton Pride Admin Portal</h2>
+          <p>Hello,</p>
+          <p>This is a test email sent from the Burton Pride admin portal.</p>
+          <p>If you have received this email, the email system is working correctly.</p>
+          <p>Kind regards,<br />Burton Pride C.I.C</p>
+        </div>`,
+    }));
+
+    setNotice({
+      type: "success",
+      message: `Test email details filled in for ${TEST_EMAIL}`,
+    });
+  }
+
+  function connectGoogle() {
+    window.location.href = "/api/admin/google/connect";
+  }
+
   function clearForm() {
     setForm(initialForm);
     setFiles([]);
@@ -421,6 +460,10 @@ export default function AdminSendEmailPage() {
     }
   }
 
+  const showConnectGoogleButton =
+    notice?.type === "error" &&
+    notice.message.toLowerCase().includes("google connection");
+
   return (
     <div className="min-w-0 p-4 md:p-6 lg:p-8">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_360px]">
@@ -447,18 +490,49 @@ export default function AdminSendEmailPage() {
             </div>
           </div>
 
-          <NoticeBanner notice={notice} />
+          <div className="space-y-4">
+            <NoticeBanner notice={notice} />
+
+            {showConnectGoogleButton ? (
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={connectGoogle}
+                  className="inline-flex min-h-[48px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                >
+                  <Mail className="h-4 w-4" />
+                  Connect Google Account
+                </button>
+              </div>
+            ) : null}
+          </div>
 
           <form onSubmit={handleSend} className="mt-6 space-y-5">
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_260px]">
               <div>
-                <FieldLabel required>To</FieldLabel>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                  <FieldLabel required>To</FieldLabel>
+
+                  <button
+                    type="button"
+                    onClick={fillTestEmail}
+                    className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    Autofill test email
+                  </button>
+                </div>
+
                 <Input
                   value={form.to}
                   onChange={(value) => updateField("to", value)}
                   placeholder="name@example.com"
                   type="email"
                 />
+
+                <p className="mt-2 text-xs text-white/45">
+                  Test address: {TEST_EMAIL}
+                </p>
               </div>
 
               <div>
@@ -726,6 +800,17 @@ export default function AdminSendEmailPage() {
               >
                 Clear form
               </button>
+
+              {showConnectGoogleButton ? (
+                <button
+                  type="button"
+                  onClick={connectGoogle}
+                  className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-5 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                >
+                  <Mail className="h-4 w-4" />
+                  Connect Google
+                </button>
+              ) : null}
             </div>
           </form>
         </section>
