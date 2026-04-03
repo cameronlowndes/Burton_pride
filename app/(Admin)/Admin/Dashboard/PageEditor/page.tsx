@@ -1,13 +1,13 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Mail, ShieldAlert } from "lucide-react";
 import PageEditorClient from "./PageEditorClient";
-
-const MAIN_ADMIN_EMAIL = "cameronlowndes@burtonpride.co.uk";
+import { requireMainAdmin } from "@/lib/isMainAdmin";
 
 export default async function PageEditorPage() {
   const { userId } = await auth();
 
+  // ❌ Not logged in
   if (!userId) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
@@ -27,7 +27,7 @@ export default async function PageEditorPage() {
 
           <div className="mt-8">
             <Link
-              href="/admin/dashboard"
+              href="/Admin/Dashboard"
               className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
             >
               Go to dashboard
@@ -38,13 +38,10 @@ export default async function PageEditorPage() {
     );
   }
 
-  const user = await currentUser();
-  const email =
-    user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
-
-  const isMainAdmin = email === MAIN_ADMIN_EMAIL;
-
-  if (!isMainAdmin) {
+  // ✅ Check main admin (NO EMAIL IN THIS FILE)
+  try {
+    await requireMainAdmin();
+  } catch {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
         <div className="w-full max-w-2xl rounded-[36px] border border-white/20 bg-white/10 shadow-[0_30px_100px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
@@ -59,10 +56,9 @@ export default async function PageEditorPage() {
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85 sm:text-base">
-              This page has been restricted to the main admin of the website. If
-              you need a page disabled, please contact Cameron with the page you
-              want disabled and the reason behind it. This page is only meant for
-              the main admin.
+              This page has been restricted to the main admin of the website.
+              If you need a page disabled or updated, please contact Cameron with
+              the details and reason. This page is only meant for the main admin.
             </p>
           </div>
 
@@ -73,7 +69,9 @@ export default async function PageEditorPage() {
               </div>
               <h2 className="text-lg font-semibold">Why access is limited</h2>
               <p className="mt-2 text-sm leading-6 text-white/75">
-               This page is restricted to the main admin to prevent accidental or unauthorised changes to the website. If everyone had access, pages could be disabled without proper reason, which could cause issues for both the public and the team.
+                This page is restricted to the main admin to prevent accidental or
+                unauthorised changes. If everyone had access, pages could be disabled
+                without proper reason, causing issues for both the public and the team.
               </p>
             </div>
 
@@ -83,7 +81,10 @@ export default async function PageEditorPage() {
               </div>
               <h2 className="text-lg font-semibold">Need a change made?</h2>
               <p className="mt-2 text-sm leading-6 text-white/75">
-              If you need to make changes to the website or disable a page, please contact Cameron with full details of the request, including what changes you want made and the reason behind them. Cameron will review your request and carry out the necessary updates if appropriate. </p>
+                Please contact Cameron with full details of the change you need,
+                including what page and why. The request will be reviewed and applied
+                if appropriate.
+              </p>
             </div>
           </div>
 
@@ -98,11 +99,11 @@ export default async function PageEditorPage() {
               </Link>
 
               <a
-                href="mailto:cameronlowndes@burtonpride.co.uk?subject=Page%20Editor%20request"
+                href="mailto:info@burtonpride.co.uk"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-yellow-300/30 bg-yellow-400/15 px-5 py-3 text-sm font-semibold text-yellow-50 transition hover:bg-yellow-400/20"
               >
                 <Mail className="h-4 w-4" />
-                Contact Cameron
+                Contact team
               </a>
             </div>
           </div>
@@ -111,5 +112,6 @@ export default async function PageEditorPage() {
     );
   }
 
+  // ✅ Allowed
   return <PageEditorClient />;
 }
