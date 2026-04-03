@@ -2,30 +2,100 @@
 
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
-
-const EVENTS_ROOT = "/Admin/Dashboard/Events";
-const PAGE_EDITOR_ROOT = "/Admin/Dashboard/PageEditor";
+import { useEffect, useMemo, useState } from "react";
+import type { AdminSidebarItem, AdminSidebarResponse } from "@/types/admin-sidebar";
 
 export default function AdminSidebar() {
   const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<AdminSidebarItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mobile submenus
-  const [eventsOpenMobile, setEventsOpenMobile] = useState(true);
-  const [pageEditorOpenMobile, setPageEditorOpenMobile] = useState(false);
+  const [mobileGroupOpen, setMobileGroupOpen] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const loadItems = async () => {
+      try {
+        const res = await fetch("/api/admin/sidebar", { cache: "no-store" });
+        const data: AdminSidebarResponse = await res.json();
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "Failed to load sidebar");
+        }
+
+        const enabledItems = (data.items || []).filter((item) => item.is_enabled);
+        setItems(enabledItems);
+
+        const initialOpen: Record<string, boolean> = {};
+        enabledItems
+          .filter((item) => item.item_type === "group")
+          .forEach((item) => {
+            initialOpen[item.id] = true;
+          });
+        setMobileGroupOpen(initialOpen);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadItems();
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpen(false);
-        setEventsOpenMobile(false);
-        setPageEditorOpenMobile(false);
+        setMobileGroupOpen({});
       }
     };
+
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  const topLevelItems = useMemo(
+    () =>
+      items
+        .filter((item) => !item.parent_id)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [items]
+  );
+
+  const childMap = useMemo(() => {
+    const map = new Map<string, AdminSidebarItem[]>();
+
+    for (const item of items) {
+      if (!item.parent_id) continue;
+      const current = map.get(item.parent_id) || [];
+      current.push(item);
+      map.set(item.parent_id, current);
+    }
+
+    for (const [key, value] of map.entries()) {
+      map.set(
+        key,
+        [...value].sort((a, b) => a.sort_order - b.sort_order)
+      );
+    }
+
+    return map;
+  }, [items]);
+
+  if (loading) {
+    return (
+      <>
+        <div className="sticky top-0 z-40 border-b border-white/10 bg-black/30 backdrop-blur-xl md:hidden">
+          <div className="px-4 py-3 text-sm text-white/70">Loading menu...</div>
+        </div>
+
+        <aside className="relative hidden w-72 bg-white/10 shadow-xl backdrop-blur-xl md:block">
+          <div className="p-6 text-sm text-white/70">Loading menu...</div>
+        </aside>
+      </>
+    );
+  }
 
   return (
     <>
@@ -58,7 +128,9 @@ export default function AdminSidebar() {
 
       <aside className="relative hidden w-72 bg-white/10 shadow-xl backdrop-blur-xl md:block">
         <SidebarContent
-          signOut={() => signOut({ redirectUrl: "/admin/login" })}
+          items={topLevelItems}
+          childMap={childMap}
+          signOut={() => signOut({ redirectUrl: "/Admin/Login" })}
         />
       </aside>
 
@@ -96,139 +168,69 @@ export default function AdminSidebar() {
 
           <div className="p-4">
             <div className="space-y-2">
-              <MobileLink
-                href="/admin/dashboard"
-                label="Dashboard"
-                onNavigate={() => setOpen(false)}
-              />
-              <MobileLink
-                href="/Admin/Email"
-                label="Emails"
-                onNavigate={() => setOpen(false)}
-              />
+              {topLevelItems.map((item) => {
+                const children = childMap.get(item.id) || [];
+                const isGroup = item.item_type === "group";
+                const isOpen = mobileGroupOpen[item.id] ?? true;
 
-              <div className="flex items-center gap-2">
-                <Link
-                  href={EVENTS_ROOT}
-                  onClick={() => setOpen(false)}
-                  className="flex-1 rounded-xl px-4 py-3 text-left text-sm font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
-                >
-                  Events
-                </Link>
+                if (isGroup) {
+                  return (
+                    <div key={item.id}>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={item.href || "#"}
+                          onClick={() => setOpen(false)}
+                          target={item.open_in_new_tab ? "_blank" : undefined}
+                          rel={item.open_in_new_tab ? "noreferrer" : undefined}
+                          className="flex-1 rounded-xl px-4 py-3 text-left text-sm font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
+                        >
+                          {item.label}
+                        </Link>
 
-                <button
-                  type="button"
-                  onClick={() => setEventsOpenMobile((v) => !v)}
-                  aria-label={
-                    eventsOpenMobile ? "Collapse events" : "Expand events"
-                  }
-                  className="shrink-0 rounded-xl px-4 py-3 text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  <span
-                    className={`block transition ${
-                      eventsOpenMobile ? "rotate-180" : ""
-                    }`}
-                  >
-                    ▾
-                  </span>
-                </button>
-              </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMobileGroupOpen((prev) => ({
+                              ...prev,
+                              [item.id]: !isOpen,
+                            }))
+                          }
+                          aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                          className="shrink-0 rounded-xl px-4 py-3 text-white/80 transition hover:bg-white/10 hover:text-white"
+                        >
+                          <span className={`block transition ${isOpen ? "rotate-180" : ""}`}>
+                            ▾
+                          </span>
+                        </button>
+                      </div>
 
-              {eventsOpenMobile && (
-                <div className="ml-2 space-y-1 border-l border-white/10 pl-3">
-                  <MobileSubLink
-                    href="/Admin/Dashboard/Windows-showcase/Entries"
-                    label="Window Showcase"
+                      {isOpen && children.length > 0 && (
+                        <div className="ml-2 space-y-1 border-l border-white/10 pl-3">
+                          {children.map((child) => (
+                            <MobileSubLink
+                              key={child.id}
+                              href={child.href || "#"}
+                              label={child.label}
+                              onNavigate={() => setOpen(false)}
+                              openInNewTab={child.open_in_new_tab}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <MobileLink
+                    key={item.id}
+                    href={item.href || "#"}
+                    label={item.label}
                     onNavigate={() => setOpen(false)}
+                    openInNewTab={item.open_in_new_tab}
                   />
-                  <MobileSubLink
-                    href="/Admin/Dashboard/Windows-showcase/Votes"
-                    label="Window Votes"
-                    onNavigate={() => setOpen(false)}
-                  />
-                  <MobileSubLink
-                    href="/Admin/Dashboard/Events/Countdown"
-                    label="Countdown"
-                    onNavigate={() => setOpen(false)}
-                  />
-                </div>
-              )}
-
-              <MobileLink
-                href="/Admin/Dashboard/Forms"
-                label="Forms"
-                onNavigate={() => setOpen(false)}
-              />
-              <MobileLink
-                href="/Admin/Dashboard/CommitteeTeam"
-                label="Committee Team"
-                onNavigate={() => setOpen(false)}
-              />
-
-              <div className="flex items-center gap-2">
-                <Link
-                  href={PAGE_EDITOR_ROOT}
-                  onClick={() => setOpen(false)}
-                  className="flex-1 rounded-xl px-4 py-3 text-left text-sm font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
-                >
-                  Page Editor
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => setPageEditorOpenMobile((v) => !v)}
-                  aria-label={
-                    pageEditorOpenMobile
-                      ? "Collapse page editor"
-                      : "Expand page editor"
-                  }
-                  className="shrink-0 rounded-xl px-4 py-3 text-white/80 transition hover:bg-white/10 hover:text-white"
-                >
-                  <span
-                    className={`block transition ${
-                      pageEditorOpenMobile ? "rotate-180" : ""
-                    }`}
-                  >
-                    ▾
-                  </span>
-                </button>
-              </div>
-
-              {pageEditorOpenMobile && (
-                <div className="ml-2 space-y-1 border-l border-white/10 pl-3">
-                  <MobileSubLink
-                    href="/Admin/Dashboard/PageEditor/SitePages"
-                    label="Site Pages"
-                    onNavigate={() => setOpen(false)}
-                  />
-                  <MobileSubLink
-                    href="/Admin/Dashboard/PageEditor/Navbar"
-                    label="Navbar"
-                    onNavigate={() => setOpen(false)}
-                  />
-                  <MobileSubLink
-                    href="/Admin/Dashboard/PageEditor/Footer"
-                    label="Footer"
-                    onNavigate={() => setOpen(false)}
-                  />
-                </div>
-              )}
-
-              <MobileLink
-                href="/Admin/Dashboard/Stripe"
-                label="Stripe"
-                onNavigate={() => setOpen(false)}
-              />
-              <MobileLink
-                href="/Admin/Dashboard/profile"
-                label="Profile"
-                onNavigate={() => setOpen(false)}
-              />
-              <MobileLink
-                href="/Admin/Dashboard/settings"
-                label="Settings"
-                onNavigate={() => setOpen(false)}
-              />
+                );
+              })}
             </div>
 
             <div className="mt-5 border-t border-white/10 pt-5">
@@ -249,9 +251,26 @@ export default function AdminSidebar() {
   );
 }
 
-function SidebarContent({ signOut }: { signOut: () => void }) {
-  const [eventsOpen, setEventsOpen] = useState(true);
-  const [pageEditorOpen, setPageEditorOpen] = useState(false);
+function SidebarContent({
+  items,
+  childMap,
+  signOut,
+}: {
+  items: AdminSidebarItem[];
+  childMap: Map<string, AdminSidebarItem[]>;
+  signOut: () => void;
+}) {
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const initial: Record<string, boolean> = {};
+    items
+      .filter((item) => item.item_type === "group")
+      .forEach((item) => {
+        initial[item.id] = true;
+      });
+    setGroupOpen(initial);
+  }, [items]);
 
   return (
     <div className="relative h-full p-6">
@@ -266,102 +285,69 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
       </div>
 
       <nav className="space-y-2">
-        <SideNavLink href="/Admin/Dashboard" label="Dashboard" />
-        <SideNavLink href="/Admin/Email" label="Emails" />
+        {items.map((item) => {
+          const children = childMap.get(item.id) || [];
+          const isGroup = item.item_type === "group";
+          const isOpen = groupOpen[item.id] ?? true;
 
-        <div className="flex items-center gap-2">
-          <Link
-            href={EVENTS_ROOT}
-            className="group flex flex-1 items-center justify-between rounded-xl px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/15"
-          >
-            <span>Events</span>
-            <span className="text-white/70 opacity-0 transition group-hover:opacity-100">
-              →
-            </span>
-          </Link>
+          if (isGroup) {
+            return (
+              <div key={item.id}>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={item.href || "#"}
+                    target={item.open_in_new_tab ? "_blank" : undefined}
+                    rel={item.open_in_new_tab ? "noreferrer" : undefined}
+                    className="group flex flex-1 items-center justify-between rounded-xl px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/15"
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-white/70 opacity-0 transition group-hover:opacity-100">
+                      →
+                    </span>
+                  </Link>
 
-          <button
-            type="button"
-            onClick={() => setEventsOpen((v) => !v)}
-            aria-label={eventsOpen ? "Collapse events" : "Expand events"}
-            className="shrink-0 rounded-xl px-3 py-2.5 text-white/70 transition hover:bg-white/10 hover:text-white"
-          >
-            <span className={`block transition ${eventsOpen ? "rotate-180" : ""}`}>
-              ▾
-            </span>
-          </button>
-        </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setGroupOpen((prev) => ({
+                        ...prev,
+                        [item.id]: !isOpen,
+                      }))
+                    }
+                    aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                    className="shrink-0 rounded-xl px-3 py-2.5 text-white/70 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <span className={`block transition ${isOpen ? "rotate-180" : ""}`}>
+                      ▾
+                    </span>
+                  </button>
+                </div>
 
-        {eventsOpen && (
-          <div className="ml-2 space-y-1 border-l border-white/10 pl-2">
-            <SubNavLink
-              href="/Admin/Dashboard/Windows-showcase/Entries"
-              label="Window Showcase"
+                {isOpen && children.length > 0 && (
+                  <div className="ml-2 space-y-1 border-l border-white/10 pl-2">
+                    {children.map((child) => (
+                      <SubNavLink
+                        key={child.id}
+                        href={child.href || "#"}
+                        label={child.label}
+                        openInNewTab={child.open_in_new_tab}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <SideNavLink
+              key={item.id}
+              href={item.href || "#"}
+              label={item.label}
+              openInNewTab={item.open_in_new_tab}
             />
-            <SubNavLink
-              href="/Admin/Dashboard/Windows-showcase/Votes"
-              label="Window Votes"
-            />
-            <SubNavLink
-              href="/Admin/Dashboard/Events/Countdown"
-              label="Countdown"
-            />
-          </div>
-        )}
-
-        <SideNavLink href="/Admin/Dashboard/Forms" label="Forms" />
-        <SideNavLink
-          href="/Admin/Dashboard/CommitteeTeam"
-          label="Committee Team"
-        />
-
-        <div className="flex items-center gap-2">
-          <Link
-            href={PAGE_EDITOR_ROOT}
-            className="group flex flex-1 items-center justify-between rounded-xl px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/15"
-          >
-            <span>Page Editor</span>
-            <span className="text-white/70 opacity-0 transition group-hover:opacity-100">
-              →
-            </span>
-          </Link>
-
-          <button
-            type="button"
-            onClick={() => setPageEditorOpen((v) => !v)}
-            aria-label={
-              pageEditorOpen ? "Collapse page editor" : "Expand page editor"
-            }
-            className="shrink-0 rounded-xl px-3 py-2.5 text-white/70 transition hover:bg-white/10 hover:text-white"
-          >
-            <span
-              className={`block transition ${pageEditorOpen ? "rotate-180" : ""}`}
-            >
-              ▾
-            </span>
-          </button>
-        </div>
-
-        {pageEditorOpen && (
-          <div className="ml-2 space-y-1 border-l border-white/10 pl-2">
-            <SubNavLink
-              href="/Admin/Dashboard/PageEditor/SitePages"
-              label="Site Pages"
-            />
-            <SubNavLink
-              href="/Admin/Dashboard/PageEditor/Navbar"
-              label="Navbar"
-            />
-            <SubNavLink
-              href="/Admin/Dashboard/PageEditor/Footer"
-              label="Footer"
-            />
-          </div>
-        )}
-
-        <SideNavLink href="/Admin/Dashboard/Stripe" label="Stripe" />
-        <SideNavLink href="/Admin/Dashboard/profile" label="Profile" />
-        <SideNavLink href="/Admin/Dashboard/settings" label="Settings" />
+          );
+        })}
 
         <div className="mt-6 border-t border-white/20 pt-6">
           <button
@@ -384,10 +370,20 @@ function SidebarContent({ signOut }: { signOut: () => void }) {
   );
 }
 
-function SideNavLink({ href, label }: { href: string; label: string }) {
+function SideNavLink({
+  href,
+  label,
+  openInNewTab = false,
+}: {
+  href: string;
+  label: string;
+  openInNewTab?: boolean;
+}) {
   return (
     <Link
       href={href}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noreferrer" : undefined}
       className="group flex items-center justify-between rounded-xl px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/15"
     >
       <span>{label}</span>
@@ -398,10 +394,20 @@ function SideNavLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-function SubNavLink({ href, label }: { href: string; label: string }) {
+function SubNavLink({
+  href,
+  label,
+  openInNewTab = false,
+}: {
+  href: string;
+  label: string;
+  openInNewTab?: boolean;
+}) {
   return (
     <Link
       href={href}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noreferrer" : undefined}
       className="block rounded-xl px-4 py-2 text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
     >
       {label}
@@ -413,15 +419,19 @@ function MobileLink({
   href,
   label,
   onNavigate,
+  openInNewTab = false,
 }: {
   href: string;
   label: string;
   onNavigate: () => void;
+  openInNewTab?: boolean;
 }) {
   return (
     <Link
       href={href}
       onClick={onNavigate}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noreferrer" : undefined}
       className="block rounded-xl px-4 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10 hover:text-white"
     >
       {label}
@@ -433,15 +443,19 @@ function MobileSubLink({
   href,
   label,
   onNavigate,
+  openInNewTab = false,
 }: {
   href: string;
   label: string;
   onNavigate: () => void;
+  openInNewTab?: boolean;
 }) {
   return (
     <Link
       href={href}
       onClick={onNavigate}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noreferrer" : undefined}
       className="block rounded-xl px-3 py-2 text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
     >
       {label}
