@@ -1,135 +1,151 @@
-import { google } from "googleapis";
+import { google, gmail_v1 } from "googleapis";
+import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-type GmailAccountRow = {
-  id: string;
-  access_token: string | null;
-  refresh_token: string | null;
-  expiry_date: number | null;
+type GmailHeader = {
+  name?: string | null;
+  value?: string | null;
 };
 
-async function getStoredAccount() {
-  const { data, error } = await supabaseAdmin
-    .from("gmail_accounts")
-    .select("id, access_token, refresh_token, expiry_date")
-    .eq("id", "main")
-    .single<GmailAccountRow>();
+type GoogleConnectionRow = {
+  user_id: string;
+  email: string | null;
+  google_email: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  expires_at: number | null;
+  scope?: string | null;
+  token_type?: string | null;
+  updated_at?: string | null;
+};
 
-  if (error || !data) {
-    throw new Error("No Gmail account connected.");
-  }
-
-  return data;
-}
-
-export async function getValidAccessToken() {
-  const account = await getStoredAccount();
-
-  if (!account.refresh_token) {
-    throw new Error("Missing Gmail refresh token.");
-  }
-
-  if (
-    account.access_token &&
-    account.expiry_date &&
-    Date.now() < account.expiry_date - 60_000
-  ) {
-    return account.access_token;
-  }
-
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      refresh_token: account.refresh_token,
-      grant_type: "refresh_token",
-    }),
-  });
-
-  if (!tokenRes.ok) {
-    const text = await tokenRes.text();
-    throw new Error(`Failed to refresh Gmail token: ${text}`);
-  }
-
-  const tokenData = await tokenRes.json();
-
-  await supabaseAdmin
-    .from("gmail_accounts")
-    .update({
-      access_token: tokenData.access_token,
-      expiry_date: Date.now() + (tokenData.expires_in ?? 3600) * 1000,
-    })
-    .eq("id", "main");
-
-  return tokenData.access_token as string;
-}
-
-export async function getGmailClient() {
-  const accessToken = await getValidAccessToken();
-
-  const auth = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_OAUTH_REDIRECT_URI
+export function getHeader(headers: GmailHeader[] = [], name: string) {
+  return (
+    headers.find((header) => header.name?.toLowerCase() === name.toLowerCase())
+      ?.value ?? ""
   );
-
-  auth.setCredentials({
-    access_token: accessToken,
-  });
-
-  return google.gmail({ version: "v1", auth });
 }
 
-export function decodeBase64Url(input?: string | null) {
-  if (!input) return "";
-  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "="
-  );
-  return Buffer.from(padded, "base64").toString("utf8");
+function decodeBase64Url(data: string) {
+  const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(normalized, "base64").toString("utf8");
 }
 
-export function getHeader(
-  headers: { name?: string | null; value?: string | null }[] | undefined,
-  name: string
-) {
-  return headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())
-    ?.value ?? "";
-}
-
-export function extractPlainTextFromPayload(payload: any): string {
+export function extractPlainTextFromPayload(
+  payload?: gmail_v1.Schema$MessagePart | null
+): string {
   if (!payload) return "";
 
   if (payload.mimeType === "text/plain" && payload.body?.data) {
-    return decodeBase64Url(payload.body.data);
+    try {
+      return decodeBase64Url(payload.body.data);
+    } catch {
+      return "";
+    }
   }
 
   if (payload.parts?.length) {
     for (const part of payload.parts) {
       const text = extractPlainTextFromPayload(part);
-      if (text) return text;
+      if (text.trim()) return text;
+    }
+  }
+
+  if (payload.body?.data) {
+    try {
+      return decodeBase64Url(payload.body.data);
+    } catch {
+      return "";
     }
   }
 
   return "";
 }
 
-export function extractHtmlFromPayload(payload: any): string {
-  if (!payload) return "";
+export async function getGmailClient() {
+  const { userId } = await auth();
 
-  if (payload.mimeType === "text/html" && payload.body?.data) {
-    return decodeBase64Url(payload.body.data);
+  if (!userId) {
+    throw new Error("Not authenticated.");
   }
 
-  if (payload.parts?.length) {
-    for (const part of payload.parts) {
-      const html = extractHtmlFromPayload(part);
-      if (html) return html;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error("Missing Google OAuth environment variables.");
+  }
+
+  const supabase = supabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("google_connections")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load google connection:", error);
+    throw new Error("Failed to load Google connection.");
+  }
+
+  const connection = data as GoogleConnectionRow | null;
+
+  if (!connection) {
+    throw new Error("No Google account connected.");
+  }
+
+  if (!connection.refresh_token) {
+    throw new Error("Google account is missing refresh token. Please reconnect.");
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    clientId,
+    clientSecret,
+    redirectUri
+  );
+
+  oauth2Client.setCredentials({
+    access_token: connection.access_token ?? undefined,
+    refresh_token: connection.refresh_token ?? undefined,
+    expiry_date: connection.expires_at ?? undefined,
+  });
+
+  oauth2Client.on("tokens", async (tokens) => {
+    try {
+      const updates: Record<string, string | number | null> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (tokens.access_token) updates.access_token = tokens.access_token;
+      if (tokens.refresh_token) updates.refresh_token = tokens.refresh_token;
+      if (tokens.expiry_date) updates.expires_at = tokens.expiry_date;
+      if (tokens.scope) updates.scope = tokens.scope;
+      if (tokens.token_type) updates.token_type = tokens.token_type;
+
+      const { error: updateError } = await supabase
+        .from("google_connections")
+        .update(updates)
+        .eq("user_id", userId);
+
+      if (updateError) {
+        console.error("Failed to update Google tokens:", updateError);
+      }
+    } catch (err) {
+      console.error("Google token persistence error:", err);
     }
+  });
+
+  try {
+    await oauth2Client.getAccessToken();
+  } catch (error) {
+    console.error("Google token refresh failed:", error);
+    throw new Error("Google authentication expired or is invalid. Please reconnect.");
   }
 
-  return "";
+  return google.gmail({
+    version: "v1",
+    auth: oauth2Client,
+  });
 }
