@@ -1,72 +1,110 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGmailClient, getHeader, extractPlainTextFromPayload } from "@/lib/gmail";
+import { auth } from "@clerk/nextjs/server";
+import { google } from "googleapis";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const maxResultsParam = req.nextUrl.searchParams.get("maxResults") || "20";
-    const pageToken = req.nextUrl.searchParams.get("pageToken") || undefined;
-    const query = req.nextUrl.searchParams.get("q") || "";
+    const { userId } = await auth();
 
-    const maxResults = Math.min(Math.max(Number(maxResultsParam) || 20, 1), 50);
-
-    let gmail;
-    try {
-      gmail = await getGmailClient();
-    } catch (error) {
-      console.error("getGmailClient failed:", error);
-
+    if (!userId) {
       return NextResponse.json(
-        {
-          ok: false,
-          code: "NOT_CONNECTED",
-          error: "Google Gmail is not connected. Please reconnect your Google account.",
-        },
+        { ok: false, error: "Unauthorised." },
         { status: 401 }
       );
     }
 
+    const search = req.nextUrl.searchParams.get("q") || "";
+    const maxResults = Number(req.nextUrl.searchParams.get("maxResults") || 25);
+
+    // ✅ GET GOOGLE CONNECTION (CORRECT TABLE)
+    const { data: connection, error } = await supabaseAdmin
+      .from("google_connections")
+      .select("google_email, refresh_token")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("DB error:", error);
+      return NextResponse.json(
+        { ok: false, error: "Failed to load Google connection." },
+        { status: 500 }
+      );
+    }
+
+    if (!connection) {
+      return NextResponse.json(
+        { ok: false, error: "No Gmail account connected." },
+        { status: 400 }
+      );
+    }
+
+    if (!connection.refresh_token) {
+      return NextResponse.json(
+        { ok: false, error: "Missing Gmail refresh token." },
+        { status: 400 }
+      );
+    }
+
+    // ✅ SETUP GOOGLE CLIENT
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_OAUTH_REDIRECT_URI
+    );
+
+    oauth2Client.setCredentials({
+      refresh_token: connection.refresh_token,
+    });
+
+    const gmail = google.gmail({
+      version: "v1",
+      auth: oauth2Client,
+    });
+
+    // ✅ FETCH EMAIL LIST
     const listRes = await gmail.users.messages.list({
       userId: "me",
       maxResults,
-      pageToken,
-      q: query || undefined,
-      labelIds: ["INBOX"],
+      q: search || undefined,
     });
 
-    const messages = listRes.data.messages ?? [];
+    const messages = listRes.data.messages || [];
 
+    if (messages.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        messages: [],
+      });
+    }
+
+    // ✅ FETCH MESSAGE DETAILS
     const fullMessages = await Promise.all(
       messages.map(async (msg) => {
-        const detail = await gmail.users.messages.get({
+        const res = await gmail.users.messages.get({
           userId: "me",
           id: msg.id!,
-          format: "full",
+          format: "metadata",
+          metadataHeaders: ["Subject", "From", "To", "Date"],
         });
 
-        const payload = detail.data.payload;
-        const headers = payload?.headers ?? [];
+        const headers = res.data.payload?.headers || [];
 
-        const subject = getHeader(headers, "Subject") || "(No subject)";
-        const from = getHeader(headers, "From") || "";
-        const to = getHeader(headers, "To") || "";
-        const date = getHeader(headers, "Date") || "";
-        const snippet =
-          detail.data.snippet ||
-          extractPlainTextFromPayload(payload)?.slice(0, 180) ||
-          "";
-
-        const unread = detail.data.labelIds?.includes("UNREAD") ?? false;
+        const getHeader = (name: string) =>
+          headers.find((h) => h.name === name)?.value || "";
 
         return {
-          id: detail.data.id,
-          threadId: detail.data.threadId,
-          subject,
-          from,
-          to,
-          date,
-          snippet,
-          unread,
-          labelIds: detail.data.labelIds ?? [],
+          id: res.data.id,
+          threadId: res.data.threadId,
+          subject: getHeader("Subject"),
+          from: getHeader("From"),
+          to: getHeader("To"),
+          date: getHeader("Date"),
+          snippet: res.data.snippet || "",
+          unread: (res.data.labelIds || []).includes("UNREAD"),
+          labelIds: res.data.labelIds || [],
         };
       })
     );
@@ -74,36 +112,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       messages: fullMessages,
-      nextPageToken: listRes.data.nextPageToken ?? null,
-      resultSizeEstimate: listRes.data.resultSizeEstimate ?? 0,
     });
-  } catch (error: any) {
-    console.error("Gmail inbox error:", error);
-
-    const message =
-      error?.response?.data?.error?.message ||
-      error?.message ||
-      "Failed to load inbox.";
-
-    const status =
-      error?.response?.status === 401
-        ? 401
-        : error?.response?.status === 403
-        ? 403
-        : 500;
+  } catch (error) {
+    console.error("Inbox error:", error);
 
     return NextResponse.json(
       {
         ok: false,
-        code:
-          status === 401
-            ? "UNAUTHORIZED"
-            : status === 403
-            ? "FORBIDDEN"
-            : "INBOX_LOAD_FAILED",
-        error: message,
+        error: "Failed to load inbox.",
       },
-      { status }
+      { status: 500 }
     );
   }
 }

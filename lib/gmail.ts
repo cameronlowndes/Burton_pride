@@ -77,7 +77,7 @@ export async function getGmailClient() {
     throw new Error("Missing Google OAuth environment variables.");
   }
 
-  const supabase = supabaseAdmin();
+  const supabase = supabaseAdmin;
 
   const { data, error } = await supabase
     .from("google_connections")

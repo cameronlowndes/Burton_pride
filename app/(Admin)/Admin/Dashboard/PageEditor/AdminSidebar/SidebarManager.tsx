@@ -1,64 +1,42 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { AdminSidebarItem, AdminSidebarResponse } from "@/types/admin-sidebar";
 
 type Notice =
   | { type: "success"; message: string }
   | { type: "error"; message: string }
   | null;
 
-type EmailSidebarItem = {
-  id: string;
-  label: string;
-  href: string;
-  icon: string;
-  sort_order: number;
-  is_enabled: boolean;
-  created_at?: string;
-};
-
-type EmailSidebarResponse = {
-  ok: boolean;
-  error?: string;
-  items?: EmailSidebarItem[];
-  item?: EmailSidebarItem;
-};
-
-type EditorMode = "create" | "edit";
+type EditorMode = "top-link" | "group" | "child-link" | "edit";
 
 type FormState = {
   label: string;
   href: string;
-  icon: string;
+  item_type: "link" | "group";
+  parent_id: string;
   sort_order: number;
   is_enabled: boolean;
+  open_in_new_tab: boolean;
 };
 
 const defaultForm: FormState = {
   label: "",
   href: "",
-  icon: "Mail",
+  item_type: "link",
+  parent_id: "",
   sort_order: 0,
   is_enabled: true,
+  open_in_new_tab: false,
 };
 
-const iconOptions = [
-  "Mail",
-  "Send",
-  "FileText",
-  "History",
-  "TestTube2",
-  "Settings",
-  "PenSquare",
-];
-
-export default function EmailSidebarAdminClient() {
-  const [items, setItems] = useState<EmailSidebarItem[]>([]);
+export default function SidebarManager() {
+  const [items, setItems] = useState<AdminSidebarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
-  const [editorMode, setEditorMode] = useState<EditorMode>("create");
+  const [editorMode, setEditorMode] = useState<EditorMode>("top-link");
   const [form, setForm] = useState<FormState>(defaultForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -69,73 +47,136 @@ export default function EmailSidebarAdminClient() {
 
   async function loadItems() {
     setLoading(true);
-
     try {
-      const res = await fetch("/api/admin/email-sidebar", {
-        cache: "no-store",
-      });
-
-      const data: EmailSidebarResponse = await res.json();
+      const res = await fetch("/api/admin/sidebar", { cache: "no-store" });
+      const data: AdminSidebarResponse = await res.json();
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load email sidebar items");
+        throw new Error(data.error || "Failed to load sidebar items");
       }
 
-      const sorted = [...(data.items || [])].sort(
-        (a, b) => a.sort_order - b.sort_order
-      );
+      const sorted = [...(data.items || [])].sort((a, b) => {
+        if (a.parent_id === b.parent_id) return a.sort_order - b.sort_order;
+        if (a.parent_id === null) return -1;
+        if (b.parent_id === null) return 1;
+        return 0;
+      });
 
       setItems(sorted);
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to load email sidebar items",
+        message: error instanceof Error ? error.message : "Failed to load items",
       });
     } finally {
       setLoading(false);
     }
   }
 
-  const filteredItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
+  const groups = useMemo(
+    () =>
+      items
+        .filter((item) => item.item_type === "group" && item.parent_id === null)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [items]
+  );
 
-    return items.filter(
+  const topLevelLinks = useMemo(
+    () =>
+      items
+        .filter((item) => item.item_type === "link" && item.parent_id === null)
+        .sort((a, b) => a.sort_order - b.sort_order),
+    [items]
+  );
+
+  function childrenOf(parentId: string) {
+    return items
+      .filter((item) => item.parent_id === parentId)
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }
+
+  function filteredGroups() {
+    const q = search.trim().toLowerCase();
+    if (!q) return groups;
+
+    return groups.filter((group) => {
+      const matchSelf =
+        group.label.toLowerCase().includes(q) ||
+        (group.href || "").toLowerCase().includes(q);
+
+      const matchChildren = childrenOf(group.id).some(
+        (child) =>
+          child.label.toLowerCase().includes(q) ||
+          (child.href || "").toLowerCase().includes(q)
+      );
+
+      return matchSelf || matchChildren;
+    });
+  }
+
+  function filteredTopLevelLinks() {
+    const q = search.trim().toLowerCase();
+    if (!q) return topLevelLinks;
+
+    return topLevelLinks.filter(
       (item) =>
         item.label.toLowerCase().includes(q) ||
-        (item.href || "").toLowerCase().includes(q) ||
-        (item.icon || "").toLowerCase().includes(q)
+        (item.href || "").toLowerCase().includes(q)
     );
-  }, [items, search]);
+  }
 
-  function resetEditor() {
-    setEditorMode("create");
+  function resetEditor(mode: EditorMode = "top-link") {
+    setEditorMode(mode);
     setEditingId(null);
     setForm(defaultForm);
   }
 
-  function startCreate() {
-    setEditorMode("create");
+  function startCreateTopLink() {
+    setEditorMode("top-link");
     setEditingId(null);
     setForm({
       ...defaultForm,
-      sort_order: items.length,
+      item_type: "link",
+      parent_id: "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function startEdit(item: EmailSidebarItem) {
+  function startCreateGroup() {
+    setEditorMode("group");
+    setEditingId(null);
+    setForm({
+      ...defaultForm,
+      item_type: "group",
+      parent_id: "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startCreateChildLink(group: AdminSidebarItem) {
+    const nextSort = childrenOf(group.id).length;
+    setEditorMode("child-link");
+    setEditingId(null);
+    setForm({
+      ...defaultForm,
+      item_type: "link",
+      parent_id: group.id,
+      sort_order: nextSort,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function startEdit(item: AdminSidebarItem) {
     setEditorMode("edit");
     setEditingId(item.id);
     setForm({
       label: item.label,
       href: item.href || "",
-      icon: item.icon || "Mail",
+      item_type: item.item_type,
+      parent_id: item.parent_id || "",
       sort_order: item.sort_order,
       is_enabled: item.is_enabled,
+      open_in_new_tab: item.open_in_new_tab,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -147,17 +188,13 @@ export default function EmailSidebarAdminClient() {
 
     try {
       const payload = {
-        label: form.label.trim(),
-        href: form.href.trim(),
-        icon: form.icon,
+        ...form,
+        href: form.href.trim() || null,
+        parent_id: form.parent_id || null,
         sort_order: Number(form.sort_order) || 0,
-        is_enabled: form.is_enabled,
       };
 
-      const url = editingId
-        ? `/api/admin/email-sidebar/${editingId}`
-        : "/api/admin/email-sidebar";
-
+      const url = editingId ? `/api/admin/sidebar/${editingId}` : "/api/admin/sidebar";
       const method = editingId ? "PATCH" : "POST";
 
       const res = await fetch(url, {
@@ -166,28 +203,36 @@ export default function EmailSidebarAdminClient() {
         body: JSON.stringify(payload),
       });
 
-      const data: EmailSidebarResponse = await res.json();
+      const data: AdminSidebarResponse = await res.json();
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to save email sidebar item");
+        throw new Error(data.error || "Failed to save item");
       }
 
       setNotice({
         type: "success",
         message: editingId
-          ? "Email sidebar item updated successfully."
-          : "Email sidebar item created successfully.",
+          ? "Sidebar item updated successfully."
+          : "Sidebar item created successfully.",
       });
 
-      resetEditor();
+      if (editorMode === "child-link" && form.parent_id) {
+        const parentId = form.parent_id;
+        setForm({
+          ...defaultForm,
+          item_type: "link",
+          parent_id: parentId,
+          sort_order: childrenOf(parentId).length + 1,
+        });
+      } else {
+        resetEditor("top-link");
+      }
+
       await loadItems();
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to save email sidebar item",
+        message: error instanceof Error ? error.message : "Failed to save item",
       });
     } finally {
       setSaving(false);
@@ -196,12 +241,12 @@ export default function EmailSidebarAdminClient() {
 
   async function handleDelete(id: string) {
     const ok = window.confirm(
-      "Are you sure you want to delete this email sidebar item?"
+      "Are you sure you want to delete this item? If it is a group, its child links will also be removed."
     );
     if (!ok) return;
 
     try {
-      const res = await fetch(`/api/admin/email-sidebar/${id}`, {
+      const res = await fetch(`/api/admin/sidebar/${id}`, {
         method: "DELETE",
       });
 
@@ -213,34 +258,35 @@ export default function EmailSidebarAdminClient() {
 
       setNotice({
         type: "success",
-        message: "Email sidebar item deleted successfully.",
+        message: "Sidebar item deleted successfully.",
       });
 
       if (editingId === id) {
-        resetEditor();
+        resetEditor("top-link");
       }
 
       await loadItems();
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to delete item",
+        message: error instanceof Error ? error.message : "Failed to delete item",
       });
     }
   }
 
-  async function toggleEnabled(item: EmailSidebarItem) {
+  async function toggleEnabled(item: AdminSidebarItem) {
     try {
-      const res = await fetch(`/api/admin/email-sidebar/${item.id}`, {
+      const res = await fetch(`/api/admin/sidebar/${item.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: item.label,
           href: item.href,
-          icon: item.icon,
+          item_type: item.item_type,
+          parent_id: item.parent_id,
           sort_order: item.sort_order,
           is_enabled: !item.is_enabled,
+          open_in_new_tab: item.open_in_new_tab,
         }),
       });
 
@@ -254,23 +300,24 @@ export default function EmailSidebarAdminClient() {
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to update item",
+        message: error instanceof Error ? error.message : "Failed to update item",
       });
     }
   }
 
-  async function duplicateItem(item: EmailSidebarItem) {
+  async function duplicateItem(item: AdminSidebarItem) {
     try {
-      const res = await fetch("/api/admin/email-sidebar", {
+      const res = await fetch("/api/admin/sidebar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: `${item.label} Copy`,
           href: item.href,
-          icon: item.icon,
+          item_type: item.item_type,
+          parent_id: item.parent_id,
           sort_order: item.sort_order + 1,
           is_enabled: item.is_enabled,
+          open_in_new_tab: item.open_in_new_tab,
         }),
       });
 
@@ -282,21 +329,23 @@ export default function EmailSidebarAdminClient() {
 
       setNotice({
         type: "success",
-        message: "Email sidebar item duplicated successfully.",
+        message: "Sidebar item duplicated successfully.",
       });
 
       await loadItems();
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to duplicate item",
+        message: error instanceof Error ? error.message : "Failed to duplicate item",
       });
     }
   }
 
-  async function moveItem(item: EmailSidebarItem, direction: "up" | "down") {
-    const siblings = [...items].sort((a, b) => a.sort_order - b.sort_order);
+  async function moveItem(item: AdminSidebarItem, direction: "up" | "down") {
+    const siblings = items
+      .filter((x) => x.parent_id === item.parent_id)
+      .sort((a, b) => a.sort_order - b.sort_order);
+
     const index = siblings.findIndex((x) => x.id === item.id);
     if (index === -1) return;
 
@@ -304,49 +353,54 @@ export default function EmailSidebarAdminClient() {
     if (targetIndex < 0 || targetIndex >= siblings.length) return;
 
     const reordered = [...siblings];
-    [reordered[index], reordered[targetIndex]] = [
-      reordered[targetIndex],
-      reordered[index],
-    ];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+
+    const payload = reordered.map((x, i) => ({
+      id: x.id,
+      sort_order: i,
+      parent_id: x.parent_id,
+    }));
 
     try {
-      await Promise.all(
-        reordered.map((x, i) =>
-          fetch(`/api/admin/email-sidebar/${x.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              label: x.label,
-              href: x.href,
-              icon: x.icon,
-              sort_order: i,
-              is_enabled: x.is_enabled,
-            }),
-          })
-        )
-      );
+      const res = await fetch("/api/admin/sidebar/reorder", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: payload }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to reorder items");
+      }
 
       await loadItems();
     } catch (error) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to reorder items",
+        message: error instanceof Error ? error.message : "Failed to reorder items",
       });
     }
   }
 
   const editorTitle =
-    editorMode === "edit" ? "Edit email sidebar item" : "Create email link";
+    editorMode === "group"
+      ? "Create dropdown group"
+      : editorMode === "child-link"
+      ? "Add child link"
+      : editorMode === "edit"
+      ? "Edit sidebar item"
+      : "Create top-level link";
+
+  const selectedParentGroup =
+    form.parent_id && groups.find((g) => g.id === form.parent_id);
 
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
-        <h1 className="text-2xl font-extrabold text-white">
-          Email Sidebar Editor
-        </h1>
+        <h1 className="text-2xl font-extrabold text-white">Admin Sidebar Editor</h1>
         <p className="mt-2 text-sm text-white/70">
-          Manage the admin email sidebar links online.
+          Easier sidebar builder for top-level links, dropdown groups, and child links.
         </p>
       </div>
 
@@ -370,10 +424,18 @@ export default function EmailSidebarAdminClient() {
             <div className="grid gap-3">
               <button
                 type="button"
-                onClick={startCreate}
+                onClick={startCreateTopLink}
                 className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
               >
-                + Create email link
+                + Create top-level link
+              </button>
+
+              <button
+                type="button"
+                onClick={startCreateGroup}
+                className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
+              >
+                + Create dropdown group
               </button>
             </div>
           </div>
@@ -382,17 +444,21 @@ export default function EmailSidebarAdminClient() {
             <h2 className="mb-4 text-lg font-bold text-white">{editorTitle}</h2>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {editorMode === "child-link" && selectedParentGroup && (
+                <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+                  Adding link inside: <span className="font-bold">{selectedParentGroup.label}</span>
+                </div>
+              )}
+
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
                   Label
                 </label>
                 <input
                   value={form.label}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, label: e.target.value }))
-                  }
+                  onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="e.g. Email Settings"
+                  placeholder="e.g. Events"
                   required
                 />
               </div>
@@ -403,33 +469,60 @@ export default function EmailSidebarAdminClient() {
                 </label>
                 <input
                   value={form.href}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, href: e.target.value }))
-                  }
+                  onChange={(e) => setForm((prev) => ({ ...prev, href: e.target.value }))}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="/Admin/Email/Example"
-                  required
+                  placeholder={
+                    form.item_type === "group"
+                      ? "Optional landing page for the group"
+                      : "/Admin/Dashboard/Events"
+                  }
                 />
               </div>
 
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Icon
-                </label>
-                <select
-                  value={form.icon}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, icon: e.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                >
-                  {iconOptions.map((icon) => (
-                    <option key={icon} value={icon}>
-                      {icon}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {editorMode === "edit" && (
+                <>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-white/80">
+                      Item type
+                    </label>
+                    <select
+                      value={form.item_type}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          item_type: e.target.value as "link" | "group",
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="link">Link</option>
+                      <option value="group">Dropdown group</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-white/80">
+                      Parent group
+                    </label>
+                    <select
+                      value={form.parent_id}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, parent_id: e.target.value }))
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="">No parent (top level)</option>
+                      {groups
+                        .filter((group) => group.id !== editingId)
+                        .map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.label}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </>
+              )}
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
@@ -453,13 +546,24 @@ export default function EmailSidebarAdminClient() {
                   type="checkbox"
                   checked={form.is_enabled}
                   onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      is_enabled: e.target.checked,
-                    }))
+                    setForm((prev) => ({ ...prev, is_enabled: e.target.checked }))
                   }
                 />
                 Enabled
+              </label>
+
+              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/85">
+                <input
+                  type="checkbox"
+                  checked={form.open_in_new_tab}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      open_in_new_tab: e.target.checked,
+                    }))
+                  }
+                />
+                Open in new tab
               </label>
 
               <div className="flex flex-wrap gap-3">
@@ -472,12 +576,16 @@ export default function EmailSidebarAdminClient() {
                     ? "Saving..."
                     : editingId
                     ? "Update item"
+                    : editorMode === "group"
+                    ? "Create group"
+                    : editorMode === "child-link"
+                    ? "Create child link"
                     : "Create link"}
                 </button>
 
                 <button
                   type="button"
-                  onClick={resetEditor}
+                  onClick={() => resetEditor("top-link")}
                   className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10"
                 >
                   Clear
@@ -490,9 +598,7 @@ export default function EmailSidebarAdminClient() {
         <div className="space-y-6">
           <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h2 className="text-lg font-bold text-white">
-                Email sidebar structure
-              </h2>
+              <h2 className="text-lg font-bold text-white">Sidebar structure</h2>
 
               <button
                 type="button"
@@ -511,31 +617,119 @@ export default function EmailSidebarAdminClient() {
             />
 
             {loading ? (
-              <div className="text-sm text-white/70">
-                Loading email sidebar items...
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
-                No email sidebar items yet.
-              </div>
+              <div className="text-sm text-white/70">Loading sidebar items...</div>
             ) : (
-              <div className="space-y-3">
-                {filteredItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                  >
-                    <ItemRow
-                      item={item}
-                      onEdit={() => startEdit(item)}
-                      onDelete={() => handleDelete(item.id)}
-                      onMoveUp={() => moveItem(item, "up")}
-                      onMoveDown={() => moveItem(item, "down")}
-                      onToggle={() => toggleEnabled(item)}
-                      onDuplicate={() => duplicateItem(item)}
-                    />
-                  </div>
-                ))}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-white/70">
+                    Dropdown groups
+                  </h3>
+
+                  {filteredGroups().length === 0 ? (
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
+                      No dropdown groups yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {filteredGroups().map((group) => {
+                        const children = childrenOf(group.id).filter((child) => {
+                          const q = search.trim().toLowerCase();
+                          if (!q) return true;
+                          return (
+                            child.label.toLowerCase().includes(q) ||
+                            (child.href || "").toLowerCase().includes(q)
+                          );
+                        });
+
+                        return (
+                          <div
+                            key={group.id}
+                            className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                          >
+                            <ItemRow
+                              item={group}
+                              onEdit={() => startEdit(group)}
+                              onDelete={() => handleDelete(group.id)}
+                              onMoveUp={() => moveItem(group, "up")}
+                              onMoveDown={() => moveItem(group, "down")}
+                              onToggle={() => toggleEnabled(group)}
+                              onDuplicate={() => duplicateItem(group)}
+                            />
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => startCreateChildLink(group)}
+                                className="rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/20"
+                              >
+                                + Add child link
+                              </button>
+                            </div>
+
+                            <div className="mt-4 border-t border-white/10 pt-4">
+                              {children.length === 0 ? (
+                                <div className="text-sm text-white/55">
+                                  No child links in this group yet.
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {children.map((child) => (
+                                    <div
+                                      key={child.id}
+                                      className="rounded-2xl border border-white/10 bg-white/5 p-3"
+                                    >
+                                      <ItemRow
+                                        item={child}
+                                        onEdit={() => startEdit(child)}
+                                        onDelete={() => handleDelete(child.id)}
+                                        onMoveUp={() => moveItem(child, "up")}
+                                        onMoveDown={() => moveItem(child, "down")}
+                                        onToggle={() => toggleEnabled(child)}
+                                        onDuplicate={() => duplicateItem(child)}
+                                        isChild
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-white/70">
+                    Top-level links
+                  </h3>
+
+                  {filteredTopLevelLinks().length === 0 ? (
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
+                      No top-level links yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredTopLevelLinks().map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                        >
+                          <ItemRow
+                            item={item}
+                            onEdit={() => startEdit(item)}
+                            onDelete={() => handleDelete(item.id)}
+                            onMoveUp={() => moveItem(item, "up")}
+                            onMoveDown={() => moveItem(item, "down")}
+                            onToggle={() => toggleEnabled(item)}
+                            onDuplicate={() => duplicateItem(item)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -553,14 +747,16 @@ function ItemRow({
   onMoveDown,
   onToggle,
   onDuplicate,
+  isChild = false,
 }: {
-  item: EmailSidebarItem;
+  item: AdminSidebarItem;
   onEdit: () => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onToggle: () => void;
   onDuplicate: () => void;
+  isChild?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -569,7 +765,7 @@ function ItemRow({
           <div className="text-sm font-bold text-white">{item.label}</div>
 
           <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
-            {item.icon}
+            {item.item_type}
           </span>
 
           {item.is_enabled ? (
@@ -581,9 +777,23 @@ function ItemRow({
               disabled
             </span>
           )}
+
+          {isChild && (
+            <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-200">
+              child link
+            </span>
+          )}
+
+          {item.open_in_new_tab && (
+            <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">
+              new tab
+            </span>
+          )}
         </div>
 
-        <div className="mt-1 break-all text-xs text-white/60">{item.href}</div>
+        <div className="mt-1 break-all text-xs text-white/60">
+          {item.href || "No URL"}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

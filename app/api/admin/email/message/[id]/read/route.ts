@@ -7,6 +7,17 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Missing message id.",
+        },
+        { status: 400 }
+      );
+    }
+
     const gmail = await getGmailClient();
 
     await gmail.users.messages.modify({
@@ -17,13 +28,20 @@ export async function POST(
       },
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      message: "Email marked as read.",
+    });
   } catch (error) {
-    console.error("Mark as read error:", error);
+    console.error("Mark Gmail message as read error:", error);
+
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Failed to mark as read.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to mark email as read.",
       },
       { status: 500 }
     );

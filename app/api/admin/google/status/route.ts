@@ -14,8 +14,8 @@ export async function GET() {
     }
 
     const { data, error } = await supabaseAdmin
-      .from("admin_google_accounts")
-      .select("google_email, expires_at")
+      .from("google_connections")
+      .select("google_email, expires_at, refresh_token")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -37,7 +37,7 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      connected: true,
+      connected: !!data.refresh_token,
       googleEmail: data.google_email,
       expiresAt: data.expires_at,
     });
