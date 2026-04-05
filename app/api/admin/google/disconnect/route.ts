@@ -7,24 +7,74 @@ export async function POST() {
     const { userId } = await auth();
 
     if (!userId) {
-      return NextResponse.json({ ok: false, error: "Unauthorised." }, { status: 401 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Not authenticated.",
+        },
+        { status: 401 }
+      );
     }
 
-    const { error } = await supabaseAdmin
-      .from("admin_google_accounts")
-      .delete()
+    const supabase = supabaseAdmin;
+
+    const { data: existing, error: lookupError } = await supabase
+      .from("google_connections")
+      .select("user_id, email, google_email")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error("Disconnect lookup error:", lookupError);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Failed to load Google connection before disconnect.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!existing) {
+      return NextResponse.json({
+        ok: true,
+        message: "No Google connection found.",
+      });
+    }
+
+    const { error: deleteError, count } = await supabase
+      .from("google_connections")
+      .delete({ count: "exact" })
       .eq("user_id", userId);
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (deleteError) {
+      console.error("Disconnect delete error:", deleteError);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: deleteError.message || "Failed to disconnect Google account.",
+        },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      deleted: count ?? 0,
+      message: "Google account disconnected successfully.",
+    });
   } catch (error) {
+    console.error("Disconnect route error:", error);
+
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unexpected server error.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to disconnect Google account.",
       },
       { status: 500 }
     );

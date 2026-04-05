@@ -23,7 +23,6 @@ export async function GET(req: NextRequest) {
   try {
     const code = req.nextUrl.searchParams.get("code");
     const state = req.nextUrl.searchParams.get("state");
-
     const { returnTo } = decodeState(state);
 
     if (!code) {
@@ -38,20 +37,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(new URL("/Admin/Login", req.url));
     }
 
-    if (
-      !process.env.GOOGLE_CLIENT_ID ||
-      !process.env.GOOGLE_CLIENT_SECRET ||
-      !process.env.GOOGLE_OAUTH_REDIRECT_URI
-    ) {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
       return NextResponse.redirect(
         new URL(`${returnTo}?error=missing_google_env`, req.url)
       );
     }
 
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_OAUTH_REDIRECT_URI
+      clientId,
+      clientSecret,
+      redirectUri
     );
 
     const { tokens } = await oauth2Client.getToken(code);
@@ -89,6 +88,9 @@ export async function GET(req: NextRequest) {
     const refreshTokenToSave =
       tokens.refresh_token || existingConnection?.refresh_token || null;
 
+    const scopeToSave =
+      typeof tokens.scope === "string" ? tokens.scope : null;
+
     const { error: upsertError } = await supabase
       .from("google_connections")
       .upsert(
@@ -99,7 +101,7 @@ export async function GET(req: NextRequest) {
           access_token: tokens.access_token ?? null,
           refresh_token: refreshTokenToSave,
           expires_at: tokens.expiry_date ?? null,
-          scope: tokens.scope ?? null,
+          scope: scopeToSave,
           token_type: tokens.token_type ?? null,
           updated_at: new Date().toISOString(),
         },

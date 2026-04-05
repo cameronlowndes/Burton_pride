@@ -27,9 +27,7 @@ export async function GET(req: NextRequest) {
     const returnTo =
       req.nextUrl.searchParams.get("returnTo") || "/Admin/Email";
 
-    const state = toBase64Url(
-      JSON.stringify({ returnTo })
-    );
+    const state = toBase64Url(JSON.stringify({ returnTo }));
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: "offline",
@@ -39,7 +37,7 @@ export async function GET(req: NextRequest) {
         "openid",
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
-        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.send",
       ],
       state,
@@ -47,7 +45,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.redirect(authUrl);
   } catch (error) {
-    console.error(error);
+    console.error("Google connect route error:", error);
+
     return NextResponse.json(
       { ok: false, error: "Failed to start Google login" },
       { status: 500 }

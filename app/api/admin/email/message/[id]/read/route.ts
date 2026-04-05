@@ -32,18 +32,19 @@ export async function POST(
       ok: true,
       message: "Email marked as read.",
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Mark Gmail message as read error:", error);
 
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to mark email as read.",
+          error?.response?.data?.error?.message ||
+          error?.message ||
+          "Failed to mark email as read.",
+        details: error?.response?.data || null,
       },
-      { status: 500 }
+      { status: error?.response?.status || 500 }
     );
   }
 }

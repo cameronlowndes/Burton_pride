@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -734,10 +735,78 @@ function FooterLine() {
   );
 }
 
+function DisconnectModal({
+  open,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/95 p-6 shadow-[0_30px_120px_rgba(0,0,0,0.55)]">
+        <div className="flex items-start gap-4">
+          <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-3">
+            <Unlink className="h-5 w-5 text-rose-200" />
+          </div>
+
+          <div className="min-w-0">
+            <h2 className="text-xl font-semibold text-white">
+              Disconnect Google account?
+            </h2>
+            <p className="mt-2 text-sm leading-7 text-white/65">
+              This will remove the linked Google account from the admin portal.
+              You can reconnect it again later.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="inline-flex min-h-[48px] items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06] px-5 text-sm font-medium text-white transition hover:bg-white/[0.10] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-rose-400/30 bg-rose-500/10 px-5 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <Unlink className="h-4 w-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminEmailPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
   const [status, setStatus] = useState<GoogleStatusResponse | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -749,7 +818,7 @@ export default function AdminEmailPage() {
         setLoading(true);
       }
 
-      const res = await fetch("/api/admin/google/status", {
+      const res = await fetch(`/api/admin/google/status?_=${Date.now()}`, {
         method: "GET",
         cache: "no-store",
       });
@@ -780,18 +849,24 @@ export default function AdminEmailPage() {
     loadStatus();
   }, []);
 
-  async function handleDisconnect() {
-    const confirmed = window.confirm(
-      "Are you sure you want to disconnect this Google account?"
-    );
-    if (!confirmed) return;
+  useEffect(() => {
+    if (!notice) return;
 
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  async function confirmDisconnect() {
     try {
       setDisconnecting(true);
       setNotice(null);
 
       const res = await fetch("/api/admin/google/disconnect", {
         method: "POST",
+        cache: "no-store",
       });
 
       const data = await res.json();
@@ -800,12 +875,22 @@ export default function AdminEmailPage() {
         throw new Error(data?.error || "Failed to disconnect account.");
       }
 
+      setConfirmDisconnectOpen(false);
+
+      setStatus({
+        ok: true,
+        connected: false,
+        googleEmail: null,
+        expiresAt: null,
+      });
+
       setNotice({
         type: "success",
         message: "Google account disconnected successfully.",
       });
 
-      await loadStatus();
+      router.refresh();
+      await loadStatus(true);
     } catch (error) {
       setNotice({
         type: "error",
@@ -815,6 +900,11 @@ export default function AdminEmailPage() {
     } finally {
       setDisconnecting(false);
     }
+  }
+
+  function handleDisconnect() {
+    setNotice(null);
+    setConfirmDisconnectOpen(true);
   }
 
   function handleConnect() {
@@ -829,6 +919,15 @@ export default function AdminEmailPage() {
       <PageGlow />
       <DotGrid />
       <BottomDecoration />
+
+      <DisconnectModal
+        open={confirmDisconnectOpen}
+        loading={disconnecting}
+        onCancel={() => {
+          if (!disconnecting) setConfirmDisconnectOpen(false);
+        }}
+        onConfirm={confirmDisconnect}
+      />
 
       <div className="relative z-20 px-4 pt-4 md:px-6 lg:px-8">
         <NoticeBanner notice={notice} />
