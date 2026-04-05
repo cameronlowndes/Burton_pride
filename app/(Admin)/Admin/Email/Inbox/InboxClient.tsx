@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   Mail,
@@ -8,6 +8,21 @@ import {
   RefreshCw,
   Search,
   Link2,
+  Reply,
+  Send,
+  X,
+  Undo2,
+  Redo2,
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  List,
+  ListOrdered,
+  Image as ImageIcon,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Type,
 } from "lucide-react";
 
 type InboxItem = {
@@ -41,6 +56,13 @@ type Notice =
   | { type: "error"; message: string }
   | null;
 
+type ReplyForm = {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+};
+
 const GMAIL_RECONNECT_REGEX =
   /No Gmail account connected|Missing Gmail refresh token|Failed to refresh Gmail token/i;
 
@@ -56,6 +78,17 @@ export default function InboxClient() {
   const [query, setQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [notice, setNotice] = useState<Notice>(null);
+
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replySending, setReplySending] = useState(false);
+  const [replyForm, setReplyForm] = useState<ReplyForm>({
+    to: "",
+    subject: "",
+    html: "",
+    text: "",
+  });
+
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   const needsReconnect =
     notice?.type === "error" && GMAIL_RECONNECT_REGEX.test(notice.message);
@@ -89,11 +122,13 @@ export default function InboxClient() {
       } else {
         setSelectedId("");
         setSelectedMessage(null);
+        setReplyOpen(false);
       }
     } catch (error) {
       setMessages([]);
       setSelectedId("");
       setSelectedMessage(null);
+      setReplyOpen(false);
       setNotice({
         type: "error",
         message:
@@ -107,6 +142,7 @@ export default function InboxClient() {
   async function loadMessage(id: string) {
     try {
       setLoadingMessage(true);
+      setReplyOpen(false);
       setNotice((current) =>
         current?.type === "error" && !needsReconnect ? null : current
       );
@@ -134,6 +170,7 @@ export default function InboxClient() {
       );
     } catch (error) {
       setSelectedMessage(null);
+      setReplyOpen(false);
       setNotice({
         type: "error",
         message: error instanceof Error ? error.message : "Failed to load email.",
@@ -148,10 +185,157 @@ export default function InboxClient() {
       setRefreshing(true);
       await loadInbox(query);
       setNotice({ type: "success", message: "Inbox refreshed." });
-    } catch {
-      // handled inside loadInbox
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  function getReplyRecipient(message: MessageDetail) {
+    const fromEmail = extractEmailAddress(message.from || "");
+    const toEmail = extractEmailAddress(message.to || "");
+
+    const ownAddresses = [
+      "cameronlowndes@burtonpride.co.uk",
+      "burtonpridetest@gmail.com",
+      "info@burtonpride.co.uk",
+      "noreply@burtonpride.co.uk",
+    ];
+
+    const looksLikeOwnAddress = (email: string) =>
+      ownAddresses.includes(email.toLowerCase().trim());
+
+    if (fromEmail && !looksLikeOwnAddress(fromEmail)) return fromEmail;
+    if (toEmail && !looksLikeOwnAddress(toEmail)) return toEmail;
+
+    return fromEmail || toEmail || "";
+  }
+
+  function openReply() {
+    if (!selectedMessage) return;
+
+    const subject = selectedMessage.subject || "";
+    const replySubject = subject.startsWith("Re:")
+      ? subject
+      : `Re: ${subject || "(No subject)"}`;
+
+    setReplyForm({
+      to: getReplyRecipient(selectedMessage),
+      subject: replySubject,
+      html: "",
+      text: "",
+    });
+
+    setReplyOpen(true);
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        editorRef.current.innerHTML = "";
+        editorRef.current.focus();
+      }
+    }, 50);
+  }
+
+  function closeReply() {
+    setReplyOpen(false);
+    setReplyForm({
+      to: "",
+      subject: "",
+      html: "",
+      text: "",
+    });
+    if (editorRef.current) {
+      editorRef.current.innerHTML = "";
+    }
+  }
+
+  function syncEditorState() {
+    const html = editorRef.current?.innerHTML || "";
+    const text = editorRef.current?.innerText || "";
+    setReplyForm((current) => ({
+      ...current,
+      html,
+      text,
+    }));
+  }
+
+  function focusEditor() {
+    editorRef.current?.focus();
+  }
+
+  function exec(command: string, value?: string) {
+    focusEditor();
+    document.execCommand(command, false, value);
+    syncEditorState();
+  }
+
+  function setBlock(tag: "h1" | "h2" | "p") {
+    focusEditor();
+    document.execCommand("formatBlock", false, tag);
+    syncEditorState();
+  }
+
+  function insertLink() {
+    focusEditor();
+    const url = window.prompt("Enter link URL");
+    if (!url) return;
+    document.execCommand("createLink", false, url);
+    syncEditorState();
+  }
+
+  function insertImage() {
+    focusEditor();
+    const url = window.prompt("Enter image URL");
+    if (!url) return;
+    document.execCommand("insertImage", false, url);
+    syncEditorState();
+  }
+
+  async function sendReply() {
+    if (!selectedMessage) return;
+
+    try {
+      setReplySending(true);
+
+      const htmlMessage = sanitizeReplyHtml(replyForm.html);
+      const plainTextMessage =
+        replyForm.text.trim() || stripHtml(htmlMessage).trim();
+
+      const res = await fetch("/api/admin/email/reply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: replyForm.to,
+          subject: replyForm.subject,
+          message: plainTextMessage,
+          htmlMessage,
+          threadId: selectedMessage.threadId || "",
+          replyToMessageId: selectedMessage.id || "",
+          originalFrom: selectedMessage.from || "",
+          originalDate: selectedMessage.date || "",
+          originalBody: selectedMessage.text || selectedMessage.snippet || "",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to send reply.");
+      }
+
+      closeReply();
+      setNotice({
+        type: "success",
+        message: data.message || "Reply sent successfully.",
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to send reply.",
+      });
+    } finally {
+      setReplySending(false);
     }
   }
 
@@ -184,10 +368,10 @@ export default function InboxClient() {
   return (
     <div className="min-h-screen bg-transparent text-white">
       <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
+        <div className="mb-6 rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-[0_20px_80px_rgba(0,0,0,0.18)] backdrop-blur-2xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold">Inbox</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
               <p className="mt-1 text-sm text-white/70">
                 View your Google email inbox inside the admin portal.
               </p>
@@ -200,7 +384,7 @@ export default function InboxClient() {
                   setQuery(searchInput);
                   loadInbox(searchInput);
                 }}
-                className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2"
+                className="group flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 shadow-inner shadow-white/5 transition hover:border-white/20 hover:bg-black/25"
               >
                 <Search className="h-4 w-4 text-white/60" />
                 <input
@@ -214,7 +398,7 @@ export default function InboxClient() {
               <button
                 onClick={handleRefresh}
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium transition hover:bg-white/15"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium shadow-[0_8px_30px_rgba(0,0,0,0.15)] transition hover:scale-[1.01] hover:bg-white/15 active:scale-[0.99]"
               >
                 {refreshing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -229,7 +413,7 @@ export default function InboxClient() {
 
         {notice && (
           <div
-            className={`mb-4 flex flex-col gap-3 rounded-2xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${
+            className={`mb-4 flex flex-col gap-3 rounded-2xl border px-4 py-3 text-sm shadow-[0_12px_40px_rgba(0,0,0,0.18)] sm:flex-row sm:items-center sm:justify-between ${
               notice.type === "success"
                 ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
                 : "border-red-400/30 bg-red-500/10 text-red-200"
@@ -250,9 +434,11 @@ export default function InboxClient() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
-            <div className="border-b border-white/10 px-4 py-3">
-              <h2 className="text-sm font-semibold text-white/80">Messages</h2>
+          <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.18)] backdrop-blur-2xl">
+            <div className="border-b border-white/10 px-4 py-4">
+              <h2 className="text-sm font-semibold tracking-wide text-white/85">
+                Messages
+              </h2>
             </div>
 
             <div className="max-h-[75vh] overflow-y-auto">
@@ -263,18 +449,6 @@ export default function InboxClient() {
               ) : messages.length === 0 ? (
                 <div className="px-4 py-12 text-center text-sm text-white/50">
                   <p>No emails found.</p>
-
-                  {needsReconnect ? (
-                    <div className="mt-4">
-                      <a
-                        href="/api/admin/google/connect"
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-2 font-medium text-white transition hover:bg-white/15"
-                      >
-                        <Link2 className="h-4 w-4" />
-                        Reconnect Google
-                      </a>
-                    </div>
-                  ) : null}
                 </div>
               ) : (
                 messages.map((message) => {
@@ -285,7 +459,9 @@ export default function InboxClient() {
                       key={message.id}
                       onClick={() => setSelectedId(message.id)}
                       className={`w-full border-b border-white/5 px-4 py-4 text-left transition ${
-                        active ? "bg-white/10" : "hover:bg-white/5"
+                        active
+                          ? "bg-white/10 shadow-inner shadow-white/5"
+                          : "hover:bg-white/[0.06]"
                       }`}
                     >
                       <div className="mb-1 flex items-start justify-between gap-3">
@@ -321,7 +497,7 @@ export default function InboxClient() {
                         {message.subject || "(No subject)"}
                       </div>
 
-                      <p className="mt-1 line-clamp-2 text-xs text-white/45">
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">
                         {message.snippet}
                       </p>
                     </button>
@@ -331,35 +507,48 @@ export default function InboxClient() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
+          <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.18)] backdrop-blur-2xl">
             <div className="border-b border-white/10 px-5 py-4">
               {selectedMessage ? (
-                <>
-                  <h2 className="text-lg font-semibold">
-                    {selectedMessage.subject || "(No subject)"}
-                  </h2>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="text-[1.75rem] font-semibold tracking-tight text-white">
+                      {selectedMessage.subject || "(No subject)"}
+                    </h2>
 
-                  <div className="mt-2 space-y-1 text-sm text-white/65">
-                    <p>
-                      <span className="text-white/40">From:</span>{" "}
-                      {selectedMessage.from || "-"}
-                    </p>
-                    <p>
-                      <span className="text-white/40">To:</span>{" "}
-                      {selectedMessage.to || "-"}
-                    </p>
-                    {selectedMessage.cc ? (
+                    <div className="mt-3 space-y-1.5 text-sm text-white/65">
                       <p>
-                        <span className="text-white/40">CC:</span>{" "}
-                        {selectedMessage.cc}
+                        <span className="text-white/40">From:</span>{" "}
+                        {selectedMessage.from || "-"}
                       </p>
-                    ) : null}
-                    <p>
-                      <span className="text-white/40">Date:</span>{" "}
-                      {formatDateLong(selectedMessage.date)}
-                    </p>
+                      <p>
+                        <span className="text-white/40">To:</span>{" "}
+                        {selectedMessage.to || "-"}
+                      </p>
+                      {selectedMessage.cc ? (
+                        <p>
+                          <span className="text-white/40">CC:</span>{" "}
+                          {selectedMessage.cc}
+                        </p>
+                      ) : null}
+                      <p>
+                        <span className="text-white/40">Date:</span>{" "}
+                        {formatDateLong(selectedMessage.date)}
+                      </p>
+                    </div>
                   </div>
-                </>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={openReply}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium shadow-[0_8px_30px_rgba(0,0,0,0.16)] transition hover:scale-[1.01] hover:bg-white/15 active:scale-[0.99]"
+                    >
+                      <Reply className="h-4 w-4" />
+                      Reply
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <h2 className="text-lg font-semibold">Select an email</h2>
               )}
@@ -372,37 +561,252 @@ export default function InboxClient() {
                 </div>
               ) : !selectedMessage ? (
                 <div className="py-16 text-center text-sm text-white/50">
-                  {needsReconnect ? (
-                    <div className="flex flex-col items-center gap-4">
-                      <p>Your Google inbox is not connected right now.</p>
-                      <a
-                        href="/api/admin/google/connect"
-                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-2 font-medium text-white transition hover:bg-white/15"
-                      >
-                        <Link2 className="h-4 w-4" />
-                        Reconnect Google
-                      </a>
-                    </div>
-                  ) : (
-                    "Choose a message from the inbox."
-                  )}
+                  Choose a message from the inbox.
                 </div>
-              ) : selectedMessage.html ? (
-                <div
-                  className="prose prose-invert max-w-none prose-p:text-white/80 prose-a:text-pink-300"
-                  dangerouslySetInnerHTML={{ __html: selectedMessage.html }}
-                />
               ) : (
-                <pre className="whitespace-pre-wrap break-words text-sm leading-6 text-white/80">
-                  {selectedPreview || "No message content found."}
-                </pre>
+                <>
+                  <div className="rounded-[24px] border border-white/8 bg-black/10 p-4 shadow-inner shadow-white/5">
+                    {selectedMessage.html ? (
+                      <div
+                        className="prose prose-invert max-w-none prose-p:text-white/80 prose-a:text-pink-300 prose-strong:text-white prose-li:text-white/80"
+                        dangerouslySetInnerHTML={{ __html: selectedMessage.html }}
+                      />
+                    ) : (
+                      <pre className="whitespace-pre-wrap break-words text-sm leading-7 text-white/80">
+                        {selectedPreview || "No message content found."}
+                      </pre>
+                    )}
+                  </div>
+
+                  {replyOpen ? (
+                    <div className="mt-6 rounded-[28px] border border-white/10 bg-[#24154a] p-4 shadow-[0_20px_80px_rgba(0,0,0,0.2)] backdrop-blur-2xl">
+                      <div className="mb-5 flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">
+                            Rich editor toolbar
+                          </h3>
+                          <p className="mt-1 text-sm text-white/45">
+                            You can click buttons even before typing, then start writing.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={closeReply}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium transition hover:bg-white/15"
+                        >
+                          <X className="h-4 w-4" />
+                          Close
+                        </button>
+                      </div>
+
+                      <div className="mb-4 rounded-[28px] border border-white/10 bg-[#221146] p-4">
+                        <div className="flex flex-wrap gap-2">
+                          <EditorButton onClick={() => exec("undo")}><Undo2 className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("redo")}><Redo2 className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("bold")}><Bold className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("italic")}><Italic className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("underline")}><UnderlineIcon className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => setBlock("h1")}>H1</EditorButton>
+                          <EditorButton onClick={() => setBlock("h2")}>H2</EditorButton>
+                          <EditorButton active onClick={() => exec("foreColor", "#f9fafb")}><Type className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("insertUnorderedList")}><List className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("insertOrderedList")}><ListOrdered className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={insertLink}><Link2 className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={insertImage}><ImageIcon className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("justifyLeft")}><AlignLeft className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("justifyCenter")}><AlignCenter className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("justifyRight")}><AlignRight className="h-4 w-4" /></EditorButton>
+                          <EditorButton onClick={() => exec("removeFormat")}>Clear</EditorButton>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-3">
+                          {["#ffffff", "#ff4d6d", "#ffb703", "#10b981", "#38bdf8", "#a78bfa"].map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => exec("foreColor", color)}
+                              className="h-9 w-9 rounded-full border border-white/10 shadow"
+                              style={{ backgroundColor: color }}
+                              title={`Text ${color}`}
+                            />
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => exec("foreColor", "#000000")}
+                            className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-white"
+                          >
+                            Black
+                          </button>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-3">
+                          {[
+                            { label: "HL", color: "#f5e66d" },
+                            { label: "HL", color: "#f6b26b" },
+                            { label: "HL", color: "#7ee2a8" },
+                            { label: "HL", color: "#8ab4f8" },
+                            { label: "HL", color: "#f4a6d7" },
+                          ].map((item, index) => (
+                            <button
+                              key={`${item.color}-${index}`}
+                              type="button"
+                              onClick={() => exec("hiliteColor", item.color)}
+                              className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white/80"
+                              style={{ backgroundColor: item.color }}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+
+                          <button
+                            type="button"
+                            onClick={() => exec("hiliteColor", "transparent")}
+                            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80"
+                          >
+                            No HL
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mb-4 space-y-4">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-white/75">
+                            To
+                          </label>
+                          <input
+                            type="text"
+                            value={replyForm.to}
+                            onChange={(e) =>
+                              setReplyForm((current) => ({
+                                ...current,
+                                to: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-pink-300/40 focus:bg-white/15"
+                            placeholder="Recipient email"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-white/75">
+                            Subject
+                          </label>
+                          <input
+                            type="text"
+                            value={replyForm.subject}
+                            onChange={(e) =>
+                              setReplyForm((current) => ({
+                                ...current,
+                                subject: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-pink-300/40 focus:bg-white/15"
+                            placeholder="Reply subject"
+                          />
+                        </div>
+
+                        <div>
+                          <div
+                            ref={editorRef}
+                            contentEditable
+                            suppressContentEditableWarning
+                            onInput={syncEditorState}
+                            className="min-h-[320px] w-full rounded-[22px] border border-white/10 bg-white px-4 py-4 text-base leading-7 text-slate-900 outline-none"
+                            style={{ whiteSpace: "pre-wrap" }}
+                            data-placeholder="Write your email here..."
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={closeReply}
+                          className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium transition hover:bg-white/15"
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={sendReply}
+                          disabled={
+                            replySending ||
+                            !replyForm.to.trim() ||
+                            !replyForm.subject.trim() ||
+                            !replyForm.text.trim()
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/90 px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {replySending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          {replySending ? "Sending..." : "Send reply"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        [contenteditable][data-placeholder]:empty:before {
+          content: attr(data-placeholder);
+          color: rgba(15, 23, 42, 0.35);
+          pointer-events: none;
+        }
+      `}</style>
     </div>
   );
+}
+
+function EditorButton({
+  children,
+  onClick,
+  active = false,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-2xl border px-4 py-2 text-sm font-medium transition ${
+        active
+          ? "border-fuchsia-400/40 bg-fuchsia-500/20 text-white"
+          : "border-white/10 bg-white/5 text-white/90 hover:bg-white/10"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function extractEmailAddress(value: string) {
+  if (!value) return "";
+  const match = value.match(/<([^>]+)>/);
+  if (match?.[1]) return match[1].trim();
+  return value.trim();
+}
+
+function stripHtml(html: string) {
+  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function sanitizeReplyHtml(html: string) {
+  return html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/\son\w+='[^']*'/gi, "");
 }
 
 function formatDate(value?: string) {
