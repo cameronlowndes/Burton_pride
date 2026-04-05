@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
 export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  context: RouteContext
 ) {
   try {
     const supabase = supabaseAdmin;
+    const { id } = await context.params;
 
-    const id = params.id;
-
-    // ❗ FIX: prevent empty ID crash
-    if (!id || id === "") {
+    if (!id || id.trim() === "") {
       return NextResponse.json(
         { ok: false, error: "Invalid ID" },
         { status: 400 }
