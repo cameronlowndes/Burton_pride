@@ -1,51 +1,129 @@
-import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getCurrentAdmin, hasPermission } from "@/lib/adminPermissions";
 
-export type CurrentAdmin = {
-  id: string;
-  clerk_user_id: string;
-  role: "main_admin" | "admin" | "editor";
-  is_active: boolean;
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
 };
 
-export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
-  const { userId } = await auth();
-  if (!userId) return null;
+export async function PATCH(req: NextRequest, context: RouteContext) {
+  try {
+    const admin = await getCurrentAdmin();
 
-  const supabase = supabaseAdmin;
+    if (!admin) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
 
-  const { data, error } = await supabase
-    .from("admin_users")
-    .select("id, clerk_user_id, role, is_active")
-    .eq("clerk_user_id", userId)
-    .single();
+    const allowed = await hasPermission("committee.edit");
 
-  if (error || !data || !data.is_active) return null;
+    if (!allowed) {
+      return NextResponse.json(
+        { ok: false, error: "You do not have permission to edit committee members." },
+        { status: 403 }
+      );
+    }
 
-  return data as CurrentAdmin;
+    const { id } = await context.params;
+    const body = await req.json();
+
+    const supabase = supabaseAdmin;
+
+    const updateData = {
+      full_name: body.full_name,
+      email: body.email,
+      image_url: body.image_url,
+      role: body.role,
+      pronouns: body.pronouns,
+      section_title: body.section_title,
+      story: body.story,
+      display_order: body.display_order,
+      is_published: body.is_published,
+      image_position_x: body.image_position_x,
+      image_position_y: body.image_position_y,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("committee_members")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Committee PATCH error:", error);
+      return NextResponse.json(
+        { ok: false, error: error.message || "Failed to update committee member." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      member: data,
+    });
+  } catch (error) {
+    console.error("Committee PATCH route error:", error);
+
+    return NextResponse.json(
+      { ok: false, error: "Internal server error." },
+      { status: 500 }
+    );
+  }
 }
 
-export async function hasPermission(permissionKey: string): Promise<boolean> {
-  const admin = await getCurrentAdmin();
-  if (!admin) return false;
+export async function DELETE(_req: NextRequest, context: RouteContext) {
+  try {
+    const admin = await getCurrentAdmin();
 
-  if (admin.role === "main_admin") return true;
+    if (!admin) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized." },
+        { status: 401 }
+      );
+    }
 
-  const supabase = supabaseAdmin;
+    const allowed = await hasPermission("committee.delete");
 
-  const { data, error } = await supabase
-    .from("admin_user_permissions")
-    .select(`
-      is_allowed,
-      admin_permissions!inner (
-        permission_key
-      )
-    `)
-    .eq("admin_user_id", admin.id)
-    .eq("admin_permissions.permission_key", permissionKey)
-    .single();
+    if (!allowed) {
+      return NextResponse.json(
+        { ok: false, error: "You do not have permission to delete committee members." },
+        { status: 403 }
+      );
+    }
 
-  if (error || !data) return false;
+    const { id } = await context.params;
 
-  return !!data.is_allowed;
+    const supabase = supabaseAdmin;
+
+    const { error } = await supabase
+      .from("committee_members")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Committee DELETE error:", error);
+      return NextResponse.json(
+        { ok: false, error: error.message || "Failed to delete committee member." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message: "Committee member deleted successfully.",
+    });
+  } catch (error) {
+    console.error("Committee DELETE route error:", error);
+
+    return NextResponse.json(
+      { ok: false, error: "Internal server error." },
+      { status: 500 }
+    );
+  }
 }
