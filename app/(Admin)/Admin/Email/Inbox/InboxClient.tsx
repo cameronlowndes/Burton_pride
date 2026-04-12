@@ -49,6 +49,14 @@ type MessageDetail = {
   html: string;
   text: string;
   labelIds: string[];
+  attachments?: {
+    filename: string;
+    mimeType: string;
+    attachmentId: string;
+    size: number;
+    inline: boolean;
+    contentId: string;
+  }[];
 };
 
 type Notice =
@@ -566,16 +574,12 @@ export default function InboxClient() {
               ) : (
                 <>
                   <div className="rounded-[24px] border border-white/8 bg-black/10 p-4 shadow-inner shadow-white/5">
-                    {selectedMessage.html ? (
-                      <div
-                        className="prose prose-invert max-w-none prose-p:text-white/80 prose-a:text-pink-300 prose-strong:text-white prose-li:text-white/80"
-                        dangerouslySetInnerHTML={{ __html: selectedMessage.html }}
-                      />
-                    ) : (
-                      <pre className="whitespace-pre-wrap break-words text-sm leading-7 text-white/80">
-                        {selectedPreview || "No message content found."}
-                      </pre>
-                    )}
+                    <div
+                      className="gmail-message-body max-w-none text-sm leading-7 text-white/85"
+                      dangerouslySetInnerHTML={{
+                        __html: getRenderableMessageHtml(selectedMessage),
+                      }}
+                    />
                   </div>
 
                   {replyOpen ? (
@@ -586,7 +590,8 @@ export default function InboxClient() {
                             Rich editor toolbar
                           </h3>
                           <p className="mt-1 text-sm text-white/45">
-                            You can click buttons even before typing, then start writing.
+                            You can click buttons even before typing, then start
+                            writing.
                           </p>
                         </div>
 
@@ -602,26 +607,65 @@ export default function InboxClient() {
 
                       <div className="mb-4 rounded-[28px] border border-white/10 bg-[#221146] p-4">
                         <div className="flex flex-wrap gap-2">
-                          <EditorButton onClick={() => exec("undo")}><Undo2 className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("redo")}><Redo2 className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("bold")}><Bold className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("italic")}><Italic className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("underline")}><UnderlineIcon className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => setBlock("h1")}>H1</EditorButton>
-                          <EditorButton onClick={() => setBlock("h2")}>H2</EditorButton>
-                          <EditorButton active onClick={() => exec("foreColor", "#f9fafb")}><Type className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("insertUnorderedList")}><List className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("insertOrderedList")}><ListOrdered className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={insertLink}><Link2 className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={insertImage}><ImageIcon className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("justifyLeft")}><AlignLeft className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("justifyCenter")}><AlignCenter className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("justifyRight")}><AlignRight className="h-4 w-4" /></EditorButton>
-                          <EditorButton onClick={() => exec("removeFormat")}>Clear</EditorButton>
+                          <EditorButton onClick={() => exec("undo")}>
+                            <Undo2 className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("redo")}>
+                            <Redo2 className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("bold")}>
+                            <Bold className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("italic")}>
+                            <Italic className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("underline")}>
+                            <UnderlineIcon className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => setBlock("h1")}>
+                            H1
+                          </EditorButton>
+                          <EditorButton onClick={() => setBlock("h2")}>
+                            H2
+                          </EditorButton>
+                          <EditorButton active onClick={() => exec("foreColor", "#f9fafb")}>
+                            <Type className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("insertUnorderedList")}>
+                            <List className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("insertOrderedList")}>
+                            <ListOrdered className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={insertLink}>
+                            <Link2 className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={insertImage}>
+                            <ImageIcon className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("justifyLeft")}>
+                            <AlignLeft className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("justifyCenter")}>
+                            <AlignCenter className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("justifyRight")}>
+                            <AlignRight className="h-4 w-4" />
+                          </EditorButton>
+                          <EditorButton onClick={() => exec("removeFormat")}>
+                            Clear
+                          </EditorButton>
                         </div>
 
                         <div className="mt-4 flex flex-wrap gap-3">
-                          {["#ffffff", "#ff4d6d", "#ffb703", "#10b981", "#38bdf8", "#a78bfa"].map((color) => (
+                          {[
+                            "#ffffff",
+                            "#ff4d6d",
+                            "#ffb703",
+                            "#10b981",
+                            "#38bdf8",
+                            "#a78bfa",
+                          ].map((color) => (
                             <button
                               key={color}
                               type="button"
@@ -652,7 +696,7 @@ export default function InboxClient() {
                               key={`${item.color}-${index}`}
                               type="button"
                               onClick={() => exec("hiliteColor", item.color)}
-                              className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white/80"
+                              className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-900"
                               style={{ backgroundColor: item.color }}
                             >
                               {item.label}
@@ -762,6 +806,64 @@ export default function InboxClient() {
           color: rgba(15, 23, 42, 0.35);
           pointer-events: none;
         }
+
+        .gmail-message-body {
+          word-break: break-word;
+        }
+
+        .gmail-message-body a {
+          color: #f9a8d4;
+          text-decoration: underline;
+          word-break: break-all;
+        }
+
+        .gmail-message-body a:hover {
+          color: #fbcfe8;
+        }
+
+        .gmail-message-body p {
+          margin: 0 0 1rem 0;
+          color: rgba(255, 255, 255, 0.85);
+        }
+
+        .gmail-message-body ul,
+        .gmail-message-body ol {
+          margin: 0 0 1rem 1.25rem;
+          padding-left: 1rem;
+        }
+
+        .gmail-message-body li {
+          margin: 0.25rem 0;
+          color: rgba(255, 255, 255, 0.85);
+        }
+
+        .gmail-message-body strong {
+          color: white;
+        }
+
+        .gmail-message-body img {
+          max-width: 100%;
+          height: auto;
+          border-radius: 14px;
+          margin-top: 0.75rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .gmail-message-body blockquote {
+          margin: 1rem 0;
+          padding-left: 1rem;
+          border-left: 3px solid rgba(255, 255, 255, 0.15);
+          color: rgba(255, 255, 255, 0.65);
+        }
+
+        .gmail-message-body pre {
+          white-space: pre-wrap;
+          background: rgba(255, 255, 255, 0.06);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 16px;
+          padding: 1rem;
+          overflow-x: auto;
+        }
       `}</style>
     </div>
   );
@@ -807,6 +909,88 @@ function sanitizeReplyHtml(html: string) {
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
     .replace(/\son\w+="[^"]*"/gi, "")
     .replace(/\son\w+='[^']*'/gi, "");
+}
+
+function getRenderableMessageHtml(message: MessageDetail) {
+  const safeHtml = sanitizeIncomingHtml(message.html || "");
+
+  if (safeHtml.trim()) {
+    return safeHtml;
+  }
+
+  const fallbackText = message.text || message.snippet || "";
+
+  if (!fallbackText.trim()) {
+    return `<p>No message content found.</p>`;
+  }
+
+  return textToLinkedHtml(fallbackText);
+}
+
+function sanitizeIncomingHtml(html: string) {
+  if (!html) return "";
+
+  let cleaned = html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/\son\w+='[^']*'/gi, "")
+    .replace(/\sjavascript:/gi, "")
+    .replace(/href=["']javascript:[^"']*["']/gi, 'href="#"')
+    .replace(/src=["']javascript:[^"']*["']/gi, "");
+
+  cleaned = cleaned.replace(
+    /<a\b([^>]*)>/gi,
+    (_match, attrs) => {
+      let nextAttrs = attrs || "";
+
+      if (!/\btarget=/i.test(nextAttrs)) {
+        nextAttrs += ` target="_blank"`;
+      }
+
+      if (!/\brel=/i.test(nextAttrs)) {
+        nextAttrs += ` rel="noreferrer noopener"`;
+      }
+
+      return `<a${nextAttrs}>`;
+    }
+  );
+
+  const hasRealText = stripHtml(cleaned).trim().length > 0;
+  if (hasRealText) {
+    return cleaned;
+  }
+
+  return "";
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function textToLinkedHtml(text: string) {
+  const escaped = escapeHtml(text);
+
+  const linked = escaped.replace(
+    /((https?:\/\/|www\.)[^\s<]+)/gi,
+    (match) => {
+      const href = match.startsWith("www.")
+        ? `https://${match}`
+        : match;
+
+      return `<a href="${href}" target="_blank" rel="noreferrer noopener">${match}</a>`;
+    }
+  );
+
+  return linked
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br />")}</p>`)
+    .join("");
 }
 
 function formatDate(value?: string) {
