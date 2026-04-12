@@ -23,6 +23,11 @@ import {
   AlignCenter,
   AlignRight,
   Type,
+  Paperclip,
+  Download,
+  Eye,
+  Upload,
+  Trash2,
 } from "lucide-react";
 
 type InboxItem = {
@@ -37,6 +42,15 @@ type InboxItem = {
   labelIds: string[];
 };
 
+type MessageAttachment = {
+  filename: string;
+  mimeType: string;
+  attachmentId: string;
+  size: number;
+  inline: boolean;
+  contentId: string;
+};
+
 type MessageDetail = {
   id: string;
   threadId: string;
@@ -49,14 +63,7 @@ type MessageDetail = {
   html: string;
   text: string;
   labelIds: string[];
-  attachments?: {
-    filename: string;
-    mimeType: string;
-    attachmentId: string;
-    size: number;
-    inline: boolean;
-    contentId: string;
-  }[];
+  attachments?: MessageAttachment[];
 };
 
 type Notice =
@@ -70,6 +77,8 @@ type ReplyForm = {
   html: string;
   text: string;
 };
+
+type EditorDialogMode = "link" | "image" | null;
 
 const GMAIL_RECONNECT_REGEX =
   /No Gmail account connected|Missing Gmail refresh token|Failed to refresh Gmail token/i;
@@ -96,7 +105,14 @@ export default function InboxClient() {
     text: "",
   });
 
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+
+  const [editorDialogMode, setEditorDialogMode] =
+    useState<EditorDialogMode>(null);
+  const [editorDialogValue, setEditorDialogValue] = useState("");
+  const [editorDialogError, setEditorDialogError] = useState("");
 
   const needsReconnect =
     notice?.type === "error" && GMAIL_RECONNECT_REGEX.test(notice.message);
@@ -233,6 +249,7 @@ export default function InboxClient() {
       text: "",
     });
 
+    setReplyFiles([]);
     setReplyOpen(true);
 
     setTimeout(() => {
@@ -251,6 +268,11 @@ export default function InboxClient() {
       html: "",
       text: "",
     });
+    setReplyFiles([]);
+    setEditorDialogMode(null);
+    setEditorDialogValue("");
+    setEditorDialogError("");
+
     if (editorRef.current) {
       editorRef.current.innerHTML = "";
     }
@@ -282,20 +304,103 @@ export default function InboxClient() {
     syncEditorState();
   }
 
-  function insertLink() {
-    focusEditor();
-    const url = window.prompt("Enter link URL");
-    if (!url) return;
-    document.execCommand("createLink", false, url);
-    syncEditorState();
+  function openEditorDialog(mode: EditorDialogMode) {
+    setEditorDialogMode(mode);
+    setEditorDialogValue("");
+    setEditorDialogError("");
   }
 
-  function insertImage() {
-    focusEditor();
-    const url = window.prompt("Enter image URL");
-    if (!url) return;
-    document.execCommand("insertImage", false, url);
-    syncEditorState();
+  function closeEditorDialog() {
+    setEditorDialogMode(null);
+    setEditorDialogValue("");
+    setEditorDialogError("");
+  }
+
+  function confirmEditorDialog() {
+    const raw = editorDialogValue.trim();
+
+    if (!raw) {
+      setEditorDialogError(
+        editorDialogMode === "link"
+          ? "Please enter a link."
+          : "Please enter an image URL."
+      );
+      return;
+    }
+
+    const normalized =
+      raw.startsWith("http://") ||
+      raw.startsWith("https://") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
+        ? raw
+        : `https://${raw}`;
+
+    try {
+      if (
+        editorDialogMode === "link" &&
+        !/^https?:\/\/|^mailto:|^tel:/i.test(normalized)
+      ) {
+        setEditorDialogError("Please enter a valid link.");
+        return;
+      }
+
+      if (editorDialogMode === "image" && !/^https?:\/\//i.test(normalized)) {
+        setEditorDialogError("Please enter a valid image URL.");
+        return;
+      }
+
+      focusEditor();
+
+      if (editorDialogMode === "link") {
+        document.execCommand("createLink", false, normalized);
+      }
+
+      if (editorDialogMode === "image") {
+        document.execCommand("insertImage", false, normalized);
+      }
+
+      syncEditorState();
+      closeEditorDialog();
+    } catch {
+      setEditorDialogError("Could not insert that value.");
+    }
+  }
+
+  function triggerFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  function handleReplyFilesChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const incoming = Array.from(event.target.files || []);
+    if (!incoming.length) return;
+
+    const maxSize = 20 * 1024 * 1024;
+    const validFiles: File[] = [];
+    const rejected: string[] = [];
+
+    for (const file of incoming) {
+      if (file.size > maxSize) {
+        rejected.push(`${file.name} is bigger than 20MB.`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    setReplyFiles((current) => [...current, ...validFiles]);
+
+    if (rejected.length > 0) {
+      setNotice({
+        type: "error",
+        message: rejected.join(" "),
+      });
+    }
+
+    event.target.value = "";
+  }
+
+  function removeReplyFile(index: number) {
+    setReplyFiles((current) => current.filter((_, i) => i !== index));
   }
 
   async function sendReply() {
@@ -308,22 +413,27 @@ export default function InboxClient() {
       const plainTextMessage =
         replyForm.text.trim() || stripHtml(htmlMessage).trim();
 
+      const formData = new FormData();
+      formData.append("to", replyForm.to);
+      formData.append("subject", replyForm.subject);
+      formData.append("message", plainTextMessage);
+      formData.append("htmlMessage", htmlMessage);
+      formData.append("threadId", selectedMessage.threadId || "");
+      formData.append("replyToMessageId", selectedMessage.id || "");
+      formData.append("originalFrom", selectedMessage.from || "");
+      formData.append("originalDate", selectedMessage.date || "");
+      formData.append(
+        "originalBody",
+        selectedMessage.text || selectedMessage.snippet || ""
+      );
+
+      replyFiles.forEach((file) => {
+        formData.append("attachments", file);
+      });
+
       const res = await fetch("/api/admin/email/reply", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          to: replyForm.to,
-          subject: replyForm.subject,
-          message: plainTextMessage,
-          htmlMessage,
-          threadId: selectedMessage.threadId || "",
-          replyToMessageId: selectedMessage.id || "",
-          originalFrom: selectedMessage.from || "",
-          originalDate: selectedMessage.date || "",
-          originalBody: selectedMessage.text || selectedMessage.snippet || "",
-        }),
+        body: formData,
       });
 
       const data = await res.json();
@@ -335,7 +445,11 @@ export default function InboxClient() {
       closeReply();
       setNotice({
         type: "success",
-        message: data.message || "Reply sent successfully.",
+        message:
+          data.message ||
+          (replyFiles.length > 0
+            ? "Reply with attachments sent successfully."
+            : "Reply sent successfully."),
       });
     } catch (error) {
       setNotice({
@@ -573,6 +687,72 @@ export default function InboxClient() {
                 </div>
               ) : (
                 <>
+                  {selectedMessage.attachments &&
+                  selectedMessage.attachments.length > 0 ? (
+                    <div className="mb-5 rounded-[24px] border border-white/8 bg-black/10 p-4 shadow-inner shadow-white/5">
+                      <div className="mb-3 flex items-center gap-2">
+                        <Paperclip className="h-4 w-4 text-pink-300" />
+                        <h3 className="text-sm font-semibold text-white">
+                          Attachments ({selectedMessage.attachments.length})
+                        </h3>
+                      </div>
+
+                      <div className="space-y-3">
+                        {selectedMessage.attachments.map((attachment) => {
+                          const href = `/api/admin/email/message/${selectedMessage.id}/attachment?attachmentId=${encodeURIComponent(
+                            attachment.attachmentId
+                          )}&filename=${encodeURIComponent(
+                            attachment.filename || "attachment"
+                          )}`;
+
+                          return (
+                            <div
+                              key={attachment.attachmentId}
+                              className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-white">
+                                  {attachment.filename || "Unnamed attachment"}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-white/50">
+                                  <span>{attachment.mimeType}</span>
+                                  <span>{formatBytes(attachment.size)}</span>
+                                  {attachment.inline ? (
+                                    <span className="text-emerald-300/80">
+                                      Inline
+                                    </span>
+                                  ) : (
+                                    <span className="text-white/40">File</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex shrink-0 flex-wrap gap-2">
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  Open
+                                </a>
+
+                                <a
+                                  href={`${href}&download=1`}
+                                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+                                >
+                                  <Download className="h-4 w-4" />
+                                  Download
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="rounded-[24px] border border-white/8 bg-black/10 p-4 shadow-inner shadow-white/5">
                     <div
                       className="gmail-message-body max-w-none text-sm leading-7 text-white/85"
@@ -628,7 +808,10 @@ export default function InboxClient() {
                           <EditorButton onClick={() => setBlock("h2")}>
                             H2
                           </EditorButton>
-                          <EditorButton active onClick={() => exec("foreColor", "#f9fafb")}>
+                          <EditorButton
+                            active
+                            onClick={() => exec("foreColor", "#f9fafb")}
+                          >
                             <Type className="h-4 w-4" />
                           </EditorButton>
                           <EditorButton onClick={() => exec("insertUnorderedList")}>
@@ -637,10 +820,10 @@ export default function InboxClient() {
                           <EditorButton onClick={() => exec("insertOrderedList")}>
                             <ListOrdered className="h-4 w-4" />
                           </EditorButton>
-                          <EditorButton onClick={insertLink}>
+                          <EditorButton onClick={() => openEditorDialog("link")}>
                             <Link2 className="h-4 w-4" />
                           </EditorButton>
-                          <EditorButton onClick={insertImage}>
+                          <EditorButton onClick={() => openEditorDialog("image")}>
                             <ImageIcon className="h-4 w-4" />
                           </EditorButton>
                           <EditorButton onClick={() => exec("justifyLeft")}>
@@ -751,6 +934,60 @@ export default function InboxClient() {
                         </div>
 
                         <div>
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              multiple
+                              onChange={handleReplyFilesChange}
+                              className="hidden"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={triggerFilePicker}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+                            >
+                              <Upload className="h-4 w-4" />
+                              Add attachment
+                            </button>
+
+                            {replyFiles.length > 0 ? (
+                              <span className="text-xs text-white/55">
+                                {replyFiles.length} file
+                                {replyFiles.length === 1 ? "" : "s"} ready
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {replyFiles.length > 0 ? (
+                            <div className="mb-4 space-y-2 rounded-2xl border border-white/10 bg-black/10 p-3">
+                              {replyFiles.map((file, index) => (
+                                <div
+                                  key={`${file.name}-${file.size}-${index}`}
+                                  className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-medium text-white">
+                                      {file.name}
+                                    </div>
+                                    <div className="text-xs text-white/50">
+                                      {formatBytes(file.size)}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => removeReplyFile(index)}
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white/80 transition hover:bg-red-500/20 hover:text-white"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+
                           <div
                             ref={editorRef}
                             contentEditable
@@ -799,6 +1036,75 @@ export default function InboxClient() {
           </div>
         </div>
       </div>
+
+      {editorDialogMode ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#25124b] p-5 shadow-[0_20px_80px_rgba(0,0,0,0.45)]">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  {editorDialogMode === "link" ? "Insert link" : "Insert image"}
+                </h3>
+                <p className="mt-1 text-sm text-white/50">
+                  {editorDialogMode === "link"
+                    ? "Paste the website address you want to insert."
+                    : "Paste the direct image URL you want to insert."}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeEditorDialog}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/15"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div>
+              <input
+                autoFocus
+                value={editorDialogValue}
+                onChange={(e) => {
+                  setEditorDialogValue(e.target.value);
+                  if (editorDialogError) setEditorDialogError("");
+                }}
+                placeholder={
+                  editorDialogMode === "link"
+                    ? "https://example.com"
+                    : "https://example.com/image.jpg"
+                }
+                className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-pink-300/40 focus:bg-white/15"
+              />
+              {editorDialogError ? (
+                <p className="mt-2 text-sm text-red-300">{editorDialogError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeEditorDialog}
+                className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmEditorDialog}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white"
+              >
+                {editorDialogMode === "link" ? (
+                  <Link2 className="h-4 w-4" />
+                ) : (
+                  <ImageIcon className="h-4 w-4" />
+                )}
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <style jsx>{`
         [contenteditable][data-placeholder]:empty:before {
@@ -1013,4 +1319,17 @@ function formatDateLong(value?: string) {
     dateStyle: "full",
     timeStyle: "short",
   }).format(date);
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes || bytes <= 0) return "0 B";
+
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    sizes.length - 1
+  );
+
+  const value = bytes / Math.pow(1024, i);
+  return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
 }

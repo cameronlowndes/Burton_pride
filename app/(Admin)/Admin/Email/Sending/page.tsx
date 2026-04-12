@@ -27,6 +27,8 @@ import {
   Upload,
   Wand2,
   X,
+  Plus,
+  Signature,
 } from "lucide-react";
 
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
@@ -60,6 +62,21 @@ type TemplateItem = {
   html?: string | null;
 };
 
+type SignatureItem = {
+  id: string;
+  name: string;
+  html: string;
+  text: string;
+  is_default?: boolean;
+  created_at?: string;
+};
+
+type SignaturesResponse = {
+  ok: boolean;
+  signatures?: SignatureItem[];
+  error?: string;
+};
+
 type HistoryItem = {
   id: string;
   to: string;
@@ -89,6 +106,20 @@ type ModalState =
   | { type: "link"; value: string }
   | { type: "image"; value: string }
   | null;
+
+type SaveTemplateModalState = {
+  open: boolean;
+  name: string;
+  subject: string;
+};
+
+type SaveSignatureModalState = {
+  open: boolean;
+  name: string;
+  html: string;
+  text: string;
+  isDefault: boolean;
+};
 
 const TEST_EMAIL = "burtonpridetest@gmail.com";
 
@@ -188,6 +219,173 @@ function formatDate(value: string) {
 
 function htmlToPlainText(value: string) {
   return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function plainTextToHtml(value: string) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+
+  const paragraphs = trimmed
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`);
+
+  return paragraphs.join("");
+}
+
+function getSignatureHtml(signature?: SignatureItem) {
+  if (!signature) return "";
+  const html = (signature.html || "").trim();
+  if (html) return html;
+  return plainTextToHtml(signature.text || "");
+}
+
+function getSignatureText(signature?: SignatureItem) {
+  if (!signature) return "";
+  const text = (signature.text || "").trim();
+  if (text) return text;
+  return htmlToPlainText(signature.html || "");
+}
+
+function normalizeHtml(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripKnownSignaturesFromHtml(
+  bodyHtml: string,
+  signatureItems: SignatureItem[]
+) {
+  let next = (bodyHtml || "").trim();
+
+  for (const item of signatureItems) {
+    const possibleHtml = getSignatureHtml(item).trim();
+    if (!possibleHtml) continue;
+
+    const normalizedHtml = normalizeHtml(possibleHtml);
+    if (!normalizedHtml) continue;
+
+    if (normalizeHtml(next).includes(normalizedHtml)) {
+      const escapedOriginal = escapeRegExp(possibleHtml)
+        .replace(/\s+/g, "\\s*")
+        .replace(/>\s*</g, ">\\s*<");
+
+      next = next.replace(new RegExp(escapedOriginal, "gi"), "");
+    }
+  }
+
+  next = next
+    .replace(/(<br\s*\/?>\s*){3,}/gi, "<br /><br />")
+    .replace(/^\s*(<br\s*\/?>\s*)+/gi, "")
+    .replace(/(<br\s*\/?>\s*)+\s*$/gi, "")
+    .trim();
+
+  return next;
+}
+
+function stripKnownSignaturesFromText(
+  bodyText: string,
+  signatureItems: SignatureItem[]
+) {
+  let next = (bodyText || "").trim();
+
+  for (const item of signatureItems) {
+    const text = getSignatureText(item).trim();
+    if (!text) continue;
+
+    const escapedText = escapeRegExp(text).replace(/\s+/g, "\\s+");
+    next = next.replace(new RegExp(escapedText, "gi"), "");
+  }
+
+  next = next.replace(/\n{3,}/g, "\n\n").trim();
+
+  return next;
+}
+
+function appendSignatureHtmlToBottom(
+  bodyHtml: string,
+  signatureHtml: string,
+  signatureItems: SignatureItem[]
+) {
+  const cleanSignature = (signatureHtml || "").trim();
+  if (!cleanSignature) return (bodyHtml || "").trim();
+
+  const bodyWithoutAnySignature = stripKnownSignaturesFromHtml(
+    bodyHtml || "",
+    signatureItems
+  );
+
+  const isBodyEmpty =
+    !bodyWithoutAnySignature ||
+    bodyWithoutAnySignature === "<p></p>" ||
+    bodyWithoutAnySignature === "<p></p><p></p>" ||
+    htmlToPlainText(bodyWithoutAnySignature).trim().length === 0;
+
+  if (isBodyEmpty) {
+    return cleanSignature;
+  }
+
+  return `${bodyWithoutAnySignature}<br /><br />${cleanSignature}`;
+}
+
+function appendSignatureTextToBottom(
+  bodyText: string,
+  signatureText: string,
+  signatureItems: SignatureItem[]
+) {
+  const cleanSignature = (signatureText || "").trim();
+  if (!cleanSignature) return (bodyText || "").trim();
+
+  const bodyWithoutAnySignature = stripKnownSignaturesFromText(
+    bodyText || "",
+    signatureItems
+  );
+
+  if (!bodyWithoutAnySignature) {
+    return cleanSignature;
+  }
+
+  return `${bodyWithoutAnySignature}\n\n${cleanSignature}`;
+}
+
+function buildBodyWithSelectedSignature(
+  bodyHtml: string,
+  bodyText: string,
+  selectedSignature: SignatureItem | undefined,
+  allSignatures: SignatureItem[]
+) {
+  const signatureHtml = getSignatureHtml(selectedSignature);
+  const signatureText = getSignatureText(selectedSignature);
+
+  const finalHtml = appendSignatureHtmlToBottom(
+    bodyHtml || "",
+    signatureHtml,
+    allSignatures
+  );
+
+  const finalText = appendSignatureTextToBottom(
+    bodyText || "",
+    signatureText,
+    allSignatures
+  );
+
+  return {
+    finalHtml,
+    finalText,
+  };
 }
 
 function FieldLabel({
@@ -383,6 +581,215 @@ function EditorActionModal({
   );
 }
 
+function SaveTemplateModal({
+  state,
+  onClose,
+  onChange,
+  onSubmit,
+  saving,
+}: {
+  state: SaveTemplateModalState;
+  onClose: () => void;
+  onChange: (next: Partial<SaveTemplateModalState>) => void;
+  onSubmit: () => void;
+  saving: boolean;
+}) {
+  if (!state.open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0a1022] p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">Save new template</h3>
+            <p className="mt-2 text-sm leading-7 text-white/60">
+              Save the current subject and email body as a reusable template.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div>
+            <FieldLabel required>Template name</FieldLabel>
+            <input
+              autoFocus
+              type="text"
+              value={state.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="Example: Sponsor thank you"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Subject</FieldLabel>
+            <input
+              type="text"
+              value={state.subject}
+              onChange={(e) => onChange({ subject: e.target.value })}
+              placeholder="Template subject"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            disabled={saving || !state.name.trim()}
+            onClick={onSubmit}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 text-sm font-semibold text-white transition hover:from-fuchsia-500 hover:to-pink-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                Save template
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SaveSignatureModal({
+  state,
+  onClose,
+  onChange,
+  onSubmit,
+  saving,
+}: {
+  state: SaveSignatureModalState;
+  onClose: () => void;
+  onChange: (next: Partial<SaveSignatureModalState>) => void;
+  onSubmit: () => void;
+  saving: boolean;
+}) {
+  if (!state.open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0a1022] p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">
+              Save email signature
+            </h3>
+            <p className="mt-2 text-sm leading-7 text-white/60">
+              Save multiple reusable signatures and pick the one you want when sending emails.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div>
+            <FieldLabel required>Signature name</FieldLabel>
+            <input
+              autoFocus
+              type="text"
+              value={state.name}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="Example: Main Burton Pride signature"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Signature HTML</FieldLabel>
+            <textarea
+              value={state.html}
+              onChange={(e) => onChange({ html: e.target.value })}
+              rows={8}
+              placeholder="<p>Kind regards,<br /><strong>Burton Pride C.I.C</strong></p>"
+              className="w-full resize-y rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Signature plain text</FieldLabel>
+            <textarea
+              value={state.text}
+              onChange={(e) => onChange({ text: e.target.value })}
+              rows={5}
+              placeholder={"Kind regards,\nBurton Pride C.I.C"}
+              className="w-full resize-y rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+            />
+          </div>
+
+          <label className="inline-flex items-center gap-3 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={state.isDefault}
+              onChange={(e) => onChange({ isDefault: e.target.checked })}
+              className="h-4 w-4 rounded border-white/20 bg-black/20"
+            />
+            Make this the default signature
+          </label>
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            disabled={saving || !state.name.trim()}
+            onClick={onSubmit}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 text-sm font-semibold text-white transition hover:from-fuchsia-500 hover:to-pink-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                Save signature
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RichEditorToolbar({
   editor,
   openLinkModal,
@@ -554,13 +961,7 @@ function RichEditorToolbar({
           title="Clear formatting"
           onClick={() =>
             run((ed) => {
-              ed
-                .chain()
-                .focus()
-                .unsetAllMarks()
-                .clearNodes()
-                .setColor("#111827")
-                .run();
+              ed.chain().focus().unsetAllMarks().clearNodes().setColor("#111827").run();
             })
           }
         >
@@ -569,7 +970,7 @@ function RichEditorToolbar({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {["#ffffff", "#f43f5e", "#f59e0b", "#10b981", "#38bdf8", "#a78bfa"].map(
+        {["#111827", "#f43f5e", "#f59e0b", "#10b981", "#38bdf8", "#a78bfa"].map(
           (color) => (
             <button
               key={color}
@@ -627,6 +1028,8 @@ export default function AdminSendEmailPage() {
   const [filePreviews, setFilePreviews] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [savingSignature, setSavingSignature] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [showHtmlPreview, setShowHtmlPreview] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
@@ -634,11 +1037,28 @@ export default function AdminSendEmailPage() {
 
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+
+  const [signatures, setSignatures] = useState<SignatureItem[]>([]);
+  const [signaturesLoading, setSignaturesLoading] = useState(true);
+  const [selectedSignatureId, setSelectedSignatureId] = useState("");
 
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
 
-  const [editorReady, setEditorReady] = useState(false);
+  const [saveTemplateModal, setSaveTemplateModal] = useState<SaveTemplateModalState>({
+    open: false,
+    name: "",
+    subject: "",
+  });
+
+  const [saveSignatureModal, setSaveSignatureModal] = useState<SaveSignatureModalState>({
+    open: false,
+    name: "",
+    html: "",
+    text: "",
+    isDefault: false,
+  });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -674,35 +1094,48 @@ export default function AdminSendEmailPage() {
           "ProseMirror min-h-[320px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-900 outline-none focus:border-fuchsia-400/30",
       },
     },
-    onCreate: ({ editor }) => {
-      setEditorReady(true);
+    onUpdate: ({ editor: currentEditor }) => {
       setForm((prev) => ({
         ...prev,
-        html: editor.getHTML(),
-        message: editor.getText(),
-      }));
-    },
-    onUpdate: ({ editor }) => {
-      setForm((prev) => ({
-        ...prev,
-        html: editor.getHTML(),
-        message: editor.getText(),
+        html: currentEditor.getHTML(),
+        message: currentEditor.getText(),
       }));
     },
   });
 
+  const previewHtml = useMemo(() => {
+    const selectedSignature = signatures.find(
+      (item) => item.id === selectedSignatureId
+    );
+
+    return buildBodyWithSelectedSignature(
+      form.html || "",
+      form.message || "",
+      selectedSignature,
+      signatures
+    ).finalHtml;
+  }, [form.html, form.message, selectedSignatureId, signatures]);
+
   const canSend = useMemo(() => {
-    const bodySource = form.html;
+    const bodySource = previewHtml;
     return (
       form.to.trim().length > 0 &&
       form.subject.trim().length > 0 &&
       bodySource.replace(/<[^>]+>/g, "").trim().length > 0
     );
-  }, [form.to, form.subject, form.html]);
+  }, [form.to, form.subject, previewHtml]);
+
+  const canSaveTemplate = useMemo(() => {
+    return (
+      form.subject.trim().length > 0 ||
+      form.html.replace(/<[^>]+>/g, "").trim().length > 0
+    );
+  }, [form.subject, form.html]);
 
   useEffect(() => {
     loadTemplates();
     loadHistory();
+    loadSignatures();
   }, []);
 
   useEffect(() => {
@@ -738,6 +1171,43 @@ export default function AdminSendEmailPage() {
     }
   }
 
+  async function loadSignatures() {
+    try {
+      setSignaturesLoading(true);
+      const res = await fetch("/api/admin/email/signatures", {
+        cache: "no-store",
+      });
+      const data: SignaturesResponse = await res.json();
+
+      if (res.ok && data.ok && data.signatures) {
+        const nextSignatures = data.signatures.map((item) => ({
+          ...item,
+          html: (item.html || "").trim() || plainTextToHtml(item.text || ""),
+          text: (item.text || "").trim() || htmlToPlainText(item.html || ""),
+        }));
+
+        setSignatures(nextSignatures);
+
+        const defaultSignature =
+          nextSignatures.find((item) => item.is_default) || nextSignatures[0];
+
+        if (defaultSignature) {
+          setSelectedSignatureId(defaultSignature.id);
+        } else {
+          setSelectedSignatureId("");
+        }
+      } else {
+        setSignatures([]);
+        setSelectedSignatureId("");
+      }
+    } catch {
+      setSignatures([]);
+      setSelectedSignatureId("");
+    } finally {
+      setSignaturesLoading(false);
+    }
+  }
+
   async function loadHistory() {
     try {
       setHistoryLoading(true);
@@ -766,7 +1236,7 @@ export default function AdminSendEmailPage() {
 
   function syncEditorContent(nextHtml: string) {
     if (!editor) return;
-    editor.commands.setContent(nextHtml, { emitUpdate: true });
+    editor.commands.setContent(nextHtml || "<p></p>", true);
   }
 
   function showSuccess(message: string) {
@@ -793,7 +1263,7 @@ export default function AdminSendEmailPage() {
       to: TEST_EMAIL,
       subject: prev.subject.trim() || "Test Email from Burton Pride Admin Portal",
       html,
-      message: "Test Email from Burton Pride Admin Portal",
+      message: htmlToPlainText(html),
     }));
 
     syncEditorContent(html);
@@ -811,8 +1281,9 @@ export default function AdminSendEmailPage() {
     setShowHtmlPreview(false);
     setModal(null);
     setEditorMode("rich");
+    setSelectedTemplateId("");
     if (fileInputRef.current) fileInputRef.current.value = "";
-    if (editor) editor.commands.clearContent(true);
+    if (editor) editor.commands.setContent("<p></p>", true);
   }
 
   function handleFilesSelected(fileList: FileList | null) {
@@ -846,12 +1317,13 @@ export default function AdminSendEmailPage() {
     const template = templates.find((item) => item.id === templateId);
     if (!template) return;
 
-    const nextHtml = template.html || `<p>${template.message || ""}</p>`;
+    const nextHtml = template.html || `<p>${escapeHtml(template.message || "")}</p>`;
 
+    setSelectedTemplateId(templateId);
     setForm((prev) => ({
       ...prev,
       subject: template.subject || prev.subject,
-      message: template.message || prev.message,
+      message: template.message || htmlToPlainText(nextHtml),
       html: nextHtml,
     }));
 
@@ -879,7 +1351,8 @@ export default function AdminSendEmailPage() {
 
   function openLinkModal() {
     if (!editor) return;
-    const previousUrl = (editor.getAttributes("link").href as string) || "https://";
+    const href = editor.getAttributes("link").href;
+    const previousUrl = typeof href === "string" && href ? href : "https://";
     setModal({ type: "link", value: previousUrl });
   }
 
@@ -934,6 +1407,207 @@ export default function AdminSendEmailPage() {
     showSuccess("HTML applied to the rich editor.");
   }
 
+  function openSaveTemplateModal() {
+    if (!canSaveTemplate) {
+      showError("Add a subject or email content before saving a template.");
+      return;
+    }
+
+    setSaveTemplateModal({
+      open: true,
+      name: form.subject.trim() || "",
+      subject: form.subject.trim() || "",
+    });
+  }
+
+  function closeSaveTemplateModal() {
+    setSaveTemplateModal({
+      open: false,
+      name: "",
+      subject: "",
+    });
+  }
+
+  async function handleSaveTemplate() {
+    const name = saveTemplateModal.name.trim();
+    const subject = saveTemplateModal.subject.trim() || form.subject.trim();
+    const html = form.html || editor?.getHTML() || "";
+    const message = form.message || editor?.getText() || "";
+
+    if (!name) {
+      showError("Please add a template name.");
+      return;
+    }
+
+    if (!html.replace(/<[^>]+>/g, "").trim()) {
+      showError("Please add some email content before saving the template.");
+      return;
+    }
+
+    try {
+      setSavingTemplate(true);
+
+      const res = await fetch("/api/admin/email/templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          subject,
+          message,
+          html,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save template.");
+      }
+
+      await loadTemplates();
+      closeSaveTemplateModal();
+      showSuccess(data.message || `Template "${name}" saved successfully.`);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Failed to save template.");
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
+
+  function openSaveSignatureModal() {
+    setSaveSignatureModal({
+      open: true,
+      name: "",
+      html: "",
+      text: "",
+      isDefault: signatures.length === 0,
+    });
+  }
+
+  function closeSaveSignatureModal() {
+    setSaveSignatureModal({
+      open: false,
+      name: "",
+      html: "",
+      text: "",
+      isDefault: false,
+    });
+  }
+
+  async function handleSaveSignature() {
+    const name = saveSignatureModal.name.trim();
+    const rawHtml = saveSignatureModal.html.trim();
+    const rawText = saveSignatureModal.text.trim();
+
+    if (!name) {
+      showError("Please add a signature name.");
+      return;
+    }
+
+    if (!rawHtml && !rawText) {
+      showError("Please add signature HTML or plain text.");
+      return;
+    }
+
+    const finalHtml = rawHtml || plainTextToHtml(rawText);
+    const finalText = rawText || htmlToPlainText(rawHtml);
+
+    try {
+      setSavingSignature(true);
+
+      const res = await fetch("/api/admin/email/signatures", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          html: finalHtml,
+          text: finalText,
+          isDefault: saveSignatureModal.isDefault,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save signature.");
+      }
+
+      await loadSignatures();
+      closeSaveSignatureModal();
+      showSuccess(data.message || `Signature "${name}" saved successfully.`);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Failed to save signature.");
+    } finally {
+      setSavingSignature(false);
+    }
+  }
+
+  async function handleDeleteSignature(id: string) {
+    try {
+      const res = await fetch(`/api/admin/email/signatures/${id}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to delete signature.");
+      }
+
+      if (selectedSignatureId === id) {
+        setSelectedSignatureId("");
+      }
+
+      await loadSignatures();
+      showSuccess(data.message || "Signature deleted successfully.");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Failed to delete signature.");
+    }
+  }
+
+  function applySignatureToBody(signature: SignatureItem) {
+    if (!editor) return;
+
+    const currentHtml = form.html || editor.getHTML() || "";
+    const currentText = form.message || editor.getText() || "";
+
+    const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+      currentHtml,
+      currentText,
+      signature,
+      signatures
+    );
+
+    setSelectedSignatureId(signature.id);
+
+    setForm((prev) => ({
+      ...prev,
+      html: finalHtml,
+      message: finalText,
+    }));
+
+    syncEditorContent(finalHtml);
+    setShowHtmlPreview(true);
+    showSuccess(`Signature "${signature.name}" added to the bottom of the email.`);
+  }
+
+  function insertSelectedSignature() {
+    const selectedSignature = signatures.find(
+      (item) => item.id === selectedSignatureId
+    );
+
+    if (!selectedSignature) {
+      showError("Please select a signature first.");
+      return;
+    }
+
+    applySignatureToBody(selectedSignature);
+  }
+
   async function handleSaveDraft() {
     setNotice(null);
 
@@ -945,14 +1619,26 @@ export default function AdminSendEmailPage() {
     try {
       setSavingDraft(true);
 
+      const selectedSignature = signatures.find(
+        (item) => item.id === selectedSignatureId
+      );
+
+      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+        form.html || editor?.getHTML() || "",
+        form.message || editor?.getText() || "",
+        selectedSignature,
+        signatures
+      );
+
       const formData = new FormData();
       formData.append("to", form.to);
       formData.append("cc", form.cc);
       formData.append("bcc", form.bcc);
       formData.append("subject", form.subject);
-      formData.append("message", form.message || editor?.getText() || "");
-      formData.append("html", form.html || editor?.getHTML() || "");
+      formData.append("message", finalText);
+      formData.append("html", finalHtml);
       formData.append("editorMode", editorMode);
+      formData.append("signatureId", selectedSignatureId || "");
 
       files.forEach((file) => {
         formData.append("attachments", file);
@@ -989,14 +1675,26 @@ export default function AdminSendEmailPage() {
     try {
       setSending(true);
 
+      const selectedSignature = signatures.find(
+        (item) => item.id === selectedSignatureId
+      );
+
+      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+        form.html || editor?.getHTML() || "",
+        form.message || editor?.getText() || "",
+        selectedSignature,
+        signatures
+      );
+
       const formData = new FormData();
       formData.append("to", form.to);
       formData.append("cc", form.cc);
       formData.append("bcc", form.bcc);
       formData.append("subject", form.subject);
-      formData.append("message", form.message || editor?.getText() || "");
-      formData.append("html", form.html || editor?.getHTML() || "");
+      formData.append("message", finalText);
+      formData.append("html", finalHtml);
       formData.append("editorMode", editorMode);
+      formData.append("signatureId", selectedSignatureId || "");
 
       files.forEach((file) => {
         formData.append("attachments", file);
@@ -1099,6 +1797,32 @@ export default function AdminSendEmailPage() {
         onSubmit={submitModal}
       />
 
+      <SaveTemplateModal
+        state={saveTemplateModal}
+        saving={savingTemplate}
+        onClose={closeSaveTemplateModal}
+        onChange={(next) =>
+          setSaveTemplateModal((prev) => ({
+            ...prev,
+            ...next,
+          }))
+        }
+        onSubmit={handleSaveTemplate}
+      />
+
+      <SaveSignatureModal
+        state={saveSignatureModal}
+        saving={savingSignature}
+        onClose={closeSaveSignatureModal}
+        onChange={(next) =>
+          setSaveSignatureModal((prev) => ({
+            ...prev,
+            ...next,
+          }))
+        }
+        onSubmit={handleSaveSignature}
+      />
+
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_390px]">
         <section className="rounded-3xl border border-white/10 bg-[#0a1022]/80 p-6 shadow-2xl backdrop-blur-xl md:p-8">
           <div className="mb-6 flex items-start gap-4">
@@ -1140,7 +1864,7 @@ export default function AdminSendEmailPage() {
           </div>
 
           <form onSubmit={handleSend} className="mt-6 space-y-5">
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                   <FieldLabel required>To</FieldLabel>
@@ -1168,15 +1892,28 @@ export default function AdminSendEmailPage() {
               </div>
 
               <div>
-                <FieldLabel>Saved template</FieldLabel>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <FieldLabel>Saved template</FieldLabel>
+
+                  <button
+                    type="button"
+                    onClick={openSaveTemplateModal}
+                    className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Save new
+                  </button>
+                </div>
+
                 <select
                   onChange={(e) => {
+                    setSelectedTemplateId(e.target.value);
                     if (e.target.value) applyTemplate(e.target.value);
                   }}
-                  value=""
+                  value={selectedTemplateId}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
                 >
-                  <option value="" disabled className="bg-slate-900 text-white">
+                  <option value="" className="bg-slate-900 text-white">
                     {templatesLoading ? "Loading templates..." : "Pick a template"}
                   </option>
                   {templates.map((template) => (
@@ -1189,6 +1926,10 @@ export default function AdminSendEmailPage() {
                     </option>
                   ))}
                 </select>
+
+                <p className="mt-2 text-xs text-white/45">
+                  Choose a saved template or save the current email as a new one.
+                </p>
               </div>
             </div>
 
@@ -1221,6 +1962,75 @@ export default function AdminSendEmailPage() {
                 onChange={(value) => updateField("subject", value)}
                 placeholder="Email subject"
               />
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Email signatures</p>
+                  <p className="text-xs text-white/50">
+                    Save multiple signatures and insert the one you want.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openSaveSignatureModal}
+                  className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New signature
+                </button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                <select
+                  value={selectedSignatureId}
+                  onChange={(e) => setSelectedSignatureId(e.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+                >
+                  <option value="" className="bg-slate-900 text-white">
+                    {signaturesLoading ? "Loading signatures..." : "Pick a signature"}
+                  </option>
+                  {signatures.map((signature) => (
+                    <option
+                      key={signature.id}
+                      value={signature.id}
+                      className="bg-slate-900 text-white"
+                    >
+                      {signature.name}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={insertSelectedSignature}
+                    className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
+                  >
+                    <Signature className="h-4 w-4" />
+                    Insert signature
+                  </button>
+
+                  {selectedSignatureId ? (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSignature(selectedSignatureId)}
+                      className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 text-sm font-medium text-rose-100 transition hover:bg-rose-500/20"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {selectedSignatureId ? (
+                <p className="mt-3 text-xs text-white/55">
+                  Selected signature will always be kept at the bottom of the email and older signatures will be removed automatically.
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
@@ -1287,6 +2097,15 @@ export default function AdminSendEmailPage() {
                     <Eye className="h-4 w-4" />
                     {showHtmlPreview ? "Hide preview" : "Show preview"}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={openSaveTemplateModal}
+                    className="inline-flex min-h-[42px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save as template
+                  </button>
                 </div>
               </div>
 
@@ -1299,13 +2118,7 @@ export default function AdminSendEmailPage() {
                   />
 
                   <div className="mt-4">
-                    {editorReady ? (
-                      <EditorContent editor={editor} />
-                    ) : (
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                        Loading editor...
-                      </div>
-                    )}
+                    <EditorContent editor={editor} />
                   </div>
                 </>
               ) : (
@@ -1339,7 +2152,7 @@ export default function AdminSendEmailPage() {
                   <div className="max-h-[700px] overflow-auto p-4 text-slate-900">
                     <div
                       dangerouslySetInnerHTML={{
-                        __html: form.html || "<p>No email content yet.</p>",
+                        __html: previewHtml || "<p>No email content yet.</p>",
                       }}
                     />
                   </div>
@@ -1476,6 +2289,26 @@ export default function AdminSendEmailPage() {
 
               <button
                 type="button"
+                onClick={openSaveTemplateModal}
+                disabled={savingTemplate || !canSaveTemplate}
+                className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-5 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus className="h-4 w-4" />
+                Save as template
+              </button>
+
+              <button
+                type="button"
+                onClick={openSaveSignatureModal}
+                disabled={savingSignature}
+                className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-5 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Signature className="h-4 w-4" />
+                Save signature
+              </button>
+
+              <button
+                type="button"
                 disabled={sending || savingDraft}
                 onClick={clearForm}
                 className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-5 text-sm font-medium text-white transition hover:bg-white/[0.10] disabled:cursor-not-allowed disabled:opacity-60"
@@ -1525,6 +2358,21 @@ export default function AdminSendEmailPage() {
             title="Template picker"
             icon={<Sparkles className="h-5 w-5 text-fuchsia-200" />}
           >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-white/55">
+                Saved templates you can reuse.
+              </p>
+
+              <button
+                type="button"
+                onClick={openSaveTemplateModal}
+                className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New template
+              </button>
+            </div>
+
             <div className="space-y-3">
               {templatesLoading ? (
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
@@ -1536,19 +2384,101 @@ export default function AdminSendEmailPage() {
                     key={template.id}
                     type="button"
                     onClick={() => applyTemplate(template.id)}
-                    className="block w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left transition hover:bg-white/[0.06]"
+                    className={clsx(
+                      "block w-full rounded-2xl border px-4 py-3 text-left transition",
+                      selectedTemplateId === template.id
+                        ? "border-fuchsia-400/30 bg-fuchsia-500/10"
+                        : "border-white/10 bg-black/20 hover:bg-white/[0.06]"
+                    )}
                   >
                     <div className="text-sm font-semibold text-white">
                       {template.name}
                     </div>
                     <div className="mt-1 text-xs text-white/50">
-                      {template.subject}
+                      {template.subject || "No subject"}
                     </div>
                   </button>
                 ))
               ) : (
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
                   No templates found.
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Signature picker"
+            icon={<Signature className="h-5 w-5 text-fuchsia-200" />}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-white/55">
+                Save and reuse multiple signatures.
+              </p>
+
+              <button
+                type="button"
+                onClick={openSaveSignatureModal}
+                className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New signature
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {signaturesLoading ? (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+                  Loading signatures...
+                </div>
+              ) : signatures.length > 0 ? (
+                signatures.map((signature) => (
+                  <div
+                    key={signature.id}
+                    className={clsx(
+                      "rounded-2xl border px-4 py-3",
+                      selectedSignatureId === signature.id
+                        ? "border-fuchsia-400/30 bg-fuchsia-500/10"
+                        : "border-white/10 bg-black/20"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSignatureId(signature.id)}
+                      className="block w-full text-left"
+                    >
+                      <div className="text-sm font-semibold text-white">
+                        {signature.name}
+                      </div>
+                      <div className="mt-1 text-xs text-white/50">
+                        {signature.is_default ? "Default signature" : "Saved signature"}
+                      </div>
+                    </button>
+
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applySignatureToBody(signature)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white transition hover:bg-white/[0.10]"
+                      >
+                        <Signature className="h-3.5 w-3.5" />
+                        Use
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSignature(signature.id)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/20"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+                  No signatures found.
                 </div>
               )}
             </div>
@@ -1598,6 +2528,9 @@ export default function AdminSendEmailPage() {
                 "Raw HTML mode included",
                 "Custom modal for links and images",
                 "Presets and saved templates",
+                "Multiple reusable signatures",
+                "Selected signature stays at bottom",
+                "Older signatures get removed",
                 "Preview before sending",
                 "Draft save and attachments",
               ].map((item) => (
