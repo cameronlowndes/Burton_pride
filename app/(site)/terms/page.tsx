@@ -240,8 +240,114 @@ const TermsPage = () => {
           <h2 className="text-2xl font-semibold text-gray-800 mb-2">
             10. Transparency, Accountability, and Community Commitment
           </h2>
-          {/* Content remains exactly as provided */}
-          {/* (Omitted here for brevity but should be included exactly as in your text) */}
+
+          <p className="text-gray-700 mb-3">
+            Transparency and accountability are fundamental to Burton Pride
+            C.I.C.
+          </p>
+          <p className="text-gray-700 mb-3">
+            We are committed to operating in a way that is open, ethical, and
+            always in the best interests of the community.
+          </p>
+
+          <h3 className="text-xl font-semibold text-gray-800 mt-4 mb-2">
+            Our Commitment to the Community
+          </h3>
+          <p className="text-gray-700 mb-2">We commit to:</p>
+          <ul className="list-disc pl-6 text-gray-700 space-y-2">
+            <li>
+              Being open about how Burton Pride operates, including decisions,
+              funding, and technology used
+            </li>
+            <li>
+              Making ethical decisions that prioritise inclusivity, fairness,
+              and community wellbeing
+            </li>
+            <li>Using funds responsibly to support our mission</li>
+            <li>Working only with ethical partners and sponsors</li>
+            <li>
+              Remaining fully independent from external control or influence
+            </li>
+            <li>
+              Ensuring the community remains at the centre of all decisions
+            </li>
+          </ul>
+
+          <h3 className="text-xl font-semibold text-gray-800 mt-6 mb-2">
+            Sponsorship Conduct and Termination Rights
+          </h3>
+          <p className="text-gray-700 mb-2">
+            All sponsors and partners must respect the values and independence
+            of Burton Pride C.I.C.
+          </p>
+          <p className="text-gray-700 mb-2">
+            We reserve the right to immediately terminate any sponsorship or
+            partnership without compensation if a sponsor or partner:
+          </p>
+          <ul className="list-disc pl-6 text-gray-700 space-y-2">
+            <li>Attempts to control or override Burton Pride decisions</li>
+            <li>Acts in a way that harms or misrepresents the community</li>
+            <li>Uses Burton Pride for purposes that conflict with our values</li>
+            <li>
+              Attempts to place commercial interests above the community
+            </li>
+          </ul>
+
+          <p className="text-gray-700 mt-3 mb-2">In such cases:</p>
+          <ul className="list-disc pl-6 text-gray-700 space-y-2">
+            <li>All association and branding rights may be removed</li>
+            <li>The partnership will be ended immediately</li>
+            <li>No financial compensation or refund will be provided</li>
+          </ul>
+
+          <h3 className="text-xl font-semibold text-gray-800 mt-6 mb-2">
+            Community-First Principle
+          </h3>
+          <p className="text-gray-700 mb-2">
+            Burton Pride C.I.C will always remain a community-led organisation,
+            built on the principle of “by the community, for the community.”
+          </p>
+          <p className="text-gray-700 mb-2">This means:</p>
+          <ul className="list-disc pl-6 text-gray-700 space-y-2">
+            <li>
+              The needs, safety, and wellbeing of the community will always come
+              before financial or commercial interests
+            </li>
+            <li>
+              No external organisation will be allowed to influence or control
+              Burton Pride in a way that conflicts with our purpose
+            </li>
+            <li>
+              We will actively protect the integrity, inclusivity, and
+              representation of the community
+            </li>
+            <li>
+              All decisions will be made with long-term community benefit in
+              mind
+            </li>
+          </ul>
+          <p className="text-gray-700 mt-3">
+            We will safeguard the organisation from any influence that could
+            compromise its values, mission, or independence.
+          </p>
+
+          <h3 className="text-xl font-semibold text-gray-800 mt-6 mb-2">
+            Accountability and Raising Concerns
+          </h3>
+          <p className="text-gray-700 mb-2">
+            We welcome feedback and accountability from the community.
+          </p>
+          <p className="text-gray-700 mb-2">
+            If you believe Burton Pride C.I.C is not meeting these standards,
+            you have the right to raise concerns.
+          </p>
+          <p className="text-gray-700 mb-2">We commit to:</p>
+          <ul className="list-disc pl-6 text-gray-700 space-y-2">
+            <li>Reviewing all concerns fairly and without bias</li>
+            <li>Responding in a respectful and timely manner</li>
+            <li>Taking appropriate action where necessary</li>
+            <li>Being transparent about outcomes where appropriate</li>
+          </ul>
         </section>
 
         {/* Contact Section */}
