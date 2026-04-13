@@ -121,7 +121,7 @@ type SaveSignatureModalState = {
   isDefault: boolean;
 };
 
-const TEST_EMAIL = "burtonpridetest@gmail.com";
+
 
 const initialForm = {
   to: "",
@@ -321,7 +321,7 @@ function appendSignatureHtmlToBottom(
   signatureItems: SignatureItem[]
 ) {
   const cleanSignature = (signatureHtml || "").trim();
-  if (!cleanSignature) return (bodyHtml || "").trim();
+  if (!cleanSignature) return stripKnownSignaturesFromHtml(bodyHtml || "", signatureItems);
 
   const bodyWithoutAnySignature = stripKnownSignaturesFromHtml(
     bodyHtml || "",
@@ -347,7 +347,7 @@ function appendSignatureTextToBottom(
   signatureItems: SignatureItem[]
 ) {
   const cleanSignature = (signatureText || "").trim();
-  if (!cleanSignature) return (bodyText || "").trim();
+  if (!cleanSignature) return stripKnownSignaturesFromText(bodyText || "", signatureItems);
 
   const bodyWithoutAnySignature = stripKnownSignaturesFromText(
     bodyText || "",
@@ -1097,8 +1097,8 @@ export default function AdminSendEmailPage() {
     onUpdate: ({ editor: currentEditor }) => {
       setForm((prev) => ({
         ...prev,
-        html: currentEditor.getHTML(),
-        message: currentEditor.getText(),
+        html: stripKnownSignaturesFromHtml(currentEditor.getHTML(), signatures),
+        message: stripKnownSignaturesFromText(currentEditor.getText(), signatures),
       }));
     },
   });
@@ -1191,11 +1191,28 @@ export default function AdminSendEmailPage() {
         const defaultSignature =
           nextSignatures.find((item) => item.is_default) || nextSignatures[0];
 
-        if (defaultSignature) {
-          setSelectedSignatureId(defaultSignature.id);
-        } else {
-          setSelectedSignatureId("");
-        }
+        setSelectedSignatureId((prev) => {
+          if (prev && nextSignatures.some((item) => item.id === prev)) {
+            return prev;
+          }
+          return defaultSignature?.id || "";
+        });
+
+        setForm((prev) => ({
+          ...prev,
+          html: stripKnownSignaturesFromHtml(prev.html, nextSignatures),
+          message: stripKnownSignaturesFromText(prev.message, nextSignatures),
+        }));
+
+        if (editor) {
+          const cleanedHtml = stripKnownSignaturesFromHtml(
+            editor.getHTML() || "",
+            nextSignatures
+          );
+          editor.commands.setContent(cleanedHtml || "<p></p>", {
+          emitUpdate: true,
+        });
+      }
       } else {
         setSignatures([]);
         setSelectedSignatureId("");
@@ -1236,7 +1253,10 @@ export default function AdminSendEmailPage() {
 
   function syncEditorContent(nextHtml: string) {
     if (!editor) return;
-    editor.commands.setContent(nextHtml || "<p></p>", true);
+    const cleanedHtml = stripKnownSignaturesFromHtml(nextHtml || "", signatures);
+    editor.commands.setContent(cleanedHtml || "<p></p>", {
+      emitUpdate: true,
+    });
   }
 
   function showSuccess(message: string) {
@@ -1247,44 +1267,28 @@ export default function AdminSendEmailPage() {
     setNotice({ type: "error", message });
   }
 
-  function fillTestEmail() {
-    const html = `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; background:#f4f4f7; padding:24px;">
-  <div style="max-width:640px; margin:0 auto; background:#ffffff; border-radius:16px; border:1px solid #e5e7eb; padding:32px 24px;">
-    <h2 style="margin: 0 0 16px;">Test Email from Burton Pride Admin Portal</h2>
-    <p>Hello,</p>
-    <p>This is a test email sent from the Burton Pride admin portal.</p>
-    <p>If you have received this email, the email system is working correctly.</p>
-    <p>Kind regards,<br />Burton Pride C.I.C</p>
-  </div>
-</div>`;
-
-    setForm((prev) => ({
-      ...prev,
-      to: TEST_EMAIL,
-      subject: prev.subject.trim() || "Test Email from Burton Pride Admin Portal",
-      html,
-      message: htmlToPlainText(html),
-    }));
-
-    syncEditorContent(html);
-    showSuccess(`Test email details filled in for ${TEST_EMAIL}`);
-  }
+  
 
   function connectGoogle() {
     window.location.href = "/api/admin/google/connect";
   }
 
-  function clearForm() {
-    setForm(initialForm);
-    setFiles([]);
-    setNotice(null);
-    setShowHtmlPreview(false);
-    setModal(null);
-    setEditorMode("rich");
-    setSelectedTemplateId("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (editor) editor.commands.setContent("<p></p>", true);
+ function clearForm() {
+  setForm(initialForm);
+  setFiles([]);
+  setNotice(null);
+  setShowHtmlPreview(false);
+  setModal(null);
+  setEditorMode("rich");
+  setSelectedTemplateId("");
+  if (fileInputRef.current) fileInputRef.current.value = "";
+
+  if (editor) {
+    editor.commands.setContent("<p></p>", {
+      emitUpdate: true,
+    });
   }
+}
 
   function handleFilesSelected(fileList: FileList | null) {
     if (!fileList) return;
@@ -1318,16 +1322,20 @@ export default function AdminSendEmailPage() {
     if (!template) return;
 
     const nextHtml = template.html || `<p>${escapeHtml(template.message || "")}</p>`;
+    const cleanedHtml = stripKnownSignaturesFromHtml(nextHtml, signatures);
 
     setSelectedTemplateId(templateId);
     setForm((prev) => ({
       ...prev,
       subject: template.subject || prev.subject,
-      message: template.message || htmlToPlainText(nextHtml),
-      html: nextHtml,
+      message: stripKnownSignaturesFromText(
+        template.message || htmlToPlainText(cleanedHtml),
+        signatures
+      ),
+      html: cleanedHtml,
     }));
 
-    syncEditorContent(nextHtml);
+    syncEditorContent(cleanedHtml);
     setEditorMode("rich");
     showSuccess(`Template "${template.name}" applied.`);
   }
@@ -1336,14 +1344,16 @@ export default function AdminSendEmailPage() {
     const preset = emailPresets.find((item) => item.id === presetId);
     if (!preset) return;
 
+    const cleanedHtml = stripKnownSignaturesFromHtml(preset.html, signatures);
+
     setForm((prev) => ({
       ...prev,
       subject: prev.subject.trim() || preset.subject,
-      html: preset.html,
-      message: htmlToPlainText(preset.html),
+      html: cleanedHtml,
+      message: htmlToPlainText(cleanedHtml),
     }));
 
-    syncEditorContent(preset.html);
+    syncEditorContent(cleanedHtml);
     setShowHtmlPreview(true);
     setEditorMode("rich");
     showSuccess(`Preset "${preset.name}" loaded.`);
@@ -1389,10 +1399,12 @@ export default function AdminSendEmailPage() {
   }
 
   function handleRawHtmlChange(value: string) {
+    const cleanedHtml = stripKnownSignaturesFromHtml(value, signatures);
+
     setForm((prev) => ({
       ...prev,
-      html: value,
-      message: htmlToPlainText(value),
+      html: cleanedHtml,
+      message: htmlToPlainText(cleanedHtml),
     }));
   }
 
@@ -1431,8 +1443,11 @@ export default function AdminSendEmailPage() {
   async function handleSaveTemplate() {
     const name = saveTemplateModal.name.trim();
     const subject = saveTemplateModal.subject.trim() || form.subject.trim();
-    const html = form.html || editor?.getHTML() || "";
-    const message = form.message || editor?.getText() || "";
+    const html = stripKnownSignaturesFromHtml(form.html || editor?.getHTML() || "", signatures);
+    const message = stripKnownSignaturesFromText(
+      form.message || editor?.getText() || "",
+      signatures
+    );
 
     if (!name) {
       showError("Please add a template name.");
@@ -1559,7 +1574,8 @@ export default function AdminSendEmailPage() {
       }
 
       if (selectedSignatureId === id) {
-        setSelectedSignatureId("");
+        const remaining = signatures.filter((item) => item.id !== id);
+        setSelectedSignatureId(remaining[0]?.id || "");
       }
 
       await loadSignatures();
@@ -1570,29 +1586,9 @@ export default function AdminSendEmailPage() {
   }
 
   function applySignatureToBody(signature: SignatureItem) {
-    if (!editor) return;
-
-    const currentHtml = form.html || editor.getHTML() || "";
-    const currentText = form.message || editor.getText() || "";
-
-    const { finalHtml, finalText } = buildBodyWithSelectedSignature(
-      currentHtml,
-      currentText,
-      signature,
-      signatures
-    );
-
     setSelectedSignatureId(signature.id);
-
-    setForm((prev) => ({
-      ...prev,
-      html: finalHtml,
-      message: finalText,
-    }));
-
-    syncEditorContent(finalHtml);
     setShowHtmlPreview(true);
-    showSuccess(`Signature "${signature.name}" added to the bottom of the email.`);
+    showSuccess(`Signature "${signature.name}" selected and will appear at the bottom of the email.`);
   }
 
   function insertSelectedSignature() {
@@ -1623,9 +1619,18 @@ export default function AdminSendEmailPage() {
         (item) => item.id === selectedSignatureId
       );
 
-      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+      const cleanedBodyHtml = stripKnownSignaturesFromHtml(
         form.html || editor?.getHTML() || "",
+        signatures
+      );
+      const cleanedBodyText = stripKnownSignaturesFromText(
         form.message || editor?.getText() || "",
+        signatures
+      );
+
+      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+        cleanedBodyHtml,
+        cleanedBodyText,
         selectedSignature,
         signatures
       );
@@ -1679,9 +1684,18 @@ export default function AdminSendEmailPage() {
         (item) => item.id === selectedSignatureId
       );
 
-      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+      const cleanedBodyHtml = stripKnownSignaturesFromHtml(
         form.html || editor?.getHTML() || "",
+        signatures
+      );
+      const cleanedBodyText = stripKnownSignaturesFromText(
         form.message || editor?.getText() || "",
+        signatures
+      );
+
+      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
+        cleanedBodyHtml,
+        cleanedBodyText,
         selectedSignature,
         signatures
       );
@@ -1868,15 +1882,6 @@ export default function AdminSendEmailPage() {
               <div>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                   <FieldLabel required>To</FieldLabel>
-
-                  <button
-                    type="button"
-                    onClick={fillTestEmail}
-                    className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    Autofill test email
-                  </button>
                 </div>
 
                 <Input
@@ -1885,10 +1890,6 @@ export default function AdminSendEmailPage() {
                   placeholder="name@example.com"
                   type="email"
                 />
-
-                <p className="mt-2 text-xs text-white/45">
-                  Test address: {TEST_EMAIL}
-                </p>
               </div>
 
               <div>
@@ -1969,7 +1970,7 @@ export default function AdminSendEmailPage() {
                 <div>
                   <p className="text-sm font-semibold text-white">Email signatures</p>
                   <p className="text-xs text-white/50">
-                    Save multiple signatures and insert the one you want.
+                    Save multiple signatures and use the one you want.
                   </p>
                 </div>
 
@@ -2010,7 +2011,7 @@ export default function AdminSendEmailPage() {
                     className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
                   >
                     <Signature className="h-4 w-4" />
-                    Insert signature
+                    Use signature
                   </button>
 
                   {selectedSignatureId ? (
@@ -2028,7 +2029,7 @@ export default function AdminSendEmailPage() {
 
               {selectedSignatureId ? (
                 <p className="mt-3 text-xs text-white/55">
-                  Selected signature will always be kept at the bottom of the email and older signatures will be removed automatically.
+                  Selected signature will appear once at the bottom of preview, draft and sent email.
                 </p>
               ) : null}
             </div>
@@ -2529,8 +2530,8 @@ export default function AdminSendEmailPage() {
                 "Custom modal for links and images",
                 "Presets and saved templates",
                 "Multiple reusable signatures",
-                "Selected signature stays at bottom",
-                "Older signatures get removed",
+                "Selected signature stays separate from body",
+                "No duplicated signatures",
                 "Preview before sending",
                 "Draft save and attachments",
               ].map((item) => (

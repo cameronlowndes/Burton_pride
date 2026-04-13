@@ -14,6 +14,11 @@ import {
   Link2,
   RefreshCw,
   Signature,
+  Plus,
+  Trash2,
+  Star,
+  Eye,
+  X,
 } from "lucide-react";
 
 type Notice =
@@ -27,8 +32,6 @@ type EmailSettings = {
   replyTo: string;
   defaultCc: string;
   defaultBcc: string;
-  signatureHtml: string;
-  signatureText: string;
   testEmail: string;
   googleConnected: boolean;
   googleEmail: string;
@@ -46,14 +49,35 @@ type SaveResponse = {
   error?: string;
 };
 
+type SignatureItem = {
+  id: string;
+  name: string;
+  html: string;
+  text: string;
+  is_default?: boolean;
+  created_at?: string;
+};
+
+type SignaturesResponse = {
+  ok: boolean;
+  signatures?: SignatureItem[];
+  error?: string;
+};
+
+type SaveSignatureModalState = {
+  open: boolean;
+  name: string;
+  html: string;
+  text: string;
+  isDefault: boolean;
+};
+
 const initialSettings: EmailSettings = {
   senderName: "",
   senderEmail: "",
   replyTo: "",
   defaultCc: "",
   defaultBcc: "",
-  signatureHtml: "",
-  signatureText: "",
   testEmail: "",
   googleConnected: false,
   googleEmail: "",
@@ -61,6 +85,52 @@ const initialSettings: EmailSettings = {
 
 function clsx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function htmlToPlainText(value: string) {
+  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function plainTextToHtml(value: string) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+
+  return trimmed
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map(
+      (block) =>
+        `<p>${block
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;")
+          .replace(/\n/g, "<br />")}</p>`
+    )
+    .join("");
+}
+
+function formatDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getSignatureHtml(signature?: SignatureItem) {
+  if (!signature) return "";
+  const html = (signature.html || "").trim();
+  if (html) return html;
+  return plainTextToHtml(signature.text || "");
 }
 
 function FieldLabel({
@@ -177,6 +247,117 @@ function SectionCard({
   );
 }
 
+function SaveSignatureModal({
+  state,
+  onClose,
+  onChange,
+  onSubmit,
+  saving,
+}: {
+  state: SaveSignatureModalState;
+  onClose: () => void;
+  onChange: (next: Partial<SaveSignatureModalState>) => void;
+  onSubmit: () => void;
+  saving: boolean;
+}) {
+  if (!state.open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0a1022] p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white">
+              Save email signature
+            </h3>
+            <p className="mt-2 text-sm leading-7 text-white/60">
+              Save multiple reusable signatures and choose one as the default.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <div>
+            <FieldLabel required>Signature name</FieldLabel>
+            <TextInput
+              value={state.name}
+              onChange={(value) => onChange({ name: value })}
+              placeholder="Example: Main Burton Pride signature"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Signature HTML</FieldLabel>
+            <TextArea
+              value={state.html}
+              onChange={(value) => onChange({ html: value })}
+              rows={8}
+              placeholder="<p>Kind regards,<br /><strong>Burton Pride C.I.C</strong></p>"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Signature plain text</FieldLabel>
+            <TextArea
+              value={state.text}
+              onChange={(value) => onChange({ text: value })}
+              rows={5}
+              placeholder={"Kind regards,\nBurton Pride C.I.C"}
+            />
+          </div>
+
+          <label className="inline-flex items-center gap-3 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={state.isDefault}
+              onChange={(e) => onChange({ isDefault: e.target.checked })}
+              className="h-4 w-4 rounded border-white/20 bg-black/20"
+            />
+            Make this the default signature
+          </label>
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            disabled={saving || !state.name.trim()}
+            onClick={onSubmit}
+            className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 text-sm font-semibold text-white transition hover:from-fuchsia-500 hover:to-pink-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                Save signature
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function EmailSettingsPage() {
   const [settings, setSettings] = useState<EmailSettings>(initialSettings);
   const [originalSettings, setOriginalSettings] =
@@ -188,12 +369,36 @@ export default function EmailSettingsPage() {
   const [refreshingGoogle, setRefreshingGoogle] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
+  const [signatures, setSignatures] = useState<SignatureItem[]>([]);
+  const [signaturesLoading, setSignaturesLoading] = useState(true);
+  const [savingSignature, setSavingSignature] = useState(false);
+  const [selectedSignatureId, setSelectedSignatureId] = useState("");
+  const [previewSignatureId, setPreviewSignatureId] = useState("");
+
+  const [saveSignatureModal, setSaveSignatureModal] =
+    useState<SaveSignatureModalState>({
+      open: false,
+      name: "",
+      html: "",
+      text: "",
+      isDefault: false,
+    });
+
   const hasChanges = useMemo(() => {
     return JSON.stringify(settings) !== JSON.stringify(originalSettings);
   }, [settings, originalSettings]);
 
+  const selectedPreviewSignature = useMemo(() => {
+    return (
+      signatures.find((item) => item.id === previewSignatureId) ||
+      signatures.find((item) => item.id === selectedSignatureId) ||
+      signatures.find((item) => item.is_default) ||
+      signatures[0]
+    );
+  }, [previewSignatureId, selectedSignatureId, signatures]);
+
   useEffect(() => {
-    loadSettings();
+    loadAll();
   }, []);
 
   useEffect(() => {
@@ -201,6 +406,10 @@ export default function EmailSettingsPage() {
     const timer = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  async function loadAll() {
+    await Promise.all([loadSettings(), loadSignatures()]);
+  }
 
   async function loadSettings() {
     try {
@@ -237,6 +446,49 @@ export default function EmailSettingsPage() {
     }
   }
 
+  async function loadSignatures() {
+    try {
+      setSignaturesLoading(true);
+
+      const res = await fetch("/api/admin/email/signatures", {
+        cache: "no-store",
+      });
+
+      const data: SignaturesResponse = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to load signatures.");
+      }
+
+      const nextSignatures = (data.signatures || []).map((item) => ({
+        ...item,
+        html: (item.html || "").trim() || plainTextToHtml(item.text || ""),
+        text: (item.text || "").trim() || htmlToPlainText(item.html || ""),
+      }));
+
+      setSignatures(nextSignatures);
+
+      const defaultSignature =
+        nextSignatures.find((item) => item.is_default) || nextSignatures[0];
+
+      setSelectedSignatureId(defaultSignature?.id || "");
+      setPreviewSignatureId((prev) => prev || defaultSignature?.id || "");
+    } catch (error) {
+      setSignatures([]);
+      setSelectedSignatureId("");
+      setPreviewSignatureId("");
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to load signatures.",
+      });
+    } finally {
+      setSignaturesLoading(false);
+    }
+  }
+
   function updateField<K extends keyof EmailSettings>(
     key: K,
     value: EmailSettings[K]
@@ -263,8 +515,6 @@ export default function EmailSettingsPage() {
           replyTo: settings.replyTo,
           defaultCc: settings.defaultCc,
           defaultBcc: settings.defaultBcc,
-          signatureHtml: settings.signatureHtml,
-          signatureText: settings.signatureText,
           testEmail: settings.testEmail,
         }),
       });
@@ -377,6 +627,124 @@ export default function EmailSettingsPage() {
     window.location.href = "/api/admin/google/connect";
   }
 
+  function openSaveSignatureModal() {
+    setSaveSignatureModal({
+      open: true,
+      name: "",
+      html: "",
+      text: "",
+      isDefault: signatures.length === 0,
+    });
+  }
+
+  function closeSaveSignatureModal() {
+    setSaveSignatureModal({
+      open: false,
+      name: "",
+      html: "",
+      text: "",
+      isDefault: false,
+    });
+  }
+
+  async function handleSaveSignature() {
+    const name = saveSignatureModal.name.trim();
+    const rawHtml = saveSignatureModal.html.trim();
+    const rawText = saveSignatureModal.text.trim();
+
+    if (!name) {
+      setNotice({
+        type: "error",
+        message: "Please add a signature name.",
+      });
+      return;
+    }
+
+    if (!rawHtml && !rawText) {
+      setNotice({
+        type: "error",
+        message: "Please add signature HTML or plain text.",
+      });
+      return;
+    }
+
+    const finalHtml = rawHtml || plainTextToHtml(rawText);
+    const finalText = rawText || htmlToPlainText(rawHtml);
+
+    try {
+      setSavingSignature(true);
+      setNotice(null);
+
+      const res = await fetch("/api/admin/email/signatures", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          html: finalHtml,
+          text: finalText,
+          isDefault: saveSignatureModal.isDefault,
+        }),
+      });
+
+      const data: SaveResponse = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save signature.");
+      }
+
+      await loadSignatures();
+      closeSaveSignatureModal();
+
+      setNotice({
+        type: "success",
+        message: data.message || `Signature "${name}" saved successfully.`,
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to save signature.",
+      });
+    } finally {
+      setSavingSignature(false);
+    }
+  }
+
+  async function handleDeleteSignature(id: string) {
+    try {
+      setNotice(null);
+
+      const res = await fetch(`/api/admin/email/signatures/${id}`, {
+        method: "DELETE",
+      });
+
+      const data: SaveResponse = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to delete signature.");
+      }
+
+      await loadSignatures();
+
+      setNotice({
+        type: "success",
+        message: data.message || "Signature deleted successfully.",
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to delete signature.",
+      });
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -392,6 +760,19 @@ export default function EmailSettingsPage() {
 
   return (
     <div className="min-w-0 p-4 md:p-6 lg:p-8">
+      <SaveSignatureModal
+        state={saveSignatureModal}
+        saving={savingSignature}
+        onClose={closeSaveSignatureModal}
+        onChange={(next) =>
+          setSaveSignatureModal((prev) => ({
+            ...prev,
+            ...next,
+          }))
+        }
+        onSubmit={handleSaveSignature}
+      />
+
       <div className="mx-auto max-w-7xl">
         <div className="rounded-3xl border border-white/10 bg-[#0a1022]/80 p-6 shadow-2xl backdrop-blur-xl md:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -411,8 +792,8 @@ export default function EmailSettingsPage() {
                 </h1>
 
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-white/60 md:text-base">
-                  Manage sender details, signature, default email behaviour,
-                  Google connection, and test delivery settings.
+                  Manage sender details, Google connection, saved signatures,
+                  and test delivery settings.
                 </p>
               </div>
             </div>
@@ -541,41 +922,129 @@ export default function EmailSettingsPage() {
             </SectionCard>
 
             <SectionCard
-              title="Email signature"
-              description="Set the signature used for outgoing emails. You can store both HTML and plain text versions."
+              title="Saved email signatures"
+              description="Save multiple signatures, mark one as default, preview them, and remove old ones."
               icon={<Signature className="h-5 w-5 text-fuchsia-200" />}
             >
-              <div className="grid gap-5 lg:grid-cols-2">
-                <div>
-                  <FieldLabel>Signature HTML</FieldLabel>
-                  <TextArea
-                    value={settings.signatureHtml}
-                    onChange={(value) => updateField("signatureHtml", value)}
-                    placeholder="<p>Kind regards,<br /><strong>Your name</strong></p>"
-                    rows={10}
-                  />
-                </div>
-
-                <div>
-                  <FieldLabel>Signature plain text</FieldLabel>
-                  <TextArea
-                    value={settings.signatureText}
-                    onChange={(value) => updateField("signatureText", value)}
-                    placeholder={"Kind regards,\nYour name"}
-                    rows={10}
-                  />
-                </div>
+              <div className="mb-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={openSaveSignatureModal}
+                  className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                >
+                  <Plus className="h-4 w-4" />
+                  New signature
+                </button>
               </div>
+
+              {signaturesLoading ? (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+                  Loading signatures...
+                </div>
+              ) : signatures.length > 0 ? (
+                <div className="space-y-3">
+                  {signatures.map((signature) => {
+                    const isSelected = selectedSignatureId === signature.id;
+                    const isPreviewing =
+                      (previewSignatureId || selectedSignatureId) === signature.id;
+
+                    return (
+                      <div
+                        key={signature.id}
+                        className={clsx(
+                          "rounded-2xl border p-4",
+                          isSelected
+                            ? "border-fuchsia-400/30 bg-fuchsia-500/10"
+                            : "border-white/10 bg-black/20"
+                        )}
+                      >
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold text-white">
+                                {signature.name}
+                              </p>
+
+                              {signature.is_default ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+                                  <Star className="h-3 w-3" />
+                                  Default
+                                </span>
+                              ) : null}
+
+                              {isSelected ? (
+                                <span className="inline-flex rounded-full bg-fuchsia-500/15 px-2.5 py-1 text-[11px] font-semibold text-fuchsia-200">
+                                  Active
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <p className="mt-2 text-xs text-white/45">
+                              {signature.created_at
+                                ? `Saved ${formatDate(signature.created_at)}`
+                                : "Saved signature"}
+                            </p>
+
+                            <p className="mt-2 line-clamp-2 text-sm text-white/60">
+                              {signature.text || htmlToPlainText(signature.html) || "No preview text"}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSignatureId(signature.id)}
+                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white transition hover:bg-white/[0.10]"
+                            >
+                              <Star className="h-3.5 w-3.5" />
+                              Use as default view
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setPreviewSignatureId(signature.id)}
+                              className={clsx(
+                                "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
+                                isPreviewing
+                                  ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100"
+                                  : "border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.10]"
+                              )}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Preview
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSignature(signature.id)}
+                              className="inline-flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/20"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
+                  No signatures saved yet.
+                </div>
+              )}
 
               <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white">
                 <div className="border-b border-slate-200 px-4 py-3 text-sm font-medium text-slate-600">
                   Signature preview
                 </div>
+
                 <div className="p-4 text-slate-900">
                   <div
                     dangerouslySetInnerHTML={{
                       __html:
-                        settings.signatureHtml || "<p>No signature preview.</p>",
+                        getSignatureHtml(selectedPreviewSignature) ||
+                        "<p>No signature preview.</p>",
                     }}
                   />
                 </div>
@@ -627,7 +1096,9 @@ export default function EmailSettingsPage() {
                     className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-4 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20"
                   >
                     <Mail className="h-4 w-4" />
-                    {settings.googleConnected ? "Reconnect Google" : "Connect Google"}
+                    {settings.googleConnected
+                      ? "Reconnect Google"
+                      : "Connect Google"}
                   </button>
 
                   <button
@@ -664,7 +1135,9 @@ export default function EmailSettingsPage() {
                     value:
                       settings.senderName || settings.senderEmail
                         ? `${settings.senderName || "No name"}${
-                            settings.senderEmail ? ` <${settings.senderEmail}>` : ""
+                            settings.senderEmail
+                              ? ` <${settings.senderEmail}>`
+                              : ""
                           }`
                         : "Not set",
                   },
@@ -683,6 +1156,17 @@ export default function EmailSettingsPage() {
                   {
                     label: "Test email",
                     value: settings.testEmail || "Not set",
+                  },
+                  {
+                    label: "Saved signatures",
+                    value: `${signatures.length}`,
+                  },
+                  {
+                    label: "Default signature",
+                    value:
+                      signatures.find((item) => item.is_default)?.name ||
+                      signatures[0]?.name ||
+                      "Not set",
                   },
                 ].map((item) => (
                   <div
@@ -709,7 +1193,8 @@ export default function EmailSettingsPage() {
                 {[
                   "Leave sender boxes blank until a Google account is connected.",
                   "After Google connects, use that account details in the sender boxes.",
-                  "Use reply-to only if you want replies to go somewhere different.",
+                  "Save more than one signature for different committee use.",
+                  "Set one signature as the default when creating it.",
                   "Keep a test email saved so you can check sending quickly.",
                 ].map((tip) => (
                   <div
