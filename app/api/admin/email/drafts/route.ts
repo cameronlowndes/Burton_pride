@@ -1,8 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export async function GET() {
+  try {
+    const supabase = supabaseAdmin;
+
+    const { data, error } = await supabase
+      .from("email_drafts")
+      .select(`
+        id,
+        to,
+        cc,
+        bcc,
+        subject,
+        message,
+        html,
+        created_at,
+        updated_at,
+        signature_id
+      `)
+      .order("updated_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Draft list error:", error);
+      return NextResponse.json(
+        { ok: false, error: error.message || "Failed to load drafts." },
+        { status: 500 }
+      );
+    }
+
+    const items = (data || []).map((item) => ({
+      ...item,
+      attachment_count: 0,
+    }));
+
+    return NextResponse.json({
+      ok: true,
+      items,
+    });
+  } catch (error) {
+    console.error("Draft GET error:", error);
+    return NextResponse.json(
+      { ok: false, error: "Failed to load drafts." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    const supabase = supabaseAdmin;
     const formData = await req.formData();
 
     const to = String(formData.get("to") || "").trim();
@@ -11,44 +59,53 @@ export async function POST(req: NextRequest) {
     const subject = String(formData.get("subject") || "").trim();
     const message = String(formData.get("message") || "").trim();
     const html = String(formData.get("html") || "").trim();
-    const editorMode = String(formData.get("editorMode") || "plain").trim();
+    const signatureId = String(formData.get("signatureId") || "").trim() || null;
 
-    const attachmentFiles = formData.getAll("attachments") as File[];
-    const attachmentNames = attachmentFiles
-      .filter((file) => file && typeof file.name === "string")
-      .map((file) => file.name);
+    if (!to) {
+      return NextResponse.json(
+        { ok: false, error: "To is required." },
+        { status: 400 }
+      );
+    }
 
-    const supabase = supabaseAdmin;
+    if (!subject) {
+      return NextResponse.json(
+        { ok: false, error: "Subject is required." },
+        { status: 400 }
+      );
+    }
 
-    const { error } = await supabase.from("email_drafts").insert({
-      to_email: to,
-      cc_email: cc || null,
-      bcc_email: bcc || null,
-      subject,
-      message,
-      html,
-      editor_mode: editorMode,
-      attachment_names: attachmentNames,
-      created_at: new Date().toISOString(),
-    });
+    const { data, error } = await supabase
+      .from("email_drafts")
+      .insert({
+        to,
+        cc: cc || null,
+        bcc: bcc || null,
+        subject,
+        message: message || null,
+        html: html || null,
+        signature_id: signatureId,
+      })
+      .select("id")
+      .single();
 
     if (error) {
+      console.error("Draft save error:", error);
       return NextResponse.json(
-        { ok: false, error: error.message },
+        { ok: false, error: error.message || "Failed to save draft." },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       ok: true,
+      id: data.id,
       message: "Draft saved successfully.",
     });
   } catch (error) {
+    console.error("Draft POST error:", error);
     return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "Failed to save draft.",
-      },
+      { ok: false, error: "Failed to save draft." },
       { status: 500 }
     );
   }

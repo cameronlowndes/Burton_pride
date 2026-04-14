@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
+import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 function toBase64Url(input: Buffer | string) {
@@ -79,8 +80,12 @@ function buildRawEmail({
   const hasText = !!text?.trim();
   const hasAttachments = !!attachments?.length;
 
-  const mixedBoundary = `mixed_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const altBoundary = `alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const mixedBoundary = `mixed_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2)}`;
+  const altBoundary = `alt_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2)}`;
 
   const headers = [
     `From: ${safeFrom}`,
@@ -189,6 +194,257 @@ function buildRawEmail({
   return [...headers, "", text || ""].join("\r\n");
 }
 
+async function insertEmailHistory({
+  to,
+  cc,
+  bcc,
+  subject,
+  message,
+  html,
+  status,
+  provider,
+  fromEmail,
+}: {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  message: string;
+  html: string;
+  status: string;
+  provider: string;
+  fromEmail: string;
+}) {
+  try {
+    const supabase = supabaseAdmin;
+
+    const payload: Record<string, unknown> = {
+      to_email: to,
+      cc_email: cc || null,
+      bcc_email: bcc || null,
+      subject,
+      message: message || null,
+      html: html || null,
+      status,
+      created_at: new Date().toISOString(),
+    };
+
+    payload.provider = provider;
+    payload.from_email = fromEmail;
+
+    const { error } = await supabase.from("email_history").insert(payload);
+
+    if (error) {
+      console.error("Failed to write email_history:", error.message);
+    }
+  } catch (error) {
+    console.error("Failed to write email history:", error);
+  }
+}
+
+async function sendWithGoogle({
+  to,
+  cc,
+  bcc,
+  subject,
+  message,
+  html,
+  editorMode,
+  attachments,
+}: {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  message: string;
+  html: string;
+  editorMode: string;
+  attachments: Array<{
+    filename: string;
+    mimeType: string;
+    content: Buffer;
+  }>;
+}) {
+  const supabase = supabaseAdmin;
+
+  const { data: connection, error: connectionError } = await supabase
+    .from("google_connections")
+    .select("id, email, google_email, access_token, refresh_token, expires_at, created_at")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (connectionError) {
+    throw new Error(connectionError.message);
+  }
+
+  if (!connection) {
+    throw new Error("No Google connection row found in google_connections.");
+  }
+
+  if (!connection.access_token) {
+    throw new Error("Google connection is missing access_token.");
+  }
+
+  if (
+    !process.env.GOOGLE_CLIENT_ID ||
+    !process.env.GOOGLE_CLIENT_SECRET ||
+    !process.env.GOOGLE_OAUTH_REDIRECT_URI
+  ) {
+    throw new Error("Google OAuth environment variables are missing.");
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_OAUTH_REDIRECT_URI
+  );
+
+  oauth2Client.setCredentials({
+    access_token: connection.access_token,
+    refresh_token: connection.refresh_token || undefined,
+    expiry_date: connection.expires_at ?? undefined,
+  });
+
+  const gmail = google.gmail({
+    version: "v1",
+    auth: oauth2Client,
+  });
+
+  const fromEmail = connection.google_email || connection.email || "me";
+
+  const rawEmail = buildRawEmail({
+    from: fromEmail,
+    to,
+    cc: cc || undefined,
+    bcc: bcc || undefined,
+    subject,
+    text: message || undefined,
+    html: editorMode === "html" ? html || undefined : html || undefined,
+    attachments,
+  });
+
+  const encodedMessage = toBase64Url(rawEmail);
+
+  const gmailResponse = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {
+      raw: encodedMessage,
+    },
+  });
+
+  await insertEmailHistory({
+    to,
+    cc,
+    bcc,
+    subject,
+    message,
+    html,
+    status: "sent",
+    provider: "google",
+    fromEmail,
+  });
+
+  return {
+    ok: true,
+    message: connection.refresh_token
+      ? "Email sent successfully with Google."
+      : "Email sent successfully with Google. No refresh token is stored, so reconnect Google later if sending stops working.",
+    gmailMessageId: gmailResponse.data.id ?? null,
+  };
+}
+
+async function sendWithResend({
+  to,
+  cc,
+  bcc,
+  subject,
+  message,
+  html,
+  attachments,
+}: {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  message: string;
+  html: string;
+  attachments: Array<{
+    filename: string;
+    mimeType: string;
+    content: Buffer;
+  }>;
+}) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is missing.");
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+
+  const fromEmail =
+    process.env.EMAIL_FROM?.trim() || "Burton Pride <noreply@burtonpride.co.uk>";
+  const replyTo =
+    process.env.EMAIL_REPLY_TO?.trim() || "cameronlowndes@burtonpride.co.uk";
+
+  const resendAttachments = attachments.map((attachment) => ({
+    filename: attachment.filename,
+    content: attachment.content,
+    contentType: attachment.mimeType,
+  }));
+
+  const payload: Record<string, unknown> = {
+    from: fromEmail,
+    to: to.split(",").map((item) => item.trim()).filter(Boolean),
+    subject,
+    replyTo,
+  };
+
+  if (cc.trim()) {
+    payload.cc = cc.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  if (bcc.trim()) {
+    payload.bcc = bcc.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  if (message.trim()) {
+    payload.text = message;
+  }
+
+  if (html.trim()) {
+    payload.html = html;
+  }
+
+  if (resendAttachments.length > 0) {
+    payload.attachments = resendAttachments;
+  }
+
+  const { data, error } = await resend.emails.send(payload as unknown as Parameters<typeof resend.emails.send>[0]);
+
+  if (error) {
+    console.error("Resend send error:", error);
+    throw new Error(error.message || "Failed to send email with Resend.");
+  }
+
+  await insertEmailHistory({
+    to,
+    cc,
+    bcc,
+    subject,
+    message,
+    html,
+    status: "sent",
+    provider: "resend",
+    fromEmail,
+  });
+
+  return {
+    ok: true,
+    message: "Email sent successfully with noreply@burtonpride.co.uk.",
+    resendId: data?.id ?? null,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -200,6 +456,7 @@ export async function POST(req: NextRequest) {
     const message = String(formData.get("message") || "").trim();
     const html = String(formData.get("html") || "").trim();
     const editorMode = String(formData.get("editorMode") || "plain").trim();
+    const sendProvider = String(formData.get("sendProvider") || "google").trim();
 
     if (!to || !subject) {
       return NextResponse.json(
@@ -212,9 +469,7 @@ export async function POST(req: NextRequest) {
     }
 
     const hasBody =
-      editorMode === "html"
-        ? html.length > 0 || message.length > 0
-        : message.length > 0;
+      html.trim().length > 0 || message.trim().length > 0;
 
     if (!hasBody) {
       return NextResponse.json(
@@ -239,120 +494,32 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    const supabase = supabaseAdmin;
+    if (sendProvider === "resend") {
+      const resendResult = await sendWithResend({
+        to,
+        cc,
+        bcc,
+        subject,
+        message,
+        html,
+        attachments,
+      });
 
-    const { data: connection, error: connectionError } = await supabase
-      .from("google_connections")
-      .select("id, email, google_email, access_token, refresh_token, expires_at, created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (connectionError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: connectionError.message,
-        },
-        { status: 500 }
-      );
+      return NextResponse.json(resendResult);
     }
 
-    if (!connection) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No Google connection row found in google_connections.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!connection.access_token) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Google connection is missing access_token.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      !process.env.GOOGLE_CLIENT_ID ||
-      !process.env.GOOGLE_CLIENT_SECRET ||
-      !process.env.GOOGLE_OAUTH_REDIRECT_URI
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Google OAuth environment variables are missing.",
-        },
-        { status: 500 }
-      );
-    }
-
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_OAUTH_REDIRECT_URI
-    );
-
-    oauth2Client.setCredentials({
-      access_token: connection.access_token,
-      refresh_token: connection.refresh_token || undefined,
-      expiry_date: connection.expires_at ?? undefined,
-    });
-
-    const gmail = google.gmail({
-      version: "v1",
-      auth: oauth2Client,
-    });
-
-    const fromEmail = connection.google_email || connection.email || "me";
-
-    const rawEmail = buildRawEmail({
-      from: fromEmail,
+    const googleResult = await sendWithGoogle({
       to,
-      cc: cc || undefined,
-      bcc: bcc || undefined,
+      cc,
+      bcc,
       subject,
-      text: message || undefined,
-      html: editorMode === "html" ? html || undefined : undefined,
+      message,
+      html,
+      editorMode,
       attachments,
     });
 
-    const encodedMessage = toBase64Url(rawEmail);
-
-    const gmailResponse = await gmail.users.messages.send({
-      userId: "me",
-      requestBody: {
-        raw: encodedMessage,
-      },
-    });
-
-    const { error: historyError } = await supabase.from("email_history").insert({
-      to_email: to,
-      cc_email: cc || null,
-      bcc_email: bcc || null,
-      subject,
-      message: message || null,
-      html: editorMode === "html" ? html || null : null,
-      status: "sent",
-      created_at: new Date().toISOString(),
-    });
-
-    if (historyError) {
-      console.error("Failed to write email_history:", historyError.message);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      message: connection.refresh_token
-        ? "Email sent successfully."
-        : "Email sent successfully. No refresh token is stored, so reconnect Google later if sending stops working.",
-      gmailMessageId: gmailResponse.data.id ?? null,
-    });
+    return NextResponse.json(googleResult);
   } catch (error) {
     console.error("Email send error:", error);
 

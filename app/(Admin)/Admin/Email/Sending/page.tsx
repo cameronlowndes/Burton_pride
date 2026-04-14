@@ -121,7 +121,7 @@ type SaveSignatureModalState = {
   isDefault: boolean;
 };
 
-
+type SendProvider = "google" | "resend";
 
 const initialForm = {
   to: "",
@@ -321,7 +321,9 @@ function appendSignatureHtmlToBottom(
   signatureItems: SignatureItem[]
 ) {
   const cleanSignature = (signatureHtml || "").trim();
-  if (!cleanSignature) return stripKnownSignaturesFromHtml(bodyHtml || "", signatureItems);
+  if (!cleanSignature) {
+    return stripKnownSignaturesFromHtml(bodyHtml || "", signatureItems);
+  }
 
   const bodyWithoutAnySignature = stripKnownSignaturesFromHtml(
     bodyHtml || "",
@@ -347,7 +349,9 @@ function appendSignatureTextToBottom(
   signatureItems: SignatureItem[]
 ) {
   const cleanSignature = (signatureText || "").trim();
-  if (!cleanSignature) return stripKnownSignaturesFromText(bodyText || "", signatureItems);
+  if (!cleanSignature) {
+    return stripKnownSignaturesFromText(bodyText || "", signatureItems);
+  }
 
   const bodyWithoutAnySignature = stripKnownSignaturesFromText(
     bodyText || "",
@@ -824,17 +828,11 @@ function RichEditorToolbar({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <ToolbarButton
-          title="Undo"
-          onClick={() => run((ed) => ed.chain().focus().undo().run())}
-        >
+        <ToolbarButton title="Undo" onClick={() => run((ed) => ed.chain().focus().undo().run())}>
           <Undo2 className="h-4 w-4" />
         </ToolbarButton>
 
-        <ToolbarButton
-          title="Redo"
-          onClick={() => run((ed) => ed.chain().focus().redo().run())}
-        >
+        <ToolbarButton title="Redo" onClick={() => run((ed) => ed.chain().focus().redo().run())}>
           <Redo2 className="h-4 w-4" />
         </ToolbarButton>
 
@@ -926,10 +924,7 @@ function RichEditorToolbar({
           <LinkIcon className="h-4 w-4" />
         </ToolbarButton>
 
-        <ToolbarButton
-          title="Add image"
-          onClick={() => run(() => openImageModal())}
-        >
+        <ToolbarButton title="Add image" onClick={() => run(() => openImageModal())}>
           <ImageIcon className="h-4 w-4" />
         </ToolbarButton>
 
@@ -1034,6 +1029,8 @@ export default function AdminSendEmailPage() {
   const [showHtmlPreview, setShowHtmlPreview] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "html">("rich");
+  const [sendProvider, setSendProvider] = useState<SendProvider>("google");
+  const signaturesDisabled = sendProvider === "resend";
 
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
@@ -1103,18 +1100,31 @@ export default function AdminSendEmailPage() {
     },
   });
 
+  const selectedSignature = useMemo(() => {
+    return signatures.find((item) => item.id === selectedSignatureId);
+  }, [signatures, selectedSignatureId]);
+
+  useEffect(() => {
+    if (sendProvider === "resend") {
+      setSelectedSignatureId("");
+    }
+  }, [sendProvider]);
+
   const previewHtml = useMemo(() => {
-    const selectedSignature = signatures.find(
-      (item) => item.id === selectedSignatureId
-    );
+    const cleanedHtml = stripKnownSignaturesFromHtml(form.html || "", signatures);
+    const cleanedText = stripKnownSignaturesFromText(form.message || "", signatures);
+
+    if (sendProvider === "resend") {
+      return cleanedHtml || plainTextToHtml(cleanedText);
+    }
 
     return buildBodyWithSelectedSignature(
-      form.html || "",
-      form.message || "",
+      cleanedHtml,
+      cleanedText,
       selectedSignature,
       signatures
     ).finalHtml;
-  }, [form.html, form.message, selectedSignatureId, signatures]);
+  }, [form.html, form.message, selectedSignature, signatures, sendProvider]);
 
   const canSend = useMemo(() => {
     const bodySource = previewHtml;
@@ -1192,6 +1202,7 @@ export default function AdminSendEmailPage() {
           nextSignatures.find((item) => item.is_default) || nextSignatures[0];
 
         setSelectedSignatureId((prev) => {
+          if (sendProvider === "resend") return "";
           if (prev && nextSignatures.some((item) => item.id === prev)) {
             return prev;
           }
@@ -1210,9 +1221,9 @@ export default function AdminSendEmailPage() {
             nextSignatures
           );
           editor.commands.setContent(cleanedHtml || "<p></p>", {
-          emitUpdate: true,
-        });
-      }
+            emitUpdate: true,
+          });
+        }
       } else {
         setSignatures([]);
         setSelectedSignatureId("");
@@ -1267,28 +1278,29 @@ export default function AdminSendEmailPage() {
     setNotice({ type: "error", message });
   }
 
-  
-
   function connectGoogle() {
     window.location.href = "/api/admin/google/connect";
   }
 
- function clearForm() {
-  setForm(initialForm);
-  setFiles([]);
-  setNotice(null);
-  setShowHtmlPreview(false);
-  setModal(null);
-  setEditorMode("rich");
-  setSelectedTemplateId("");
-  if (fileInputRef.current) fileInputRef.current.value = "";
+  function clearForm() {
+    setForm(initialForm);
+    setFiles([]);
+    setNotice(null);
+    setShowHtmlPreview(false);
+    setModal(null);
+    setEditorMode("rich");
+    setSelectedTemplateId("");
+    if (sendProvider === "resend") {
+      setSelectedSignatureId("");
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
 
-  if (editor) {
-    editor.commands.setContent("<p></p>", {
-      emitUpdate: true,
-    });
+    if (editor) {
+      editor.commands.setContent("<p></p>", {
+        emitUpdate: true,
+      });
+    }
   }
-}
 
   function handleFilesSelected(fileList: FileList | null) {
     if (!fileList) return;
@@ -1492,6 +1504,11 @@ export default function AdminSendEmailPage() {
   }
 
   function openSaveSignatureModal() {
+    if (sendProvider === "resend") {
+      showError("Signatures are disabled when using Noreply (Resend).");
+      return;
+    }
+
     setSaveSignatureModal({
       open: true,
       name: "",
@@ -1586,22 +1603,34 @@ export default function AdminSendEmailPage() {
   }
 
   function applySignatureToBody(signature: SignatureItem) {
+    if (sendProvider === "resend") {
+      showError("Signatures are disabled when using Noreply (Resend).");
+      return;
+    }
+
     setSelectedSignatureId(signature.id);
     setShowHtmlPreview(true);
-    showSuccess(`Signature "${signature.name}" selected and will appear at the bottom of the email.`);
+    showSuccess(
+      `Signature "${signature.name}" selected and will appear at the bottom of the email.`
+    );
   }
 
   function insertSelectedSignature() {
-    const selectedSignature = signatures.find(
+    if (sendProvider === "resend") {
+      showError("Signatures are disabled when using Noreply (Resend).");
+      return;
+    }
+
+    const nextSelectedSignature = signatures.find(
       (item) => item.id === selectedSignatureId
     );
 
-    if (!selectedSignature) {
+    if (!nextSelectedSignature) {
       showError("Please select a signature first.");
       return;
     }
 
-    applySignatureToBody(selectedSignature);
+    applySignatureToBody(nextSelectedSignature);
   }
 
   async function handleSaveDraft() {
@@ -1615,10 +1644,6 @@ export default function AdminSendEmailPage() {
     try {
       setSavingDraft(true);
 
-      const selectedSignature = signatures.find(
-        (item) => item.id === selectedSignatureId
-      );
-
       const cleanedBodyHtml = stripKnownSignaturesFromHtml(
         form.html || editor?.getHTML() || "",
         signatures
@@ -1628,12 +1653,18 @@ export default function AdminSendEmailPage() {
         signatures
       );
 
-      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
-        cleanedBodyHtml,
-        cleanedBodyText,
-        selectedSignature,
-        signatures
-      );
+      const { finalHtml, finalText } =
+        sendProvider === "resend"
+          ? {
+              finalHtml: cleanedBodyHtml,
+              finalText: cleanedBodyText,
+            }
+          : buildBodyWithSelectedSignature(
+              cleanedBodyHtml,
+              cleanedBodyText,
+              selectedSignature,
+              signatures
+            );
 
       const formData = new FormData();
       formData.append("to", form.to);
@@ -1644,6 +1675,7 @@ export default function AdminSendEmailPage() {
       formData.append("html", finalHtml);
       formData.append("editorMode", editorMode);
       formData.append("signatureId", selectedSignatureId || "");
+      formData.append("sendProvider", sendProvider);
 
       files.forEach((file) => {
         formData.append("attachments", file);
@@ -1680,10 +1712,6 @@ export default function AdminSendEmailPage() {
     try {
       setSending(true);
 
-      const selectedSignature = signatures.find(
-        (item) => item.id === selectedSignatureId
-      );
-
       const cleanedBodyHtml = stripKnownSignaturesFromHtml(
         form.html || editor?.getHTML() || "",
         signatures
@@ -1693,12 +1721,18 @@ export default function AdminSendEmailPage() {
         signatures
       );
 
-      const { finalHtml, finalText } = buildBodyWithSelectedSignature(
-        cleanedBodyHtml,
-        cleanedBodyText,
-        selectedSignature,
-        signatures
-      );
+      const { finalHtml, finalText } =
+        sendProvider === "resend"
+          ? {
+              finalHtml: cleanedBodyHtml,
+              finalText: cleanedBodyText,
+            }
+          : buildBodyWithSelectedSignature(
+              cleanedBodyHtml,
+              cleanedBodyText,
+              selectedSignature,
+              signatures
+            );
 
       const formData = new FormData();
       formData.append("to", form.to);
@@ -1709,6 +1743,7 @@ export default function AdminSendEmailPage() {
       formData.append("html", finalHtml);
       formData.append("editorMode", editorMode);
       formData.append("signatureId", selectedSignatureId || "");
+      formData.append("sendProvider", sendProvider);
 
       files.forEach((file) => {
         formData.append("attachments", file);
@@ -1737,8 +1772,14 @@ export default function AdminSendEmailPage() {
   }
 
   const showConnectGoogleButton =
+    sendProvider === "google" &&
     notice?.type === "error" &&
     notice.message.toLowerCase().includes("google connection");
+
+  const providerLabel =
+    sendProvider === "resend"
+      ? "Sending from noreply@burtonpride.co.uk with Resend"
+      : "Sending with Google account connection";
 
   return (
     <div className="min-w-0 p-4 md:p-6 lg:p-8">
@@ -1844,7 +1885,7 @@ export default function AdminSendEmailPage() {
               <Mail className="h-6 w-6 text-fuchsia-200" />
             </div>
 
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">
                 <Sparkles className="h-3.5 w-3.5" />
                 Gmail-style email composer
@@ -1858,6 +1899,59 @@ export default function AdminSendEmailPage() {
                 One rich editor, plus raw HTML mode when you want to type HTML directly.
               </p>
             </div>
+          </div>
+
+          <div className="mb-6 rounded-3xl border border-white/10 bg-black/20 p-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold text-white">Send method</p>
+              <p className="text-xs text-white/50">
+                Switch between noreply sending with Resend or connected Google sending.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex rounded-2xl border border-white/10 bg-[#060b17] p-1">
+                <button
+                  type="button"
+                  onClick={() => setSendProvider("resend")}
+                  className={clsx(
+                    "rounded-xl px-4 py-2 text-sm font-medium transition",
+                    sendProvider === "resend"
+                      ? "bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white"
+                      : "text-white/65 hover:text-white"
+                  )}
+                >
+                  Noreply (Resend)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSendProvider("google")}
+                  className={clsx(
+                    "rounded-xl px-4 py-2 text-sm font-medium transition",
+                    sendProvider === "google"
+                      ? "bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white"
+                      : "text-white/65 hover:text-white"
+                  )}
+                >
+                  Google
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs text-white/70">
+                {providerLabel}
+              </div>
+            </div>
+
+            {sendProvider === "resend" ? (
+              <div className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                This mode does not need Gmail inbox connection. Emails will send using your Resend setup and noreply address.
+              </div>
+            ) : (
+              <div className="mt-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
+                This mode uses your connected Google account for sending.
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -1977,7 +2071,13 @@ export default function AdminSendEmailPage() {
                 <button
                   type="button"
                   onClick={openSaveSignatureModal}
-                  className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                  disabled={signaturesDisabled}
+                  className={clsx(
+                    "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                    signaturesDisabled
+                      ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35"
+                      : "border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20"
+                  )}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   New signature
@@ -1988,7 +2088,13 @@ export default function AdminSendEmailPage() {
                 <select
                   value={selectedSignatureId}
                   onChange={(e) => setSelectedSignatureId(e.target.value)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+                  disabled={signaturesDisabled}
+                  className={clsx(
+                    "w-full rounded-2xl border px-4 py-3 text-sm outline-none transition",
+                    signaturesDisabled
+                      ? "cursor-not-allowed border-white/5 bg-black/10 text-white/35"
+                      : "border-white/10 bg-black/20 text-white focus:border-fuchsia-400/30 focus:bg-white/[0.04]"
+                  )}
                 >
                   <option value="" className="bg-slate-900 text-white">
                     {signaturesLoading ? "Loading signatures..." : "Pick a signature"}
@@ -2008,13 +2114,19 @@ export default function AdminSendEmailPage() {
                   <button
                     type="button"
                     onClick={insertSelectedSignature}
-                    className="inline-flex min-h-[46px] items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-white transition hover:bg-white/[0.10]"
+                    disabled={signaturesDisabled}
+                    className={clsx(
+                      "inline-flex min-h-[46px] items-center gap-2 rounded-2xl border px-4 text-sm font-medium transition",
+                      signaturesDisabled
+                        ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35"
+                        : "border-white/15 bg-white/[0.06] text-white hover:bg-white/[0.10]"
+                    )}
                   >
                     <Signature className="h-4 w-4" />
                     Use signature
                   </button>
 
-                  {selectedSignatureId ? (
+                  {selectedSignatureId && !signaturesDisabled ? (
                     <button
                       type="button"
                       onClick={() => handleDeleteSignature(selectedSignatureId)}
@@ -2027,7 +2139,11 @@ export default function AdminSendEmailPage() {
                 </div>
               </div>
 
-              {selectedSignatureId ? (
+              {signaturesDisabled ? (
+                <p className="mt-3 text-xs text-amber-200/90">
+                  Signatures are disabled when sending with Noreply (Resend).
+                </p>
+              ) : selectedSignatureId ? (
                 <p className="mt-3 text-xs text-white/55">
                   Selected signature will appear once at the bottom of preview, draft and sent email.
                 </p>
@@ -2150,6 +2266,11 @@ export default function AdminSendEmailPage() {
                   <div className="border-b border-slate-200 px-4 py-3 text-sm font-medium text-slate-600">
                     Email preview
                   </div>
+                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                    {sendProvider === "resend"
+                      ? "From: noreply@burtonpride.co.uk via Resend"
+                      : "From: connected Google account"}
+                  </div>
                   <div className="max-h-[700px] overflow-auto p-4 text-slate-900">
                     <div
                       dangerouslySetInnerHTML={{
@@ -2264,7 +2385,7 @@ export default function AdminSendEmailPage() {
                 ) : (
                   <>
                     <Send className="h-4 w-4" />
-                    Send email
+                    {sendProvider === "resend" ? "Send with noreply" : "Send email"}
                   </>
                 )}
               </button>
@@ -2301,8 +2422,13 @@ export default function AdminSendEmailPage() {
               <button
                 type="button"
                 onClick={openSaveSignatureModal}
-                disabled={savingSignature}
-                className="inline-flex min-h-[52px] items-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-5 text-sm font-medium text-fuchsia-100 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={signaturesDisabled}
+                className={clsx(
+                  "inline-flex min-h-[52px] items-center gap-2 rounded-2xl border px-5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+                  signaturesDisabled
+                    ? "border-white/10 bg-white/[0.03] text-white/35"
+                    : "border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20"
+                )}
               >
                 <Signature className="h-4 w-4" />
                 Save signature
@@ -2332,6 +2458,41 @@ export default function AdminSendEmailPage() {
         </section>
 
         <aside className="space-y-6">
+          <SectionCard
+            title="Send mode"
+            icon={<Mail className="h-5 w-5 text-fuchsia-200" />}
+          >
+            <div className="space-y-3">
+              <div
+                className={clsx(
+                  "rounded-2xl border px-4 py-3 text-sm",
+                  sendProvider === "resend"
+                    ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                    : "border-white/10 bg-black/20 text-white/70"
+                )}
+              >
+                <div className="font-semibold">Noreply (Resend)</div>
+                <div className="mt-1 text-xs opacity-80">
+                  Sends from noreply@burtonpride.co.uk and does not need inbox connection.
+                </div>
+              </div>
+
+              <div
+                className={clsx(
+                  "rounded-2xl border px-4 py-3 text-sm",
+                  sendProvider === "google"
+                    ? "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100"
+                    : "border-white/10 bg-black/20 text-white/70"
+                )}
+              >
+                <div className="font-semibold">Google</div>
+                <div className="mt-1 text-xs opacity-80">
+                  Uses connected Google account sending.
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
           <SectionCard
             title="Preset email layouts"
             icon={<Wand2 className="h-5 w-5 text-fuchsia-200" />}
@@ -2420,7 +2581,13 @@ export default function AdminSendEmailPage() {
               <button
                 type="button"
                 onClick={openSaveSignatureModal}
-                className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+                disabled={signaturesDisabled}
+                className={clsx(
+                  "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                  signaturesDisabled
+                    ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35"
+                    : "border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-100 hover:bg-fuchsia-500/20"
+                )}
               >
                 <Plus className="h-3.5 w-3.5" />
                 New signature
@@ -2445,8 +2612,15 @@ export default function AdminSendEmailPage() {
                   >
                     <button
                       type="button"
-                      onClick={() => setSelectedSignatureId(signature.id)}
-                      className="block w-full text-left"
+                      onClick={() => {
+                        if (signaturesDisabled) return;
+                        setSelectedSignatureId(signature.id);
+                      }}
+                      disabled={signaturesDisabled}
+                      className={clsx(
+                        "block w-full text-left",
+                        signaturesDisabled ? "cursor-not-allowed opacity-40" : ""
+                      )}
                     >
                       <div className="text-sm font-semibold text-white">
                         {signature.name}
@@ -2460,7 +2634,13 @@ export default function AdminSendEmailPage() {
                       <button
                         type="button"
                         onClick={() => applySignatureToBody(signature)}
-                        className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-medium text-white transition hover:bg-white/[0.10]"
+                        disabled={signaturesDisabled}
+                        className={clsx(
+                          "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
+                          signaturesDisabled
+                            ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35"
+                            : "border-white/10 bg-white/[0.06] text-white hover:bg-white/[0.10]"
+                        )}
                       >
                         <Signature className="h-3.5 w-3.5" />
                         Use
@@ -2469,7 +2649,13 @@ export default function AdminSendEmailPage() {
                       <button
                         type="button"
                         onClick={() => handleDeleteSignature(signature.id)}
-                        className="inline-flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/20"
+                        disabled={signaturesDisabled}
+                        className={clsx(
+                          "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition",
+                          signaturesDisabled
+                            ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35"
+                            : "border-rose-400/20 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
+                        )}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         Delete
@@ -2525,6 +2711,8 @@ export default function AdminSendEmailPage() {
           >
             <div className="grid gap-3">
               {[
+                "Resend noreply send mode",
+                "Google send mode",
                 "Rich editor buttons work on empty body",
                 "Raw HTML mode included",
                 "Custom modal for links and images",
