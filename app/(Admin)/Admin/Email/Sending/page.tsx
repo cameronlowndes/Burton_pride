@@ -2733,7 +2733,7 @@ export default function AdminSendEmailPage() {
             </div>
           </SectionCard>
         </aside>
-      </div>
+      </div>{/*  */}
     </div>
   );
 }
