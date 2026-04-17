@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -133,6 +134,8 @@ function getStoryText(item: SponsorRow) {
 }
 
 export default function SponsorAdminListPage() {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +146,13 @@ export default function SponsorAdminListPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | SponsorStatus>("all");
   const [readFilter, setReadFilter] = useState<"all" | "read" | "unread">("all");
+
+  function goToReply(s: SponsorRow) {
+    const params = new URLSearchParams();
+    params.set("to", s.email);
+    params.set("subject", `Re: ${s.sponsor_name} sponsorship application`);
+    router.push(`/Admin/Email/Sending?${params.toString()}`);
+  }
 
   async function load() {
     setLoading(true);
@@ -616,12 +626,13 @@ export default function SponsorAdminListPage() {
                       ) : null}
 
                       {s.email ? (
-                        <a
-                          href={`mailto:${s.email}`}
+                        <button
+                          type="button"
+                          onClick={() => goToReply(s)}
                           className="inline-flex items-center rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15"
                         >
                           Reply
-                        </a>
+                        </button>
                       ) : null}
                     </div>
                   </div>

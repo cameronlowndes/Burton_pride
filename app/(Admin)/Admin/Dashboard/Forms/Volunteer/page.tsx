@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type VolunteerStatus = "new" | "in_progress" | "done";
@@ -92,6 +93,8 @@ async function parseJsonResponse(res: Response) {
 }
 
 export default function VolunteerAdminPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<VolunteerApplication[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,6 +121,15 @@ export default function VolunteerAdminPage() {
   useEffect(() => {
     void fetchItems();
   }, []);
+
+  function goToReply(item: VolunteerApplication) {
+    const params = new URLSearchParams();
+
+    params.set("to", item.email);
+    params.set("subject", `Re: Volunteer Application - ${item.full_name}`);
+
+    router.push(`/Admin/Email/Sending?${params.toString()}`);
+  }
 
   async function fetchItems(showRefreshState = false) {
     try {
@@ -518,12 +530,13 @@ export default function VolunteerAdminPage() {
                     </button>
                   )}
 
-                  <a
-                    href={`mailto:${selectedItem.email}`}
+                  <button
+                    type="button"
+                    onClick={() => goToReply(selectedItem)}
                     className="rounded-2xl bg-white/15 px-4 py-2.5 text-center font-semibold text-white hover:bg-white/20"
                   >
                     Reply
-                  </a>
+                  </button>
 
                   <button
                     type="button"

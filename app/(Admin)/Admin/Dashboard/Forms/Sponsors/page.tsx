@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type SponsorStatus = "pending" | "approved" | "rejected";
@@ -143,6 +144,8 @@ function getGoogleMapsUrl(item: SponsorApplication) {
 }
 
 export default function SponsorAdminPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<SponsorApplication[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -167,6 +170,15 @@ export default function SponsorAdminPage() {
   useEffect(() => {
     void fetchItems();
   }, []);
+
+  function goToReply(item: SponsorApplication) {
+    const params = new URLSearchParams();
+
+    params.set("to", item.email);
+    params.set("subject", `Re: ${item.sponsor_name} sponsorship application`);
+
+    router.push(`/Admin/Email/Sending?${params.toString()}`);
+  }
 
   async function fetchItems(showRefreshState = false) {
     try {
@@ -505,10 +517,11 @@ export default function SponsorAdminPage() {
             </Link>
 
             <Link
-          href="/Admin/Dashboard/Forms/Sponsors/OrganiseSponsor"
-            className="inline-flex w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto">
-             Sponsor Order
-             </Link>
+              href="/Admin/Dashboard/Forms/Sponsors/OrganiseSponsor"
+              className="inline-flex w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 font-semibold text-white backdrop-blur hover:bg-white/20 sm:w-auto"
+            >
+              Sponsor Order
+            </Link>
 
             {!confirmDeleteAll ? (
               <button
@@ -535,8 +548,6 @@ export default function SponsorAdminPage() {
                 >
                   Cancel
                 </button>
-
-                
               </div>
             )}
 
@@ -589,12 +600,13 @@ export default function SponsorAdminPage() {
                     </button>
                   )}
 
-                  <a
-                    href={`mailto:${selectedItem.email}`}
+                  <button
+                    type="button"
+                    onClick={() => goToReply(selectedItem)}
                     className="rounded-2xl bg-white/15 px-4 py-2.5 text-center font-semibold text-white hover:bg-white/20"
                   >
                     Reply
-                  </a>
+                  </button>
 
                   <button
                     type="button"
@@ -765,4 +777,4 @@ export default function SponsorAdminPage() {
       </div>
     </div>
   );
-}  
+}
