@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
   Mail,
   RefreshCw,
   Reply,
-  Trash2,
   AlertTriangle,
 } from "lucide-react";
 
@@ -60,6 +60,8 @@ function getStatusLabel(status: FeedbackStatus) {
 }
 
 export default function AdminFeedbackPage() {
+  const router = useRouter();
+
   const [items, setItems] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -173,9 +175,11 @@ export default function AdminFeedbackPage() {
 
       setItems((prev) => {
         const next = prev.filter((item) => item.id !== id);
+
         if (selected?.id === id) {
           setSelected(null);
         }
+
         return next;
       });
     } catch (err) {
@@ -207,7 +211,9 @@ export default function AdminFeedbackPage() {
       setItems([]);
       setSelected(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete all feedback");
+      setError(
+        err instanceof Error ? err.message : "Failed to delete all feedback"
+      );
     } finally {
       setActionLoading(false);
     }
@@ -250,6 +256,26 @@ export default function AdminFeedbackPage() {
     setConfirmType(null);
   }
 
+  function handleReply(item: FeedbackRow) {
+    const params = new URLSearchParams({
+      to: item.email,
+      subject: "Re: Burton Pride Feedback",
+      feedbackId: item.id,
+    });
+
+    router.push(`/Admin/Email/Sending?${params.toString()}`);
+  }
+
+  function handleItemKeyDown(
+    e: React.KeyboardEvent<HTMLDivElement>,
+    item: FeedbackRow
+  ) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openFeedback(item);
+    }
+  }
+
   const disableStatusButtons = !!selected?.is_read;
 
   return (
@@ -257,9 +283,11 @@ export default function AdminFeedbackPage() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-6xl font-bold tracking-tight">Contact Messages</h1>
+            <h1 className="text-6xl font-bold tracking-tight">
+       Feedback Management  
+            </h1>
             <p className="mt-4 text-xl text-white/85">
-              Manage messages from your website contact form
+              Manage messages from your website FeedBack Forms
             </p>
           </div>
 
@@ -271,7 +299,9 @@ export default function AdminFeedbackPage() {
               className="rounded-2xl bg-white/25 px-6 py-3 text-lg font-semibold text-white backdrop-blur-md transition hover:bg-white/35 disabled:opacity-60"
             >
               <span className="inline-flex items-center gap-2">
-                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                />
                 Refresh
               </span>
             </button>
@@ -310,11 +340,13 @@ export default function AdminFeedbackPage() {
               ) : (
                 <div className="divide-y divide-white/10">
                   {unreadItems.map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => openFeedback(item)}
-                      className={`w-full px-5 py-4 text-left transition hover:bg-white/10 ${
+                      onKeyDown={(e) => handleItemKeyDown(e, item)}
+                      className={`w-full cursor-pointer px-5 py-4 text-left transition hover:bg-white/10 ${
                         selected?.id === item.id ? "bg-white/10" : ""
                       }`}
                     >
@@ -345,12 +377,16 @@ export default function AdminFeedbackPage() {
                         </div>
                       </div>
 
-                      <p className="truncate text-sm text-white/70">{item.email}</p>
-                      <p className="mt-2 truncate text-lg text-white/95">{item.message}</p>
+                      <p className="truncate text-sm text-white/70">
+                        {item.email}
+                      </p>
+                      <p className="mt-2 truncate text-lg text-white/95">
+                        {item.message}
+                      </p>
                       <p className="mt-1 text-sm text-white/55">
                         {formatDate(item.created_at)}
                       </p>
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -359,7 +395,9 @@ export default function AdminFeedbackPage() {
             <div className="overflow-hidden rounded-[28px] border border-white/15 bg-white/10 shadow-2xl backdrop-blur-xl">
               <div className="border-b border-white/10 px-5 py-4">
                 <h2 className="text-4xl font-bold">Read Contact</h2>
-                <p className="mt-1 text-lg text-white/75">{readItems.length} read</p>
+                <p className="mt-1 text-lg text-white/75">
+                  {readItems.length} read
+                </p>
               </div>
 
               {loading ? (
@@ -369,11 +407,18 @@ export default function AdminFeedbackPage() {
               ) : (
                 <div className="divide-y divide-white/10">
                   {readItems.slice(0, 5).map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelected(item)}
-                      className={`w-full px-5 py-4 text-left transition hover:bg-white/10 ${
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelected(item);
+                        }
+                      }}
+                      className={`w-full cursor-pointer px-5 py-4 text-left transition hover:bg-white/10 ${
                         selected?.id === item.id ? "bg-white/10" : ""
                       }`}
                     >
@@ -395,7 +440,7 @@ export default function AdminFeedbackPage() {
                           {getStatusLabel(item.status)}
                         </span>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -429,17 +474,16 @@ export default function AdminFeedbackPage() {
                       {selected.is_read ? "Mark Unread" : "Mark Read"}
                     </button>
 
-                    <a
-                      href={`mailto:${selected.email}?subject=${encodeURIComponent(
-                        "Burton Pride Feedback"
-                      )}`}
+                    <button
+                      type="button"
+                      onClick={() => handleReply(selected)}
                       className="rounded-2xl bg-white/20 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/30"
                     >
                       <span className="inline-flex items-center gap-2">
                         <Reply className="h-4 w-4" />
                         Reply
                       </span>
-                    </a>
+                    </button>
 
                     <button
                       type="button"
@@ -471,7 +515,7 @@ export default function AdminFeedbackPage() {
                     {selected.is_read ? "Read Message" : "New Message"}
                   </p>
 
-                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-lg text-white/95">
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-lg text-white/95 whitespace-pre-wrap">
                     {selected.message}
                   </div>
 
@@ -540,7 +584,9 @@ export default function AdminFeedbackPage() {
 
               <div className="flex-1">
                 <h3 className="text-2xl font-bold">
-                  {confirmType === "all" ? "Delete all messages?" : "Delete this message?"}
+                  {confirmType === "all"
+                    ? "Delete all messages?"
+                    : "Delete this message?"}
                 </h3>
 
                 <p className="mt-2 text-sm leading-6 text-white/85">
