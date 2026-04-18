@@ -1,7 +1,7 @@
 "use client";
-//ready to go
 
-import { useEffect, useMemo, useRef, useState } from "react";
+
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
