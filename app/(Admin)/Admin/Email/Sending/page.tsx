@@ -1,8 +1,6 @@
 "use client";
 
-
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bold,
@@ -1020,12 +1018,7 @@ function RichEditorToolbar({
 }
 
 export default function AdminSendEmailPage() {
-  const searchParams = useSearchParams();
   const replyPrefillAppliedRef = useRef(false);
-
-  const replyToPrefill = searchParams.get("to") || "";
-  const replySubjectPrefill = searchParams.get("subject") || "";
-  const replyBodyPrefill = searchParams.get("body") || "";
 
   const [form, setForm] = useState(initialForm);
   const [files, setFiles] = useState<File[]>([]);
@@ -1111,8 +1104,14 @@ export default function AdminSendEmailPage() {
 
   useEffect(() => {
     if (replyPrefillAppliedRef.current) return;
-    if (!replyToPrefill && !replySubjectPrefill && !replyBodyPrefill) return;
+    if (typeof window === "undefined") return;
 
+    const params = new URLSearchParams(window.location.search);
+    const replyToPrefill = params.get("to") || "";
+    const replySubjectPrefill = params.get("subject") || "";
+    const replyBodyPrefill = params.get("body") || "";
+
+    if (!replyToPrefill && !replySubjectPrefill && !replyBodyPrefill) return;
     if (replyBodyPrefill && !editor) return;
 
     const nextHtml = replyBodyPrefill ? plainTextToHtml(replyBodyPrefill) : "";
@@ -1133,7 +1132,7 @@ export default function AdminSendEmailPage() {
 
     setEditorMode("rich");
     replyPrefillAppliedRef.current = true;
-  }, [replyToPrefill, replySubjectPrefill, replyBodyPrefill, editor]);
+  }, [editor]);
 
   const selectedSignature = useMemo(() => {
     return signatures.find((item) => item.id === selectedSignatureId);
@@ -1181,6 +1180,7 @@ export default function AdminSendEmailPage() {
     loadTemplates();
     loadHistory();
     loadSignatures();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1330,6 +1330,7 @@ export default function AdminSendEmailPage() {
     if (sendProvider === "resend") {
       setSelectedSignatureId("");
     }
+
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (editor) {
