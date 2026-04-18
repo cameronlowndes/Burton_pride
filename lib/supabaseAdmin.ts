@@ -15,7 +15,7 @@ const serviceRoleKey =
 
 // ✅ Use a singleton so dev hot-reload doesn't recreate clients constantly
 declare global {
-  // eslint-disable-next-line no-var
+  // eslint-disable-next-line novar
   var __supabaseAdmin: SupabaseClient | undefined;
 }
 
