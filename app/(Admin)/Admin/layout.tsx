@@ -14,6 +14,7 @@ export default function AdminLayout({
   const isLoginPage = pathname === "/Admin/Login";
   const isDashboardRoute = pathname?.startsWith("/Admin/Dashboard");
   const isEmailRoute = pathname?.startsWith("/Admin/Email");
+  const isMoneyRoute = pathname?.startsWith("/Admin/Money");
 
   const showAdminNav = !isLoginPage && isDashboardRoute;
 
@@ -24,6 +25,8 @@ export default function AdminLayout({
     [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
     user?.primaryEmailAddress?.emailAddress ||
     "Committee Member";
+
+  const useFullWidthLayout = isEmailRoute || isMoneyRoute;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
@@ -44,8 +47,8 @@ export default function AdminLayout({
             </header>
           )}
 
-          {isEmailRoute ? (
-            <main className="flex-1 min-w-0">
+          {useFullWidthLayout ? (
+            <main className="min-w-0 flex-1">
               {children}
             </main>
           ) : (

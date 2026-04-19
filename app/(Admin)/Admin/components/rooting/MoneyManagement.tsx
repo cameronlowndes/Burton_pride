@@ -6,28 +6,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ChevronRight,
-  LayoutDashboard,
-  Wallet,
-  Receipt,
-  PiggyBank,
   CreditCard,
-  Landmark,
-  BarChart3,
-  Settings,
-  Menu,
-  X,
+  LayoutDashboard,
+  PiggyBank,
+  Receipt,
+  Wallet,
 } from "lucide-react";
 
 const MONEY_ROOT = "/Admin/Money";
-
-type SidebarItem = {
-  id: string;
-  label: string;
-  href: string;
-  icon: string;
-  sort_order: number;
-  is_enabled: boolean;
-};
 
 function clsx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -37,26 +23,28 @@ function getIcon(name: string) {
   switch (name) {
     case "LayoutDashboard":
       return LayoutDashboard;
-    case "Wallet":
-      return Wallet;
     case "Receipt":
       return Receipt;
-    case "PiggyBank":
-      return PiggyBank;
+    case "Wallet":
+      return Wallet;
     case "CreditCard":
       return CreditCard;
-    case "Landmark":
-      return Landmark;
-    case "BarChart3":
-      return BarChart3;
-    case "Settings":
-      return Settings;
+    case "PiggyBank":
+      return PiggyBank;
     default:
       return Wallet;
   }
 }
 
-export default function MoneySidebar({
+type SidebarItem = {
+  id: string;
+  label: string;
+  href: string;
+  icon: string;
+  is_enabled: boolean;
+};
+
+export default function MoneyManagementSidebar({
   children,
 }: {
   children: ReactNode;
@@ -74,16 +62,51 @@ export default function MoneySidebar({
       const res = await fetch("/api/admin/money-sidebar", {
         cache: "no-store",
       });
-
       const data = await res.json();
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load sidebar");
-      }
+      if (!data.ok) throw new Error(data.error || "Failed to load sidebar");
 
       setItems(data.items || []);
     } catch (err) {
       console.error("Failed to load money sidebar", err);
+
+      setItems([
+        {
+          id: "home",
+          label: "Money Home Page",
+          href: "/Admin/Money",
+          icon: "LayoutDashboard",
+          is_enabled: true,
+        },
+        {
+          id: "transactions",
+          label: "Transactions",
+          href: "/Admin/Money/Transactions",
+          icon: "Receipt",
+          is_enabled: true,
+        },
+        {
+          id: "accounts",
+          label: "Accounts",
+          href: "/Admin/Money/Accounts",
+          icon: "Wallet",
+          is_enabled: true,
+        },
+        {
+          id: "cards",
+          label: "Cards",
+          href: "/Admin/Money/Cards",
+          icon: "CreditCard",
+          is_enabled: true,
+        },
+        {
+          id: "budgets",
+          label: "Budgets",
+          href: "/Admin/Money/Budgets",
+          icon: "PiggyBank",
+          is_enabled: true,
+        },
+      ]);
     }
   }
 
@@ -100,73 +123,69 @@ export default function MoneySidebar({
     const current = items.find(
       (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
     );
-    return current?.label || "Money Manager";
+    return current?.label || "Money Admin";
   }, [pathname, items]);
-
-  const enabledItems = items.filter((item) => item.is_enabled);
 
   return (
     <>
-      {/* Mobile header */}
-      <div className="sticky top-0 z-40 border-b border-white/10 bg-black/30 backdrop-blur-xl md:hidden">
+      {/* MOBILE HEADER */}
+      <div className="sticky top-0 z-40 border-b border-white/10 bg-gradient-to-b from-pink-500 via-fuchsia-500 to-purple-500 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/20 text-lg font-bold text-white">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/20 text-sm font-bold text-white">
               £
             </div>
 
-            <div>
-              <div className="text-base font-extrabold text-white">
+            <div className="min-w-0">
+              <div className="truncate text-base font-extrabold text-white">
                 Money Admin
               </div>
-              <div className="text-[11px] text-white/70">{currentTitle}</div>
+              <div className="truncate text-[11px] text-white/70">
+                {currentTitle}
+              </div>
             </div>
           </div>
 
           <button
-            type="button"
             onClick={() => setOpen(true)}
             className="rounded-xl px-3 py-2 text-white hover:bg-white/10"
-            aria-label="Open menu"
           >
-            <Menu className="h-5 w-5" />
+            ☰
           </button>
         </div>
       </div>
 
-      {/* Main layout */}
-      <div className="flex min-h-screen">
-        <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-white/10 backdrop-blur-xl md:block">
-          <DesktopSidebar pathname={pathname} items={enabledItems} />
+      {/* DESKTOP */}
+      <div className="flex min-h-dvh w-full min-w-0">
+       <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-gradient-to-b from-pink-500 via-fuchsia-500 to-purple-500 md:block">
+          <DesktopSidebar pathname={pathname} items={items} />
         </aside>
 
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden">
+          {children}
+        </main>
       </div>
 
-      {/* Mobile menu */}
+      {/* MOBILE SIDEBAR */}
       {open && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <button
-            type="button"
+          <div
             className="absolute inset-0 bg-black/60"
             onClick={() => setOpen(false)}
-            aria-label="Close menu overlay"
           />
 
-          <div className="absolute left-0 top-0 h-full w-80 border-r border-white/10 bg-slate-950/90 p-4 backdrop-blur-xl">
+        <div className="absolute left-0 top-0 h-full w-80 max-w-[85vw] bg-gradient-to-b from-pink-500 via-fuchsia-500 to-purple-500 p-4">
             <div className="mb-4 flex items-center justify-between">
-              <span className="text-lg font-bold text-white">Money Menu</span>
+              <span className="font-bold text-white">Money Menu</span>
               <button
-                type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-xl p-2 text-white hover:bg-white/10"
-                aria-label="Close menu"
+                className="rounded-lg px-2 py-1 text-white hover:bg-white/10"
               >
-                <X className="h-5 w-5" />
+                ✕
               </button>
             </div>
 
-            <MobileNavLink
+            <MobileMoneyLink
               href="/Admin/Dashboard"
               label="Back to Dashboard"
               icon={ArrowLeft}
@@ -177,21 +196,23 @@ export default function MoneySidebar({
 
             <div className="my-3 border-t border-white/10" />
 
-            {enabledItems.map((item) => {
-              const Icon = getIcon(item.icon);
+            {items
+              .filter((item) => item.is_enabled)
+              .map((item) => {
+                const Icon = getIcon(item.icon);
 
-              return (
-                <MobileNavLink
-                  key={item.id}
-                  href={item.href}
-                  label={item.label}
-                  icon={Icon}
-                  pathname={pathname}
-                  onNavigate={() => setOpen(false)}
-                  exact={item.href === MONEY_ROOT}
-                />
-              );
-            })}
+                return (
+                  <MobileMoneyLink
+                    key={item.id}
+                    href={item.href}
+                    label={item.label}
+                    icon={Icon}
+                    pathname={pathname}
+                    onNavigate={() => setOpen(false)}
+                    exact={item.href === MONEY_ROOT}
+                  />
+                );
+              })}
           </div>
         </div>
       )}
@@ -208,17 +229,13 @@ function DesktopSidebar({
 }) {
   return (
     <div className="p-6">
-      <div className="mb-2 flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/20 text-xl font-bold text-white">
+      <div className="mb-8">
+        <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/15 text-lg font-bold text-emerald-300">
           £
         </div>
-        <div>
-          <div className="text-lg font-bold text-white">Money Admin</div>
-          <div className="text-xs text-white/60">Manage finances easily</div>
-        </div>
+        <div className="font-bold text-lg text-white">Money Admin</div>
+        <div className="text-sm text-white/60">Manage finances easily</div>
       </div>
-
-      <div className="my-6 border-t border-white/10" />
 
       <SideNavLink
         href="/Admin/Dashboard"
@@ -230,20 +247,22 @@ function DesktopSidebar({
 
       <div className="my-3 border-t border-white/10" />
 
-      {items.map((item) => {
-        const Icon = getIcon(item.icon);
+      {items
+        .filter((item) => item.is_enabled)
+        .map((item) => {
+          const Icon = getIcon(item.icon);
 
-        return (
-          <SideNavLink
-            key={item.id}
-            href={item.href}
-            label={item.label}
-            pathname={pathname}
-            icon={Icon}
-            exact={item.href === MONEY_ROOT}
-          />
-        );
-      })}
+          return (
+            <SideNavLink
+              key={item.id}
+              href={item.href}
+              label={item.label}
+              pathname={pathname}
+              icon={Icon}
+              exact={item.href === MONEY_ROOT}
+            />
+          );
+        })}
     </div>
   );
 }
@@ -258,7 +277,7 @@ function SideNavLink({
   href: string;
   label: string;
   pathname: string;
-  icon: any;
+  icon: React.ElementType;
   exact?: boolean;
 }) {
   const active = exact ? pathname === href : pathname.startsWith(href);
@@ -267,22 +286,20 @@ function SideNavLink({
     <Link
       href={href}
       className={clsx(
-        "mb-2 flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition",
-        active
-          ? "bg-emerald-500/20 text-white shadow-lg shadow-emerald-500/10"
-          : "text-white/80 hover:bg-white/10 hover:text-white"
+        "mb-2 flex items-center justify-between rounded-xl px-4 py-3 text-sm transition",
+        active ? "bg-white/15 text-white" : "text-white hover:bg-white/10"
       )}
     >
-      <span className="flex items-center gap-3">
-        <Icon className="h-4 w-4" />
-        {label}
+      <span className="flex min-w-0 items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{label}</span>
       </span>
-      <ChevronRight className="h-4 w-4" />
+      <ChevronRight className="h-4 w-4 shrink-0" />
     </Link>
   );
 }
 
-function MobileNavLink({
+function MobileMoneyLink({
   href,
   label,
   icon: Icon,
@@ -292,7 +309,7 @@ function MobileNavLink({
 }: {
   href: string;
   label: string;
-  icon: any;
+  icon: React.ElementType;
   pathname: string;
   onNavigate: () => void;
   exact?: boolean;
@@ -304,17 +321,15 @@ function MobileNavLink({
       href={href}
       onClick={onNavigate}
       className={clsx(
-        "mb-2 flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-medium transition",
-        active
-          ? "bg-emerald-500/20 text-white"
-          : "text-white/80 hover:bg-white/10 hover:text-white"
+        "mb-2 flex items-center justify-between rounded-xl px-4 py-3 text-sm transition",
+        active ? "bg-white/15 text-white" : "text-white/80 hover:bg-white/10"
       )}
     >
-      <span className="flex items-center gap-3">
-        <Icon className="h-4 w-4" />
-        {label}
+      <span className="flex min-w-0 items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{label}</span>
       </span>
-      <ChevronRight className="h-4 w-4" />
+      <ChevronRight className="h-4 w-4 shrink-0" />
     </Link>
   );
 }
