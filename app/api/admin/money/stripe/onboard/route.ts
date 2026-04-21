@@ -11,7 +11,9 @@ if (!stripeSecretKey) {
   throw new Error("Missing STRIPE_SECRET_KEY");
 }
 
-const stripe = new Stripe(stripeSecretKey);
+const stripe = new Stripe(stripeSecretKey, {
+  apiVersion: "2026-02-25.clover",
+});
 
 async function requireUser() {
   const { userId } = await auth();
@@ -45,14 +47,17 @@ export async function POST() {
 
     if (!appUrl) {
       return NextResponse.json(
-        { ok: false, error: "NEXT_PUBLIC_URL" },
+        { ok: false, error: "Missing NEXT_PUBLIC_URL" },
         { status: 500 }
       );
     }
 
-    if (!appUrl.startsWith("http://") && !appUrl.startsWith("https://")) {
+    if (!/^https?:\/\//.test(appUrl)) {
       return NextResponse.json(
-        { ok: false, error: "NEXT_PUBLIC_APP_URL must start with http:// or https://" },
+        {
+          ok: false,
+          error: "NEXT_PUBLIC_APP_URL must start with http:// or https://",
+        },
         { status: 500 }
       );
     }
