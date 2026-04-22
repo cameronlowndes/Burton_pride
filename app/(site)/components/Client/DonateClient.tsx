@@ -13,8 +13,43 @@ export default function DonationsContent() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // validation errors
+  const [nameError, setNameError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [serverError, setServerError] = useState("");
+
+  // TEST BUTTON
+  function fillTestDetails() {
+    setFullName("Burton Pride Test");
+    setEmail("burtonpridetest@gmail.com");
+    setMessage("This is a Stripe donation test.");
+    setSelectedAmount("£10");
+    setCustomAmount("10");
+    setNameError("");
+    setEmailError("");
+    setServerError("");
+  }
+
   async function handleDonate() {
     try {
+      let hasError = false;
+
+      setNameError("");
+      setEmailError("");
+      setServerError("");
+
+      if (!fullName.trim()) {
+        setNameError("Please enter your full name");
+        hasError = true;
+      }
+
+      if (!email.trim()) {
+        setEmailError("Please enter your email address");
+        hasError = true;
+      }
+
+      if (hasError) return;
+
       setLoading(true);
 
       const res = await fetch("/api/stripe/donate", {
@@ -35,24 +70,32 @@ export default function DonationsContent() {
       console.log("Donate API response:", text);
 
       let data;
+
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error("API did not return JSON. Check /api/stripe/donate route.");
+        setServerError(
+          "API did not return JSON. Check /api/stripe/donate route."
+        );
+        return;
       }
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to start donation");
+        setServerError(data.error || "Failed to start donation");
+        return;
       }
 
       if (!data.url) {
-        throw new Error("Stripe checkout URL was not returned");
+        setServerError("Stripe checkout URL was not returned");
+        return;
       }
 
       window.location.href = data.url;
     } catch (error) {
       console.error("Donate button error:", error);
-      alert(error instanceof Error ? error.message : "Something went wrong");
+      setServerError(
+        error instanceof Error ? error.message : "Something went wrong"
+      );
     } finally {
       setLoading(false);
     }
@@ -156,26 +199,65 @@ export default function DonationsContent() {
             </h2>
 
             <div className="mt-7 space-y-5">
-              <input
-                type="text"
-                placeholder="Full Name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none"
-              />
+              {/* TEST BUTTON */}
+              <button
+                type="button"
+                onClick={fillTestDetails}
+                className="w-full rounded-2xl border border-yellow-300 bg-yellow-300 px-5 py-4 text-lg font-bold text-black transition hover:opacity-90"
+              >
+                Fill Test Details
+              </button>
 
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none"
-              />
+              <div>
+                <input
+                  type="text"
+                  placeholder="Full Name *"
+                  value={fullName}
+                  onChange={(e) => {
+                    setFullName(e.target.value);
+                    setNameError("");
+                  }}
+                  className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
+                    nameError
+                      ? "border-red-400 bg-red-500/10"
+                      : "border-white/15 bg-white/10"
+                  }`}
+                />
+
+                {nameError && (
+                  <p className="mt-2 text-sm text-red-200">{nameError}</p>
+                )}
+              </div>
+
+              <div>
+                <input
+                  type="email"
+                  placeholder="Email Address *"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setEmailError("");
+                  }}
+                  className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
+                    emailError
+                      ? "border-red-400 bg-red-500/10"
+                      : "border-white/15 bg-white/10"
+                  }`}
+                />
+
+                {emailError && (
+                  <p className="mt-2 text-sm text-red-200">{emailError}</p>
+                )}
+              </div>
 
               <input
                 type="number"
                 placeholder="Donation Amount (£)"
-                value={selectedAmount === "Custom" ? customAmount : selectedAmount.replace("£", "")}
+                value={
+                  selectedAmount === "Custom"
+                    ? customAmount
+                    : selectedAmount.replace("£", "")
+                }
                 onChange={(e) => {
                   setSelectedAmount("Custom");
                   setCustomAmount(e.target.value);
@@ -193,6 +275,7 @@ export default function DonationsContent() {
                       type="button"
                       onClick={() => {
                         setSelectedAmount(item);
+
                         if (item !== "Custom") {
                           setCustomAmount(item.replace("£", ""));
                         } else {
@@ -218,6 +301,12 @@ export default function DonationsContent() {
                 onChange={(e) => setMessage(e.target.value)}
                 className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none"
               />
+
+              {serverError && (
+                <div className="rounded-2xl border border-red-300 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {serverError}
+                </div>
+              )}
 
               <button
                 type="button"

@@ -231,8 +231,7 @@ export default function HomeClient() {
 
                   <div className="mt-auto">
                     <Link
-                      href="https://www.gofundme.com/f/raising-funds-for-burton-pride?qid=63f32d4ac52a110d1d8046124f523f48"
-                      target="_blank"
+                      href="/DonateToUs"
                       className="inline-flex rounded-full bg-yellow-400 px-8 py-3 text-lg font-bold text-black shadow-lg shadow-yellow-400/50 transition-transform hover:scale-105 hover:bg-yellow-300"
                     >
                       Donate Now
