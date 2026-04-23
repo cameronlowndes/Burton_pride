@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 
 type Member = {
@@ -37,20 +37,23 @@ type CommitteeSectionProps = {
   hideOtherSections?: boolean;
 };
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  visible: (i: number) => ({
+const fadeUp: Variants = {
+  hidden: {
+    opacity: 0,
+    y: 24,
+  },
+  visible: (i: number = 0) => ({
     opacity: 1,
     y: 0,
     transition: {
       delay: i * 0.08,
       duration: 0.45,
-      ease: "easeOut",
+      ease: "easeInOut" as const,
     },
   }),
 };
 
-function groupMembers(members: Member[]) {
+function groupMembers(members: Member[]): Section[] {
   const map = new Map<string, Member[]>();
 
   for (const member of members) {
@@ -105,7 +108,9 @@ export default function CommitteeSection({
       } catch (err) {
         if (!ignore) {
           setError(
-            err instanceof Error ? err.message : "Failed to load committee members"
+            err instanceof Error
+              ? err.message
+              : "Failed to load committee members"
           );
         }
       } finally {
