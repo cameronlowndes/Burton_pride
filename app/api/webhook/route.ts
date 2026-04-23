@@ -64,6 +64,11 @@ async function handleDonationSession(session: Stripe.Checkout.Session) {
   const safeDonorEmail = escapeHtml(donorEmail);
   const safeDonorMessage = escapeHtml(donorMessage);
 
+  const donationNotifyRecipients = [
+    "info@burtonpride.co.uk",
+    "prideburton@gmail.com",
+  ];
+
   if (donorEmail) {
     await resend.emails.send({
       from: process.env.EMAIL_FROM!,
@@ -107,12 +112,20 @@ async function handleDonationSession(session: Stripe.Checkout.Session) {
           </div>
         </div>
       `,
+      text: `Hi ${donorName},
+
+Thank you so much for your donation of £${donationAmount} to Burton Pride C.I.C.
+
+Your support helps us continue creating inclusive events, safer spaces, and meaningful opportunities for the LGBTQIA+ community and allies in Burton on Trent.
+
+With heartfelt thanks,
+Burton Pride C.I.C`,
     });
   }
 
   await resend.emails.send({
     from: process.env.EMAIL_FROM!,
-    to: process.env.NOTIFY_EMAIL!,
+    to: donationNotifyRecipients,
     subject: `New donation received - £${donationAmount}`,
     html: `
       <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
@@ -130,6 +143,14 @@ async function handleDonationSession(session: Stripe.Checkout.Session) {
         </div>
       </div>
     `,
+    text: `New Burton Pride donation
+
+Name: ${donorName}
+Email: ${donorEmail || "No email provided"}
+Amount: £${donationAmount}
+Stripe Session ID: ${session.id}
+Payment Status: ${session.payment_status || "unknown"}
+Message: ${donorMessage || "No message provided"}`,
   });
 }
 
@@ -138,7 +159,9 @@ async function handleCompetitionSession(session: Stripe.Checkout.Session) {
 
   if (!entryId && session.payment_intent) {
     try {
-      const pi = await stripe.paymentIntents.retrieve(session.payment_intent as string);
+      const pi = await stripe.paymentIntents.retrieve(
+        session.payment_intent as string
+      );
       entryId = pi.metadata?.entryId;
     } catch (e: any) {
       console.error("Failed to retrieve PaymentIntent:", e?.message || e);

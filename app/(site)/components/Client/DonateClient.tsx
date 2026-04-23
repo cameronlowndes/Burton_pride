@@ -102,7 +102,7 @@ export default function DonationsContent() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-r from-pink-600 via-fuchsia-500 to-blue-600 px-6 py-16 text-white">
+    <main className="min-h-screen bg-gradient-to-r  px-6 py-16 text-white">
       <div className="mx-auto max-w-6xl">
         <div className="mb-14 flex flex-col items-center text-center">
           <div className="mb-5 flex h-28 w-28 items-center justify-center rounded-full border-4 border-white/20 bg-white/10 shadow-2xl backdrop-blur-xl">
