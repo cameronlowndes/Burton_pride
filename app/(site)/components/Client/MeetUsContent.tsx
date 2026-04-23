@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type Variants } from "framer-motion";
 import { useState, useEffect, useMemo } from "react";
 
 type Member = {
@@ -32,15 +32,18 @@ type CommitteeApiResponse = {
   members?: Member[];
 };
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  visible: (i: number) => ({
+const fadeUp: Variants = {
+  hidden: {
+    opacity: 0,
+    y: 24,
+  },
+  visible: (i: number = 0) => ({
     opacity: 1,
     y: 0,
     transition: {
       delay: i * 0.08,
       duration: 0.55,
-      ease: "easeOut",
+      ease: "easeOut" as const,
     },
   }),
 };
@@ -53,10 +56,6 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max);
 }
 
-/**
- * Uses saved crop position, then nudges image down slightly
- * so faces sit better in the top card crop.
- */
 function getImagePosition(member: Member) {
   const x =
     typeof member.image_position_x === "number" ? member.image_position_x : 50;
@@ -93,7 +92,7 @@ function TeamStoryModal({
             initial={{ opacity: 0, scale: 0.97, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 18 }}
-            transition={{ duration: 0.22, ease: "easeOut" }}
+            transition={{ duration: 0.22, ease: "easeOut" as const }}
             onClick={(e) => e.stopPropagation()}
             className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/20 bg-gradient-to-br from-violet-700/95 via-purple-700/95 to-fuchsia-700/95 p-6 text-white shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-8"
           >
@@ -306,9 +305,11 @@ export default function MeetUsContent() {
           throw new Error(data.error || "Failed to load committee members");
         }
 
-        setMembers(data.members || []);
+        setMembers((data.members || []).filter((member) => member.is_published));
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load members");
+        setError(
+          err instanceof Error ? err.message : "Failed to load members"
+        );
       } finally {
         setLoading(false);
       }
@@ -317,18 +318,18 @@ export default function MeetUsContent() {
     loadMembers();
   }, []);
 
-  const sections = useMemo(() => {
+  const sections: Section[] = useMemo(() => {
     const grouped = new Map<string, Member[]>();
 
     for (const member of members) {
-      const title = member.section_title || "Committee";
+      const title = member.section_title?.trim() || "Committee";
       if (!grouped.has(title)) grouped.set(title, []);
       grouped.get(title)!.push(member);
     }
 
     return Array.from(grouped.entries()).map(([title, groupedMembers]) => ({
       title,
-      members: groupedMembers.sort(
+      members: [...groupedMembers].sort(
         (a, b) => (a.display_order ?? 999) - (b.display_order ?? 999)
       ),
     }));
@@ -337,6 +338,7 @@ export default function MeetUsContent() {
   const boardSection = sections.find(
     (section) => section.title === "Committed Board"
   );
+
   const otherSections = sections.filter(
     (section) => section.title !== "Committed Board"
   );
@@ -348,7 +350,7 @@ export default function MeetUsContent() {
           <motion.header
             initial={{ opacity: 0, y: 22 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: "easeOut" }}
+            transition={{ duration: 0.6, ease: "easeOut" as const }}
             className="relative mt-16 overflow-hidden rounded-[36px] border border-slate-200 bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-500 px-6 py-12 text-white shadow-[0_25px_80px_rgba(0,0,0,0.12)] sm:mt-10 sm:px-10 sm:py-16 lg:px-14"
           >
             <div className="relative z-10 flex flex-col items-center text-center">
@@ -409,7 +411,7 @@ export default function MeetUsContent() {
           {!loading &&
             !error &&
             otherSections.map((section, sIndex) => (
-              <section key={section.title + sIndex} className="mt-20">
+              <section key={`${section.title}-${sIndex}`} className="mt-20">
                 <div className="mb-8 text-center">
                   <h2 className="mt-2 text-3xl font-black text-slate-900 sm:text-4xl">
                     {section.title}
@@ -433,7 +435,7 @@ export default function MeetUsContent() {
             initial={{ opacity: 0, y: 24 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            transition={{ duration: 0.55, ease: "easeOut" }}
+            transition={{ duration: 0.55, ease: "easeOut" as const }}
             className="mt-20 overflow-hidden rounded-[34px] border border-slate-200 bg-slate-50 p-8 text-center shadow-sm sm:p-10 lg:p-12"
           >
             <h2 className="text-3xl font-black text-slate-900 sm:text-4xl lg:text-5xl">
