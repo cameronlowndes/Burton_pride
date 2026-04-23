@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -9,13 +10,19 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
-function escapeHtml(s: string) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+const resend = new Resend(process.env.RESEND_API_KEY!);
+
+function formatAmount(amount?: number | null) {
+  return ((amount || 0) / 100).toFixed(2);
+}
+
+function escapeHtml(value: string) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function drivePreviewUrl(url: string) {
@@ -44,47 +51,103 @@ function parseEmailList(value: string | undefined) {
     .filter(Boolean);
 }
 
-export async function POST(req: Request) {
-  const sig = req.headers.get("stripe-signature");
-  if (!sig) {
-    console.error("❌ Missing stripe-signature header");
-    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
+async function handleDonationSession(session: Stripe.Checkout.Session) {
+  const donorName = session.metadata?.fullName?.trim() || "Supporter";
+  const donorEmail =
+    session.customer_details?.email?.trim() ||
+    session.metadata?.email?.trim() ||
+    "";
+  const donorMessage = session.metadata?.message?.trim() || "";
+  const donationAmount = formatAmount(session.amount_total);
+
+  const safeDonorName = escapeHtml(donorName);
+  const safeDonorEmail = escapeHtml(donorEmail);
+  const safeDonorMessage = escapeHtml(donorMessage);
+
+  if (donorEmail) {
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM!,
+      to: donorEmail,
+      subject: "Thank you for supporting Burton Pride C.I.C",
+      html: `
+        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
+          <div style="padding: 32px 24px; background: linear-gradient(135deg, #db2777, #a21caf, #2563eb); color: white; border-radius: 20px 20px 0 0; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px;">Thank You For Your Donation</h1>
+            <p style="margin: 12px 0 0; font-size: 16px; opacity: 0.95;">
+              Burton Pride C.I.C
+            </p>
+          </div>
+
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 20px 20px; padding: 32px 24px;">
+            <p style="margin-top: 0;">Hi ${safeDonorName},</p>
+
+            <p>
+              Thank you so much for your donation of <strong>£${donationAmount}</strong> to Burton Pride C.I.C.
+            </p>
+
+            <p>
+              Burton Pride is a grassroots, community-led organisation built by local people, for local people.
+              Every donation helps us continue creating inclusive events, safer spaces, stronger visibility,
+              accessibility support, and meaningful opportunities for the LGBTQIA+ community and allies in Burton on Trent.
+            </p>
+
+            <p>
+              As a Community Interest Company, our focus is always on community impact. Your support helps us keep building
+              something real, welcoming, and rooted in pride, care, and togetherness.
+            </p>
+
+            <p>
+              Your kindness truly makes a difference, and we are very grateful for your support.
+            </p>
+
+            <p style="margin-bottom: 0;">
+              With heartfelt thanks,<br />
+              <strong>Burton Pride C.I.C</strong>
+            </p>
+          </div>
+        </div>
+      `,
+    });
   }
 
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!webhookSecret) {
-    console.error("❌ Missing STRIPE_WEBHOOK_SECRET env var");
-    return NextResponse.json({ error: "Missing STRIPE_WEBHOOK_SECRET" }, { status: 500 });
-  }
+  await resend.emails.send({
+    from: process.env.EMAIL_FROM!,
+    to: process.env.NOTIFY_EMAIL!,
+    subject: `New donation received - £${donationAmount}`,
+    html: `
+      <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
+        <div style="padding: 24px; background: #111827; color: white; border-radius: 20px 20px 0 0;">
+          <h2 style="margin: 0;">New Burton Pride Donation</h2>
+        </div>
 
-  const body = await req.text();
+        <div style="background: #ffffff; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 20px 20px; padding: 24px;">
+          <p><strong>Name:</strong> ${safeDonorName}</p>
+          <p><strong>Email:</strong> ${safeDonorEmail || "No email provided"}</p>
+          <p><strong>Amount:</strong> £${donationAmount}</p>
+          <p><strong>Stripe Session ID:</strong> ${escapeHtml(session.id)}</p>
+          <p><strong>Payment Status:</strong> ${escapeHtml(session.payment_status || "unknown")}</p>
+          <p><strong>Message:</strong><br />${safeDonorMessage || "No message provided"}</p>
+        </div>
+      </div>
+    `,
+  });
+}
 
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
-  } catch (err: any) {
-    console.error("❌ Webhook signature verification failed:", err?.message || err);
-    return NextResponse.json({ error: `Webhook Error: ${err?.message || err}` }, { status: 400 });
-  }
-
-  if (event.type !== "checkout.session.completed") {
-    return NextResponse.json({ received: true });
-  }
-
-  const session = event.data.object as Stripe.Checkout.Session;
-  const sessionEmail = session.customer_details?.email || session.customer_email || "";
-
+async function handleCompetitionSession(session: Stripe.Checkout.Session) {
   let entryId = session.metadata?.entryId;
+
   if (!entryId && session.payment_intent) {
     try {
       const pi = await stripe.paymentIntents.retrieve(session.payment_intent as string);
       entryId = pi.metadata?.entryId;
     } catch (e: any) {
-      console.error("❌ Failed to retrieve PaymentIntent:", e?.message || e);
+      console.error("Failed to retrieve PaymentIntent:", e?.message || e);
     }
   }
 
-  if (!entryId) return NextResponse.json({ received: true });
+  if (!entryId) {
+    return;
+  }
 
   const db = supabaseAdmin;
 
@@ -94,7 +157,7 @@ export async function POST(req: Request) {
     .eq("id", entryId);
 
   if (paidErr) {
-    console.error("❌ Failed to update payment_status:", paidErr);
+    console.error("Failed to update payment_status:", paidErr);
   }
 
   const { data: entry, error: entryError } = await db
@@ -106,32 +169,31 @@ export async function POST(req: Request) {
     .single();
 
   if (entryError || !entry) {
-    console.error("❌ Could not load entry:", entryError);
-    return NextResponse.json({ received: true });
+    console.error("Could not load entry:", entryError);
+    return;
   }
 
   if (entry.confirmation_email_sent_at) {
-    return NextResponse.json({ received: true });
+    return;
   }
 
-  const resendKey = process.env.RESEND_API_KEY;
-  if (!resendKey) {
-    console.error("❌ Missing RESEND_API_KEY");
-    return NextResponse.json({ received: true });
-  }
-
-  const resend = new Resend(resendKey);
-
-  const FROM = process.env.EMAIL_FROM?.trim() || "Burton Pride <noreply@burtonpride.co.uk>";
-  const REPLY_TO = process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
+  const FROM =
+    process.env.EMAIL_FROM?.trim() ||
+    "Burton Pride <noreply@burtonpride.co.uk>";
+  const REPLY_TO =
+    process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
 
   const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS).length
     ? parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
     : parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
 
-  const adminRecipients = adminList.length ? adminList : ["prideburton@gmail.com"];
+  const adminRecipients = adminList.length
+    ? adminList
+    : ["prideburton@gmail.com"];
 
-  const customerEmail = String(entry.email || sessionEmail || "")
+  const customerEmail = String(
+    entry.email || session.customer_details?.email || session.customer_email || ""
+  )
     .trim()
     .toLowerCase();
 
@@ -171,12 +233,12 @@ export async function POST(req: Request) {
     </div>
   `;
 
-  const customerSubject = "Payment received — your Windows of Hope entry is confirmed";
+  const customerSubject =
+    "Payment received — your Windows of Hope entry is confirmed";
+
   const customerText = `Hi ${entry.contact_name || "there"},
 
 Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
-
-Your uploaded window photo is shown below.
 
 Download your window photo:
 ${imageDownloadUrl || "Image download link unavailable"}
@@ -361,7 +423,7 @@ Download QR poster: ${qrDownloadUrl || "none"}`;
     </div>
   `;
 
-  const headers = {
+  const emailHeaders = {
     "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
   } as Record<string, string>;
 
@@ -374,11 +436,9 @@ Download QR poster: ${qrDownloadUrl || "none"}`;
         subject: customerSubject,
         text: customerText,
         html: customerHtml,
-        headers,
+        headers: emailHeaders,
       });
-      console.log("✅ Customer email sent to:", customerEmail);
-    } else {
-      console.warn("⚠️ Customer email missing — skipped customer email send");
+      console.log("Customer email sent to:", customerEmail);
     }
 
     await resend.emails.send({
@@ -388,19 +448,62 @@ Download QR poster: ${qrDownloadUrl || "none"}`;
       subject: adminSubject,
       text: adminText,
       html: adminHtml,
-      headers,
+      headers: emailHeaders,
     });
-    console.log("✅ Admin email sent to:", adminRecipients.join(", "));
 
     const { error: sentErr } = await db
       .from("competition_entries")
       .update({ confirmation_email_sent_at: new Date().toISOString() })
       .eq("id", entryId);
 
-    if (sentErr) console.error("❌ Failed to set confirmation_email_sent_at:", sentErr);
+    if (sentErr) {
+      console.error("Failed to set confirmation_email_sent_at:", sentErr);
+    }
   } catch (err: any) {
-    console.error("❌ Email send failed:", err?.message || err);
+    console.error("Competition email send failed:", err?.message || err);
+  }
+}
+
+export async function POST(req: Request) {
+  const body = await req.text();
+  const headersList = await headers();
+  const signature = headersList.get("stripe-signature");
+
+  if (!signature) {
+    return new NextResponse("Missing Stripe signature", { status: 400 });
   }
 
-  return NextResponse.json({ received: true });
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    return new NextResponse("Missing STRIPE_WEBHOOK_SECRET", { status: 500 });
+  }
+
+  let event: Stripe.Event;
+
+  try {
+    event = stripe.webhooks.constructEvent(
+      body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (error) {
+    console.error("Stripe webhook signature error:", error);
+    return new NextResponse("Invalid webhook signature", { status: 400 });
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+
+      if (session.metadata?.entryId) {
+        await handleCompetitionSession(session);
+      } else {
+        await handleDonationSession(session);
+      }
+    }
+
+    return new NextResponse("OK", { status: 200 });
+  } catch (error) {
+    console.error("Stripe webhook handler error:", error);
+    return new NextResponse("Webhook handler failed", { status: 500 });
+  }
 }
