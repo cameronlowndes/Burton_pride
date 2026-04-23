@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useMediaQuery } from "react-responsive";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import BusinessForm from "../../components/Forms/BussinessForm";
 import CharityForm from "../Forms/ChraityForm";
-import EntertainmentForm from "../../components/Forms/EntertainmentForm"; 
+import EntertainmentForm from "../../components/Forms/EntertainmentForm";
 
 export default function BurtonPrideClient2026() {
   const [isBusinessModalOpen, setIsBusinessModalOpen] = useState(false);
@@ -16,43 +16,53 @@ export default function BurtonPrideClient2026() {
 
   const openBusinessForm = () => {
     if (isMobile) {
-      window.location.href = "/BusinessForm";
-    } else {
-      setIsBusinessModalOpen(true);
+      window.location.assign("/BusinessForm");
+      return;
     }
+    setIsBusinessModalOpen(true);
   };
 
   const openCharityForm = () => {
     if (isMobile) {
-      window.location.href = "/CharityForm";
-    } else {
-      setIsCharityModalOpen(true);
+      window.location.assign("/CharityForm");
+      return;
     }
+    setIsCharityModalOpen(true);
   };
 
   const openEntertainmentForm = () => {
     if (isMobile) {
-      window.location.href = "/EntertainmentForm";
-    } else {
-      setIsEntertainmentModalOpen(true);
+      window.location.assign("/EntertainmentForm");
+      return;
     }
+    setIsEntertainmentModalOpen(true);
   };
 
   const closeBusinessModal = () => setIsBusinessModalOpen(false);
   const closeCharityModal = () => setIsCharityModalOpen(false);
   const closeEntertainmentModal = () => setIsEntertainmentModalOpen(false);
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: {},
-    visible: { transition: { staggerChildren: 0.3 } },
+    visible: {
+      transition: {
+        staggerChildren: 0.3,
+      },
+    },
   };
 
-  const fadeUpVariant = {
-    hidden: { opacity: 0, y: 40 },
+  const fadeUpVariant: Variants = {
+    hidden: {
+      opacity: 0,
+      y: 40,
+    },
     visible: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.6, ease: "easeOut" },
+      transition: {
+        duration: 0.6,
+        ease: "easeOut" as const,
+      },
     },
   };
 
@@ -63,7 +73,6 @@ export default function BurtonPrideClient2026() {
       animate="visible"
       variants={containerVariants}
     >
-      {/* Hero Section */}
       <motion.header
         className="text-center flex flex-col items-center gap-6 mt-16"
         variants={fadeUpVariant}
@@ -77,12 +86,10 @@ export default function BurtonPrideClient2026() {
         </p>
       </motion.header>
 
-      {/* Info + Buttons */}
       <motion.section
         className="mt-12 w-full max-w-6xl flex flex-col md:flex-row gap-10"
         variants={fadeUpVariant}
       >
-        {/* Left Info */}
         <div className="md:w-1/2 bg-white/20 p-6 rounded-xl shadow-lg space-y-4">
           <h2 className="text-2xl font-bold text-yellow-300">
             Get Involved with Burton Pride 2026
@@ -99,9 +106,15 @@ export default function BurtonPrideClient2026() {
             equality and inclusion.
           </p>
 
-          <p><strong>Local Businesses:</strong> Apply using the Business Form.</p>
-          <p><strong>Charities &amp; C.I.C.s:</strong> Apply using the Charity Form.</p>
-          <p><strong>Entertainment:</strong> Apply using the Entertainment Form.</p>
+          <p>
+            <strong>Local Businesses:</strong> Apply using the Business Form.
+          </p>
+          <p>
+            <strong>Charities &amp; C.I.C.s:</strong> Apply using the Charity Form.
+          </p>
+          <p>
+            <strong>Entertainment:</strong> Apply using the Entertainment Form.
+          </p>
 
           <p>
             Questions? Contact us at{" "}
@@ -114,7 +127,6 @@ export default function BurtonPrideClient2026() {
           </p>
         </div>
 
-        {/* Right Buttons */}
         <div className="md:w-1/2 flex flex-col justify-center gap-6 items-center">
           <button
             onClick={openBusinessForm}
@@ -122,12 +134,14 @@ export default function BurtonPrideClient2026() {
           >
             Business Form
           </button>
+
           <button
             onClick={openCharityForm}
             className="w-3/4 sm:w-1/2 bg-purple-400 text-white px-8 py-4 rounded-full font-bold text-xl hover:bg-purple-300 transition transform hover:scale-105 shadow-lg cursor-pointer"
           >
             Charity Form
           </button>
+
           <button
             onClick={openEntertainmentForm}
             className="w-3/4 sm:w-1/2 bg-pink-500 text-white px-8 py-4 rounded-full font-bold text-xl hover:bg-pink-400 transition transform hover:scale-105 shadow-lg cursor-pointer"
@@ -137,8 +151,10 @@ export default function BurtonPrideClient2026() {
         </div>
       </motion.section>
 
-      {/* Pricing Section */}
-      <motion.section className="mt-20 w-full max-w-5xl" variants={fadeUpVariant}>
+      <motion.section
+        className="mt-20 w-full max-w-5xl"
+        variants={fadeUpVariant}
+      >
         <div className="bg-white/20 backdrop-blur-md rounded-2xl shadow-xl p-10 text-center">
           <h2 className="text-3xl sm:text-4xl font-bold text-yellow-300 mb-6">
             Stall Prices for Burton Pride 2026
@@ -148,8 +164,12 @@ export default function BurtonPrideClient2026() {
             <table className="w-full border border-white/30 rounded-xl overflow-hidden">
               <thead className="bg-white/30">
                 <tr>
-                  <th className="px-6 py-4 text-left text-lg font-bold">Organisation Type</th>
-                  <th className="px-6 py-4 text-right text-lg font-bold">Price</th>
+                  <th className="px-6 py-4 text-left text-lg font-bold">
+                    Organisation Type
+                  </th>
+                  <th className="px-6 py-4 text-right text-lg font-bold">
+                    Price
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -163,7 +183,9 @@ export default function BurtonPrideClient2026() {
                 </tr>
                 <tr className="border-t border-white/20 bg-white/10">
                   <td className="px-6 py-4 text-lg">Charities &amp; C.I.C</td>
-                  <td className="px-6 py-4 text-right text-lg font-bold">FREE!!</td>
+                  <td className="px-6 py-4 text-right text-lg font-bold">
+                    FREE!!
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -173,29 +195,29 @@ export default function BurtonPrideClient2026() {
             Prices are per stall. Additional space may be available at an extra cost.
           </p>
 
-          {/* TERMS BUTTON */}
           <div className="mt-8 flex justify-center">
             <a
               href="/BurtronPride2026/Terms"
               className="bg-white text-purple-700 px-8 py-4 rounded-full font-bold text-lg hover:bg-gray-200 transition transform hover:scale-105 shadow-lg"
             >
-              View Terms & Conditions
+              View Terms &amp; Conditions
             </a>
           </div>
         </div>
       </motion.section>
 
-      {/* Business Modal */}
       {isBusinessModalOpen && !isMobile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <motion.div
             className="bg-white rounded-xl p-6 max-w-lg w-full relative"
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2, ease: "easeOut" as const }}
           >
             <button
               onClick={closeBusinessModal}
               className="absolute top-3 right-3 text-black text-xl font-bold"
+              aria-label="Close business form"
             >
               &times;
             </button>
@@ -204,17 +226,18 @@ export default function BurtonPrideClient2026() {
         </div>
       )}
 
-      {/* Charity Modal */}
       {isCharityModalOpen && !isMobile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <motion.div
             className="bg-white rounded-xl p-6 max-w-lg w-full relative"
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2, ease: "easeOut" as const }}
           >
             <button
               onClick={closeCharityModal}
               className="absolute top-3 right-3 text-black text-xl font-bold"
+              aria-label="Close charity form"
             >
               &times;
             </button>
@@ -223,17 +246,18 @@ export default function BurtonPrideClient2026() {
         </div>
       )}
 
-      {/* Entertainment Modal */}
       {isEntertainmentModalOpen && !isMobile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <motion.div
             className="bg-white rounded-xl p-6 max-w-lg w-full relative"
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.2, ease: "easeOut" as const }}
           >
             <button
               onClick={closeEntertainmentModal}
               className="absolute top-3 right-3 text-black text-xl font-bold"
+              aria-label="Close entertainment form"
             >
               &times;
             </button>
