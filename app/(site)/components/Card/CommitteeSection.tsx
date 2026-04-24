@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { motion, type Variants } from "framer-motion";
+import { motion, AnimatePresence, type Variants } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 
 type Member = {
@@ -53,6 +53,10 @@ const fadeUp: Variants = {
   }),
 };
 
+function slugifyName(value: string) {
+  return value.replace(/\s+/g, "-").toLowerCase();
+}
+
 function groupMembers(members: Member[]): Section[] {
   const map = new Map<string, Member[]>();
 
@@ -70,12 +74,125 @@ function groupMembers(members: Member[]): Section[] {
   }));
 }
 
-export default function CommitteeSection({
-  onlySection,
-}: CommitteeSectionProps) {
+function getImagePosition(member: Member) {
+  return `${member.image_position_x ?? 50}% ${member.image_position_y ?? 50}%`;
+}
+
+function MemberModal({
+  member,
+  open,
+  onClose,
+}: {
+  member: Member | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!member) return null;
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md sm:p-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 20 }}
+            transition={{ duration: 0.22, ease: "easeOut" as const }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/20 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-700 p-6 text-white shadow-2xl sm:p-8"
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute right-4 top-4 z-10 rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/25"
+            >
+              Close
+            </button>
+
+            <div className="flex flex-col items-center text-center">
+              <div className="relative mb-5 h-32 w-32 overflow-hidden rounded-full border-4 border-white/70 shadow-xl">
+                <Image
+                  src={member.image_url || "/image/Logo.png"}
+                  alt={member.full_name}
+                  fill
+                  unoptimized
+                  className="object-cover"
+                  style={{
+                    objectPosition: getImagePosition(member),
+                  }}
+                />
+              </div>
+
+              <h2 className="text-4xl font-black text-white">
+                {member.full_name}
+              </h2>
+
+              <p className="mt-2 text-lg font-bold text-white/85">
+                {member.role}
+              </p>
+
+              <div className="mt-4 flex flex-wrap justify-center gap-3">
+                {member.pronouns && (
+                  <span className="rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-bold">
+                    {member.pronouns}
+                  </span>
+                )}
+
+                {member.section_title && (
+                  <span className="rounded-full border border-white/20 bg-white/15 px-4 py-2 text-sm font-bold">
+                    {member.section_title}
+                  </span>
+                )}
+              </div>
+
+              {member.email && (
+                <a
+                  href={`mailto:${member.email}`}
+                  className="mt-5 rounded-2xl border border-white/25 bg-black/20 px-5 py-3 text-sm font-bold text-white transition hover:bg-black/30"
+                >
+                  {member.email}
+                </a>
+              )}
+
+              {member.story_title && (
+                <h3 className="mt-8 text-2xl font-black text-yellow-300">
+                  {member.story_title}
+                </h3>
+              )}
+            </div>
+
+            <div className="mt-8 space-y-5 text-base leading-8 text-white/90 sm:text-lg">
+              {(member.story || "")
+                .split("\n")
+                .filter((p) => p.trim())
+                .map((paragraph, i) => (
+                  <p key={i}>{paragraph}</p>
+                ))}
+
+              {!member.story?.trim() && (
+                <p className="text-center italic text-white/70">
+                  Story coming soon.
+                </p>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+export default function CommitteeSection({ onlySection }: CommitteeSectionProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeMember, setActiveMember] = useState<Member | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -161,83 +278,102 @@ export default function CommitteeSection({
   }
 
   return (
-    <section className="w-full">
-      <div className="mx-auto max-w-7xl space-y-14">
-        {sections.map((section) => (
-          <div key={section.title}>
-            <h2 className="mb-8 text-center text-3xl font-bold text-black sm:text-5xl">
-              {section.title}
-            </h2>
+    <>
+      <section className="w-full">
+        <div className="mx-auto max-w-7xl space-y-14">
+          {sections.map((section) => (
+            <div key={section.title}>
+              <h2 className="mb-8 text-center text-3xl font-bold text-black sm:text-5xl">
+                {section.title}
+              </h2>
 
-            <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
-              {section.members.map((member, index) => (
-                <motion.article
-                  key={member.id}
-                  custom={index}
-                  initial="hidden"
-                  whileInView="visible"
-                  viewport={{ once: true, amount: 0.2 }}
-                  variants={fadeUp}
-                  className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md"
-                >
-                  <div className="relative h-[300px] w-full overflow-hidden">
-                    <Image
-                      src={member.image_url || "/image/Logo.png"}
-                      alt={member.full_name}
-                      fill
-                      className="object-cover"
-                      style={{
-                        objectPosition: `${member.image_position_x ?? 50}% ${
-                          member.image_position_y ?? 50
-                        }%`,
-                      }}
-                    />
-                  </div>
-
-                  <div className="space-y-4 p-5 text-white">
-                    <div>
-                      <h3 className="text-2xl font-bold">{member.full_name}</h3>
-                      <p className="mt-1 text-base font-semibold text-white/90">
-                        {member.role}
-                      </p>
+              <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+                {section.members.map((member, index) => (
+                  <motion.article
+                    key={member.id}
+                    custom={index}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: true, amount: 0.2 }}
+                    variants={fadeUp}
+                    className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md"
+                  >
+                    <div className="relative h-[300px] w-full overflow-hidden">
+                      <Image
+                        src={member.image_url || "/image/Logo.png"}
+                        alt={member.full_name}
+                        fill
+                        unoptimized
+                        className="object-cover"
+                        style={{
+                          objectPosition: getImagePosition(member),
+                        }}
+                      />
                     </div>
 
-                    {member.pronouns ? (
-                      <p className="text-sm font-medium text-white/85">
-                        {member.pronouns}
-                      </p>
-                    ) : null}
+                    <div className="space-y-4 p-5 text-white">
+                      <div>
+                        <h3 className="text-2xl font-bold">
+                          {member.full_name}
+                        </h3>
 
-                    {member.email ? (
-                      <div className="inline-flex rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white/95">
-                        {member.email}
+                        <p className="mt-1 text-base font-semibold text-white/90">
+                          {member.role}
+                        </p>
                       </div>
-                    ) : null}
 
-                    <div className="flex flex-col gap-3 pt-2">
-                      <Link
-                        href={`/committee/${member.id}`}
-                        className="inline-flex items-center justify-center rounded-full border border-white/60 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                      >
-                        View Profile
-                      </Link>
+                      {member.pronouns && (
+                        <p className="text-sm font-medium text-white/85">
+                          {member.pronouns}
+                        </p>
+                      )}
 
-                      {member.story ? (
+                      {member.email && (
+                        <div className="inline-flex max-w-full rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white/95">
+                          <span className="truncate">{member.email}</span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-3 pt-2">
                         <Link
-                          href={`/committee/${member.id}#story`}
-                          className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
+                          href={`/team/${slugifyName(member.full_name)}`}
+                          className="inline-flex items-center justify-center rounded-full border border-white/25 bg-white/10 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/20"
                         >
-                          Read Story
+                          View Profile
                         </Link>
-                      ) : null}
+
+                        {member.story ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveMember(member)}
+                            className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
+                          >
+                            Read Story
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="inline-flex cursor-not-allowed items-center justify-center rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white/60"
+                          >
+                            Story Coming Soon
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </motion.article>
-              ))}
+                  </motion.article>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
-    </section>
+          ))}
+        </div>
+      </section>
+
+      <MemberModal
+        member={activeMember}
+        open={!!activeMember}
+        onClose={() => setActiveMember(null)}
+      />
+    </>
   );
 }

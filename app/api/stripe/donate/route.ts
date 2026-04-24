@@ -1,98 +1,140 @@
-import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-08-16" as any,
+});
 
-export async function POST(req: NextRequest) {
+function getAmountPence(selectedAmount: string, customAmount: string) {
+  const raw =
+    selectedAmount === "Custom"
+      ? customAmount
+      : selectedAmount.replace("£", "");
+
+  const amount = Number(raw);
+
+  if (!amount || amount < 1) {
+    throw new Error("Donation amount must be at least £1");
+  }
+
+  return Math.round(amount * 100);
+}
+
+export async function POST(req: Request) {
   try {
+    const body = await req.json();
+
+    const {
+      fullName,
+      email,
+      message,
+      supporterStory,
+      supporterImagePreview,
+      supporterImageName,
+      selectedAmount,
+      customAmount,
+      donationType,
+    } = body;
+
+    if (!fullName || !email) {
+      return NextResponse.json(
+        { ok: false, error: "Full name and email are required" },
+        { status: 400 }
+      );
+    }
+
+    const amountPence = getAmountPence(selectedAmount, customAmount);
+    const isMonthly = donationType === "monthly";
+
     const appUrl = process.env.NEXT_PUBLIC_URL;
 
-    if (!appUrl || !/^https?:\/\//.test(appUrl)) {
+    if (!appUrl) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "NEXT_PUBLIC_URL is missing or invalid. It must start with http:// or https://",
-        },
+        { ok: false, error: "Missing NEXT_PUBLIC_URL" },
         { status: 500 }
       );
     }
 
-    const body = await req.json();
-
-    const fullName = String(body.fullName || "").trim();
-    const email = String(body.email || "").trim();
-    const message = String(body.message || "").trim();
-    const selectedAmount = String(body.selectedAmount || "");
-    const customAmount = String(body.customAmount || "");
-
-    if (!fullName) {
-      return NextResponse.json(
-        { ok: false, error: "Full name is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!email) {
-      return NextResponse.json(
-        { ok: false, error: "Email address is required" },
-        { status: 400 }
-      );
-    }
-
-    let amountInPence = 0;
-
-    if (selectedAmount === "Custom") {
-      amountInPence = Math.round(Number(customAmount) * 100);
-    } else {
-      amountInPence = Math.round(Number(selectedAmount.replace("£", "")) * 100);
-    }
-
-    if (!amountInPence || amountInPence < 100) {
-      return NextResponse.json(
-        { ok: false, error: "Minimum donation is £1" },
-        { status: 400 }
-      );
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: isMonthly ? "subscription" : "payment",
       customer_email: email,
-      line_items: [
-        {
-          price_data: {
-            currency: "gbp",
-            product_data: {
-              name: "Donation to Burton Pride C.I.C",
-              description: "Community donation",
-            },
-            unit_amount: amountInPence,
-          },
-          quantity: 1,
-        },
-      ],
+      success_url: `${appUrl}/DonateToUs/Success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/DonateToUs`,
       metadata: {
         fullName,
         email,
-        message,
+        message: message || "",
+        supporterStory: isMonthly ? supporterStory || "" : "",
+        supporterImageName: isMonthly ? supporterImageName || "" : "",
+        donationType: isMonthly ? "monthly" : "one_time",
+        amountPence: String(amountPence),
       },
-      success_url: `${appUrl}/DonateToUs/Success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/DonateToUs?canceled=true`,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "gbp",
+            unit_amount: amountPence,
+            recurring: isMonthly ? { interval: "month" } : undefined,
+            product_data: {
+              name: isMonthly
+                ? "Monthly Burton Pride Supporter"
+                : "Burton Pride Donation",
+              description: isMonthly
+                ? "Monthly donation to support Burton Pride C.I.C"
+                : "One-time donation to support Burton Pride C.I.C",
+            },
+          },
+        },
+      ],
     });
+
+    const { error: insertError } = await supabaseAdmin.from("donations").insert({
+      full_name: fullName,
+      email,
+      message: message || null,
+
+      supporter_story: isMonthly ? supporterStory || null : null,
+      supporter_story_status: isMonthly && supporterStory ? "pending" : null,
+      supporter_wall_approved: false,
+      supporter_display_name: isMonthly ? fullName : null,
+      supporter_image_url: isMonthly ? supporterImagePreview || null : null,
+
+      donation_type: isMonthly ? "monthly" : "one_time",
+      amount_pence: amountPence,
+      currency: "gbp",
+
+      stripe_checkout_session_id: checkoutSession.id,
+      status: "checkout_started",
+    });
+
+    if (insertError) {
+      console.error("Donation insert error:", insertError);
+
+      return NextResponse.json(
+        { ok: false, error: insertError.message },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       ok: true,
-      url: session.url,
-      sessionId: session.id,
+      url: checkoutSession.url,
     });
   } catch (error) {
-    console.error("Stripe donate route error:", error);
+    console.error("Donate API error:", error);
 
     return NextResponse.json(
-      { ok: false, error: "Failed to create Stripe session" },
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create donation checkout",
+      },
       { status: 500 }
     );
   }
