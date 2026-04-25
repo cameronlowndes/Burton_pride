@@ -1,0 +1,85 @@
+import { auth } from "@clerk/nextjs/server";
+import Link from "next/link";
+import { AlertTriangle, ArrowLeft, Lock, Mail, ShieldAlert } from "lucide-react";
+import { requireMainAdmin } from "@/lib/isMainAdmin";
+import DeletePasswordClient from "./DeletePasswordClient";
+
+export default async function DeletePasswordPage() {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
+        <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:p-10">
+          <ShieldAlert className="mx-auto h-12 w-12 text-white" />
+
+          <h1 className="mt-6 text-3xl font-bold">Please sign in</h1>
+
+          <p className="mt-3 text-white/80">
+            You need to be signed in with the main admin account to access this page.
+          </p>
+
+          <Link
+            href="/Admin/Dashboard"
+            className="mt-8 inline-flex rounded-2xl bg-white/10 px-5 py-3 font-semibold text-white hover:bg-white/15"
+          >
+            Go to dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  try {
+    await requireMainAdmin();
+  } catch {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
+        <div className="w-full max-w-2xl rounded-[36px] bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.32)] backdrop-blur-2xl">
+          <div className="inline-flex items-center gap-2 rounded-full bg-yellow-400/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.24em] text-yellow-100">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Restricted access
+          </div>
+
+          <h1 className="mt-5 text-4xl font-bold">Main admin only</h1>
+
+          <p className="mt-4 text-sm leading-7 text-white/85">
+            This page is restricted to the main admin because it controls the password
+            used for high-risk donation deletion actions.
+          </p>
+
+          <div className="mt-6 rounded-3xl bg-black/10 p-5">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+              <Lock className="h-5 w-5 text-white/90" />
+            </div>
+            <h2 className="text-lg font-semibold">Why access is limited</h2>
+            <p className="mt-2 text-sm leading-6 text-white/75">
+              Changing this password could allow someone to delete all donation records,
+              so only the main admin should be able to manage it.
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              href="/Admin/Dashboard"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-5 py-3 text-sm font-semibold text-white hover:bg-white/15"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to dashboard
+            </Link>
+
+            <a
+              href="mailto:cameronlowndes@burtonpride.co.uk?subject=Main%20admin%20delete%20password%20request"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-yellow-400/15 px-5 py-3 text-sm font-semibold text-yellow-50 hover:bg-yellow-400/20"
+            >
+              <Mail className="h-4 w-4" />
+              Contact Cameron
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <DeletePasswordClient />;
+}

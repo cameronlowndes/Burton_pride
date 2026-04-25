@@ -21,6 +21,14 @@ export async function POST(req: NextRequest) {
     const email = String(body.email || "").trim();
     const supporterStory = String(body.supporterStory || "").trim();
     const supporterImageUrl = String(body.supporterImageUrl || "").trim();
+    const pronouns = String(body.pronouns || "").trim();
+    const identityLabel = String(body.identityLabel || "").trim();
+
+    const rawAmountPence = Number(body.amountPence || 0);
+    const amountPence =
+      Number.isFinite(rawAmountPence) && rawAmountPence >= 0
+        ? Math.round(rawAmountPence)
+        : 0;
 
     if (!fullName) {
       return NextResponse.json(
@@ -36,13 +44,15 @@ export async function POST(req: NextRequest) {
         email: email || null,
         message: "Manually added by admin",
         donation_type: "monthly",
-        amount_pence: 0,
+        amount_pence: amountPence,
         currency: "gbp",
         status: "paid",
         supporter_story: supporterStory || null,
         supporter_image_url: supporterImageUrl || null,
         supporter_story_status: "approved",
         supporter_wall_approved: true,
+        pronouns: pronouns || null,
+        identity_label: identityLabel || null,
       })
       .select()
       .single();

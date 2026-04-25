@@ -33,6 +33,7 @@ type EditingDonation = {
 type CreateForm = {
   fullName: string;
   email: string;
+  amountPounds: string;
   supporterStory: string;
   supporterImageUrl: string;
   pronouns: string;
@@ -58,6 +59,16 @@ const identityOptions = [
   "Other",
 ];
 
+const emptyCreateForm: CreateForm = {
+  fullName: "",
+  email: "",
+  amountPounds: "",
+  supporterStory: "",
+  supporterImageUrl: "",
+  pronouns: "",
+  identityLabel: "",
+};
+
 export default function AdminDonationsPage() {
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,17 +76,20 @@ export default function AdminDonationsPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editing, setEditing] = useState<EditingDonation | null>(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const [creating, setCreating] = useState(false);
   const [savingCreate, setSavingCreate] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateForm>({
-    fullName: "",
-    email: "",
-    supporterStory: "",
-    supporterImageUrl: "",
-    pronouns: "",
-    identityLabel: "",
-  });
+  const [createForm, setCreateForm] = useState<CreateForm>(emptyCreateForm);
+
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  const [deleteOneOpen, setDeleteOneOpen] = useState(false);
+  const [deleteOneId, setDeleteOneId] = useState("");
+  const [deleteOneName, setDeleteOneName] = useState("");
+  const [deletingOne, setDeletingOne] = useState(false);
 
   async function loadDonations() {
     try {
@@ -107,6 +121,8 @@ export default function AdminDonationsPage() {
   ) {
     try {
       setUpdatingId(id);
+      setError("");
+      setSuccess("");
 
       const res = await fetch(`/api/admin/donations/${id}/supporter-wall`, {
         method: "PATCH",
@@ -120,13 +136,14 @@ export default function AdminDonationsPage() {
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
-        alert(data.error || "Failed to update story");
+        setError(data.error || "Failed to update story");
         return;
       }
 
+      setSuccess("Supporter wall status updated.");
       await loadDonations();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to update story");
+      setError(err instanceof Error ? err.message : "Failed to update story");
     } finally {
       setUpdatingId("");
     }
@@ -137,6 +154,8 @@ export default function AdminDonationsPage() {
 
     try {
       setSavingEdit(true);
+      setError("");
+      setSuccess("");
 
       const res = await fetch(
         `/api/admin/donations/${editing.id}/edit-supporter`,
@@ -156,14 +175,15 @@ export default function AdminDonationsPage() {
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
-        alert(data.error || "Failed to save supporter details");
+        setError(data.error || "Failed to save supporter details");
         return;
       }
 
       setEditing(null);
+      setSuccess("Supporter details saved.");
       await loadDonations();
     } catch (err) {
-      alert(
+      setError(
         err instanceof Error ? err.message : "Failed to save supporter details"
       );
     } finally {
@@ -174,41 +194,129 @@ export default function AdminDonationsPage() {
   async function createSupporter() {
     try {
       if (!createForm.fullName.trim()) {
-        alert("Supporter name is required");
+        setError("Supporter name is required");
+        return;
+      }
+
+      const amountNumber = Number(createForm.amountPounds || 0);
+
+      if (Number.isNaN(amountNumber) || amountNumber < 0) {
+        setError("Please enter a valid amount");
         return;
       }
 
       setSavingCreate(true);
+      setError("");
+      setSuccess("");
 
       const res = await fetch("/api/admin/donations/create-supporter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createForm),
+        body: JSON.stringify({
+          fullName: createForm.fullName,
+          email: createForm.email,
+          amountPence: Math.round(amountNumber * 100),
+          supporterStory: createForm.supporterStory,
+          supporterImageUrl: createForm.supporterImageUrl,
+          pronouns: createForm.pronouns,
+          identityLabel: createForm.identityLabel,
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok || !data.ok) {
-        alert(data.error || "Failed to create supporter");
+        setError(data.error || "Failed to create supporter");
         return;
       }
 
       setCreating(false);
-      setCreateForm({
-        fullName: "",
-        email: "",
-        supporterStory: "",
-        supporterImageUrl: "",
-        pronouns: "",
-        identityLabel: "",
-      });
-
+      setCreateForm(emptyCreateForm);
+      setSuccess("Monthly supporter created.");
       await loadDonations();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create supporter");
+      setError(err instanceof Error ? err.message : "Failed to create supporter");
     } finally {
       setSavingCreate(false);
     }
+  }
+
+  async function deleteOneDonation() {
+    try {
+      if (!deleteOneId) return;
+
+      setDeletingOne(true);
+      setError("");
+      setSuccess("");
+
+      const res = await fetch(`/api/admin/donations/${deleteOneId}/delete`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setError(data.error || "Failed to delete donation");
+        return;
+      }
+
+      setDeleteOneOpen(false);
+      setDeleteOneId("");
+      setDeleteOneName("");
+      setSuccess("Donation deleted successfully.");
+      await loadDonations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete donation");
+    } finally {
+      setDeletingOne(false);
+    }
+  }
+
+  async function deleteAllDonations() {
+    try {
+      if (!deletePassword.trim()) {
+        setError("Main admin delete password is required");
+        return;
+      }
+
+      setDeletingAll(true);
+      setError("");
+      setSuccess("");
+
+      const res = await fetch("/api/admin/donations/delete-all", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: deletePassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setError(data.error || "Failed to delete all donations");
+        return;
+      }
+
+      setDeleteAllOpen(false);
+      setDeletePassword("");
+      setSuccess("All donations have been deleted successfully.");
+      await loadDonations();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to delete all donations"
+      );
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
+  function openDeleteOne(donation: Donation) {
+    setError("");
+    setSuccess("");
+    setDeleteOneId(donation.id);
+    setDeleteOneName(donation.full_name || "this supporter");
+    setDeleteOneOpen(true);
   }
 
   function handleEditImageUpload(file: File | null) {
@@ -262,24 +370,53 @@ export default function AdminDonationsPage() {
             create supporters, and edit supporter details.
           </p>
 
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="mt-5 rounded-full bg-yellow-300 px-6 py-3 font-black text-black transition hover:bg-yellow-200"
-          >
-            Create Monthly Supporter
-          </button>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setCreating(true)}
+              className="rounded-full bg-yellow-300 px-6 py-3 font-black text-black transition hover:bg-yellow-200"
+            >
+              Create Monthly Supporter
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setError("");
+                setSuccess("");
+                setDeleteAllOpen(true);
+              }}
+              className="rounded-full bg-red-600 px-6 py-3 font-black text-white transition hover:bg-red-700"
+            >
+              Delete All Monthly Supporter Wall Submissions
+            </button>
+          </div>
+
+          <div className="mt-5 rounded-3xl border border-red-300/30 bg-red-500/10 p-5">
+            <h2 className="text-lg font-black text-red-100">Danger Zone</h2>
+            <p className="mt-1 text-sm leading-6 text-red-50/80">
+              Use Delete All only if you want to remove every 
+              supporter wall submission. Deleting one supporter does not need the
+              main admin password.
+            </p>
+          </div>
         </div>
+
+        {error && (
+          <div className="mb-5 rounded-3xl border border-red-300 bg-red-500/10 p-6 font-bold text-red-100">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-5 rounded-3xl border border-green-300/30 bg-green-500/20 p-6 font-bold text-green-100">
+            {success}
+          </div>
+        )}
 
         {loading && (
           <div className="rounded-3xl bg-white/10 p-6">
             Loading donations...
-          </div>
-        )}
-
-        {error && (
-          <div className="rounded-3xl border border-red-300 bg-red-500/10 p-6 text-red-100">
-            {error}
           </div>
         )}
 
@@ -503,6 +640,14 @@ export default function AdminDonationsPage() {
                                 Edit Details
                               </button>
 
+                              <button
+                                type="button"
+                                onClick={() => openDeleteOne(donation)}
+                                className="rounded-full bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+
                               <span className="rounded-full bg-white/10 px-5 py-3 text-sm font-bold">
                                 Status:{" "}
                                 {donation.supporter_story_status || "pending"}
@@ -512,6 +657,18 @@ export default function AdminDonationsPage() {
                         </div>
                       </div>
                     )}
+
+                  {donation.donation_type !== "monthly" && (
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openDeleteOne(donation)}
+                        className="rounded-full bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
 
                   <p className="mt-4 text-sm text-white/50">
                     {new Date(donation.created_at).toLocaleString("en-GB")}
@@ -528,6 +685,106 @@ export default function AdminDonationsPage() {
           </div>
         )}
       </div>
+
+      {deleteOneOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
+          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-gradient-to-br from-red-700 via-pink-700 to-purple-800 p-6 text-white shadow-2xl">
+            <h2 className="text-3xl font-black text-yellow-300">
+              Delete this donation?
+            </h2>
+
+            <p className="mt-3 leading-7 text-white/85">
+              You are about to delete{" "}
+              <span className="font-black text-yellow-200">
+                {deleteOneName}
+              </span>
+              . This will remove this one donation/supporter record from the
+              admin portal.
+            </p>
+
+            <div className="mt-4 rounded-2xl border border-red-200/30 bg-red-500/20 p-4 text-sm font-bold text-red-50">
+              This does not need the main admin password, but it cannot be
+              undone.
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                disabled={deletingOne}
+                onClick={() => {
+                  setDeleteOneOpen(false);
+                  setDeleteOneId("");
+                  setDeleteOneName("");
+                }}
+                className="rounded-full bg-white/10 px-6 py-3 font-bold text-white hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={deletingOne}
+                onClick={deleteOneDonation}
+                className="rounded-full bg-red-500 px-6 py-3 font-black text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingOne ? "Deleting..." : "Delete This One"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteAllOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
+          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-gradient-to-br from-red-700 via-pink-700 to-purple-800 p-6 text-white shadow-2xl">
+            <h2 className="text-3xl font-black text-yellow-300">
+              Delete ALL donations?
+            </h2>
+
+            <p className="mt-3 leading-7 text-white/85">
+              This will permanently delete every donation and monthly supporter
+              record from the admin portal. Approved supporter wall stories will
+              also disappear from the website.
+            </p>
+
+            <div className="mt-4 rounded-2xl border border-red-200/30 bg-red-500/20 p-4 text-sm font-bold text-red-50">
+              This action cannot be undone. Enter the main admin delete password
+              to continue.
+            </div>
+
+            <input
+              type="password"
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              placeholder="Main admin delete password"
+              className="mt-5 w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
+            />
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                disabled={deletingAll}
+                onClick={() => {
+                  setDeleteAllOpen(false);
+                  setDeletePassword("");
+                }}
+                className="rounded-full bg-white/10 px-6 py-3 font-bold text-white hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={deletingAll}
+                onClick={deleteAllDonations}
+                className="rounded-full bg-red-500 px-6 py-3 font-black text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingAll ? "Deleting..." : "Delete Everything"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur">
@@ -659,7 +916,8 @@ export default function AdminDonationsPage() {
                   Create Monthly Supporter
                 </h2>
                 <p className="text-sm text-white/70">
-                  Add someone directly to the Monthly Supporter Wall.
+                  Add someone directly to the Monthly Supporter Wall. The amount
+                  is only for the admin donation record.
                 </p>
               </div>
 
@@ -688,6 +946,21 @@ export default function AdminDonationsPage() {
                   setCreateForm({ ...createForm, email: e.target.value })
                 }
                 placeholder="Email optional"
+                className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
+              />
+
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={createForm.amountPounds}
+                onChange={(e) =>
+                  setCreateForm({
+                    ...createForm,
+                    amountPounds: e.target.value,
+                  })
+                }
+                placeholder="Monthly amount for admin, e.g. 5.00"
                 className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
               />
 

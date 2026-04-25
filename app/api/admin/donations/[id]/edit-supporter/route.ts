@@ -24,10 +24,19 @@ export async function PATCH(
     const fullName = String(body.fullName || "").trim();
     const supporterStory = String(body.supporterStory || "").trim();
     const supporterImageUrl = String(body.supporterImageUrl || "").trim();
+    const pronouns = String(body.pronouns || "").trim();
+    const identityLabel = String(body.identityLabel || "").trim();
+
+    if (!id) {
+      return NextResponse.json(
+        { ok: false, error: "Donation ID is required" },
+        { status: 400 }
+      );
+    }
 
     if (!fullName) {
       return NextResponse.json(
-        { ok: false, error: "Name is required" },
+        { ok: false, error: "Supporter name is required" },
         { status: 400 }
       );
     }
@@ -38,6 +47,8 @@ export async function PATCH(
         full_name: fullName,
         supporter_story: supporterStory || null,
         supporter_image_url: supporterImageUrl || null,
+        pronouns: pronouns || null,
+        identity_label: identityLabel || null,
       })
       .eq("id", id)
       .select()
@@ -50,7 +61,10 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json({ ok: true, donation: data });
+    return NextResponse.json({
+      ok: true,
+      donation: data,
+    });
   } catch (error) {
     return NextResponse.json(
       {
