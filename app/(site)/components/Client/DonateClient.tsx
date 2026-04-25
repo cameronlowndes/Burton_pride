@@ -1,13 +1,32 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import CommitteeSection from "../Card/CommitteeSection";
 
 type DonationType = "one_time" | "monthly";
 
+type SupporterWallItem = {
+  id: string;
+  full_name: string | null;
+  supporter_story: string | null;
+  supporter_image_url: string | null;
+  pronouns: string | null;
+  identity_label: string | null;
+};
+
 const oneTimeAmounts = ["£5", "£10", "£20", "£50", "£100", "Custom"];
 const monthlyAmounts = ["£3", "£5", "£10", "£20", "£50", "Custom"];
+
+function makeSupporterSlug(name: string | null, id: string) {
+  const safeName = (name || "supporter")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  return `${safeName}-${id}`;
+}
 
 export default function DonationsContent() {
   const [donationType, setDonationType] = useState<DonationType>("one_time");
@@ -19,14 +38,40 @@ export default function DonationsContent() {
   const [supporterStory, setSupporterStory] = useState("");
   const [supporterImage, setSupporterImage] = useState<File | null>(null);
   const [supporterImagePreview, setSupporterImagePreview] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [supporters, setSupporters] = useState<SupporterWallItem[]>([]);
+  const [supportersLoading, setSupportersLoading] = useState(true);
 
+  const [loading, setLoading] = useState(false);
   const [nameError, setNameError] = useState("");
   const [emailError, setEmailError] = useState("");
   const [amountError, setAmountError] = useState("");
   const [serverError, setServerError] = useState("");
 
   const amounts = donationType === "monthly" ? monthlyAmounts : oneTimeAmounts;
+
+  useEffect(() => {
+    async function loadSupporters() {
+      try {
+        setSupportersLoading(true);
+
+        const res = await fetch("/api/donations/supporter-wall", {
+          cache: "no-store",
+        });
+
+        const data = await res.json();
+
+        if (data.ok) {
+          setSupporters(data.supporters || []);
+        }
+      } catch (error) {
+        console.error("Failed to load supporter wall:", error);
+      } finally {
+        setSupportersLoading(false);
+      }
+    }
+
+    loadSupporters();
+  }, []);
 
   function switchDonationType(type: DonationType) {
     setDonationType(type);
@@ -200,21 +245,14 @@ export default function DonationsContent() {
                   <p>
                     Monthly support gives Burton Pride C.I.C something
                     incredibly valuable: stability, strength, and the ability to
-                    plan for the future with confidence. Instead of relying only
-                    on short-term fundraising close to event season, regular
-                    monthly donations help us build a stronger year-round
-                    foundation for the community we serve.
+                    plan for the future with confidence.
                   </p>
 
                   <p>
                     Burton Pride is a fully community-led, grassroots Pride
                     organisation, created by local people who care deeply about
                     Burton on Trent and the people who live here. We are proud
-                    to be created by the community, for the community. We are
-                    not backed by large corporations, and that is a conscious
-                    choice. It allows us to remain independent, authentic, and
-                    focused on the real needs of our local LGBTQIA+ community
-                    and its allies.
+                    to be created by the community, for the community.
                   </p>
 
                   <p>
@@ -229,31 +267,14 @@ export default function DonationsContent() {
                     Regular monthly support gives us the confidence to organise
                     bigger and better events, improve inclusion, invest in
                     long-term community projects, and continue building
-                    something meaningful that lasts beyond a single day of
-                    celebration.
+                    something meaningful.
                   </p>
 
                   <p>
-                    Even a small monthly donation can make a real difference.
-                    Just a few pounds each month helps create lasting impact,
-                    supports ongoing community work, and keeps Pride accessible,
-                    welcoming, and powered by local people.
-                  </p>
-
-                  <p>
-                    As an ethical Community Interest Company (C.I.C), Burton
-                    Pride does not use donations for personal gain or private
-                    profit. No individual benefits personally from the
-                    generosity of supporters. Every pound is handled responsibly
-                    and reinvested directly back into the community where it
-                    matters most.
-                  </p>
-
-                  <p>
-                    By becoming a monthly supporter, you become part of the
-                    heartbeat of Burton Pride. Your support helps create a
-                    stronger, safer, and more inclusive future for Burton on
-                    Trent.
+                    As an ethical Community Interest Company, Burton Pride does
+                    not use donations for personal gain or private profit. Every
+                    pound is handled responsibly and reinvested directly back
+                    into the community.
                   </p>
 
                   <p className="font-bold text-yellow-300">
@@ -271,59 +292,32 @@ export default function DonationsContent() {
                   <p>
                     Burton Pride C.I.C is a fully community-led, grassroots
                     Pride organisation, created by local people who care deeply
-                    about Burton and the people who live here. It was founded
-                    with a clear purpose: to build something real, inclusive,
-                    and meaningful for the local LGBTQIA+ community and its
-                    allies.
+                    about Burton and the people who live here.
                   </p>
 
                   <p>
                     We are not backed by large corporations, and that is a
                     conscious choice. Burton Pride was built from the ground up
-                    by the community, for the community. Every step of our
-                    journey has been shaped by local voices, volunteers,
-                    supporters, and people who believe Burton deserves a Pride
-                    rooted in authenticity, visibility, and belonging.
+                    by the community, for the community.
                   </p>
 
                   <p>
-                    As an ethical Community Interest Company (C.I.C), Burton
-                    Pride does not use donations for personal gain or private
-                    profit. No individual benefits personally from the
-                    generosity of our supporters. Every donation we receive is
-                    handled responsibly and reinvested directly back into the
-                    community to create positive impact where it matters most.
-                  </p>
-
-                  <p>
-                    Being grassroots means we rely on people power, community
-                    spirit, and genuine support rather than corporate influence.
-                    It allows us to stay independent, listen to the needs of
-                    local people, and make decisions that truly reflect our
-                    community.
+                    Every donation we receive is handled responsibly and
+                    reinvested directly back into the community to create
+                    positive impact where it matters most.
                   </p>
 
                   <p>
                     Every donation helps us fund safer spaces, accessibility
                     improvements, outreach work, wellbeing support,
                     entertainment, education, venue costs, safety measures, and
-                    welcoming Pride events that everyone can enjoy regardless of
-                    background or circumstance.
+                    welcoming Pride events.
                   </p>
 
                   <p>
-                    Our team works tirelessly behind the scenes to deliver
-                    inclusive and uplifting community events, organising
-                    everything from planning and fundraising to logistics and
-                    volunteer coordination. Everything we do is driven by
-                    passion, pride, and purpose — not profit.
-                  </p>
-
-                  <p>
-                    When you donate to Burton Pride, you can do so knowing your
-                    support stays within the community and helps build a
-                    stronger, safer, and more inclusive future for Burton on
-                    Trent.
+                    When you donate to Burton Pride, your support stays within
+                    the community and helps build a stronger, safer, and more
+                    inclusive future for Burton on Trent.
                   </p>
 
                   <p className="font-bold text-yellow-300">
@@ -381,78 +375,72 @@ export default function DonationsContent() {
                 </div>
               )}
 
-              <div>
-                <input
-                  type="text"
-                  placeholder="Full Name *"
-                  value={fullName}
-                  onChange={(e) => {
-                    setFullName(e.target.value);
-                    setNameError("");
-                  }}
-                  className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
-                    nameError
-                      ? "border-red-400 bg-red-500/10"
-                      : "border-white/15 bg-white/10"
-                  }`}
-                />
+              <input
+                type="text"
+                placeholder="Full Name *"
+                value={fullName}
+                onChange={(e) => {
+                  setFullName(e.target.value);
+                  setNameError("");
+                }}
+                className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
+                  nameError
+                    ? "border-red-400 bg-red-500/10"
+                    : "border-white/15 bg-white/10"
+                }`}
+              />
 
-                {nameError && (
-                  <p className="mt-2 text-sm text-red-200">{nameError}</p>
-                )}
-              </div>
+              {nameError && (
+                <p className="text-sm text-red-200">{nameError}</p>
+              )}
 
-              <div>
-                <input
-                  type="email"
-                  placeholder="Email Address *"
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setEmailError("");
-                  }}
-                  className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
-                    emailError
-                      ? "border-red-400 bg-red-500/10"
-                      : "border-white/15 bg-white/10"
-                  }`}
-                />
+              <input
+                type="email"
+                placeholder="Email Address *"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailError("");
+                }}
+                className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
+                  emailError
+                    ? "border-red-400 bg-red-500/10"
+                    : "border-white/15 bg-white/10"
+                }`}
+              />
 
-                {emailError && (
-                  <p className="mt-2 text-sm text-red-200">{emailError}</p>
-                )}
-              </div>
+              {emailError && (
+                <p className="text-sm text-red-200">{emailError}</p>
+              )}
 
-              <div>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder={
-                    donationType === "monthly"
-                      ? "Monthly Donation Amount (£)"
-                      : "Donation Amount (£)"
-                  }
-                  value={
-                    selectedAmount === "Custom"
-                      ? customAmount
-                      : selectedAmount.replace("£", "")
-                  }
-                  onChange={(e) => {
-                    setSelectedAmount("Custom");
-                    setCustomAmount(e.target.value);
-                    setAmountError("");
-                  }}
-                  className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
-                    amountError
-                      ? "border-red-400 bg-red-500/10"
-                      : "border-white/15 bg-white/10"
-                  }`}
-                />
+              <input
+                type="number"
+                min="1"
+                placeholder={
+                  donationType === "monthly"
+                    ? "Monthly Donation Amount (£)"
+                    : "Donation Amount (£)"
+                }
+                value={
+                  selectedAmount === "Custom"
+                    ? customAmount
+                    : selectedAmount.replace("£", "")
+                }
+                onChange={(e) => {
+                  setSelectedAmount("Custom");
+                  setCustomAmount(e.target.value);
+                  setAmountError("");
+                }}
+                className={`w-full rounded-2xl border px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none ${
+                  amountError
+                    ? "border-red-400 bg-red-500/10"
+                    : "border-white/15 bg-white/10"
+                }`}
+              />
 
-                {amountError && (
-                  <p className="mt-2 text-sm text-red-200">{amountError}</p>
-                )}
-              </div>
+              {amountError && (
+                <p className="text-sm text-red-200">{amountError}</p>
+              )}
 
               <div className="grid grid-cols-3 gap-3">
                 {amounts.map((item) => {
@@ -557,131 +545,120 @@ export default function DonationsContent() {
 
         <section className="mt-16 pb-24">
           <h2 className="mb-8 text-center text-4xl font-black text-black">
-            Monthly Supporter Wall Preview
+            Monthly Supporter Wall
           </h2>
 
           <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
-            <div className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md">
-              <div className="relative h-[300px] w-full overflow-hidden bg-purple-900/40">
-                {supporterImagePreview ? (
-                  <Image
-                    src={supporterImagePreview}
-                    alt="Supporter preview"
-                    fill
-                    className="object-cover"
-                  />
-                ) : (
-                  <Image
-                    src="/image/Logo.png"
-                    alt="Burton Pride supporter"
-                    fill
-                    className="object-contain p-12"
-                  />
-                )}
-              </div>
+            {(donationType === "monthly" ||
+              fullName ||
+              supporterStory ||
+              supporterImagePreview) && (
+              <div className="overflow-hidden rounded-[30px] border border-yellow-300/40 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md">
+                <div className="relative h-[300px] w-full overflow-hidden bg-purple-900/40">
+                  {supporterImagePreview ? (
+                    <Image
+                      src={supporterImagePreview}
+                      alt="Supporter preview"
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <Image
+                      src="/image/Logo.png"
+                      alt="Burton Pride supporter"
+                      fill
+                      className="object-contain p-12"
+                    />
+                  )}
+                </div>
 
-              <div className="space-y-4 p-5 text-white">
-                <div>
-                  <h3 className="text-2xl font-bold">
-                    {fullName || "Your Name"}
-                  </h3>
+                <div className="space-y-4 p-5 text-white">
+                  <div>
+                    <h3 className="text-2xl font-bold">
+                      {fullName || "Your Name"}
+                    </h3>
 
-                  <p className="mt-1 text-base font-semibold text-white/90">
-                    Monthly Pride Supporter
+                    <p className="mt-1 text-base font-semibold text-yellow-200">
+                      Monthly Pride Supporter Preview
+                    </p>
+                  </div>
+
+                  <p className="text-sm leading-6 text-white/75">
+                    {supporterStory ||
+                      "Your supporter story preview will appear here if you choose to share one."}
                   </p>
                 </div>
-
-                <div className="flex flex-col gap-3 pt-2">
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full border border-white/60 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                  >
-                    View Profile
-                  </button>
-
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
-                  >
-                    Your Story Preview
-                  </button>
-                </div>
               </div>
-            </div>
+            )}
 
-            <div className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md">
-              <div className="relative h-[300px] w-full overflow-hidden bg-purple-900/40">
-                <Image
-                  src="/image/Logo.png"
-                  alt="Community Ally"
-                  fill
-                  className="object-contain p-12"
-                />
+            {supportersLoading && (
+              <div className="rounded-[30px] border border-white/20 bg-white/10 p-8 text-center text-white/80 backdrop-blur-md md:col-span-2 xl:col-span-3">
+                Loading supporter wall...
               </div>
+            )}
 
-              <div className="space-y-4 p-5 text-white">
-                <div>
-                  <h3 className="text-2xl font-bold">Community Ally</h3>
-
-                  <p className="mt-1 text-base font-semibold text-white/90">
-                    Monthly Pride Supporter
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-3 pt-2">
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full border border-white/60 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                  >
-                    View Profile
-                  </button>
-
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
-                  >
-                    Example Story
-                  </button>
-                </div>
+            {!supportersLoading && supporters.length === 0 && (
+              <div className="rounded-[30px] border border-white/20 bg-white/10 p-8 text-center text-white/80 backdrop-blur-md md:col-span-2 xl:col-span-3">
+                No approved monthly supporters are showing yet.
               </div>
-            </div>
+            )}
 
-            <div className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md">
-              <div className="relative h-[300px] w-full overflow-hidden bg-purple-900/40">
-                <Image
-                  src="/image/Logo.png"
-                  alt="Local Supporter"
-                  fill
-                  className="object-contain p-12"
-                />
-              </div>
+            {!supportersLoading &&
+              supporters.map((supporter) => (
+                <div
+                  key={supporter.id}
+                  className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md"
+                >
+                  <div className="relative h-[300px] w-full overflow-hidden bg-purple-900/40">
+                    <Image
+                      src={supporter.supporter_image_url || "/image/Logo.png"}
+                      alt={supporter.full_name || "Burton Pride supporter"}
+                      fill
+                      className={
+                        supporter.supporter_image_url
+                          ? "object-cover"
+                          : "object-contain p-12"
+                      }
+                    />
+                  </div>
 
-              <div className="space-y-4 p-5 text-white">
-                <div>
-                  <h3 className="text-2xl font-bold">Local Supporter</h3>
+                  <div className="space-y-4 p-5 text-white">
+                    <div>
+                      <h3 className="text-2xl font-bold">
+                        {supporter.full_name || "Community Supporter"}
+                      </h3>
 
-                  <p className="mt-1 text-base font-semibold text-white/90">
-                    Monthly Pride Supporter
-                  </p>
+                      <p className="mt-1 text-base font-semibold text-white/90">
+                        Monthly Pride Supporter
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {supporter.pronouns && (
+                          <span className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold text-white">
+                            {supporter.pronouns}
+                          </span>
+                        )}
+
+                        {supporter.identity_label && (
+                          <span className="rounded-full border border-yellow-300/30 bg-yellow-300/20 px-4 py-2 text-xs font-bold text-yellow-100">
+                            {supporter.identity_label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <Link
+                      href={`/DonateToUs/${makeSupporterSlug(
+                        supporter.full_name,
+                        supporter.id
+                      )}`}
+                      className="inline-flex w-full items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-pink-700"
+                    >
+                      View Story
+                    </Link>
+                  </div>
                 </div>
-
-                <div className="flex flex-col gap-3 pt-2">
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full border border-white/60 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
-                  >
-                    View Profile
-                  </button>
-
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
-                  >
-                    Example Story
-                  </button>
-                </div>
-              </div>
-            </div>
+              ))}
           </div>
 
           <p className="mt-6 text-center text-sm font-semibold text-white/80">
