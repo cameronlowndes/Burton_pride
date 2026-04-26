@@ -12,6 +12,18 @@ type Props = {
   }>;
 };
 
+type Supporter = {
+  id: string;
+  full_name: string | null;
+  supporter_story: string | null;
+  supporter_image_url: string | null;
+  supporter_story_status: string | null;
+  supporter_wall_approved: boolean | null;
+  donation_type: string | null;
+  pronouns: string | null;
+  identity_label: string | null;
+};
+
 function makeSlug(name: string | null, id: string) {
   const safeName = (name || "supporter")
     .toLowerCase()
@@ -34,12 +46,15 @@ export default async function StoryPage({ params }: Props) {
       supporter_image_url,
       supporter_story_status,
       supporter_wall_approved,
-      donation_type
+      donation_type,
+      pronouns,
+      identity_label
     `
     )
     .eq("donation_type", "monthly")
     .eq("supporter_story_status", "approved")
-    .eq("supporter_wall_approved", true);
+    .eq("supporter_wall_approved", true)
+    .returns<Supporter[]>();
 
   if (error || !data) notFound();
 
@@ -53,9 +68,11 @@ export default async function StoryPage({ params }: Props) {
     .split("\n")
     .filter(Boolean);
 
+  const supporterImage = supporter.supporter_image_url || "/image/Logo.png";
+  const hasCustomImage = Boolean(supporter.supporter_image_url);
+
   return (
     <main className="relative min-h-screen overflow-hidden text-white">
-      {/* DESKTOP: normal Donate page behind + floating window */}
       <div className="hidden lg:block">
         <div className="pointer-events-none fixed inset-0 select-none overflow-hidden blur-md brightness-50">
           <div className="min-h-screen overflow-hidden">
@@ -77,12 +94,16 @@ export default async function StoryPage({ params }: Props) {
             <div className="flex flex-col items-center text-center">
               <div className="h-32 w-32 overflow-hidden rounded-full border-4 border-white/45 bg-white/20 shadow-xl">
                 <Image
-                  src={supporter.supporter_image_url || "/image/Logo.png"}
+                  src={supporterImage}
                   alt={supporter.full_name || "Supporter"}
                   width={180}
                   height={180}
                   unoptimized
-                  className="h-full w-full object-cover"
+                  className={
+                    hasCustomImage
+                      ? "h-full w-full object-cover"
+                      : "h-full w-full object-contain p-5"
+                  }
                 />
               </div>
 
@@ -95,13 +116,19 @@ export default async function StoryPage({ params }: Props) {
               </p>
 
               <div className="mt-5 flex flex-wrap justify-center gap-3">
-                <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
-                  Burton Pride Supporter
-                </span>
+              
 
-                <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
-                  Community Ally
-                </span>
+                {supporter.pronouns && (
+                  <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
+                    {supporter.pronouns}
+                  </span>
+                )}
+
+                {supporter.identity_label && (
+                  <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
+                    {supporter.identity_label}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -114,22 +141,26 @@ export default async function StoryPage({ params }: Props) {
                 <p key={index}>{paragraph}</p>
               ))}
             </div>
+
           </section>
         </div>
       </div>
 
-      {/* MOBILE: full profile page */}
       <div className="block min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 px-3 py-8 lg:hidden">
         <section className="mx-auto overflow-hidden rounded-[28px] border border-white/20 bg-white/15 shadow-2xl backdrop-blur-xl">
           <div className="px-6 pb-10 pt-10 text-center">
             <div className="mx-auto h-36 w-36 overflow-hidden rounded-full border-4 border-white/50 bg-white/20 shadow-xl">
               <Image
-                src={supporter.supporter_image_url || "/image/Logo.png"}
+                src={supporterImage}
                 alt={supporter.full_name || "Supporter"}
                 width={180}
                 height={180}
                 unoptimized
-                className="h-full w-full object-cover"
+                className={
+                  hasCustomImage
+                    ? "h-full w-full object-cover"
+                    : "h-full w-full object-contain p-5"
+                }
               />
             </div>
 
@@ -141,10 +172,22 @@ export default async function StoryPage({ params }: Props) {
               Monthly Pride Supporter
             </p>
 
-            <div className="mt-5 flex justify-center">
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
               <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
                 Burton Pride Supporter
               </span>
+
+              {supporter.pronouns && (
+                <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
+                  {supporter.pronouns}
+                </span>
+              )}
+
+              {supporter.identity_label && (
+                <span className="rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold">
+                  {supporter.identity_label}
+                </span>
+              )}
             </div>
           </div>
 

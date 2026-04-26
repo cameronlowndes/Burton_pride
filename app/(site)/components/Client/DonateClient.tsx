@@ -38,6 +38,10 @@ export default function DonationsContent() {
   const [supporterStory, setSupporterStory] = useState("");
   const [supporterImage, setSupporterImage] = useState<File | null>(null);
   const [supporterImagePreview, setSupporterImagePreview] = useState("");
+
+  const [pronouns, setPronouns] = useState("");
+  const [identityLabel, setIdentityLabel] = useState("");
+
   const [supporters, setSupporters] = useState<SupporterWallItem[]>([]);
   const [supportersLoading, setSupportersLoading] = useState(true);
 
@@ -87,6 +91,8 @@ export default function DonationsContent() {
       setSupporterStory("");
       setSupporterImage(null);
       setSupporterImagePreview("");
+      setPronouns("");
+      setIdentityLabel("");
     }
   }
 
@@ -114,6 +120,8 @@ export default function DonationsContent() {
     setSupporterStory(
       "I support Burton Pride because everyone deserves to feel safe, seen, celebrated, and included."
     );
+    setPronouns("he/him");
+    setIdentityLabel("Gay");
     setDonationType("monthly");
     setSelectedAmount("£5");
     setCustomAmount("5");
@@ -171,6 +179,8 @@ export default function DonationsContent() {
           selectedAmount,
           customAmount,
           donationType,
+          pronouns,
+          identityLabel,
         }),
       });
 
@@ -243,39 +253,42 @@ export default function DonationsContent() {
 
                 <div className="mt-7 space-y-6 text-xl leading-10 text-white/90">
                   <p>
-                    Monthly support gives Burton Pride C.I.C something
-                    incredibly valuable: stability, strength, and the ability to
-                    plan for the future with confidence.
+                   Monthly support gives Burton Pride C.I.C something incredibly valuable:
+                    stability, strength, and the ability to plan for the future with 
+                    confidence. Instead of relying only on short-term fundraising 
+                    close to event season, regular monthly donations help us build a 
+                    stronger year-round foundation for the community we serve.
                   </p>
 
                   <p>
-                    Burton Pride is a fully community-led, grassroots Pride
-                    organisation, created by local people who care deeply about
-                    Burton on Trent and the people who live here. We are proud
-                    to be created by the community, for the community.
+                   Burton Pride is a fully community-led, grassroots Pride organisation,
+                    created by local people who care deeply about Burton on Trent and the 
+                    people who live here. We are proud to be created by the community, for the community. 
+                    We are not backed by large corporations, and that is a conscious choice. It allows us to remain independent, authentic,
+                    and focused on the real needs of our local LGBTQIA+ community and its allies.
                   </p>
 
                   <p>
-                    Every monthly donation helps fund safer spaces,
-                    accessibility improvements, outreach work, wellbeing
-                    support, community events, education, entertainment,
-                    insurance, venue costs, equipment, and the practical
-                    essentials needed to deliver Pride successfully.
+                    Every monthly donation helps fund safer spaces, accessibility improvements, 
+                    outreach work, wellbeing support, community events, education, entertainment, 
+                    insurance, venue costs, equipment, and the practical essentials needed to deliver Pride successfully.
                   </p>
 
-                  <p>
-                    Regular monthly support gives us the confidence to organise
-                    bigger and better events, improve inclusion, invest in
-                    long-term community projects, and continue building
-                    something meaningful.
-                  </p>
+                  <p>Regular monthly support gives us the confidence to organise bigger and better events,
+                     improve inclusion, invest in long-term community projects, and continue building 
+                     something meaningful that lasts beyond a single day of celebration.</p>
 
-                  <p>
-                    As an ethical Community Interest Company, Burton Pride does
-                    not use donations for personal gain or private profit. Every
-                    pound is handled responsibly and reinvested directly back
-                    into the community.
-                  </p>
+                     <p>Even a small monthly donation can make a real difference.
+                       Just a few pounds each month helps create lasting impact, 
+                       supports ongoing community work, and keeps Pride accessible, 
+                       welcoming, and powered by local people.</p>
+
+                  <p>As an ethical Community Interest Company (C.I.C), Burton Pride does not use donations
+                     for personal gain or private profit. No individual benefits personally from the generosity of supporters. 
+                     Every pound is handled responsibly and reinvested directly back into the community where it matters most.</p>
+
+                    <p>By becoming a monthly supporter, you become part of the heartbeat of Burton Pride. 
+                      Your support helps create a stronger, safer, and more inclusive future for Burton on Trent.</p>
 
                   <p className="font-bold text-yellow-300">
                     Small monthly support. Big community impact.
@@ -290,35 +303,42 @@ export default function DonationsContent() {
 
                 <div className="mt-7 space-y-6 text-xl leading-10 text-white/90">
                   <p>
-                    Burton Pride C.I.C is a fully community-led, grassroots
-                    Pride organisation, created by local people who care deeply
-                    about Burton and the people who live here.
+                    Burton Pride C.I.C is a fully community-led, grassroots 
+                    Pride organisation, created by local people who care deeply about Burton and
+                     the people who live here. It was founded with a clear purpose: to build something real, 
+                     inclusive, and meaningful for the local LGBTQIA+ community and its allies.
                   </p>
 
                   <p>
-                    We are not backed by large corporations, and that is a
-                    conscious choice. Burton Pride was built from the ground up
-                    by the community, for the community.
+                    We are not backed by large corporations, and that is a conscious choice. 
+                    Burton Pride was built from the ground up by the community, for the community. 
+                    Every step of our journey has been shaped by local voices, volunteers, supporters, 
+                    and people who believe Burton deserves a Pride rooted in authenticity, visibility, and belonging.
                   </p>
 
                   <p>
-                    Every donation we receive is handled responsibly and
-                    reinvested directly back into the community to create
-                    positive impact where it matters most.
+                   As an ethical Community Interest Company (C.I.C), Burton Pride does not use donations for personal
+                    gain or private profit. No individual benefits personally from the generosity of our supporters.
+                     Every donation we receive is handled responsibly and reinvested directly back into the community 
+                     to create positive impact where it matters most.
                   </p>
 
-                  <p>
-                    Every donation helps us fund safer spaces, accessibility
-                    improvements, outreach work, wellbeing support,
-                    entertainment, education, venue costs, safety measures, and
-                    welcoming Pride events.
-                  </p>
+                  <p>Being grassroots means we rely on people power, community spirit, and genuine support rather 
+                    than corporate influence. It allows us to stay independent, listen to the needs of local people,
+                     and make decisions that truly reflect our community.</p>
 
                   <p>
-                    When you donate to Burton Pride, your support stays within
-                    the community and helps build a stronger, safer, and more
-                    inclusive future for Burton on Trent.
-                  </p>
+                  Every donation helps us fund safer spaces, accessibility improvements,
+                   outreach work, wellbeing support, entertainment, education, venue costs,
+                   safety measures, and welcoming Pride events that everyone can enjoy 
+                   regardless of background or circumstance.</p> 
+
+                   <p>Our team works tirelessly behind the scenes to deliver inclusive and uplifting 
+                    community events, organising everything from planning and fundraising to 
+                    logistics and volunteer coordination. Everything we do is driven by passion, 
+                    pride, and purpose — not profit.</p>
+
+                    <p>When you donate to Burton Pride, you can do so knowing your support stays within the community and helps build a stronger, safer, and more inclusive future for Burton on Trent.</p>
 
                   <p className="font-bold text-yellow-300">
                     The people. The heart. The community spirit.
@@ -368,13 +388,6 @@ export default function DonationsContent() {
                 </button>
               </div>
 
-              {donationType === "monthly" && (
-                <div className="rounded-2xl border border-yellow-300/40 bg-yellow-300/10 px-5 py-4 text-sm font-semibold text-yellow-100">
-                  You are setting up a monthly donation to support Burton Pride
-                  every month.
-                </div>
-              )}
-
               <input
                 type="text"
                 placeholder="Full Name *"
@@ -390,9 +403,7 @@ export default function DonationsContent() {
                 }`}
               />
 
-              {nameError && (
-                <p className="text-sm text-red-200">{nameError}</p>
-              )}
+              {nameError && <p className="text-sm text-red-200">{nameError}</p>}
 
               <input
                 type="email"
@@ -473,7 +484,7 @@ export default function DonationsContent() {
               </div>
 
               <textarea
-                placeholder="Message of support (optional)"
+                placeholder="Message of support optional"
                 rows={5}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
@@ -482,8 +493,24 @@ export default function DonationsContent() {
 
               {donationType === "monthly" && (
                 <div className="space-y-4">
+                  <input
+                    type="text"
+                    placeholder="Pronouns optional e.g. he/him, she/her, they/them"
+                    value={pronouns}
+                    onChange={(e) => setPronouns(e.target.value)}
+                    className="w-full rounded-2xl border border-yellow-300/40 bg-white/10 px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none"
+                  />
+
+                  <input
+                    type="text"
+                    placeholder="How do you identify? optional e.g. Gay, Trans, Non-binary, Ally"
+                    value={identityLabel}
+                    onChange={(e) => setIdentityLabel(e.target.value)}
+                    className="w-full rounded-2xl border border-yellow-300/40 bg-white/10 px-5 py-4 text-lg text-white placeholder:text-white/50 outline-none"
+                  />
+
                   <textarea
-                    placeholder="Your supporter story (optional) — why do you support Burton Pride?"
+                    placeholder="Your supporter story optional — why do you support Burton Pride?"
                     rows={5}
                     value={supporterStory}
                     onChange={(e) => setSupporterStory(e.target.value)}
@@ -509,11 +536,6 @@ export default function DonationsContent() {
                       approval.
                     </p>
                   </div>
-
-                  <p className="text-sm text-white/70">
-                    If approved, your story may appear on the Monthly Supporter
-                    Wall.
-                  </p>
                 </div>
               )}
 
@@ -581,6 +603,20 @@ export default function DonationsContent() {
                     <p className="mt-1 text-base font-semibold text-yellow-200">
                       Monthly Pride Supporter Preview
                     </p>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {pronouns && (
+                        <span className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold text-white">
+                          {pronouns}
+                        </span>
+                      )}
+
+                      {identityLabel && (
+                        <span className="rounded-full border border-yellow-300/30 bg-yellow-300/20 px-4 py-2 text-xs font-bold text-yellow-100">
+                          {identityLabel}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-sm leading-6 text-white/75">

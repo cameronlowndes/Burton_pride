@@ -13,6 +13,7 @@ type Donation = {
   amount_pence: number | null;
   currency: string | null;
   status: string | null;
+  subscription_status?: string | null;
   supporter_story: string | null;
   supporter_image_url: string | null;
   supporter_story_status: string | null;
@@ -20,6 +21,8 @@ type Donation = {
   pronouns: string | null;
   identity_label: string | null;
 };
+
+type DonationFilter = "all" | "monthly" | "one_time";
 
 type EditingDonation = {
   id: string;
@@ -71,6 +74,7 @@ const emptyCreateForm: CreateForm = {
 
 export default function AdminDonationsPage() {
   const [donations, setDonations] = useState<Donation[]>([]);
+  const [donationFilter, setDonationFilter] = useState<DonationFilter>("all");
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
@@ -90,6 +94,26 @@ export default function AdminDonationsPage() {
   const [deleteOneId, setDeleteOneId] = useState("");
   const [deleteOneName, setDeleteOneName] = useState("");
   const [deletingOne, setDeletingOne] = useState(false);
+
+  const [cancelSubOpen, setCancelSubOpen] = useState(false);
+  const [cancelSubId, setCancelSubId] = useState("");
+  const [cancelSubName, setCancelSubName] = useState("");
+  const [cancelSubPassword, setCancelSubPassword] = useState("");
+  const [cancellingSub, setCancellingSub] = useState(false);
+
+  const monthlyCount = donations.filter(
+    (donation) => donation.donation_type === "monthly"
+  ).length;
+
+  const oneTimeCount = donations.filter(
+    (donation) => donation.donation_type !== "monthly"
+  ).length;
+
+  const filteredDonations = donations.filter((donation) => {
+    if (donationFilter === "all") return true;
+    if (donationFilter === "monthly") return donation.donation_type === "monthly";
+    return donation.donation_type !== "monthly";
+  });
 
   async function loadDonations() {
     try {
@@ -319,6 +343,61 @@ export default function AdminDonationsPage() {
     setDeleteOneOpen(true);
   }
 
+  function openCancelSubscription(donation: Donation) {
+    setError("");
+    setSuccess("");
+    setCancelSubId(donation.id);
+    setCancelSubName(donation.full_name || "this supporter");
+    setCancelSubPassword("");
+    setCancelSubOpen(true);
+  }
+
+  async function cancelSubscription() {
+    try {
+      if (!cancelSubId) return;
+
+      if (!cancelSubPassword.trim()) {
+        setError("Main admin password is required");
+        return;
+      }
+
+      setCancellingSub(true);
+      setError("");
+      setSuccess("");
+
+      const res = await fetch(
+        `/api/admin/donations/${cancelSubId}/cancel-subscription`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            password: cancelSubPassword,
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        setError(data.error || "Failed to cancel subscription");
+        return;
+      }
+
+      setCancelSubOpen(false);
+      setCancelSubId("");
+      setCancelSubName("");
+      setCancelSubPassword("");
+      setSuccess("Monthly subscription cancelled successfully.");
+      await loadDonations();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to cancel subscription"
+      );
+    } finally {
+      setCancellingSub(false);
+    }
+  }
+
   function handleEditImageUpload(file: File | null) {
     if (!file || !editing) return;
 
@@ -367,7 +446,8 @@ export default function AdminDonationsPage() {
 
           <p className="mt-2 text-white/70">
             View donations, monthly supporters, approve supporter wall stories,
-            create supporters, and edit supporter details.
+            create supporters, edit supporter details, and cancel Stripe monthly
+            subscriptions.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-3">
@@ -376,7 +456,7 @@ export default function AdminDonationsPage() {
               onClick={() => setCreating(true)}
               className="rounded-full bg-yellow-300 px-6 py-3 font-black text-black transition hover:bg-yellow-200"
             >
-              Create Monthly Supporter
+              Create Monthly Supporter Wall
             </button>
 
             <button
@@ -392,12 +472,49 @@ export default function AdminDonationsPage() {
             </button>
           </div>
 
+          <div className="mt-5 flex flex-wrap gap-3 rounded-3xl border border-white/10 bg-white/10 p-3 backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setDonationFilter("all")}
+              className={`rounded-full px-6 py-3 font-black transition ${
+                donationFilter === "all"
+                  ? "bg-white text-fuchsia-700 shadow-lg"
+                  : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              All Donations ({donations.length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDonationFilter("monthly")}
+              className={`rounded-full px-6 py-3 font-black transition ${
+                donationFilter === "monthly"
+                  ? "bg-yellow-300 text-black shadow-lg"
+                  : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              Monthly Supporters ({monthlyCount})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDonationFilter("one_time")}
+              className={`rounded-full px-6 py-3 font-black transition ${
+                donationFilter === "one_time"
+                  ? "bg-pink-500 text-white shadow-lg"
+                  : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              One-Time Donations ({oneTimeCount})
+            </button>
+          </div>
+
           <div className="mt-5 rounded-3xl border border-red-300/30 bg-red-500/10 p-5">
             <h2 className="text-lg font-black text-red-100">Danger Zone</h2>
             <p className="mt-1 text-sm leading-6 text-red-50/80">
-              Use Delete All only if you want to remove every 
-              supporter wall submission. Deleting one supporter does not need the
-              main admin password.
+              Cancelling a subscription stops future Stripe monthly payments.
+              Deleting a donation only removes the record from your admin portal.
             </p>
           </div>
         </div>
@@ -422,7 +539,7 @@ export default function AdminDonationsPage() {
 
         {!loading && !error && (
           <div className="space-y-5">
-            {donations.map((donation) => {
+            {filteredDonations.map((donation) => {
               const isApproved =
                 donation.supporter_story_status === "approved" &&
                 donation.supporter_wall_approved === true;
@@ -434,12 +551,17 @@ export default function AdminDonationsPage() {
 
               const isUpdating = updatingId === donation.id;
 
+              const isMonthly = donation.donation_type === "monthly";
+              const isCancelled =
+                donation.subscription_status === "cancelled" ||
+                donation.status === "cancelled";
+
               return (
                 <div
                   key={donation.id}
                   className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur"
                 >
-                  <div className="grid gap-4 lg:grid-cols-4">
+                  <div className="grid gap-4 lg:grid-cols-5">
                     <div>
                       <p className="text-sm text-white/50">Name</p>
                       <p className="font-bold">
@@ -464,9 +586,20 @@ export default function AdminDonationsPage() {
                     <div>
                       <p className="text-sm text-white/50">Type</p>
                       <p className="font-bold">
-                        {donation.donation_type === "monthly"
-                          ? "Monthly"
-                          : "One-Time"}
+                        {isMonthly ? "Monthly" : "One-Time"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-sm text-white/50">Payment Status</p>
+                      <p
+                        className={`font-bold ${
+                          isCancelled ? "text-red-200" : "text-green-200"
+                        }`}
+                      >
+                        {isCancelled
+                          ? "Cancelled"
+                          : donation.status || "Active / paid"}
                       </p>
                     </div>
                   </div>
@@ -494,7 +627,44 @@ export default function AdminDonationsPage() {
                     </div>
                   )}
 
-                  {donation.donation_type === "monthly" &&
+                  {isMonthly && (
+                    <div className="mt-5 flex flex-wrap gap-3 rounded-2xl border border-orange-300/30 bg-orange-500/10 p-4">
+                      <div className="w-full">
+                        <p className="text-sm font-black text-orange-100">
+                          Monthly Subscription Controls
+                        </p>
+                        <p className="mt-1 text-sm text-white/70">
+                          Use this only when the supporter asks to stop their
+                          monthly payment.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isCancelled}
+                        onClick={() => openCancelSubscription(donation)}
+                        className={`rounded-full px-5 py-3 font-bold text-white transition ${
+                          isCancelled
+                            ? "cursor-not-allowed bg-red-900/60 opacity-60"
+                            : "bg-orange-500 hover:bg-orange-600"
+                        }`}
+                      >
+                        {isCancelled
+                          ? "Subscription Cancelled"
+                          : "Cancel Subscription"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openDeleteOne(donation)}
+                        className="rounded-full bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
+                      >
+                        Delete Record
+                      </button>
+                    </div>
+                  )}
+
+                  {isMonthly &&
                     (donation.supporter_story ||
                       donation.supporter_image_url) && (
                       <div className="mt-5 rounded-2xl border border-yellow-300/30 bg-yellow-300/10 p-4">
@@ -640,14 +810,6 @@ export default function AdminDonationsPage() {
                                 Edit Details
                               </button>
 
-                              <button
-                                type="button"
-                                onClick={() => openDeleteOne(donation)}
-                                className="rounded-full bg-red-600 px-5 py-3 font-bold text-white transition hover:bg-red-700"
-                              >
-                                Delete
-                              </button>
-
                               <span className="rounded-full bg-white/10 px-5 py-3 text-sm font-bold">
                                 Status:{" "}
                                 {donation.supporter_story_status || "pending"}
@@ -658,7 +820,7 @@ export default function AdminDonationsPage() {
                       </div>
                     )}
 
-                  {donation.donation_type !== "monthly" && (
+                  {!isMonthly && (
                     <div className="mt-5 flex flex-wrap gap-3">
                       <button
                         type="button"
@@ -677,14 +839,65 @@ export default function AdminDonationsPage() {
               );
             })}
 
-            {!donations.length && (
+            {!filteredDonations.length && (
               <div className="rounded-3xl bg-white/10 p-6 text-center">
-                No donations found yet.
+                No donations found for this filter.
               </div>
             )}
           </div>
         )}
       </div>
+
+      {cancelSubOpen && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
+          <div className="w-full max-w-xl rounded-3xl border border-orange-300/30 bg-gradient-to-br from-orange-700 via-red-700 to-purple-800 p-6 text-white shadow-2xl">
+            <h2 className="text-3xl font-black text-yellow-300">
+              Cancel monthly subscription?
+            </h2>
+
+            <p className="mt-3 leading-7 text-white/85">
+              You are about to cancel the Stripe monthly subscription for{" "}
+              <span className="font-black text-yellow-200">
+                {cancelSubName}
+              </span>
+              . This will stop future monthly payments.
+            </p>
+
+            <input
+              type="password"
+              value={cancelSubPassword}
+              onChange={(e) => setCancelSubPassword(e.target.value)}
+              placeholder="Main admin password"
+              className="mt-5 w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
+            />
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                disabled={cancellingSub}
+                onClick={() => {
+                  setCancelSubOpen(false);
+                  setCancelSubId("");
+                  setCancelSubName("");
+                  setCancelSubPassword("");
+                }}
+                className="rounded-full bg-white/10 px-6 py-3 font-bold text-white hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={cancellingSub}
+                onClick={cancelSubscription}
+                className="rounded-full bg-orange-500 px-6 py-3 font-black text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancellingSub ? "Cancelling..." : "Cancel Subscription"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteOneOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
@@ -698,14 +911,8 @@ export default function AdminDonationsPage() {
               <span className="font-black text-yellow-200">
                 {deleteOneName}
               </span>
-              . This will remove this one donation/supporter record from the
-              admin portal.
+              . This cannot be undone.
             </p>
-
-            <div className="mt-4 rounded-2xl border border-red-200/30 bg-red-500/20 p-4 text-sm font-bold text-red-50">
-              This does not need the main admin password, but it cannot be
-              undone.
-            </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <button
@@ -743,14 +950,8 @@ export default function AdminDonationsPage() {
 
             <p className="mt-3 leading-7 text-white/85">
               This will permanently delete every donation and monthly supporter
-              record from the admin portal. Approved supporter wall stories will
-              also disappear from the website.
+              record from the admin portal.
             </p>
-
-            <div className="mt-4 rounded-2xl border border-red-200/30 bg-red-500/20 p-4 text-sm font-bold text-red-50">
-              This action cannot be undone. Enter the main admin delete password
-              to continue.
-            </div>
 
             <input
               type="password"
@@ -824,7 +1025,7 @@ export default function AdminDonationsPage() {
                   setEditing({ ...editing, pronouns: e.target.value })
                 }
                 className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
-                placeholder="Pronouns, e.g. he/him, she/her, they/them"
+                placeholder="Pronouns"
               />
 
               <select
@@ -916,8 +1117,7 @@ export default function AdminDonationsPage() {
                   Create Monthly Supporter
                 </h2>
                 <p className="text-sm text-white/70">
-                  Add someone directly to the Monthly Supporter Wall. The amount
-                  is only for the admin donation record.
+                  Add someone directly to the Monthly Supporter Wall.
                 </p>
               </div>
 
@@ -972,7 +1172,7 @@ export default function AdminDonationsPage() {
                     pronouns: e.target.value,
                   })
                 }
-                placeholder="Pronouns, e.g. he/him, she/her, they/them"
+                placeholder="Pronouns"
                 className="w-full rounded-2xl border border-white/15 bg-white/10 px-5 py-4 text-white outline-none placeholder:text-white/50"
               />
 
