@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import CommitteeSection from "../Card/CommitteeSection";
 
 type DonationType = "one_time" | "monthly";
@@ -29,11 +30,18 @@ function makeSupporterSlug(name: string | null, id: string) {
 }
 
 export default function DonationsContent() {
-  const [donationType, setDonationType] = useState<DonationType>("one_time");
-  const [selectedAmount, setSelectedAmount] = useState<string>("£10");
+  const searchParams = useSearchParams();
+  const startMonthly = searchParams.get("type") === "monthly";
+
+  const [donationType, setDonationType] = useState<DonationType>(
+    startMonthly ? "monthly" : "one_time"
+  );
+  const [selectedAmount, setSelectedAmount] = useState<string>(
+    startMonthly ? "£3" : "£10"
+  );
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [customAmount, setCustomAmount] = useState("10");
+  const [customAmount, setCustomAmount] = useState(startMonthly ? "3" : "10");
   const [message, setMessage] = useState("");
   const [supporterStory, setSupporterStory] = useState("");
   const [supporterImage, setSupporterImage] = useState<File | null>(null);
@@ -83,8 +91,8 @@ export default function DonationsContent() {
     setAmountError("");
 
     if (type === "monthly") {
-      setSelectedAmount("£5");
-      setCustomAmount("5");
+      setSelectedAmount("£3");
+      setCustomAmount("3");
     } else {
       setSelectedAmount("£10");
       setCustomAmount("10");
@@ -123,8 +131,8 @@ export default function DonationsContent() {
     setPronouns("he/him");
     setIdentityLabel("Gay");
     setDonationType("monthly");
-    setSelectedAmount("£5");
-    setCustomAmount("5");
+    setSelectedAmount("£3");
+    setCustomAmount("3");
     setNameError("");
     setEmailError("");
     setAmountError("");

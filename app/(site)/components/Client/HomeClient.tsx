@@ -17,7 +17,10 @@ export default function HomeClient() {
       className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white"
       initial="hidden"
       animate="visible"
-      variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.12 } } }}
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.12 } },
+      }}
     >
       <div className="px-5 py-10 sm:px-10 sm:py-14 lg:px-16">
         {/* HERO */}
@@ -61,9 +64,10 @@ export default function HomeClient() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 }}
           >
-            At Burton Pride, we believe in the power of community. We are proud to be
-            grassroots-led and community-driven. We are here for everyone in the LGBTQIA+
-            community, celebrating diversity, inclusion, and equality for all.
+            At Burton Pride, we believe in the power of community. We are proud
+            to be grassroots-led and community-driven. We are here for everyone
+            in the LGBTQIA+ community, celebrating diversity, inclusion, and
+            equality for all.
           </motion.p>
 
           <motion.div
@@ -92,21 +96,30 @@ export default function HomeClient() {
         <div className="mt-10 sm:mt-14">
           <div className="mx-auto w-full max-w-6xl space-y-10 sm:space-y-14">
             {/* Countdown */}
-            <motion.section variants={fadeUp} transition={{ delay: 0.1, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.1, duration: 0.6 }}
+            >
               <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md sm:p-6">
                 <Countdown />
               </div>
             </motion.section>
 
             {/* Event Card */}
-            <motion.section variants={fadeUp} transition={{ delay: 0.15, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.15, duration: 0.6 }}
+            >
               <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md sm:p-6">
                 <EventCard />
               </div>
             </motion.section>
 
             {/* Volunteer CTA */}
-            <motion.section variants={fadeUp} transition={{ delay: 0.18, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.18, duration: 0.6 }}
+            >
               <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 p-8 text-center shadow-2xl sm:p-10">
                 <div className="pointer-events-none absolute -left-24 -top-24 h-60 w-60 rounded-full bg-green-300/40 blur-3xl animate-pulse mix-blend-overlay sm:h-80 sm:w-80" />
                 <div className="pointer-events-none absolute -bottom-24 -right-24 h-60 w-60 rounded-full bg-teal-300/40 blur-3xl animate-pulse mix-blend-overlay sm:h-80 sm:w-80" />
@@ -117,9 +130,9 @@ export default function HomeClient() {
                   </h2>
 
                   <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-xl">
-                    Want to help make Burton Pride amazing? Join our volunteer team and be
-                    part of creating safe, inclusive, and unforgettable Pride events for the
-                    whole community.
+                    Want to help make Burton Pride amazing? Join our volunteer
+                    team and be part of creating safe, inclusive, and
+                    unforgettable Pride events for the whole community.
                   </p>
 
                   <Link
@@ -132,17 +145,82 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
+            {/* Monthly Donations CTA */}
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.19, duration: 0.6 }}
+            >
+              <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 p-8 text-center shadow-2xl shadow-yellow-400/30 sm:p-12">
+                <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-white/30 blur-3xl animate-pulse mix-blend-overlay" />
+                <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-pink-300/40 blur-3xl animate-pulse mix-blend-overlay" />
+
+                <div className="relative mx-auto max-w-4xl">
+                  <p className="mb-3 inline-flex rounded-full bg-white/20 px-5 py-2 text-sm font-bold uppercase tracking-wide text-white shadow-lg backdrop-blur-md">
+                    Support your local grassroots Pride
+                  </p>
+
+                  <h2 className="mb-4 text-3xl font-extrabold drop-shadow-lg sm:text-5xl">
+                    🌈 Donate Monthly From Just £3
+                  </h2>
+
+                  <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/95 sm:text-xl">
+                    Burton Pride is created by the community, for the community.
+                    A monthly donation helps us plan safer events, support local
+                    LGBTQIA+ people, and keep Pride growing in Burton upon Trent.
+                  </p>
+
+                  <div className="mb-7 grid gap-4 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl font-black">£3</p>
+                      <p className="mt-1 text-sm font-semibold text-white/90">
+                        Helps us build community support
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl font-black">£5</p>
+                      <p className="mt-1 text-sm font-semibold text-white/90">
+                        Helps us fund Pride resources
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl font-black">£10</p>
+                      <p className="mt-1 text-sm font-semibold text-white/90">
+                        Helps us grow future events
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href="/DonateToUs?type=monthly"
+                    className="inline-flex items-center justify-center rounded-full bg-white px-9 py-3.5 text-lg font-extrabold text-pink-600 shadow-xl transition-transform hover:scale-105 hover:bg-pink-50 sm:px-12 sm:py-4 sm:text-xl"
+                  >
+                    Start Monthly Donation
+                  </Link>
+
+                  <p className="mt-4 text-sm font-medium text-white/85">
+                    Every donation, big or small, helps Burton Pride stay
+                    community-led.
+                  </p>
+                </div>
+              </div>
+            </motion.section>
+
             {/* Competition */}
-            <motion.section variants={fadeUp} transition={{ delay: 0.2, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.2, duration: 0.6 }}
+            >
               <div className="rounded-3xl border border-white/20 bg-white/10 p-8 text-center shadow-2xl backdrop-blur-lg sm:p-10">
                 <h2 className="mb-3 text-3xl font-extrabold sm:text-4xl">
                   🌈 Windows Of Hope Competition 2026
                 </h2>
 
                 <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-lg">
-                  Show your creativity and Pride spirit! Enter our competition for a chance to win
-                  amazing prizes. Upload your design, photo, or artwork and take part in the
-                  celebration.
+                  Show your creativity and Pride spirit! Enter our competition
+                  for a chance to win amazing prizes. Upload your design, photo,
+                  or artwork and take part in the celebration.
                 </p>
 
                 <p className="mb-6 text-xl font-bold">Entry Fee: £2</p>
@@ -156,15 +234,18 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
-            <motion.section variants={fadeUp} transition={{ delay: 0.25, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.25, duration: 0.6 }}
+            >
               <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 sm:gap-8">
                 <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Burton Pride 2026 Application Forms
                   </h2>
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                    We are looking for local companies and charities to take part in Burton Pride
-                    2026.
+                    We are looking for local companies and charities to take
+                    part in Burton Pride 2026.
                   </p>
                   <div className="mt-auto">
                     <Link
@@ -177,10 +258,13 @@ export default function HomeClient() {
                 </div>
 
                 <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
-                  <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">Collaborate with Us</h2>
+                  <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
+                    Collaborate with Us
+                  </h2>
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                    We’re always looking for like-minded businesses, organisations, and individuals
-                    who want to support our mission of inclusivity and equality.
+                    We’re always looking for like-minded businesses,
+                    organisations, and individuals who want to support our
+                    mission of inclusivity and equality.
                   </p>
                   <div className="mt-auto">
                     <Link
@@ -194,7 +278,10 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
-            <motion.section variants={fadeUp} transition={{ delay: 0.3, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.3, duration: 0.6 }}
+            >
               <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 p-7 shadow-2xl shadow-pink-500/40 sm:p-12">
                 <div className="pointer-events-none absolute -left-24 -top-24 h-60 w-60 rounded-full bg-pink-400/40 blur-3xl animate-pulse mix-blend-overlay sm:h-80 sm:w-80" />
                 <div className="pointer-events-none absolute -bottom-24 -right-24 h-60 w-60 rounded-full bg-blue-400/40 blur-3xl animate-pulse mix-blend-overlay sm:h-80 sm:w-80" />
@@ -204,8 +291,9 @@ export default function HomeClient() {
                     Give Your Feedback To Burton Pride 💖
                   </h2>
                   <p className="mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-xl">
-                    We would love your help in making next year’s event even better. Every comment,
-                    suggestion, or idea helps us improve and make future events even more enjoyable.
+                    We would love your help in making next year’s event even
+                    better. Every comment, suggestion, or idea helps us improve
+                    and make future events even more enjoyable.
                   </p>
 
                   <Link
@@ -218,15 +306,19 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
-            <motion.section variants={fadeUp} transition={{ delay: 0.35, duration: 0.6 }}>
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.35, duration: 0.6 }}
+            >
               <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 sm:gap-8">
                 <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Support Burton Pride 💖
                   </h2>
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                    Help us bring the best Pride events to Burton. Your donation supports community
-                    initiatives, parade organisation, and inclusivity programmes.
+                    Help us bring the best Pride events to Burton. Your donation
+                    supports community initiatives, parade organisation, and
+                    inclusivity programmes.
                   </p>
 
                   <div className="mt-auto">
@@ -240,9 +332,12 @@ export default function HomeClient() {
                 </div>
 
                 <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
-                  <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">Follow Burton Pride</h2>
+                  <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
+                    Follow Burton Pride
+                  </h2>
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                    Keep up to date with announcements, events, and community updates.
+                    Keep up to date with announcements, events, and community
+                    updates.
                   </p>
 
                   <div className="mt-auto">
