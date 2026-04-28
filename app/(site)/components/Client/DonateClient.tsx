@@ -121,23 +121,7 @@ export default function DonationsContent() {
     reader.readAsDataURL(file);
   }
 
-  function fillTestDetails() {
-    setFullName("Burton Pride Test");
-    setEmail("burtonpridetest@gmail.com");
-    setMessage("This is a Stripe donation test.");
-    setSupporterStory(
-      "I support Burton Pride because everyone deserves to feel safe, seen, celebrated, and included."
-    );
-    setPronouns("he/him");
-    setIdentityLabel("Gay");
-    setDonationType("monthly");
-    setSelectedAmount("£3");
-    setCustomAmount("3");
-    setNameError("");
-    setEmailError("");
-    setAmountError("");
-    setServerError("");
-  }
+
 
   async function handleDonate() {
     try {
@@ -362,13 +346,7 @@ export default function DonationsContent() {
             </h2>
 
             <div className="mt-7 space-y-5">
-              <button
-                type="button"
-                onClick={fillTestDetails}
-                className="w-full rounded-2xl border border-yellow-300 bg-yellow-300 px-5 py-4 text-lg font-bold text-black transition hover:opacity-90"
-              >
-                Fill Test Details
-              </button>
+             
 
               <div className="grid grid-cols-2 gap-3 rounded-2xl bg-white/10 p-2">
                 <button
