@@ -51,6 +51,157 @@ function parseEmailList(value: string | undefined) {
     .filter(Boolean);
 }
 
+/**
+ * Adds completed website donations into the Money Tracker.
+ * This runs for checkout.session.completed donations only.
+ */
+async function addDonationSessionToMoneyTracker(
+  session: Stripe.Checkout.Session
+) {
+  try {
+    const stripeSessionId = session.id;
+    const amountPence = session.amount_total || 0;
+
+    if (!stripeSessionId || amountPence <= 0) {
+      return;
+    }
+
+    const donorName =
+      session.metadata?.fullName?.trim() ||
+      session.customer_details?.name?.trim() ||
+      "Supporter";
+
+    const donorEmail =
+      session.customer_details?.email?.trim() ||
+      session.metadata?.email?.trim() ||
+      "";
+
+    const donorMessage = session.metadata?.message?.trim() || "";
+
+    const donationType =
+      session.mode === "subscription"
+        ? "Monthly donation"
+        : "One-time donation";
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      donorMessage ? `Message: ${donorMessage}` : "",
+      session.payment_status
+        ? `Payment status: ${session.payment_status}`
+        : "",
+      session.mode ? `Stripe mode: ${session.mode}` : "",
+      stripeSessionId ? `Stripe session: ${stripeSessionId}` : "",
+    ].filter(Boolean);
+
+    const stripeInvoiceId =
+      typeof session.invoice === "string" ? session.invoice : null;
+
+    const stripeCustomerId =
+      typeof session.customer === "string" ? session.customer : null;
+
+    const transactionDate = session.created
+      ? new Date(session.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `${donationType} - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_session_id: stripeSessionId,
+        stripe_invoice_id: stripeInvoiceId,
+        stripe_customer_id: stripeCustomerId,
+        source: "website_donation",
+      },
+      {
+        onConflict: "stripe_session_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add donation to money tracker:", error);
+    }
+  } catch (error) {
+    console.error("Money tracker donation insert failed:", error);
+  }
+}
+
+/**
+ * Adds future monthly Stripe subscription payments into the Money Tracker.
+ * This uses invoice.paid.
+ * It skips subscription_create because checkout.session.completed already records the first payment.
+ */
+async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
+  try {
+    const invoiceAny = invoice as any;
+
+    if (invoice.billing_reason === "subscription_create") {
+      return;
+    }
+
+    const stripeInvoiceId = invoice.id;
+    const amountPence = invoice.amount_paid || 0;
+
+    if (!stripeInvoiceId || amountPence <= 0) {
+      return;
+    }
+
+    const stripeCustomerId =
+      typeof invoice.customer === "string" ? invoice.customer : null;
+
+    const donorEmail =
+      invoice.customer_email?.trim() ||
+      invoiceAny.customer_details?.email?.trim() ||
+      "";
+
+    const donorName =
+      invoice.customer_name?.trim() ||
+      invoiceAny.customer_details?.name?.trim() ||
+      "Monthly supporter";
+
+    const transactionDate = invoice.created
+      ? new Date(invoice.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      invoice.number ? `Invoice number: ${invoice.number}` : "",
+      invoice.billing_reason
+        ? `Billing reason: ${invoice.billing_reason}`
+        : "",
+      stripeInvoiceId ? `Stripe invoice: ${stripeInvoiceId}` : "",
+    ].filter(Boolean);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `Monthly donation - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_invoice_id: stripeInvoiceId,
+        stripe_customer_id: stripeCustomerId,
+        source: "website_monthly_donation",
+      },
+      {
+        onConflict: "stripe_invoice_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add paid invoice to money tracker:", error);
+    }
+  } catch (error) {
+    console.error("Money tracker invoice insert failed:", error);
+  }
+}
+
 async function handleDonationSession(session: Stripe.Checkout.Session) {
   const donorName = session.metadata?.fullName?.trim() || "Supporter";
   const donorEmail =
@@ -521,7 +672,14 @@ export async function POST(req: Request) {
         await handleCompetitionSession(session);
       } else {
         await handleDonationSession(session);
+        await addDonationSessionToMoneyTracker(session);
       }
+    }
+
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object as Stripe.Invoice;
+
+      await addPaidInvoiceToMoneyTracker(invoice);
     }
 
     return new NextResponse("OK", { status: 200 });
