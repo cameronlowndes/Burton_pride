@@ -374,6 +374,7 @@ export default function MoneyTransactionsPage() {
                 className="w-full rounded-xl bg-black/20 p-3"
               >
                 <option value="Stripe">Stripe</option>
+                <option value="Online">Online Payment</option>
                 <option value="Cash">Cash</option>
                 <option value="Bank Transfer">Bank Transfer</option>
                 <option value="PayPal">PayPal</option>
@@ -463,7 +464,7 @@ export default function MoneyTransactionsPage() {
               <p className="text-white/60">No transactions yet</p>
             ) : (
               <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-                <table className="w-full min-w-[980px] text-sm">
+                <table className="w-full min-w-[1100px] text-sm">
                   <thead className="bg-white/10 text-white/60">
                     <tr>
                       <th className="p-3 text-left">Date</th>
@@ -499,11 +500,11 @@ export default function MoneyTransactionsPage() {
 
                         <td className="p-3">
                           <span
-                            className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                            className={`inline-flex min-w-[120px] items-center justify-center rounded-2xl px-4 py-2 text-sm font-bold leading-tight ${
                               item.source === "website_donation" ||
                               item.source === "website_monthly_donation"
-                                ? "bg-emerald-500/15 text-emerald-200"
-                                : "bg-white/10 text-white/70"
+                                ? "bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-300/20"
+                                : "bg-white/10 text-white/80 ring-1 ring-white/10"
                             }`}
                           >
                             {sourceLabel(item.source)}
