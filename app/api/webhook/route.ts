@@ -51,10 +51,6 @@ function parseEmailList(value: string | undefined) {
     .filter(Boolean);
 }
 
-/**
- * Adds completed website donations into the Money Tracker.
- * This runs for checkout.session.completed donations only.
- */
 async function addDonationSessionToMoneyTracker(
   session: Stripe.Checkout.Session
 ) {
@@ -63,6 +59,7 @@ async function addDonationSessionToMoneyTracker(
     const amountPence = session.amount_total || 0;
 
     if (!stripeSessionId || amountPence <= 0) {
+      console.log("Skipped checkout money tracker insert: missing amount/session");
       return;
     }
 
@@ -99,6 +96,11 @@ async function addDonationSessionToMoneyTracker(
     const stripeCustomerId =
       typeof session.customer === "string" ? session.customer : null;
 
+    const stripePaymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : null;
+
     const transactionDate = session.created
       ? new Date(session.created * 1000).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
@@ -115,6 +117,7 @@ async function addDonationSessionToMoneyTracker(
         stripe_session_id: stripeSessionId,
         stripe_invoice_id: stripeInvoiceId,
         stripe_customer_id: stripeCustomerId,
+        stripe_payment_intent_id: stripePaymentIntentId,
         source: "website_donation",
       },
       {
@@ -123,23 +126,27 @@ async function addDonationSessionToMoneyTracker(
     );
 
     if (error) {
-      console.error("Failed to add donation to money tracker:", error);
+      console.error("Failed to add checkout donation to money tracker:", {
+        message: error.message,
+        details: error,
+        sessionId: stripeSessionId,
+        amount: amountPence,
+      });
+      return;
     }
+
+    console.log("Added checkout donation to money tracker:", stripeSessionId);
   } catch (error) {
-    console.error("Money tracker donation insert failed:", error);
+    console.error("Money tracker checkout donation insert failed:", error);
   }
 }
 
-/**
- * Adds future monthly Stripe subscription payments into the Money Tracker.
- * This uses invoice.paid.
- * It skips subscription_create because checkout.session.completed already records the first payment.
- */
 async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
   try {
     const invoiceAny = invoice as any;
 
     if (invoice.billing_reason === "subscription_create") {
+      console.log("Skipped invoice.paid because checkout session records first subscription payment");
       return;
     }
 
@@ -147,6 +154,7 @@ async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
     const amountPence = invoice.amount_paid || 0;
 
     if (!stripeInvoiceId || amountPence <= 0) {
+      console.log("Skipped invoice money tracker insert: missing amount/invoice");
       return;
     }
 
@@ -195,10 +203,92 @@ async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
     );
 
     if (error) {
-      console.error("Failed to add paid invoice to money tracker:", error);
+      console.error("Failed to add paid invoice to money tracker:", {
+        message: error.message,
+        details: error,
+        invoiceId: stripeInvoiceId,
+        amount: amountPence,
+      });
+      return;
     }
+
+    console.log("Added paid invoice to money tracker:", stripeInvoiceId);
   } catch (error) {
     console.error("Money tracker invoice insert failed:", error);
+  }
+}
+
+async function addPaymentIntentToMoneyTracker(
+  paymentIntent: Stripe.PaymentIntent
+) {
+  try {
+    const stripePaymentIntentId = paymentIntent.id;
+    const amountPence =
+      paymentIntent.amount_received || paymentIntent.amount || 0;
+
+    if (!stripePaymentIntentId || amountPence <= 0) {
+      console.log("Skipped payment intent money tracker insert: missing amount/payment intent");
+      return;
+    }
+
+    const donorEmail =
+      paymentIntent.receipt_email?.trim() ||
+      String(paymentIntent.metadata?.email || "").trim();
+
+    const donorName =
+      String(paymentIntent.metadata?.fullName || "").trim() ||
+      String(paymentIntent.metadata?.name || "").trim() ||
+      "Website donation";
+
+    const donorMessage = String(paymentIntent.metadata?.message || "").trim();
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      donorMessage ? `Message: ${donorMessage}` : "",
+      paymentIntent.status ? `Payment status: ${paymentIntent.status}` : "",
+      stripePaymentIntentId
+        ? `Stripe payment intent: ${stripePaymentIntentId}`
+        : "",
+    ].filter(Boolean);
+
+    const transactionDate = paymentIntent.created
+      ? new Date(paymentIntent.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `Website donation - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_payment_intent_id: stripePaymentIntentId,
+        stripe_customer_id:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : null,
+        source: "website_donation",
+      },
+      {
+        onConflict: "stripe_payment_intent_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add PaymentIntent to money tracker:", {
+        message: error.message,
+        details: error,
+        paymentIntentId: stripePaymentIntentId,
+        amount: amountPence,
+      });
+      return;
+    }
+
+    console.log("Added payment intent to money tracker:", stripePaymentIntentId);
+  } catch (error) {
+    console.error("Money tracker PaymentIntent insert failed:", error);
   }
 }
 
@@ -665,8 +755,12 @@ export async function POST(req: Request) {
   }
 
   try {
+    console.log("Stripe webhook received:", event.type);
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
+
+      console.log("Checkout session completed:", session.id);
 
       if (session.metadata?.entryId) {
         await handleCompetitionSession(session);
@@ -679,7 +773,17 @@ export async function POST(req: Request) {
     if (event.type === "invoice.paid") {
       const invoice = event.data.object as Stripe.Invoice;
 
+      console.log("Invoice paid:", invoice.id);
+
       await addPaidInvoiceToMoneyTracker(invoice);
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+      console.log("Payment intent succeeded:", paymentIntent.id);
+
+      await addPaymentIntentToMoneyTracker(paymentIntent);
     }
 
     return new NextResponse("OK", { status: 200 });
