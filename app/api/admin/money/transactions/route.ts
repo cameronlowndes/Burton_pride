@@ -1,9 +1,147 @@
+import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-08-16" as any,
+});
+
+async function syncPaidDonationsToMoneyTracker() {
+  try {
+    const { data: donations, error: donationError } = await supabaseAdmin
+      .from("donations")
+      .select(
+        "id, full_name, email, message, donation_type, amount_pence, currency, stripe_checkout_session_id, status, created_at"
+      )
+      .not("stripe_checkout_session_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (donationError) {
+      console.error("Failed to load donations for money sync:", donationError);
+      return;
+    }
+
+    if (!donations?.length) return;
+
+    for (const donation of donations) {
+      const sessionId = donation.stripe_checkout_session_id;
+
+      if (!sessionId) continue;
+
+      const { data: existing } = await supabaseAdmin
+        .from("money_transactions")
+        .select("id")
+        .eq("stripe_session_id", sessionId)
+        .maybeSingle();
+
+      if (existing) continue;
+
+      let session: Stripe.Checkout.Session | null = null;
+
+      try {
+        session = await stripe.checkout.sessions.retrieve(sessionId);
+      } catch (err) {
+        console.error("Failed to retrieve Stripe session:", sessionId, err);
+        continue;
+      }
+
+      const isPaid =
+        session.payment_status === "paid" || session.status === "complete";
+
+      if (!isPaid) continue;
+
+      const amountPence =
+        session.amount_total || donation.amount_pence || 0;
+
+      if (!amountPence || amountPence <= 0) continue;
+
+      const donorName =
+        session.metadata?.fullName ||
+        session.customer_details?.name ||
+        donation.full_name ||
+        "Supporter";
+
+      const donorEmail =
+        session.customer_details?.email ||
+        session.metadata?.email ||
+        donation.email ||
+        "";
+
+      const donorMessage =
+        session.metadata?.message || donation.message || "";
+
+      const donationType =
+        session.mode === "subscription" ||
+        donation.donation_type === "monthly"
+          ? "Monthly donation"
+          : "One-time donation";
+
+      const stripeInvoiceId =
+        typeof session.invoice === "string" ? session.invoice : null;
+
+      const stripeCustomerId =
+        typeof session.customer === "string" ? session.customer : null;
+
+      const stripePaymentIntentId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : null;
+
+      const transactionDate = session.created
+        ? new Date(session.created * 1000).toISOString().slice(0, 10)
+        : new Date(donation.created_at || Date.now())
+            .toISOString()
+            .slice(0, 10);
+
+      const descriptionParts = [
+        donorEmail ? `Email: ${donorEmail}` : "",
+        donorMessage ? `Message: ${donorMessage}` : "",
+        session.payment_status
+          ? `Payment status: ${session.payment_status}`
+          : "",
+        session.mode ? `Stripe mode: ${session.mode}` : "",
+        sessionId ? `Stripe session: ${sessionId}` : "",
+      ].filter(Boolean);
+
+      const { error: insertError } = await supabaseAdmin
+        .from("money_transactions")
+        .insert({
+          title: `${donationType} - ${donorName}`,
+          description: descriptionParts.join("\n") || null,
+          type: "income",
+          category: "Donation",
+          amount_pence: amountPence,
+          payment_method: "Stripe",
+          transaction_date: transactionDate,
+          stripe_session_id: sessionId,
+          stripe_invoice_id: stripeInvoiceId,
+          stripe_customer_id: stripeCustomerId,
+          stripe_payment_intent_id: stripePaymentIntentId,
+          source:
+            donation.donation_type === "monthly"
+              ? "website_monthly_donation"
+              : "website_donation",
+        });
+
+      if (insertError) {
+        console.error("Failed to sync donation into money tracker:", {
+          error: insertError,
+          sessionId,
+          donationId: donation.id,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Money tracker donation sync failed:", err);
+  }
+}
+
 export async function GET() {
+  await syncPaidDonationsToMoneyTracker();
+
   const { data, error } = await supabaseAdmin
     .from("money_transactions")
     .select("*")
@@ -17,7 +155,14 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({ ok: true, transactions: data || [] });
+  return NextResponse.json(
+    { ok: true, transactions: data || [] },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
 }
 
 export async function POST(req: Request) {

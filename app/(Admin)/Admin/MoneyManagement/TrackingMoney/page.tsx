@@ -14,6 +14,12 @@ type Transaction = {
   payment_method: string | null;
   transaction_date: string | null;
   invoice_image_url: string | null;
+
+  source: string | null;
+  stripe_session_id: string | null;
+  stripe_invoice_id: string | null;
+  stripe_customer_id: string | null;
+  stripe_payment_intent_id: string | null;
 };
 
 type FormState = {
@@ -43,6 +49,17 @@ function money(amountPence: number) {
   }).format((amountPence || 0) / 100);
 }
 
+function sourceLabel(source: string | null) {
+  if (source === "website_donation") return "Website Donation";
+  if (source === "website_monthly_donation") return "Monthly Donation";
+  if (source === "manual") return "Manual";
+  if (!source) return "Manual";
+
+  return source
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export default function MoneyTransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [form, setForm] = useState<FormState>(initialForm);
@@ -64,7 +81,7 @@ export default function MoneyTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const res = await fetch("/api/admin/money/transactions", {
+      const res = await fetch(`/api/admin/money/transactions?t=${Date.now()}`, {
         cache: "no-store",
       });
 
@@ -150,6 +167,7 @@ export default function MoneyTransactionsPage() {
       uploadData.append("amount", form.amount);
       uploadData.append("paymentMethod", form.paymentMethod);
       uploadData.append("transactionDate", form.transactionDate);
+      uploadData.append("source", "manual");
 
       if (invoiceFile) {
         uploadData.append("invoiceFile", invoiceFile);
@@ -445,13 +463,14 @@ export default function MoneyTransactionsPage() {
               <p className="text-white/60">No transactions yet</p>
             ) : (
               <div className="overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-                <table className="w-full min-w-[850px] text-sm">
+                <table className="w-full min-w-[980px] text-sm">
                   <thead className="bg-white/10 text-white/60">
                     <tr>
                       <th className="p-3 text-left">Date</th>
                       <th className="p-3 text-left">Title</th>
                       <th className="p-3 text-left">Type</th>
                       <th className="p-3 text-left">Payment</th>
+                      <th className="p-3 text-left">Source</th>
                       <th className="p-3 text-left">Invoice</th>
                       <th className="p-3 text-right">Amount</th>
                       <th className="p-3 text-right">Action</th>
@@ -462,6 +481,7 @@ export default function MoneyTransactionsPage() {
                     {filteredTransactions.map((item) => (
                       <tr key={item.id} className="border-t border-white/10">
                         <td className="p-3">{item.transaction_date}</td>
+
                         <td className="p-3">
                           <p className="font-semibold">{item.title}</p>
                           {item.description && (
@@ -470,10 +490,26 @@ export default function MoneyTransactionsPage() {
                             </p>
                           )}
                         </td>
+
                         <td className="p-3">
                           {item.type === "income" ? "Money In" : "Money Out"}
                         </td>
+
                         <td className="p-3">{item.payment_method || "—"}</td>
+
+                        <td className="p-3">
+                          <span
+                            className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                              item.source === "website_donation" ||
+                              item.source === "website_monthly_donation"
+                                ? "bg-emerald-500/15 text-emerald-200"
+                                : "bg-white/10 text-white/70"
+                            }`}
+                          >
+                            {sourceLabel(item.source)}
+                          </span>
+                        </td>
+
                         <td className="p-3">
                           {item.invoice_image_url ? (
                             <a
@@ -489,9 +525,11 @@ export default function MoneyTransactionsPage() {
                             <span className="text-white/40">—</span>
                           )}
                         </td>
+
                         <td className="p-3 text-right font-bold">
                           {money(item.amount_pence)}
                         </td>
+
                         <td className="p-3 text-right">
                           <button
                             type="button"
