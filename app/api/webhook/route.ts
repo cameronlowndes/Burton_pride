@@ -51,6 +51,55 @@ function parseEmailList(value: string | undefined) {
     .filter(Boolean);
 }
 
+/**
+ * ✅ RAFFLE PAYMENT COMPLETE
+ * When Stripe confirms checkout.session.completed for raffle,
+ * this updates raffle_entries from checkout_started to paid.
+ */
+async function handleRaffleSession(session: Stripe.Checkout.Session) {
+  try {
+    const sessionId = session.id;
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : null;
+
+    if (!sessionId) {
+      console.error("Raffle webhook missing session ID");
+      return;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("raffle_entries")
+      .update({
+        status: "paid",
+        payment_status: "paid",
+        stripe_payment_intent_id: paymentIntentId,
+      })
+      .eq("stripe_checkout_session_id", sessionId)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("Failed to mark raffle entry as paid:", {
+        message: error.message,
+        details: error,
+        sessionId,
+        paymentIntentId,
+      });
+      return;
+    }
+
+    console.log("Raffle entry marked as paid:", data);
+  } catch (error) {
+    console.error("Raffle webhook update failed:", error);
+  }
+}
+
+/**
+ * Adds completed website donations into the Money Tracker.
+ */
 async function addDonationSessionToMoneyTracker(
   session: Stripe.Checkout.Session
 ) {
@@ -59,7 +108,9 @@ async function addDonationSessionToMoneyTracker(
     const amountPence = session.amount_total || 0;
 
     if (!stripeSessionId || amountPence <= 0) {
-      console.log("Skipped checkout money tracker insert: missing amount/session");
+      console.log(
+        "Skipped checkout money tracker insert: missing amount/session"
+      );
       return;
     }
 
@@ -141,12 +192,17 @@ async function addDonationSessionToMoneyTracker(
   }
 }
 
+/**
+ * Adds future monthly Stripe subscription payments into the Money Tracker.
+ */
 async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
   try {
     const invoiceAny = invoice as any;
 
     if (invoice.billing_reason === "subscription_create") {
-      console.log("Skipped invoice.paid because checkout session records first subscription payment");
+      console.log(
+        "Skipped invoice.paid because checkout session records first subscription payment"
+      );
       return;
     }
 
@@ -178,9 +234,7 @@ async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
     const descriptionParts = [
       donorEmail ? `Email: ${donorEmail}` : "",
       invoice.number ? `Invoice number: ${invoice.number}` : "",
-      invoice.billing_reason
-        ? `Billing reason: ${invoice.billing_reason}`
-        : "",
+      invoice.billing_reason ? `Billing reason: ${invoice.billing_reason}` : "",
       stripeInvoiceId ? `Stripe invoice: ${stripeInvoiceId}` : "",
     ].filter(Boolean);
 
@@ -227,7 +281,9 @@ async function addPaymentIntentToMoneyTracker(
       paymentIntent.amount_received || paymentIntent.amount || 0;
 
     if (!stripePaymentIntentId || amountPence <= 0) {
-      console.log("Skipped payment intent money tracker insert: missing amount/payment intent");
+      console.log(
+        "Skipped payment intent money tracker insert: missing amount/payment intent"
+      );
       return;
     }
 
@@ -760,9 +816,15 @@ export async function POST(req: Request) {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      console.log("Checkout session completed:", session.id);
+      console.log("Checkout session completed:", {
+        id: session.id,
+        source: session.metadata?.source,
+        payment_status: session.payment_status,
+      });
 
-      if (session.metadata?.entryId) {
+      if (session.metadata?.source === "website_raffle") {
+        await handleRaffleSession(session);
+      } else if (session.metadata?.entryId) {
         await handleCompetitionSession(session);
       } else {
         await handleDonationSession(session);
