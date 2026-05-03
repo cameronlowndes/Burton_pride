@@ -96,7 +96,7 @@ function formatDate(value: string | null) {
 }
 
 export default function AdminRafflePage() {
-  const drawSectionRef = useRef<HTMLDivElement | null>(null);
+  const drawSectionRef = useRef<HTMLElement | null>(null);
 
   const [entries, setEntries] = useState<RaffleEntry[]>([]);
   const [stats, setStats] = useState<ApiStats>({
@@ -113,12 +113,19 @@ export default function AdminRafflePage() {
   >("all");
 
   const [loading, setLoading] = useState(true);
+  const [creatingTestEntries, setCreatingTestEntries] = useState(false);
   const [drawing, setDrawing] = useState<number | null>(null);
+  const [drawHighlight, setDrawHighlight] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
 
   const [drawModal, setDrawModal] = useState<number | null>(null);
+  const [redoModal, setRedoModal] = useState<number | null>(null);
+  const [deleteModal, setDeleteModal] = useState<RaffleEntry | null>(null);
+  const [deleteAllModal, setDeleteAllModal] = useState(false);
+
   const [latestWinner, setLatestWinner] = useState<RaffleEntry | null>(null);
   const [latestDraw, setLatestDraw] = useState<DrawInfo | null>(null);
   const [bigMessage, setBigMessage] = useState<BigMessage | null>(null);
@@ -194,22 +201,34 @@ export default function AdminRafflePage() {
   }, [entries, filter]);
 
   function scrollToDraw() {
-    drawSectionRef.current?.scrollIntoView({
+    const section = drawSectionRef.current;
+
+    if (!section) {
+      setError("Draw raffle section could not be found on this page.");
+      return;
+    }
+
+    section.scrollIntoView({
       behavior: "smooth",
-      block: "start",
+      block: "center",
+      inline: "nearest",
     });
+
+    setDrawHighlight(true);
+
+    window.setTimeout(() => {
+      section.focus();
+    }, 500);
+
+    window.setTimeout(() => {
+      setDrawHighlight(false);
+    }, 2500);
   }
 
   function testRandomDraw() {
     setError("");
     setErrorDetails(null);
 
-    /**
-     * TEST DRAW ONLY
-     * This does NOT save anything.
-     * It will use paid entries first.
-     * If there are no paid entries yet, it will use all entries so you can test the message.
-     */
     let testEntries = entries.filter(
       (entry) =>
         entry.payment_status === "paid" && !entry.raffle_winner_position
@@ -264,6 +283,63 @@ export default function AdminRafflePage() {
         ticketPool.length
       }. This test can use checkout-started entries if no paid entries exist yet.`,
     });
+  }
+
+  async function createTestEntries() {
+    try {
+      setCreatingTestEntries(true);
+      setError("");
+      setErrorDetails(null);
+      setBigMessage(null);
+
+      const res = await fetch("/api/admin/raffle/entries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "create_test_entries",
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to create test entries",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setBigMessage({
+        type: "test",
+        title: "10 Test Entries Created",
+        subtitle:
+          "These are fake paid raffle entries so you can test the raffle draw.",
+        winnerName: "Test Entries Added",
+        winnerEmail: `${data.created || 10} fake paid entries added`,
+        winnerPhone: "—",
+        prize: "Test Data",
+        tickets: data.totalTickets || 10,
+        notes:
+          "You can now test the official draw. Remember to delete test entries before doing the real raffle.",
+      });
+
+      await loadEntries();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setCreatingTestEntries(false);
+    }
   }
 
   async function drawWinner(position: number) {
@@ -329,6 +405,185 @@ export default function AdminRafflePage() {
     }
   }
 
+  async function redoDraw(position: number) {
+    try {
+      setDrawing(position);
+      setError("");
+      setErrorDetails(null);
+      setLatestWinner(null);
+      setLatestDraw(null);
+      setBigMessage(null);
+
+      const res = await fetch("/api/admin/raffle/entries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "redo_draw",
+          prizePosition: position,
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to redo draw",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setRedoModal(null);
+
+      setBigMessage({
+        type: "test",
+        title: "Draw Reset",
+        subtitle:
+          "The saved winner for this prize has been cleared. You can now draw this prize again.",
+        winnerName: `${prizeLabel(position)} Reset`,
+        winnerEmail: "Winner removed",
+        winnerPhone: "—",
+        prize: prizeLabel(position),
+        tickets: 0,
+        notes:
+          "The previous winner has been removed from this prize only. You can now draw this prize again.",
+      });
+
+      await loadEntries();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setDrawing(null);
+    }
+  }
+
+  async function deleteEntry(entry: RaffleEntry) {
+    try {
+      setDeleting(true);
+      setError("");
+      setErrorDetails(null);
+      setBigMessage(null);
+
+      const res = await fetch("/api/admin/raffle/entries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "delete_entry",
+          entryId: entry.id,
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to delete raffle entry",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setDeleteModal(null);
+
+      setBigMessage({
+        type: "test",
+        title: "Raffle Entry Deleted",
+        subtitle: "The selected raffle entry has been deleted.",
+        winnerName: entry.full_name,
+        winnerEmail: entry.email,
+        winnerPhone: entry.phone || "—",
+        prize: "Deleted Entry",
+        tickets: ticketCount(entry.ticket_amount),
+        notes:
+          "This entry has been removed from Supabase and will no longer be included in the raffle draw.",
+      });
+
+      await loadEntries();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function deleteAllTestEntries() {
+    try {
+      setDeleting(true);
+      setError("");
+      setErrorDetails(null);
+      setBigMessage(null);
+
+      const res = await fetch("/api/admin/raffle/entries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "delete_all_test_entries",
+        }),
+      });
+
+      const text = await res.text();
+
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to delete all test entries",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setDeleteAllModal(false);
+
+      setBigMessage({
+        type: "test",
+        title: "Test Entries Deleted",
+        subtitle: "All fake test raffle entries have been deleted.",
+        winnerName: "Test Entries Removed",
+        winnerEmail: `${data.deleted || 0} entries deleted`,
+        winnerPhone: "—",
+        prize: "Cleaned Test Data",
+        tickets: 0,
+        notes:
+          "Only entries marked as test raffle entries were deleted. Real raffle entries were not removed.",
+      });
+
+      await loadEntries();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -342,11 +597,11 @@ export default function AdminRafflePage() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <button
                 type="button"
                 onClick={scrollToDraw}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white hover:bg-pink-400"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white shadow-lg shadow-pink-500/20 hover:bg-pink-400"
               >
                 <Trophy className="h-4 w-4" />
                 Go To Draw Raffle
@@ -362,6 +617,27 @@ export default function AdminRafflePage() {
               </button>
 
               <button
+                type="button"
+                onClick={createTestEntries}
+                disabled={creatingTestEntries}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-400 px-5 py-3 text-sm font-black text-black hover:bg-blue-300 disabled:opacity-60"
+              >
+                <Bug className="h-4 w-4" />
+                {creatingTestEntries ? "Creating..." : "Create 10 Test Entries"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDeleteAllModal(true)}
+                disabled={deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+              >
+                <Bug className="h-4 w-4" />
+                Delete All  Entries
+              </button>
+
+              <button
+                type="button"
                 onClick={loadEntries}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-5 py-3 text-sm font-bold hover:bg-white/20"
               >
@@ -438,7 +714,7 @@ export default function AdminRafflePage() {
 
             <div className="mt-8 rounded-[2rem] border border-white/10 bg-black/25 p-6">
               <p className="text-sm font-bold uppercase tracking-widest text-white/50">
-                Winner
+                Winner / Message
               </p>
 
               <h3 className="mt-2 text-4xl font-black text-white sm:text-6xl">
@@ -452,7 +728,7 @@ export default function AdminRafflePage() {
                 </div>
 
                 <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Tickets Bought</p>
+                  <p className="text-xs text-white/50">Tickets</p>
                   <p className="text-lg font-black">{bigMessage.tickets}</p>
                 </div>
 
@@ -569,8 +845,14 @@ export default function AdminRafflePage() {
         </section>
 
         <section
+          id="draw-raffle-section"
           ref={drawSectionRef}
-          className="rounded-3xl border border-white/10 bg-white/[0.04] p-5"
+          tabIndex={-1}
+          className={`scroll-mt-28 rounded-3xl border bg-white/[0.04] p-5 outline-none transition-all duration-500 ${
+            drawHighlight
+              ? "scale-[1.01] border-pink-300 ring-4 ring-pink-400/80 shadow-2xl shadow-pink-500/40"
+              : "border-white/10"
+          }`}
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -609,23 +891,37 @@ export default function AdminRafflePage() {
                       <p className="font-bold text-yellow-100">
                         {existingWinner.full_name}
                       </p>
+
                       <p className="mt-1 text-xs text-white/60">
                         {existingWinner.email}
                       </p>
+
                       <p className="mt-1 text-xs text-white/60">
                         Phone: {existingWinner.phone || "—"}
                       </p>
+
                       <p className="mt-1 text-xs text-white/60">
                         Tickets: {ticketCount(existingWinner.ticket_amount)}
                       </p>
+
                       <p className="mt-1 text-xs text-white/60">
                         Drawn: {formatDate(existingWinner.raffle_won_at)}
                       </p>
+
                       {existingWinner.raffle_draw_notes && (
                         <p className="mt-2 text-xs text-white/50">
                           {existingWinner.raffle_draw_notes}
                         </p>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={() => setRedoModal(position)}
+                        disabled={drawing !== null}
+                        className="mt-4 w-full rounded-2xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                      >
+                        Redo {prizeLabel(position)}
+                      </button>
                     </div>
                   ) : (
                     <button
@@ -684,7 +980,7 @@ export default function AdminRafflePage() {
             <p className="text-white/60">No raffle entries found.</p>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1200px] text-sm">
+              <table className="w-full min-w-[1350px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
@@ -696,6 +992,7 @@ export default function AdminRafflePage() {
                     <th className="p-3 text-right">Amount</th>
                     <th className="p-3 text-left">Winner</th>
                     <th className="p-3 text-left">Message</th>
+                    <th className="p-3 text-right">Actions</th>
                   </tr>
                 </thead>
 
@@ -747,6 +1044,17 @@ export default function AdminRafflePage() {
                           {entry.message || "—"}
                         </div>
                       </td>
+
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setDeleteModal(entry)}
+                          disabled={deleting}
+                          className="rounded-xl border border-red-300/30 bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -755,6 +1063,166 @@ export default function AdminRafflePage() {
           )}
         </section>
       </div>
+
+      {deleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                <Bug className="h-6 w-6" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                  Delete Entry
+                </p>
+                <h2 className="text-xl font-black">Delete raffle entry?</h2>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+              <p className="font-black text-white">{deleteModal.full_name}</p>
+              <p className="mt-1 text-sm text-white/60">
+                {deleteModal.email}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                Tickets: {ticketCount(deleteModal.ticket_amount)}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                Payment: {deleteModal.payment_status || "not_paid"}
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+              This will permanently delete this raffle entry from Supabase.
+              This cannot be undone.
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteModal(null)}
+                disabled={deleting}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => deleteEntry(deleteModal)}
+                disabled={deleting}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Yes, Delete Entry"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteAllModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                <Bug className="h-6 w-6" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                  Delete Test Entries
+                </p>
+                <h2 className="text-xl font-black">
+                  Delete all test entries?
+                </h2>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-white/70">
+              This will delete all fake test raffle entries created by the
+              <strong> Create 10 Test Entries</strong> button.
+            </p>
+
+            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+              Real raffle entries will not be deleted. Only entries with test
+              email/session details will be removed.
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteAllModal(false)}
+                disabled={deleting}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={deleteAllTestEntries}
+                disabled={deleting}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Yes, Delete Test Entries"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {redoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                <RefreshCcw className="h-6 w-6" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                  Redo Draw
+                </p>
+                <h2 className="text-xl font-black">
+                  Redo {prizeLabel(redoModal)}?
+                </h2>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm leading-6 text-white/70">
+              This will remove the current saved winner for{" "}
+              <strong>{prizeLabel(redoModal)}</strong>. After this, you can draw
+              that prize again.
+            </p>
+
+            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+              This does not delete the raffle entry. It only clears the winner
+              fields for this prize.
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRedoModal(null)}
+                disabled={drawing !== null}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => redoDraw(redoModal)}
+                disabled={drawing !== null}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+              >
+                {drawing ? "Resetting..." : `Yes, Redo ${prizeLabel(redoModal)}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {drawModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
