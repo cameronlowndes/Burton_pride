@@ -633,7 +633,7 @@ export default function AdminRafflePage() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
               >
                 <Bug className="h-4 w-4" />
-                Delete All  Entries
+                Delete all Test Entries
               </button>
 
               <button
