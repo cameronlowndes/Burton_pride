@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
@@ -31,11 +32,19 @@ async function syncPaidDonationsToMoneyTracker() {
 
       if (!sessionId) continue;
 
-      const { data: existing } = await supabaseAdmin
+      const { data: existing, error: existingError } = await supabaseAdmin
         .from("money_transactions")
         .select("id")
         .eq("stripe_session_id", sessionId)
         .maybeSingle();
+
+      if (existingError) {
+        console.error("Failed to check existing money transaction:", {
+          error: existingError,
+          sessionId,
+        });
+        continue;
+      }
 
       if (existing) continue;
 
@@ -53,8 +62,7 @@ async function syncPaidDonationsToMoneyTracker() {
 
       if (!isPaid) continue;
 
-      const amountPence =
-        session.amount_total || donation.amount_pence || 0;
+      const amountPence = session.amount_total || donation.amount_pence || 0;
 
       if (!amountPence || amountPence <= 0) continue;
 
@@ -70,12 +78,10 @@ async function syncPaidDonationsToMoneyTracker() {
         donation.email ||
         "";
 
-      const donorMessage =
-        session.metadata?.message || donation.message || "";
+      const donorMessage = session.metadata?.message || donation.message || "";
 
       const donationType =
-        session.mode === "subscription" ||
-        donation.donation_type === "monthly"
+        session.mode === "subscription" || donation.donation_type === "monthly"
           ? "Monthly donation"
           : "One-time donation";
 
@@ -140,29 +146,48 @@ async function syncPaidDonationsToMoneyTracker() {
 }
 
 export async function GET() {
-  await syncPaidDonationsToMoneyTracker();
+  try {
+    await syncPaidDonationsToMoneyTracker();
 
-  const { data, error } = await supabaseAdmin
-    .from("money_transactions")
-    .select("*")
-    .order("transaction_date", { ascending: false })
-    .order("created_at", { ascending: false });
+    const { data, error } = await supabaseAdmin
+      .from("money_transactions")
+      .select("*")
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false });
 
-  if (error) {
+    if (error) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message,
+          details: error,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { ok: false, error: error.message, details: error },
+      {
+        ok: true,
+        transactions: data || [],
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
+  } catch (err) {
+    console.error("Money transactions GET error:", err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : "Server error",
+      },
       { status: 500 }
     );
   }
-
-  return NextResponse.json(
-    { ok: true, transactions: data || [] },
-    {
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    }
-  );
 }
 
 export async function POST(req: Request) {
@@ -277,8 +302,76 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, transaction: data });
+    return NextResponse.json({
+      ok: true,
+      transaction: data,
+    });
   } catch (err) {
+    console.error("Money transactions POST error:", err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : "Server error",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE() {
+  try {
+    const { data: transactions, error: loadError } = await supabaseAdmin
+      .from("money_transactions")
+      .select("id");
+
+    if (loadError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: loadError.message,
+          details: loadError,
+        },
+        { status: 500 }
+      );
+    }
+
+    const ids = (transactions || []).map((item) => item.id);
+
+    if (ids.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        deletedCount: 0,
+        message: "No transactions to delete",
+      });
+    }
+
+    const { error: deleteError } = await supabaseAdmin
+      .from("money_transactions")
+      .delete()
+      .in("id", ids);
+
+    if (deleteError) {
+      console.error("Delete all money transactions error:", deleteError);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: deleteError.message,
+          details: deleteError,
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      deletedCount: ids.length,
+      message: "All transactions deleted successfully",
+    });
+  } catch (err) {
+    console.error("Unexpected delete all transactions error:", err);
+
     return NextResponse.json(
       {
         ok: false,
