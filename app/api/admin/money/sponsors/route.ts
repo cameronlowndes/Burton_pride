@@ -3,14 +3,19 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-function toPence(amount: string | number | null | undefined) {
-  const value = Number(amount || 0);
+function toPence(value: unknown) {
+  const amount = Number(String(value || "0"));
 
-  if (!Number.isFinite(value) || value < 0) {
+  if (!Number.isFinite(amount) || amount < 0) {
     return 0;
   }
 
-  return Math.round(value * 100);
+  return Math.round(amount * 100);
+}
+
+function clean(value: unknown) {
+  const text = String(value || "").trim();
+  return text.length > 0 ? text : null;
 }
 
 export async function GET() {
@@ -34,7 +39,7 @@ export async function GET() {
     const { data: transactions, error: transactionsError } = await supabaseAdmin
       .from("money_transactions")
       .select(
-        "id,type,amount_pence,sponsor_id,sponsor_name,source,category,is_personal_funds,payment_method,personal_funds_repaid"
+        "id,type,amount_pence,sponsor_id,sponsor_name,source,category,payment_method"
       );
 
     if (transactionsError) {
@@ -48,23 +53,34 @@ export async function GET() {
       );
     }
 
-    const safeSponsors = sponsors || [];
-    const safeTransactions = transactions || [];
+    const breakdown = (sponsors || []).map((sponsor: any) => {
+      const sponsorTransactions = (transactions || []).filter((item: any) => {
+        const transactionSponsorName = String(item.sponsor_name || "")
+          .toLowerCase()
+          .trim();
 
-    const breakdown = safeSponsors.map((sponsor) => {
-      const sponsorTransactions = safeTransactions.filter((item) => {
+        const sponsorName = String(sponsor.sponsor_name || "")
+          .toLowerCase()
+          .trim();
+
         return (
           item.sponsor_id === sponsor.id ||
-          item.sponsor_name === sponsor.sponsor_name
+          Boolean(sponsorName && transactionSponsorName === sponsorName)
         );
       });
 
-      const spentPence = sponsorTransactions
-        .filter((item) => item.type === "expense")
-        .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+      const receivedFromTransactions = sponsorTransactions
+        .filter((item: any) => item.type === "income")
+        .reduce((sum: number, item: any) => sum + (item.amount_pence || 0), 0);
 
-      const agreedPence = sponsor.agreed_amount_pence || 0;
-      const receivedPence = sponsor.received_amount_pence || 0;
+      const spentPence = sponsorTransactions
+        .filter((item: any) => item.type === "expense")
+        .reduce((sum: number, item: any) => sum + (item.amount_pence || 0), 0);
+
+      const receivedPence =
+        receivedFromTransactions > 0
+          ? receivedFromTransactions
+          : sponsor.received_amount_pence || 0;
 
       return {
         sponsor_id: sponsor.id,
@@ -72,7 +88,7 @@ export async function GET() {
         contact_name: sponsor.contact_name,
         email: sponsor.email,
         phone: sponsor.phone,
-        agreed_amount_pence: agreedPence,
+        agreed_amount_pence: sponsor.agreed_amount_pence || 0,
         received_pence: receivedPence,
         spent_pence: spentPence,
         remaining_pence: receivedPence - spentPence,
@@ -81,14 +97,14 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      sponsors: safeSponsors,
+      sponsors: sponsors || [],
       breakdown,
     });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+        error: err?.message || "Failed to load sponsors.",
       },
       { status: 500 }
     );
@@ -99,35 +115,38 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const sponsorName = String(body.sponsorName || "").trim();
-    const contactName = String(body.contactName || "").trim();
-    const email = String(body.email || "").trim();
-    const phone = String(body.phone || "").trim();
-    const agreedAmount = String(body.agreedAmount || "").trim();
-    const receivedAmount = String(body.receivedAmount || "").trim();
-    const notes = String(body.notes || "").trim();
+    const sponsorName = clean(body.sponsorName);
+    const contactName = clean(body.contactName);
+    const email = clean(body.email);
+    const phone = clean(body.phone);
+    const agreedAmountPence = toPence(body.agreedAmount);
+    const receivedAmountPence = toPence(body.receivedAmount);
+    const notes = clean(body.notes);
 
     if (!sponsorName) {
       return NextResponse.json(
-        { ok: false, error: "Sponsor name is required" },
+        {
+          ok: false,
+          error: "Please enter a sponsor name.",
+        },
         { status: 400 }
       );
     }
 
-    const payload = {
+    const insertData = {
       sponsor_name: sponsorName,
-      contact_name: contactName || null,
-      email: email || null,
-      phone: phone || null,
-      agreed_amount_pence: toPence(agreedAmount),
-      received_amount_pence: toPence(receivedAmount),
-      notes: notes || null,
+      contact_name: contactName,
+      email,
+      phone,
+      agreed_amount_pence: agreedAmountPence,
+      received_amount_pence: receivedAmountPence,
+      notes,
       is_active: true,
     };
 
     const { data, error } = await supabaseAdmin
       .from("money_sponsors")
-      .insert(payload)
+      .insert(insertData)
       .select("*")
       .single();
 
@@ -137,6 +156,7 @@ export async function POST(req: Request) {
           ok: false,
           error: error.message,
           details: error,
+          sent: insertData,
         },
         { status: 500 }
       );
@@ -145,13 +165,12 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       sponsor: data,
-      message: "Sponsor saved successfully",
     });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+        error: err?.message || "Failed to save sponsor.",
       },
       { status: 500 }
     );

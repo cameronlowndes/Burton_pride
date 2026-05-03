@@ -97,7 +97,7 @@ const initialForm: FormState = {
   type: "income",
   category: "",
   amount: "",
-  paymentMethod: "Stripe",
+  paymentMethod: "",
   transactionDate: new Date().toISOString().slice(0, 10),
   isPersonalFunds: false,
   personalFundsName: "",
@@ -190,6 +190,8 @@ export default function MoneyTransactionsPage() {
   const [filter, setFilter] = useState<
     "all" | "income" | "expense" | "sponsorship" | "personal"
   >("all");
+
+  const [selectedSponsorId, setSelectedSponsorId] = useState<string>("all");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -303,27 +305,47 @@ export default function MoneyTransactionsPage() {
     loadSponsors();
   }, []);
 
+  const selectedSponsor = useMemo(() => {
+    if (selectedSponsorId === "all") return null;
+
+    return displaySponsors.find((sponsor) => sponsor.id === selectedSponsorId) || null;
+  }, [displaySponsors, selectedSponsorId]);
+
   const filteredTransactions = useMemo(() => {
-    if (filter === "all") return transactions;
+    let rows = transactions;
 
     if (filter === "income") {
-      return transactions.filter((item) => item.type === "income");
+      rows = rows.filter((item) => item.type === "income");
     }
 
     if (filter === "expense") {
-      return transactions.filter((item) => item.type === "expense");
+      rows = rows.filter((item) => item.type === "expense");
     }
 
     if (filter === "personal") {
-      return transactions.filter((item) => isPersonalFundsTransaction(item));
+      rows = rows.filter((item) => isPersonalFundsTransaction(item));
     }
 
     if (filter === "sponsorship") {
-      return transactions.filter((item) => isSponsorshipTransaction(item));
+      rows = rows.filter((item) => isSponsorshipTransaction(item));
     }
 
-    return transactions;
-  }, [transactions, filter]);
+    if (selectedSponsorId !== "all") {
+      const sponsor = displaySponsors.find((item) => item.id === selectedSponsorId);
+      const sponsorName = sponsor?.sponsor_name?.toLowerCase().trim() || "";
+
+      rows = rows.filter((item) => {
+        const transactionSponsorName = item.sponsor_name?.toLowerCase().trim() || "";
+
+        return (
+          item.sponsor_id === selectedSponsorId ||
+          Boolean(sponsorName && transactionSponsorName === sponsorName)
+        );
+      });
+    }
+
+    return rows;
+  }, [transactions, filter, selectedSponsorId, displaySponsors]);
 
   const totals = useMemo(() => {
     const income = transactions
@@ -545,6 +567,11 @@ export default function MoneyTransactionsPage() {
         }));
       }
 
+      if (selectedSponsorId === deleteSponsorId) {
+        setSelectedSponsorId("all");
+        setFilter("all");
+      }
+
       if (editingSponsor?.id === deleteSponsorId) {
         closeSponsorForm();
       }
@@ -583,6 +610,15 @@ export default function MoneyTransactionsPage() {
 
   function startEditTransaction(item: Transaction) {
     const isPersonal = isPersonalFundsTransaction(item);
+    const matchingSponsor = displaySponsors.find((sponsor) => {
+      const sponsorName = sponsor.sponsor_name?.toLowerCase().trim() || "";
+      const itemSponsorName = item.sponsor_name?.toLowerCase().trim() || "";
+
+      return (
+        sponsor.id === item.sponsor_id ||
+        Boolean(sponsorName && itemSponsorName && sponsorName === itemSponsorName)
+      );
+    });
 
     setEditingTransaction(item);
 
@@ -592,13 +628,17 @@ export default function MoneyTransactionsPage() {
       type: item.type,
       category: item.category || "",
       amount: ((item.amount_pence || 0) / 100).toFixed(2),
-      paymentMethod: item.payment_method || "Stripe",
+      paymentMethod:
+        item.source === "sponsorship" || item.sponsor_id || item.sponsor_name
+          ? "Sponsorship Money"
+          : item.payment_method || "",
       transactionDate:
         item.transaction_date || new Date().toISOString().slice(0, 10),
       isPersonalFunds: isPersonal,
       personalFundsName: item.personal_funds_name || "",
-      sponsorId: item.sponsor_id || "",
-      sponsorName: item.sponsor_name || "",
+      sponsorId: matchingSponsor?.id || item.sponsor_id || "",
+      sponsorName:
+        matchingSponsor?.sponsor_name || item.sponsor_name || "",
       sponsorshipNote: item.sponsorship_note || "",
     });
 
@@ -640,9 +680,37 @@ export default function MoneyTransactionsPage() {
         return;
       }
 
+      if (!form.paymentMethod && !form.sponsorId) {
+        setError("Please choose a payment method.");
+        setSaving(false);
+        return;
+      }
+
       if (form.isPersonalFunds && !form.personalFundsName.trim()) {
         setError(
           "Please enter the name of the person who paid with personal funds."
+        );
+        setSaving(false);
+        return;
+      }
+
+      const selectedSponsorForSave = form.sponsorId
+        ? displaySponsors.find((sponsor) => sponsor.id === form.sponsorId)
+        : null;
+
+      const finalSponsorId = selectedSponsorForSave?.id || "";
+      const finalSponsorName = selectedSponsorForSave?.sponsor_name || "";
+      const isSponsorLinked = Boolean(finalSponsorId || finalSponsorName);
+      const looksLikeSponsorship =
+        form.paymentMethod === "Sponsorship Money" ||
+        form.category.toLowerCase().trim() === "sponsorship" ||
+        Boolean(editingTransaction?.source === "sponsorship") ||
+        Boolean(editingTransaction?.sponsor_id) ||
+        Boolean(editingTransaction?.sponsor_name);
+
+      if (looksLikeSponsorship && !isSponsorLinked) {
+        setError(
+          "Please choose the correct sponsor before saving this sponsorship transaction."
         );
         setSaving(false);
         return;
@@ -655,13 +723,16 @@ export default function MoneyTransactionsPage() {
       uploadData.append("type", form.type);
       uploadData.append("category", form.category);
       uploadData.append("amount", form.amount);
-      uploadData.append("paymentMethod", form.paymentMethod);
+      uploadData.append(
+        "paymentMethod",
+        isSponsorLinked ? "Sponsorship Money" : form.paymentMethod
+      );
       uploadData.append("transactionDate", form.transactionDate);
-      uploadData.append("source", form.sponsorId ? "sponsorship" : "manual");
+      uploadData.append("source", isSponsorLinked ? "sponsorship" : "manual");
       uploadData.append("isPersonalFunds", String(form.isPersonalFunds));
       uploadData.append("personalFundsName", form.personalFundsName);
-      uploadData.append("sponsorId", form.sponsorId);
-      uploadData.append("sponsorName", form.sponsorName);
+      uploadData.append("sponsorId", finalSponsorId);
+      uploadData.append("sponsorName", finalSponsorName);
       uploadData.append("sponsorshipNote", form.sponsorshipNote);
 
       if (invoiceFile) {
@@ -843,7 +914,7 @@ export default function MoneyTransactionsPage() {
     const fileDate = new Date().toISOString().slice(0, 10);
     const exportedAt = new Date().toLocaleString("en-GB");
 
-    const filterLabel =
+    const baseFilterLabel =
       filter === "all"
         ? "All Transactions"
         : filter === "income"
@@ -853,6 +924,10 @@ export default function MoneyTransactionsPage() {
         : filter === "personal"
         ? "Personal Funds"
         : "Sponsorship";
+
+    const filterLabel = selectedSponsor
+      ? `${baseFilterLabel} — ${selectedSponsor.sponsor_name}`
+      : baseFilterLabel;
 
     const rows = filteredTransactions;
 
@@ -1282,7 +1357,7 @@ export default function MoneyTransactionsPage() {
   function printTransactions() {
     const printedAt = new Date().toLocaleString("en-GB");
 
-    const filterLabel =
+    const baseFilterLabel =
       filter === "all"
         ? "All Transactions"
         : filter === "income"
@@ -1292,6 +1367,10 @@ export default function MoneyTransactionsPage() {
         : filter === "personal"
         ? "Personal Funds"
         : "Sponsorship";
+
+    const filterLabel = selectedSponsor
+      ? `${baseFilterLabel} — ${selectedSponsor.sponsor_name}`
+      : baseFilterLabel;
 
     const sponsorRows =
       sponsorBreakdown.length === 0
@@ -1795,6 +1874,31 @@ export default function MoneyTransactionsPage() {
     printWindow.document.close();
   }
 
+  useEffect(() => {
+    function handlePrintShortcut(event: KeyboardEvent) {
+      const isPrintShortcut =
+        (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p";
+
+      if (!isPrintShortcut) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (filteredTransactions.length === 0) {
+        setError("There are no transactions to print.");
+        return;
+      }
+
+      printTransactions();
+    }
+
+    window.addEventListener("keydown", handlePrintShortcut);
+
+    return () => {
+      window.removeEventListener("keydown", handlePrintShortcut);
+    };
+  }, [filteredTransactions, filter, sponsorBreakdown, filteredTotals, totals]);
+
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1600px] space-y-6">
@@ -2100,19 +2204,23 @@ export default function MoneyTransactionsPage() {
                       ...prev,
                       sponsorId: selected?.id || "",
                       sponsorName: selected?.sponsor_name || "",
-                      category:
-                        selected && prev.type === "income" && !prev.category
-                          ? "Sponsorship"
-                          : prev.category,
-                      paymentMethod:
-                        selected && prev.type === "income"
-                          ? "Bank Transfer"
-                          : prev.paymentMethod,
+                      category: selected
+                        ? "Sponsorship"
+                        : prev.category === "Sponsorship"
+                        ? ""
+                        : prev.category,
+                      paymentMethod: selected
+                        ? "Sponsorship Money"
+                        : prev.paymentMethod === "Sponsorship Money"
+                        ? ""
+                        : prev.paymentMethod,
+                      isPersonalFunds: selected ? false : prev.isPersonalFunds,
+                      personalFundsName: selected ? "" : prev.personalFundsName,
                     }));
                   }}
                   className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
                 >
-                  <option value="">No sponsor linked</option>
+                  <option value="">Choose sponsor...</option>
 
                   {displaySponsors.map((sponsor) => (
                     <option key={sponsor.id} value={sponsor.id}>
@@ -2142,28 +2250,41 @@ export default function MoneyTransactionsPage() {
                 </button>
               </div>
 
-              <select
-                value={form.paymentMethod}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    paymentMethod: e.target.value,
-                    isPersonalFunds:
-                      e.target.value === "Personal Funds"
-                        ? true
-                        : prev.isPersonalFunds,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              >
-                <option value="Stripe">Stripe</option>
-                <option value="Online">Online Payment</option>
-                <option value="Cash">Cash</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="PayPal">PayPal</option>
-                <option value="Card Machine">Card Machine</option>
-                <option value="Personal Funds">Personal Funds</option>
-              </select>
+              {form.sponsorId ? (
+                <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  <p className="font-bold">Payment method</p>
+                  <p className="mt-1 text-lg font-black text-white">
+                    Sponsorship Money
+                  </p>
+                  <p className="mt-1 text-xs text-amber-100/70">
+                    This is locked because a sponsor is linked. Remove the sponsor if this was paid another way.
+                  </p>
+                </div>
+              ) : (
+                <select
+                  value={form.paymentMethod}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      paymentMethod: e.target.value,
+                      isPersonalFunds:
+                        e.target.value === "Personal Funds"
+                          ? true
+                          : prev.isPersonalFunds,
+                    }))
+                  }
+                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
+                >
+                  <option value="">Choose payment method...</option>
+                  <option value="Stripe">Stripe</option>
+                  <option value="Online">Online Payment</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="PayPal">PayPal</option>
+                  <option value="Card Machine">Card Machine</option>
+                  <option value="Personal Funds">Personal Funds</option>
+                </select>
+              )}
 
               {form.type === "expense" && (
                 <label className="flex items-start gap-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
@@ -2177,7 +2298,7 @@ export default function MoneyTransactionsPage() {
                         paymentMethod: e.target.checked
                           ? "Personal Funds"
                           : prev.paymentMethod === "Personal Funds"
-                          ? "Stripe"
+                          ? ""
                           : prev.paymentMethod,
                         personalFundsName: e.target.checked
                           ? prev.personalFundsName
@@ -2328,31 +2449,88 @@ export default function MoneyTransactionsPage() {
               </div>
             </div>
 
-            <div className="mb-4 flex flex-wrap gap-2">
-              {(
-                ["all", "income", "expense", "personal", "sponsorship"] as const
-              ).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setFilter(item)}
-                  className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                    filter === item
-                      ? "bg-white text-black"
-                      : "bg-white/10 text-white hover:bg-white/20"
-                  }`}
-                >
-                  {item === "all"
-                    ? "All"
-                    : item === "income"
-                    ? "Money In"
-                    : item === "expense"
-                    ? "Money Out"
-                    : item === "personal"
-                    ? "Personal Funds"
-                    : "Sponsorship"}
-                </button>
-              ))}
+            <div className="mb-4 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {(
+                  ["all", "income", "expense", "personal", "sponsorship"] as const
+                ).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setFilter(item)}
+                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                      filter === item
+                        ? "bg-white text-black"
+                        : "bg-white/10 text-white hover:bg-white/20"
+                    }`}
+                  >
+                    {item === "all"
+                      ? "All"
+                      : item === "income"
+                      ? "Money In"
+                      : item === "expense"
+                      ? "Money Out"
+                      : item === "personal"
+                      ? "Personal Funds"
+                      : "Sponsorship"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-amber-100">
+                      Organise by sponsor
+                    </p>
+                    <p className="text-xs text-amber-100/70">
+                      Choose one sponsor to only show money in and spending linked to them.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <select
+                      value={selectedSponsorId}
+                      onChange={(e) => {
+                        const nextSponsorId = e.target.value;
+                        setSelectedSponsorId(nextSponsorId);
+
+                        if (nextSponsorId !== "all") {
+                          setFilter("sponsorship");
+                        }
+                      }}
+                      className="min-w-[240px] rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/50"
+                    >
+                      <option value="all">All sponsors</option>
+
+                      {displaySponsors.map((sponsor) => (
+                        <option key={sponsor.id} value={sponsor.id}>
+                          {sponsor.sponsor_name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedSponsorId !== "all" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSponsorId("all");
+                          setFilter("all");
+                        }}
+                        className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20"
+                      >
+                        Clear sponsor
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {selectedSponsor && (
+                  <div className="mt-3 rounded-xl bg-black/20 px-4 py-3 text-sm text-amber-100">
+                    Showing transactions for <strong>{selectedSponsor.sponsor_name}</strong>. Export Excel and Print will also use this sponsor view.
+                  </div>
+                )}
+              </div>
             </div>
 
             {loading ? (

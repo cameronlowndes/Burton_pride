@@ -3,64 +3,73 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-type RouteContext = {
-  params: Promise<{
-    id: string;
-  }>;
-};
+function toPence(value: unknown) {
+  const amount = Number(String(value || "0"));
 
-function toPence(amount: string | number | null | undefined) {
-  const value = Number(amount || 0);
-
-  if (!Number.isFinite(value) || value < 0) {
+  if (!Number.isFinite(amount) || amount < 0) {
     return 0;
   }
 
-  return Math.round(value * 100);
+  return Math.round(amount * 100);
 }
 
-export async function PATCH(req: Request, context: RouteContext) {
-  try {
-    const { id } = await context.params;
+function clean(value: unknown) {
+  const text = String(value || "").trim();
+  return text.length > 0 ? text : null;
+}
 
-    if (!id) {
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const sponsorId = params.id;
+
+    if (!sponsorId) {
       return NextResponse.json(
-        { ok: false, error: "Missing sponsor ID" },
+        {
+          ok: false,
+          error: "Missing sponsor ID.",
+        },
         { status: 400 }
       );
     }
 
     const body = await req.json();
 
-    const sponsorName = String(body.sponsorName || "").trim();
-    const contactName = String(body.contactName || "").trim();
-    const email = String(body.email || "").trim();
-    const phone = String(body.phone || "").trim();
-    const agreedAmount = String(body.agreedAmount || "").trim();
-    const receivedAmount = String(body.receivedAmount || "").trim();
-    const notes = String(body.notes || "").trim();
+    const sponsorName = clean(body.sponsorName);
+    const contactName = clean(body.contactName);
+    const email = clean(body.email);
+    const phone = clean(body.phone);
+    const agreedAmountPence = toPence(body.agreedAmount);
+    const receivedAmountPence = toPence(body.receivedAmount);
+    const notes = clean(body.notes);
 
     if (!sponsorName) {
       return NextResponse.json(
-        { ok: false, error: "Sponsor name is required" },
+        {
+          ok: false,
+          error: "Please enter a sponsor name.",
+        },
         { status: 400 }
       );
     }
 
-    const payload = {
+    const updateData = {
       sponsor_name: sponsorName,
-      contact_name: contactName || null,
-      email: email || null,
-      phone: phone || null,
-      agreed_amount_pence: toPence(agreedAmount),
-      received_amount_pence: toPence(receivedAmount),
-      notes: notes || null,
+      contact_name: contactName,
+      email,
+      phone,
+      agreed_amount_pence: agreedAmountPence,
+      received_amount_pence: receivedAmountPence,
+      notes,
+      is_active: true,
     };
 
     const { data, error } = await supabaseAdmin
       .from("money_sponsors")
-      .update(payload)
-      .eq("id", id)
+      .update(updateData)
+      .eq("id", sponsorId)
       .select("*")
       .single();
 
@@ -70,6 +79,7 @@ export async function PATCH(req: Request, context: RouteContext) {
           ok: false,
           error: error.message,
           details: error,
+          sent: updateData,
         },
         { status: 500 }
       );
@@ -80,36 +90,41 @@ export async function PATCH(req: Request, context: RouteContext) {
       .update({
         sponsor_name: sponsorName,
       })
-      .eq("sponsor_id", id);
+      .eq("sponsor_id", sponsorId);
 
     return NextResponse.json({
       ok: true,
       sponsor: data,
-      message: "Sponsor updated successfully",
     });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+        error: err?.message || "Failed to update sponsor.",
       },
       { status: 500 }
     );
   }
 }
 
-export async function DELETE(req: Request, context: RouteContext) {
+export async function DELETE(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = await context.params;
+    const sponsorId = params.id;
 
-    if (!id) {
+    if (!sponsorId) {
       return NextResponse.json(
-        { ok: false, error: "Missing sponsor ID" },
+        {
+          ok: false,
+          error: "Missing sponsor ID.",
+        },
         { status: 400 }
       );
     }
 
-    await supabaseAdmin
+    const { error: transactionError } = await supabaseAdmin
       .from("money_transactions")
       .update({
         sponsor_id: null,
@@ -117,12 +132,23 @@ export async function DELETE(req: Request, context: RouteContext) {
         sponsorship_note: null,
         source: "manual",
       })
-      .eq("sponsor_id", id);
+      .eq("sponsor_id", sponsorId);
+
+    if (transactionError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: transactionError.message,
+          details: transactionError,
+        },
+        { status: 500 }
+      );
+    }
 
     const { error } = await supabaseAdmin
       .from("money_sponsors")
       .delete()
-      .eq("id", id);
+      .eq("id", sponsorId);
 
     if (error) {
       return NextResponse.json(
@@ -137,13 +163,12 @@ export async function DELETE(req: Request, context: RouteContext) {
 
     return NextResponse.json({
       ok: true,
-      message: "Sponsor deleted successfully",
     });
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+        error: err?.message || "Failed to delete sponsor.",
       },
       { status: 500 }
     );
