@@ -15,12 +15,14 @@ import {
   RotateCcw,
 } from "lucide-react";
 
+type SitePageStatus = "live" | "hidden" | "coming_soon";
+
 type SitePage = {
   id: string;
   title: string;
   route: string;
   page_key: string | null;
-  status: "live" | "hidden" | "coming_soon";
+  status: SitePageStatus;
   is_enabled: boolean;
   show_in_nav: boolean;
   nav_label: string | null;
@@ -37,6 +39,7 @@ type SitePage = {
   created_at: string;
   updated_at: string;
 };
+
 type ApiResponse = {
   ok: boolean;
   error?: string;
@@ -56,7 +59,11 @@ function formatDate(value: string) {
   });
 }
 
-function statusClasses(status: SitePage["status"]) {
+function cleanText(value: string | null | undefined) {
+  return String(value || "").toLowerCase().trim();
+}
+
+function statusClasses(status: SitePageStatus) {
   if (status === "live") {
     return "border-emerald-400/30 bg-emerald-500/15 text-emerald-200";
   }
@@ -68,7 +75,7 @@ function statusClasses(status: SitePage["status"]) {
   return "border-white/10 bg-white/5 text-white/70";
 }
 
-function statusLabel(status: SitePage["status"]) {
+function statusLabel(status: SitePageStatus) {
   if (status === "coming_soon") return "Coming soon";
   if (status === "hidden") return "Hidden";
   return "Live";
@@ -80,8 +87,11 @@ export default function SitePagesAdminPage() {
   const [syncing, setSyncing] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | SitePage["status"]>("all");
-  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | SitePageStatus>("all");
+  const [notice, setNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   async function loadPages() {
     try {
@@ -120,19 +130,24 @@ export default function SitePagesAdminPage() {
 
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 3500);
-    return () => clearTimeout(timer);
+
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 3500);
+
+    return () => window.clearTimeout(timer);
   }, [notice]);
 
   const filteredPages = useMemo(() => {
-    return pages.filter((page) => {
-      const q = query.toLowerCase();
+    const q = cleanText(query);
 
+    return pages.filter((page) => {
       const matchesQuery =
-        !query.trim() ||
-        page.title.toLowerCase().includes(q) ||
-        page.route.toLowerCase().includes(q) ||
-        (page.nav_label || "").toLowerCase().includes(q);
+        !q ||
+        cleanText(page.title).includes(q) ||
+        cleanText(page.route).includes(q) ||
+        cleanText(page.nav_label).includes(q) ||
+        cleanText(page.page_key).includes(q);
 
       const matchesStatus =
         statusFilter === "all" ? true : page.status === statusFilter;
@@ -159,6 +174,7 @@ export default function SitePagesAdminPage() {
 
       const res = await fetch("/api/admin/site-pages/sync", {
         method: "POST",
+        cache: "no-store",
       });
 
       const json = await res.json();
@@ -171,7 +187,9 @@ export default function SitePagesAdminPage() {
 
       setNotice({
         type: "success",
-        text: `Sync complete. Scanned ${json.scanned || 0} pages, added ${json.inserted || 0} new pages.`,
+        text: `Sync complete. Scanned ${json.scanned || 0} pages, added ${
+          json.inserted || 0
+        } new pages.`,
       });
     } catch (error) {
       setNotice({
@@ -205,24 +223,24 @@ export default function SitePagesAdminPage() {
         headers: {
           "Content-Type": "application/json",
         },
-      body: JSON.stringify({
-  id,
-  title: optimistic.title,
-  status: optimistic.status,
-  is_enabled: optimistic.is_enabled,
-  show_in_nav: optimistic.show_in_nav,
-  nav_label: optimistic.nav_label,
-  template: optimistic.template,
-  sort_order: optimistic.sort_order,
-  hidden_title: optimistic.hidden_title,
-  hidden_message: optimistic.hidden_message,
-  coming_soon_title: optimistic.coming_soon_title,
-  coming_soon_message: optimistic.coming_soon_message,
-  locked_title: optimistic.locked_title,
-  locked_message: optimistic.locked_message,
-  password_protected: optimistic.password_protected,
-  page_password: optimistic.page_password || "",
-}),
+        body: JSON.stringify({
+          id,
+          title: optimistic.title,
+          status: optimistic.status,
+          is_enabled: optimistic.is_enabled,
+          show_in_nav: optimistic.show_in_nav,
+          nav_label: optimistic.nav_label || "",
+          template: optimistic.template || "",
+          sort_order: Number(optimistic.sort_order || 0),
+          hidden_title: optimistic.hidden_title || "",
+          hidden_message: optimistic.hidden_message || "",
+          coming_soon_title: optimistic.coming_soon_title || "",
+          coming_soon_message: optimistic.coming_soon_message || "",
+          locked_title: optimistic.locked_title || "",
+          locked_message: optimistic.locked_message || "",
+          password_protected: optimistic.password_protected,
+          page_password: optimistic.page_password || "",
+        }),
       });
 
       const json = await res.json();
@@ -242,7 +260,10 @@ export default function SitePagesAdminPage() {
         )
       );
 
-      setNotice({ type: "success", text: successMessage });
+      setNotice({
+        type: "success",
+        text: successMessage,
+      });
     } catch (error) {
       setPages((prev) => prev.map((p) => (p.id === id ? current : p)));
       setNotice({
@@ -252,6 +273,10 @@ export default function SitePagesAdminPage() {
     } finally {
       setSavingId(null);
     }
+  }
+
+  function updateLocalPage(id: string, patch: Partial<SitePage>) {
+    setPages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
   function resetPageDetails(page: SitePage) {
@@ -264,6 +289,8 @@ export default function SitePagesAdminPage() {
         hidden_message: "",
         coming_soon_title: "",
         coming_soon_message: "",
+        locked_title: "",
+        locked_message: "",
         password_protected: false,
         page_password: "",
       },
@@ -343,7 +370,7 @@ export default function SitePagesAdminPage() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by page title, route, or nav label..."
+                  placeholder="Search by title, route, page key, or nav label..."
                   className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/35"
                 />
               </label>
@@ -351,9 +378,9 @@ export default function SitePagesAdminPage() {
               <select
                 value={statusFilter}
                 onChange={(e) =>
-                  setStatusFilter(e.target.value as "all" | SitePage["status"])
+                  setStatusFilter(e.target.value as "all" | SitePageStatus)
                 }
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white outline-none"
               >
                 <option value="all">All statuses</option>
                 <option value="live">Live</option>
@@ -392,7 +419,7 @@ export default function SitePagesAdminPage() {
                 </div>
                 <h2 className="mt-4 text-lg font-semibold">No pages found</h2>
                 <p className="mt-2 text-sm text-white/60">
-                  Try changing your search or run a sync to pull in any new routes.
+                  Try clearing your search or click Sync pages to pull in new routes.
                 </p>
               </div>
             ) : (
@@ -490,12 +517,12 @@ export default function SitePagesAdminPage() {
                                   updatePage(
                                     page.id,
                                     {
-                                      status: e.target.value as SitePage["status"],
+                                      status: e.target.value as SitePageStatus,
                                     },
                                     `Updated ${page.title} status`
                                   )
                                 }
-                                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                className="w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none"
                               >
                                 <option value="live">Live</option>
                                 <option value="coming_soon">Coming soon</option>
@@ -512,16 +539,9 @@ export default function SitePagesAdminPage() {
                                 value={page.sort_order}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? {
-                                            ...p,
-                                            sort_order: Number(e.target.value || 0),
-                                          }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    sort_order: Number(e.target.value || 0),
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -545,13 +565,9 @@ export default function SitePagesAdminPage() {
                                 value={page.nav_label || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, nav_label: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    nav_label: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -574,13 +590,9 @@ export default function SitePagesAdminPage() {
                                 value={page.template || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, template: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    template: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -605,13 +617,9 @@ export default function SitePagesAdminPage() {
                                 value={page.hidden_title || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, hidden_title: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    hidden_title: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -634,13 +642,9 @@ export default function SitePagesAdminPage() {
                                 value={page.coming_soon_title || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, coming_soon_title: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    coming_soon_title: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -667,13 +671,9 @@ export default function SitePagesAdminPage() {
                                 value={page.hidden_message || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, hidden_message: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    hidden_message: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -695,16 +695,9 @@ export default function SitePagesAdminPage() {
                                 value={page.coming_soon_message || ""}
                                 disabled={isSaving}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? {
-                                            ...p,
-                                            coming_soon_message: e.target.value,
-                                          }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    coming_soon_message: e.target.value,
+                                  })
                                 }
                                 onBlur={() =>
                                   updatePage(
@@ -729,7 +722,11 @@ export default function SitePagesAdminPage() {
                               onClick={() =>
                                 updatePage(
                                   page.id,
-                                  { password_protected: !page.password_protected },
+                                  {
+                                    password_protected:
+                                      !page.password_protected,
+                                    page_password: "",
+                                  },
                                   page.password_protected
                                     ? `${page.title} password protection disabled`
                                     : `${page.title} password protection enabled`
@@ -756,13 +753,9 @@ export default function SitePagesAdminPage() {
                                 value={page.page_password || ""}
                                 disabled={isSaving || !page.password_protected}
                                 onChange={(e) =>
-                                  setPages((prev) =>
-                                    prev.map((p) =>
-                                      p.id === page.id
-                                        ? { ...p, page_password: e.target.value }
-                                        : p
-                                    )
-                                  )
+                                  updateLocalPage(page.id, {
+                                    page_password: e.target.value,
+                                  })
                                 }
                                 onBlur={() => {
                                   if (
@@ -774,7 +767,9 @@ export default function SitePagesAdminPage() {
 
                                   updatePage(
                                     page.id,
-                                    { page_password: page.page_password },
+                                    {
+                                      page_password: page.page_password,
+                                    },
                                     `Updated ${page.title} page password`
                                   );
                                 }}
