@@ -39,7 +39,13 @@ export async function POST(req: Request) {
       donationType,
     } = body;
 
-    if (!fullName || !email) {
+    const cleanFullName = String(fullName || "").trim();
+    const cleanEmail = String(email || "").trim().toLowerCase();
+    const cleanMessage = String(message || "").trim();
+    const cleanSupporterStory = String(supporterStory || "").trim();
+    const cleanSupporterImageName = String(supporterImageName || "").trim();
+
+    if (!cleanFullName || !cleanEmail) {
       return NextResponse.json(
         { ok: false, error: "Full name and email are required" },
         { status: 400 }
@@ -49,29 +55,56 @@ export async function POST(req: Request) {
     const amountPence = getAmountPence(selectedAmount, customAmount);
     const isMonthly = donationType === "monthly";
 
-    const appUrl = process.env.NEXT_PUBLIC_URL;
+    const appUrl =
+      process.env.NEXT_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.APP_URL;
 
     if (!appUrl) {
       return NextResponse.json(
-        { ok: false, error: "Missing NEXT_PUBLIC_URL" },
+        {
+          ok: false,
+          error:
+            "Missing app URL. Add NEXT_PUBLIC_URL or NEXT_PUBLIC_APP_URL to your environment variables.",
+        },
         { status: 500 }
       );
     }
 
+    const donationMode = isMonthly ? "monthly" : "one_time";
+
+    const metadata = {
+      fullName: cleanFullName,
+      email: cleanEmail,
+      message: cleanMessage,
+      supporterStory: isMonthly ? cleanSupporterStory : "",
+      supporterImageName: isMonthly ? cleanSupporterImageName : "",
+      donationType: donationMode,
+      amountPence: String(amountPence),
+      source: "website_donation",
+    };
+
     const checkoutSession = await stripe.checkout.sessions.create({
       mode: isMonthly ? "subscription" : "payment",
-      customer_email: email,
+      customer_email: cleanEmail,
+
       success_url: `${appUrl}/DonateToUs/Success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/DonateToUs`,
-      metadata: {
-        fullName,
-        email,
-        message: message || "",
-        supporterStory: isMonthly ? supporterStory || "" : "",
-        supporterImageName: isMonthly ? supporterImageName || "" : "",
-        donationType: isMonthly ? "monthly" : "one_time",
-        amountPence: String(amountPence),
-      },
+
+      metadata,
+
+      payment_intent_data: !isMonthly
+        ? {
+            metadata,
+          }
+        : undefined,
+
+      subscription_data: isMonthly
+        ? {
+            metadata,
+          }
+        : undefined,
+
       line_items: [
         {
           quantity: 1,
@@ -86,6 +119,7 @@ export async function POST(req: Request) {
               description: isMonthly
                 ? "Monthly donation to support Burton Pride C.I.C"
                 : "One-time donation to support Burton Pride C.I.C",
+              metadata,
             },
           },
         },
@@ -93,17 +127,18 @@ export async function POST(req: Request) {
     });
 
     const { error: insertError } = await supabaseAdmin.from("donations").insert({
-      full_name: fullName,
-      email,
-      message: message || null,
+      full_name: cleanFullName,
+      email: cleanEmail,
+      message: cleanMessage || null,
 
-      supporter_story: isMonthly ? supporterStory || null : null,
-      supporter_story_status: isMonthly && supporterStory ? "pending" : null,
+      supporter_story: isMonthly ? cleanSupporterStory || null : null,
+      supporter_story_status:
+        isMonthly && cleanSupporterStory ? "pending" : null,
       supporter_wall_approved: false,
-      supporter_display_name: isMonthly ? fullName : null,
+      supporter_display_name: isMonthly ? cleanFullName : null,
       supporter_image_url: isMonthly ? supporterImagePreview || null : null,
 
-      donation_type: isMonthly ? "monthly" : "one_time",
+      donation_type: donationMode,
       amount_pence: amountPence,
       currency: "gbp",
 
@@ -115,7 +150,11 @@ export async function POST(req: Request) {
       console.error("Donation insert error:", insertError);
 
       return NextResponse.json(
-        { ok: false, error: insertError.message },
+        {
+          ok: false,
+          error: insertError.message,
+          details: insertError,
+        },
         { status: 500 }
       );
     }
@@ -123,6 +162,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       url: checkoutSession.url,
+      sessionId: checkoutSession.id,
     });
   } catch (error) {
     console.error("Donate API error:", error);

@@ -16,7 +16,7 @@ function formatAmount(amount?: number | null) {
   return ((amount || 0) / 100).toFixed(2);
 }
 
-function escapeHtml(value: string) {
+function escapeHtml(value: string | null | undefined) {
   return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -49,6 +49,484 @@ function parseEmailList(value: string | undefined) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function safeTicketCount(value: string | number | null | undefined) {
+  const n = Number(value || 1);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.floor(n);
+}
+
+/**
+ * ✅ RAFFLE PAYMENT COMPLETE
+ * When Stripe confirms checkout.session.completed for raffle,
+ * this updates raffle_entries from checkout_started to paid,
+ * sends confirmation email to the person,
+ * and sends notification email to Burton Pride.
+ */
+async function handleRaffleSession(session: Stripe.Checkout.Session) {
+  try {
+    const sessionId = session.id;
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : null;
+
+    if (!sessionId) {
+      console.error("Raffle webhook missing session ID");
+      return;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("raffle_entries")
+      .update({
+        status: "paid",
+        payment_status: "paid",
+        stripe_payment_intent_id: paymentIntentId,
+      })
+      .eq("stripe_checkout_session_id", sessionId)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error("Failed to mark raffle entry as paid:", {
+        message: error.message,
+        details: error,
+        sessionId,
+        paymentIntentId,
+      });
+      return;
+    }
+
+    console.log("Raffle entry marked as paid:", data);
+
+    const fullName = String(data.full_name || "Supporter").trim();
+    const email = String(
+      data.email || session.customer_details?.email || ""
+    ).trim();
+    const phone = String(data.phone || "").trim();
+    const tickets = safeTicketCount(data.ticket_amount);
+    const amount = formatAmount(data.amount_pence || session.amount_total || 0);
+    const message = String(data.message || "").trim();
+
+    const safeFullName = escapeHtml(fullName);
+    const safeEmail = escapeHtml(email);
+    const safePhone = escapeHtml(phone || "No phone provided");
+    const safeMessage = escapeHtml(message || "No message provided");
+    const safeTickets = escapeHtml(String(tickets));
+    const safeAmount = escapeHtml(amount);
+    const safeEntryId = escapeHtml(data.id);
+    const safeSessionId = escapeHtml(sessionId);
+    const safePaymentIntentId = escapeHtml(paymentIntentId || "Not available");
+
+    const FROM =
+      process.env.EMAIL_FROM?.trim() ||
+      "Burton Pride <noreply@burtonpride.co.uk>";
+
+    const REPLY_TO =
+      process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
+
+    const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
+      .length
+      ? parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
+      : parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
+
+    const adminRecipients = adminList.length
+      ? adminList
+      : ["info@burtonpride.co.uk", "prideburton@gmail.com"];
+
+    const emailHeaders = {
+      "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
+    } as Record<string, string>;
+
+    if (email) {
+      await resend.emails.send({
+        from: FROM,
+        to: email,
+        replyTo: REPLY_TO,
+        subject: "You are entered into the Burton Pride raffle",
+        headers: emailHeaders,
+        html: `
+          <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
+            <div style="padding: 32px 24px; background: linear-gradient(135deg, #db2777, #a21caf, #2563eb); color: white; border-radius: 20px 20px 0 0; text-align: center;">
+              <h1 style="margin: 0; font-size: 28px;">You Are In The Raffle</h1>
+              <p style="margin: 12px 0 0; font-size: 16px; opacity: 0.95;">
+                Burton Pride C.I.C
+              </p>
+            </div>
+
+            <div style="background: #ffffff; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 20px 20px; padding: 32px 24px;">
+              <p style="margin-top: 0;">Hi ${safeFullName},</p>
+
+              <p>
+                Thank you for entering the Burton Pride raffle. Your payment has been received and your raffle entry is now confirmed.
+              </p>
+
+              <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; margin: 22px 0;">
+                <p style="margin: 0 0 8px;"><strong>Name:</strong> ${safeFullName}</p>
+                <p style="margin: 0 0 8px;"><strong>Tickets:</strong> ${safeTickets}</p>
+                <p style="margin: 0 0 8px;"><strong>Amount paid:</strong> £${safeAmount}</p>
+                <p style="margin: 0;"><strong>Entry reference:</strong> ${safeEntryId}</p>
+              </div>
+
+              <p>
+                Every ticket helps us keep Burton Pride community-led, grassroots, and created by the community, for the community.
+              </p>
+
+              <p>
+                Good luck, and thank you for supporting Burton Pride.
+              </p>
+
+              <p style="margin-bottom: 0;">
+                Kind regards,<br />
+                <strong>Burton Pride C.I.C</strong>
+              </p>
+            </div>
+          </div>
+        `,
+        text: `Hi ${fullName},
+
+Thank you for entering the Burton Pride raffle. Your payment has been received and your raffle entry is now confirmed.
+
+Name: ${fullName}
+Tickets: ${tickets}
+Amount paid: £${amount}
+Entry reference: ${data.id}
+
+Every ticket helps us keep Burton Pride community-led, grassroots, and created by the community, for the community.
+
+Good luck, and thank you for supporting Burton Pride.
+
+Kind regards,
+Burton Pride C.I.C`,
+      });
+
+      console.log("Raffle confirmation email sent to:", email);
+    }
+
+    await resend.emails.send({
+      from: FROM,
+      to: adminRecipients,
+      replyTo: REPLY_TO,
+      subject: `New raffle entry received - ${fullName}`,
+      headers: emailHeaders,
+      html: `
+        <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 700px; margin: 0 auto;">
+          <div style="padding: 24px; background: #111827; color: white; border-radius: 20px 20px 0 0;">
+            <h2 style="margin: 0;">New Burton Pride Raffle Entry</h2>
+          </div>
+
+          <div style="background: #ffffff; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 20px 20px; padding: 24px;">
+            <p>A new paid raffle entry has been confirmed by Stripe.</p>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 16px;">
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Name</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeFullName}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Email</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeEmail || "No email provided"}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Phone</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safePhone}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Tickets</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeTickets}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Amount</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">£${safeAmount}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Message</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeMessage}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Entry ID</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeEntryId}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Stripe Session</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeSessionId}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Payment Intent</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safePaymentIntentId}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+      `,
+      text: `New Burton Pride raffle entry
+
+Name: ${fullName}
+Email: ${email || "No email provided"}
+Phone: ${phone || "No phone provided"}
+Tickets: ${tickets}
+Amount: £${amount}
+Message: ${message || "No message provided"}
+Entry ID: ${data.id}
+Stripe Session: ${sessionId}
+Payment Intent: ${paymentIntentId || "Not available"}`,
+    });
+
+    console.log("Raffle admin notification email sent to:", adminRecipients);
+  } catch (error) {
+    console.error("Raffle webhook update/email failed:", error);
+  }
+}
+
+/**
+ * Adds completed website donations into the Money Tracker.
+ */
+async function addDonationSessionToMoneyTracker(
+  session: Stripe.Checkout.Session
+) {
+  try {
+    const stripeSessionId = session.id;
+    const amountPence = session.amount_total || 0;
+
+    if (!stripeSessionId || amountPence <= 0) {
+      console.log(
+        "Skipped checkout money tracker insert: missing amount/session"
+      );
+      return;
+    }
+
+    const donorName =
+      session.metadata?.fullName?.trim() ||
+      session.customer_details?.name?.trim() ||
+      "Supporter";
+
+    const donorEmail =
+      session.customer_details?.email?.trim() ||
+      session.metadata?.email?.trim() ||
+      "";
+
+    const donorMessage = session.metadata?.message?.trim() || "";
+
+    const donationType =
+      session.mode === "subscription"
+        ? "Monthly donation"
+        : "One-time donation";
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      donorMessage ? `Message: ${donorMessage}` : "",
+      session.payment_status ? `Payment status: ${session.payment_status}` : "",
+      session.mode ? `Stripe mode: ${session.mode}` : "",
+      stripeSessionId ? `Stripe session: ${stripeSessionId}` : "",
+    ].filter(Boolean);
+
+    const stripeInvoiceId =
+      typeof session.invoice === "string" ? session.invoice : null;
+
+    const stripeCustomerId =
+      typeof session.customer === "string" ? session.customer : null;
+
+    const stripePaymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : null;
+
+    const transactionDate = session.created
+      ? new Date(session.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `${donationType} - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_session_id: stripeSessionId,
+        stripe_invoice_id: stripeInvoiceId,
+        stripe_customer_id: stripeCustomerId,
+        stripe_payment_intent_id: stripePaymentIntentId,
+        source: "website_donation",
+      },
+      {
+        onConflict: "stripe_session_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add checkout donation to money tracker:", {
+        message: error.message,
+        details: error,
+        sessionId: stripeSessionId,
+        amount: amountPence,
+      });
+      return;
+    }
+
+    console.log("Added checkout donation to money tracker:", stripeSessionId);
+  } catch (error) {
+    console.error("Money tracker checkout donation insert failed:", error);
+  }
+}
+
+/**
+ * Adds future monthly Stripe subscription payments into the Money Tracker.
+ */
+async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
+  try {
+    const invoiceAny = invoice as any;
+
+    if (invoice.billing_reason === "subscription_create") {
+      console.log(
+        "Skipped invoice.paid because checkout session records first subscription payment"
+      );
+      return;
+    }
+
+    const stripeInvoiceId = invoice.id;
+    const amountPence = invoice.amount_paid || 0;
+
+    if (!stripeInvoiceId || amountPence <= 0) {
+      console.log("Skipped invoice money tracker insert: missing amount/invoice");
+      return;
+    }
+
+    const stripeCustomerId =
+      typeof invoice.customer === "string" ? invoice.customer : null;
+
+    const donorEmail =
+      invoice.customer_email?.trim() ||
+      invoiceAny.customer_details?.email?.trim() ||
+      "";
+
+    const donorName =
+      invoice.customer_name?.trim() ||
+      invoiceAny.customer_details?.name?.trim() ||
+      "Monthly supporter";
+
+    const transactionDate = invoice.created
+      ? new Date(invoice.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      invoice.number ? `Invoice number: ${invoice.number}` : "",
+      invoice.billing_reason ? `Billing reason: ${invoice.billing_reason}` : "",
+      stripeInvoiceId ? `Stripe invoice: ${stripeInvoiceId}` : "",
+    ].filter(Boolean);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `Monthly donation - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_invoice_id: stripeInvoiceId,
+        stripe_customer_id: stripeCustomerId,
+        source: "website_monthly_donation",
+      },
+      {
+        onConflict: "stripe_invoice_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add paid invoice to money tracker:", {
+        message: error.message,
+        details: error,
+        invoiceId: stripeInvoiceId,
+        amount: amountPence,
+      });
+      return;
+    }
+
+    console.log("Added paid invoice to money tracker:", stripeInvoiceId);
+  } catch (error) {
+    console.error("Money tracker invoice insert failed:", error);
+  }
+}
+
+async function addPaymentIntentToMoneyTracker(
+  paymentIntent: Stripe.PaymentIntent
+) {
+  try {
+    const stripePaymentIntentId = paymentIntent.id;
+    const amountPence =
+      paymentIntent.amount_received || paymentIntent.amount || 0;
+
+    if (!stripePaymentIntentId || amountPence <= 0) {
+      console.log(
+        "Skipped payment intent money tracker insert: missing amount/payment intent"
+      );
+      return;
+    }
+
+    const donorEmail =
+      paymentIntent.receipt_email?.trim() ||
+      String(paymentIntent.metadata?.email || "").trim();
+
+    const donorName =
+      String(paymentIntent.metadata?.fullName || "").trim() ||
+      String(paymentIntent.metadata?.name || "").trim() ||
+      "Website donation";
+
+    const donorMessage = String(paymentIntent.metadata?.message || "").trim();
+
+    const descriptionParts = [
+      donorEmail ? `Email: ${donorEmail}` : "",
+      donorMessage ? `Message: ${donorMessage}` : "",
+      paymentIntent.status ? `Payment status: ${paymentIntent.status}` : "",
+      stripePaymentIntentId
+        ? `Stripe payment intent: ${stripePaymentIntentId}`
+        : "",
+    ].filter(Boolean);
+
+    const transactionDate = paymentIntent.created
+      ? new Date(paymentIntent.created * 1000).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    const { error } = await supabaseAdmin.from("money_transactions").upsert(
+      {
+        title: `Website donation - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+        stripe_payment_intent_id: stripePaymentIntentId,
+        stripe_customer_id:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : null,
+        source: "website_donation",
+      },
+      {
+        onConflict: "stripe_payment_intent_id",
+      }
+    );
+
+    if (error) {
+      console.error("Failed to add PaymentIntent to money tracker:", {
+        message: error.message,
+        details: error,
+        paymentIntentId: stripePaymentIntentId,
+        amount: amountPence,
+      });
+      return;
+    }
+
+    console.log("Added payment intent to money tracker:", stripePaymentIntentId);
+  } catch (error) {
+    console.error("Money tracker PaymentIntent insert failed:", error);
+  }
 }
 
 async function handleDonationSession(session: Stripe.Checkout.Session) {
@@ -206,7 +684,8 @@ async function handleCompetitionSession(session: Stripe.Checkout.Session) {
   const REPLY_TO =
     process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
 
-  const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS).length
+  const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
+    .length
     ? parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
     : parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
 
@@ -514,14 +993,41 @@ export async function POST(req: Request) {
   }
 
   try {
+    console.log("Stripe webhook received:", event.type);
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      if (session.metadata?.entryId) {
+      console.log("Checkout session completed:", {
+        id: session.id,
+        source: session.metadata?.source,
+        payment_status: session.payment_status,
+      });
+
+      if (session.metadata?.source === "website_raffle") {
+        await handleRaffleSession(session);
+      } else if (session.metadata?.entryId) {
         await handleCompetitionSession(session);
       } else {
         await handleDonationSession(session);
+        await addDonationSessionToMoneyTracker(session);
       }
+    }
+
+    if (event.type === "invoice.paid") {
+      const invoice = event.data.object as Stripe.Invoice;
+
+      console.log("Invoice paid:", invoice.id);
+
+      await addPaidInvoiceToMoneyTracker(invoice);
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+      console.log("Payment intent succeeded:", paymentIntent.id);
+
+      await addPaymentIntentToMoneyTracker(paymentIntent);
     }
 
     return new NextResponse("OK", { status: 200 });
