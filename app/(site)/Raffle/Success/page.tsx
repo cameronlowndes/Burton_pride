@@ -3,9 +3,9 @@ import Image from "next/image";
 import { CheckCircle2, Home, Ticket, Heart, ShieldCheck } from "lucide-react";
 
 type PageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     session_id?: string;
-  };
+  }>;
 };
 
 export const metadata = {
@@ -14,8 +14,9 @@ export const metadata = {
     "Thank you for buying raffle tickets and supporting Burton Pride C.I.C.",
 };
 
-export default function RaffleSuccessPage({ searchParams }: PageProps) {
-  const sessionId = searchParams?.session_id || "";
+export default async function RaffleSuccessPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const sessionId = params?.session_id || "";
 
   return (
     <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 py-16 text-white sm:px-8">
