@@ -3,6 +3,12 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
 function toPence(value: unknown) {
   const amount = Number(String(value || "0"));
 
@@ -18,12 +24,9 @@ function clean(value: unknown) {
   return text.length > 0 ? text : null;
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: Request, context: RouteContext) {
   try {
-    const sponsorId = params.id;
+    const { id: sponsorId } = await context.params;
 
     if (!sponsorId) {
       return NextResponse.json(
@@ -107,12 +110,9 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function DELETE(req: Request, context: RouteContext) {
   try {
-    const sponsorId = params.id;
+    const { id: sponsorId } = await context.params;
 
     if (!sponsorId) {
       return NextResponse.json(
