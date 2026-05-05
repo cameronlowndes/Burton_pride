@@ -20,67 +20,90 @@ function clean(value: unknown) {
 
 export async function GET() {
   try {
-    const { data: sponsors, error: sponsorsError } = await supabaseAdmin
+    const { data: sponsors, error: sponsorError } = await supabaseAdmin
       .from("money_sponsors")
       .select("*")
+      .eq("is_active", true)
       .order("created_at", { ascending: false });
 
-    if (sponsorsError) {
+    if (sponsorError) {
       return NextResponse.json(
         {
           ok: false,
-          error: sponsorsError.message,
-          details: sponsorsError,
+          error: sponsorError.message,
+          details: sponsorError,
         },
         { status: 500 }
       );
     }
 
-    const { data: transactions, error: transactionsError } = await supabaseAdmin
+    const { data: transactions, error: transactionError } = await supabaseAdmin
       .from("money_transactions")
       .select(
-        "id,type,amount_pence,sponsor_id,sponsor_name,source,category,payment_method"
-      );
+        `
+        id,
+        type,
+        amount_pence,
+        sponsor_id,
+        sponsor_name,
+        source,
+        category
+      `
+      )
+      .or("source.eq.sponsorship,category.eq.Sponsorship,sponsor_id.not.is.null,sponsor_name.not.is.null");
 
-    if (transactionsError) {
+    if (transactionError) {
       return NextResponse.json(
         {
           ok: false,
-          error: transactionsError.message,
-          details: transactionsError,
+          error: transactionError.message,
+          details: transactionError,
         },
         { status: 500 }
       );
     }
 
-    const breakdown = (sponsors || []).map((sponsor: any) => {
-      const sponsorTransactions = (transactions || []).filter((item: any) => {
-        const transactionSponsorName = String(item.sponsor_name || "")
-          .toLowerCase()
-          .trim();
+    const sponsorRows = sponsors || [];
+    const transactionRows = transactions || [];
 
-        const sponsorName = String(sponsor.sponsor_name || "")
-          .toLowerCase()
-          .trim();
+    const breakdown = sponsorRows.map((sponsor) => {
+      const sponsorId = sponsor.id;
+      const sponsorName = String(sponsor.sponsor_name || "")
+        .trim()
+        .toLowerCase();
+
+      const linkedTransactions = transactionRows.filter((transaction) => {
+        const transactionSponsorName = String(transaction.sponsor_name || "")
+          .trim()
+          .toLowerCase();
 
         return (
-          item.sponsor_id === sponsor.id ||
+          transaction.sponsor_id === sponsorId ||
           Boolean(sponsorName && transactionSponsorName === sponsorName)
         );
       });
 
-      const receivedFromTransactions = sponsorTransactions
-        .filter((item: any) => item.type === "income")
-        .reduce((sum: number, item: any) => sum + (item.amount_pence || 0), 0);
+      const receivedFromSponsorRecord =
+        Number(sponsor.received_amount_pence || 0) || 0;
 
-      const spentPence = sponsorTransactions
-        .filter((item: any) => item.type === "expense")
-        .reduce((sum: number, item: any) => sum + (item.amount_pence || 0), 0);
+      const receivedFromTransactions = linkedTransactions
+        .filter((transaction) => transaction.type === "income")
+        .reduce(
+          (sum, transaction) => sum + Number(transaction.amount_pence || 0),
+          0
+        );
+
+      const spentPence = linkedTransactions
+        .filter((transaction) => transaction.type === "expense")
+        .reduce(
+          (sum, transaction) => sum + Number(transaction.amount_pence || 0),
+          0
+        );
 
       const receivedPence =
-        receivedFromTransactions > 0
-          ? receivedFromTransactions
-          : sponsor.received_amount_pence || 0;
+        receivedFromSponsorRecord > 0
+          ? receivedFromSponsorRecord
+          : receivedFromTransactions;
 
       return {
         sponsor_id: sponsor.id,
@@ -88,7 +111,7 @@ export async function GET() {
         contact_name: sponsor.contact_name,
         email: sponsor.email,
         phone: sponsor.phone,
-        agreed_amount_pence: sponsor.agreed_amount_pence || 0,
+        agreed_amount_pence: Number(sponsor.agreed_amount_pence || 0),
         received_pence: receivedPence,
         spent_pence: spentPence,
         remaining_pence: receivedPence - spentPence,
@@ -97,7 +120,7 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      sponsors: sponsors || [],
+      sponsors: sponsorRows,
       breakdown,
     });
   } catch (err: any) {

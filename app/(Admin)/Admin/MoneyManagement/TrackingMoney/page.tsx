@@ -64,6 +64,8 @@ type SponsorBreakdown = {
   received_pence: number;
   spent_pence: number;
   remaining_pence: number;
+  carried_forward_pence?: number;
+  notes?: string | null;
 };
 
 type FormState = {
@@ -116,6 +118,17 @@ const initialSponsorForm: SponsorFormState = {
   notes: "",
 };
 
+const paymentMethods = [
+  "Stripe",
+  "Online Payment",
+  "Cash",
+  "Bank Transfer",
+  "PayPal",
+  "Card Machine",
+  "Personal Funds",
+  "Item Donation",
+];
+
 function money(amountPence: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -159,6 +172,18 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function getTransactionYear(value: string | null | undefined) {
+  if (!value) return new Date().getFullYear().toString();
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().getFullYear().toString();
+  }
+
+  return date.getFullYear().toString();
+}
+
 function isPersonalFundsTransaction(item: Transaction) {
   return (
     item.type === "expense" &&
@@ -173,6 +198,13 @@ function isSponsorshipTransaction(item: Transaction) {
     item.source === "sponsorship" ||
     item.category?.toLowerCase() === "sponsorship"
   );
+}
+
+function sponsorNameMatches(
+  a: string | null | undefined,
+  b: string | null | undefined
+) {
+  return Boolean(a && b && a.toLowerCase().trim() === b.toLowerCase().trim());
 }
 
 export default function MoneyTransactionsPage() {
@@ -193,6 +225,15 @@ export default function MoneyTransactionsPage() {
 
   const [selectedSponsorId, setSelectedSponsorId] = useState<string>("all");
 
+  const [selectedYear, setSelectedYear] = useState<string>(
+    new Date().getFullYear().toString()
+  );
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [deleteYearOpen, setDeleteYearOpen] = useState(false);
+  const [deletingYear, setDeletingYear] = useState(false);
+  const [deleteYearPassword, setDeleteYearPassword] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -201,6 +242,7 @@ export default function MoneyTransactionsPage() {
 
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [deleteAllPassword, setDeleteAllPassword] = useState("");
 
   const [repayingId, setRepayingId] = useState<string | null>(null);
 
@@ -227,7 +269,7 @@ export default function MoneyTransactionsPage() {
       phone: item.phone,
       agreed_amount_pence: item.agreed_amount_pence,
       received_amount_pence: item.received_pence,
-      notes: null,
+      notes: item.notes || null,
       is_active: true,
       created_at: "",
     }));
@@ -271,6 +313,9 @@ export default function MoneyTransactionsPage() {
 
   async function loadSponsors() {
     try {
+      setError("");
+      setErrorDetails(null);
+
       const res = await fetch(`/api/admin/money/sponsors?t=${Date.now()}`, {
         cache: "no-store",
       });
@@ -308,11 +353,170 @@ export default function MoneyTransactionsPage() {
   const selectedSponsor = useMemo(() => {
     if (selectedSponsorId === "all") return null;
 
-    return displaySponsors.find((sponsor) => sponsor.id === selectedSponsorId) || null;
+    return (
+      displaySponsors.find((sponsor) => sponsor.id === selectedSponsorId) ||
+      null
+    );
   }, [displaySponsors, selectedSponsorId]);
 
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+
+    const years = new Set<string>([
+      String(currentYear - 2),
+      String(currentYear - 1),
+      String(currentYear),
+      String(currentYear + 1),
+      String(currentYear + 2),
+    ]);
+
+    transactions.forEach((item) => {
+      years.add(getTransactionYear(item.transaction_date || item.created_at));
+    });
+
+    displaySponsors.forEach((sponsor) => {
+      if (sponsor.created_at) {
+        years.add(getTransactionYear(sponsor.created_at));
+      }
+    });
+
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [transactions, displaySponsors]);
+
+  const yearTransactions = useMemo(() => {
+    return transactions.filter((item) => {
+      const year = getTransactionYear(item.transaction_date || item.created_at);
+      return year === selectedYear;
+    });
+  }, [transactions, selectedYear]);
+
+  const previousYearTransactions = useMemo(() => {
+    return transactions.filter((item) => {
+      const year = Number(
+        getTransactionYear(item.transaction_date || item.created_at)
+      );
+
+      return year < Number(selectedYear);
+    });
+  }, [transactions, selectedYear]);
+
+  const carryForward = useMemo(() => {
+    const previousIncome = previousYearTransactions
+      .filter((item) => item.type === "income")
+      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+    const previousNormalExpense = previousYearTransactions
+      .filter(
+        (item) => item.type === "expense" && !isPersonalFundsTransaction(item)
+      )
+      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+    const previousPersonalFundsRepaid = previousYearTransactions
+      .filter(
+        (item) =>
+          isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
+      )
+      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+    return previousIncome - previousNormalExpense - previousPersonalFundsRepaid;
+  }, [previousYearTransactions]);
+
+  const yearlySponsorBreakdown = useMemo(() => {
+    return displaySponsors
+      .map((sponsor) => {
+        const thisYearSponsorTransactions = yearTransactions.filter((item) => {
+          if (!isSponsorshipTransaction(item)) return false;
+
+          return (
+            item.sponsor_id === sponsor.id ||
+            sponsorNameMatches(item.sponsor_name, sponsor.sponsor_name)
+          );
+        });
+
+        const previousSponsorTransactions = previousYearTransactions.filter(
+          (item) => {
+            if (!isSponsorshipTransaction(item)) return false;
+
+            return (
+              item.sponsor_id === sponsor.id ||
+              sponsorNameMatches(item.sponsor_name, sponsor.sponsor_name)
+            );
+          }
+        );
+
+        const previousReceived = previousSponsorTransactions
+          .filter((item) => item.type === "income")
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const previousSpent = previousSponsorTransactions
+          .filter((item) => item.type === "expense")
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const sponsorCreatedYear = sponsor.created_at
+          ? getTransactionYear(sponsor.created_at)
+          : "";
+
+        const sponsorStartedBeforeThisYear =
+          sponsorCreatedYear && Number(sponsorCreatedYear) < Number(selectedYear);
+
+        const sponsorStartedThisYear = sponsorCreatedYear === selectedYear;
+
+        const manualReceivedFromSponsorRecord =
+          sponsorStartedThisYear || sponsorStartedBeforeThisYear
+            ? sponsor.received_amount_pence || 0
+            : 0;
+
+        const previousCarryForward =
+          sponsorStartedBeforeThisYear && previousReceived === 0
+            ? manualReceivedFromSponsorRecord - previousSpent
+            : previousReceived - previousSpent;
+
+        const safeCarryForward = Math.max(previousCarryForward, 0);
+
+        const receivedFromTransactions = thisYearSponsorTransactions
+          .filter((item) => item.type === "income")
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const spentPence = thisYearSponsorTransactions
+          .filter((item) => item.type === "expense")
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const receivedPence =
+          safeCarryForward + receivedFromTransactions ||
+          (sponsorStartedThisYear ? sponsor.received_amount_pence || 0 : 0);
+
+        const agreedPence =
+          sponsorStartedThisYear ||
+          sponsorStartedBeforeThisYear ||
+          thisYearSponsorTransactions.length > 0
+            ? sponsor.agreed_amount_pence || 0
+            : 0;
+
+        return {
+          sponsor_id: sponsor.id,
+          sponsor_name: sponsor.sponsor_name,
+          contact_name: sponsor.contact_name,
+          email: sponsor.email,
+          phone: sponsor.phone,
+          agreed_amount_pence: agreedPence,
+          received_pence: receivedPence,
+          spent_pence: spentPence,
+          remaining_pence: receivedPence - spentPence,
+          carried_forward_pence: safeCarryForward,
+          notes: sponsor.notes,
+        };
+      })
+      .filter(
+        (sponsor) =>
+          sponsor.agreed_amount_pence > 0 ||
+          sponsor.received_pence > 0 ||
+          sponsor.spent_pence > 0 ||
+          (sponsor.carried_forward_pence || 0) > 0
+      );
+  }, [displaySponsors, yearTransactions, previousYearTransactions, selectedYear]);
+
   const filteredTransactions = useMemo(() => {
-    let rows = transactions;
+    let rows = yearTransactions;
 
     if (filter === "income") {
       rows = rows.filter((item) => item.type === "income");
@@ -331,50 +535,70 @@ export default function MoneyTransactionsPage() {
     }
 
     if (selectedSponsorId !== "all") {
-      const sponsor = displaySponsors.find((item) => item.id === selectedSponsorId);
-      const sponsorName = sponsor?.sponsor_name?.toLowerCase().trim() || "";
+      const sponsor = displaySponsors.find(
+        (item) => item.id === selectedSponsorId
+      );
 
       rows = rows.filter((item) => {
-        const transactionSponsorName = item.sponsor_name?.toLowerCase().trim() || "";
-
         return (
           item.sponsor_id === selectedSponsorId ||
-          Boolean(sponsorName && transactionSponsorName === sponsorName)
+          sponsorNameMatches(item.sponsor_name, sponsor?.sponsor_name)
+        );
+      });
+    }
+
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase().trim();
+
+      rows = rows.filter((item) => {
+        return (
+          item.title?.toLowerCase().includes(q) ||
+          item.description?.toLowerCase().includes(q) ||
+          item.payment_method?.toLowerCase().includes(q) ||
+          item.sponsor_name?.toLowerCase().includes(q) ||
+          item.sponsorship_note?.toLowerCase().includes(q) ||
+          item.personal_funds_name?.toLowerCase().includes(q)
         );
       });
     }
 
     return rows;
-  }, [transactions, filter, selectedSponsorId, displaySponsors]);
+  }, [
+    yearTransactions,
+    filter,
+    selectedSponsorId,
+    displaySponsors,
+    searchTerm,
+  ]);
 
   const totals = useMemo(() => {
-    const income = transactions
+    const income = yearTransactions
       .filter((item) => item.type === "income")
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
-    const normalExpense = transactions
+    const normalExpense = yearTransactions
       .filter(
         (item) => item.type === "expense" && !isPersonalFundsTransaction(item)
       )
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
-    const personalFunds = transactions
+    const personalFunds = yearTransactions
       .filter((item) => isPersonalFundsTransaction(item))
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
-    const personalFundsRepaid = transactions
+    const personalFundsRepaid = yearTransactions
       .filter(
         (item) =>
           isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
       )
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
-    const sponsorshipIncome = sponsorBreakdown.reduce(
+    const sponsorshipIncome = yearlySponsorBreakdown.reduce(
       (sum, item) => sum + (item.received_pence || 0),
       0
     );
 
-    const sponsorshipSpent = sponsorBreakdown.reduce(
+    const sponsorshipSpent = yearlySponsorBreakdown.reduce(
       (sum, item) => sum + (item.spent_pence || 0),
       0
     );
@@ -383,6 +607,7 @@ export default function MoneyTransactionsPage() {
     const expense = normalExpense + personalFundsRepaid;
 
     return {
+      openingBalance: carryForward,
       income,
       normalExpense,
       expense,
@@ -392,9 +617,9 @@ export default function MoneyTransactionsPage() {
       sponsorshipIncome,
       sponsorshipSpent,
       sponsorshipRemaining: sponsorshipIncome - sponsorshipSpent,
-      balance: income - expense,
+      balance: carryForward + income - expense,
     };
-  }, [transactions, sponsorBreakdown]);
+  }, [yearTransactions, yearlySponsorBreakdown, carryForward]);
 
   const filteredTotals = useMemo(() => {
     const income = filteredTransactions
@@ -439,9 +664,9 @@ export default function MoneyTransactionsPage() {
       sponsorshipIncome,
       sponsorshipSpent,
       sponsorshipRemaining: sponsorshipIncome - sponsorshipSpent,
-      balance: income - expense,
+      balance: totals.openingBalance + income - expense,
     };
-  }, [filteredTransactions]);
+  }, [filteredTransactions, totals.openingBalance]);
 
   function openNewSponsorForm() {
     setEditingSponsor(null);
@@ -594,7 +819,7 @@ export default function MoneyTransactionsPage() {
       title: "Test donation",
       description: "This is a test transaction",
       type: "income",
-      category: "Donation",
+      category: "",
       amount: "25.00",
       paymentMethod: "Stripe",
       transactionDate: new Date().toISOString().slice(0, 10),
@@ -610,35 +835,35 @@ export default function MoneyTransactionsPage() {
 
   function startEditTransaction(item: Transaction) {
     const isPersonal = isPersonalFundsTransaction(item);
-    const matchingSponsor = displaySponsors.find((sponsor) => {
-      const sponsorName = sponsor.sponsor_name?.toLowerCase().trim() || "";
-      const itemSponsorName = item.sponsor_name?.toLowerCase().trim() || "";
 
+    const matchingSponsor = displaySponsors.find((sponsor) => {
       return (
         sponsor.id === item.sponsor_id ||
-        Boolean(sponsorName && itemSponsorName && sponsorName === itemSponsorName)
+        sponsorNameMatches(sponsor.sponsor_name, item.sponsor_name)
       );
     });
+
+    const hasSponsorLinked = Boolean(
+      matchingSponsor?.id || item.sponsor_id || item.sponsor_name
+    );
 
     setEditingTransaction(item);
 
     setForm({
       title: item.title || "",
       description: item.description || "",
-      type: item.type,
-      category: item.category || "",
+      type: hasSponsorLinked ? "expense" : item.type,
+      category: hasSponsorLinked ? "Sponsorship" : "",
       amount: ((item.amount_pence || 0) / 100).toFixed(2),
-      paymentMethod:
-        item.source === "sponsorship" || item.sponsor_id || item.sponsor_name
-          ? "Sponsorship Money"
-          : item.payment_method || "",
+      paymentMethod: hasSponsorLinked
+        ? "Sponsorship Money"
+        : item.payment_method || "",
       transactionDate:
         item.transaction_date || new Date().toISOString().slice(0, 10),
-      isPersonalFunds: isPersonal,
-      personalFundsName: item.personal_funds_name || "",
+      isPersonalFunds: hasSponsorLinked ? false : isPersonal,
+      personalFundsName: hasSponsorLinked ? "" : item.personal_funds_name || "",
       sponsorId: matchingSponsor?.id || item.sponsor_id || "",
-      sponsorName:
-        matchingSponsor?.sponsor_name || item.sponsor_name || "",
+      sponsorName: matchingSponsor?.sponsor_name || item.sponsor_name || "",
       sponsorshipNote: item.sponsorship_note || "",
     });
 
@@ -701,6 +926,7 @@ export default function MoneyTransactionsPage() {
       const finalSponsorId = selectedSponsorForSave?.id || "";
       const finalSponsorName = selectedSponsorForSave?.sponsor_name || "";
       const isSponsorLinked = Boolean(finalSponsorId || finalSponsorName);
+
       const looksLikeSponsorship =
         form.paymentMethod === "Sponsorship Money" ||
         form.category.toLowerCase().trim() === "sponsorship" ||
@@ -720,8 +946,8 @@ export default function MoneyTransactionsPage() {
 
       uploadData.append("title", form.title);
       uploadData.append("description", form.description);
-      uploadData.append("type", form.type);
-      uploadData.append("category", form.category);
+      uploadData.append("type", isSponsorLinked ? "expense" : form.type);
+      uploadData.append("category", isSponsorLinked ? "Sponsorship" : "");
       uploadData.append("amount", form.amount);
       uploadData.append(
         "paymentMethod",
@@ -729,8 +955,14 @@ export default function MoneyTransactionsPage() {
       );
       uploadData.append("transactionDate", form.transactionDate);
       uploadData.append("source", isSponsorLinked ? "sponsorship" : "manual");
-      uploadData.append("isPersonalFunds", String(form.isPersonalFunds));
-      uploadData.append("personalFundsName", form.personalFundsName);
+      uploadData.append(
+        "isPersonalFunds",
+        String(isSponsorLinked ? false : form.isPersonalFunds)
+      );
+      uploadData.append(
+        "personalFundsName",
+        isSponsorLinked ? "" : form.personalFundsName
+      );
       uploadData.append("sponsorId", finalSponsorId);
       uploadData.append("sponsorName", finalSponsorName);
       uploadData.append("sponsorshipNote", form.sponsorshipNote);
@@ -824,14 +1056,81 @@ export default function MoneyTransactionsPage() {
     }
   }
 
+  async function deleteSelectedYearTransactions() {
+    try {
+      setDeletingYear(true);
+      setError("");
+      setErrorDetails(null);
+
+      if (!deleteYearPassword.trim()) {
+        setError("Please enter the main admin delete password.");
+        setDeletingYear(false);
+        return;
+      }
+
+      const res = await fetch(
+        `/api/admin/money/transactions/year/${selectedYear}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            password: deleteYearPassword,
+          }),
+        }
+      );
+
+      const text = await res.text();
+
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || `Failed to delete ${selectedYear} transactions`,
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setDeleteYearOpen(false);
+      setDeleteYearPassword("");
+      cancelEditTransaction();
+      await loadTransactions();
+      await loadSponsors();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setDeletingYear(false);
+    }
+  }
+
   async function deleteAllTransactions() {
     try {
       setDeletingAll(true);
       setError("");
       setErrorDetails(null);
 
+      if (!deleteAllPassword.trim()) {
+        setError("Please enter the main admin delete password.");
+        setDeletingAll(false);
+        return;
+      }
+
       const res = await fetch("/api/admin/money/transactions", {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          password: deleteAllPassword,
+        }),
       });
 
       const text = await res.text();
@@ -852,6 +1151,7 @@ export default function MoneyTransactionsPage() {
       }
 
       setDeleteAllOpen(false);
+      setDeleteAllPassword("");
       cancelEditTransaction();
       await loadTransactions();
       await loadSponsors();
@@ -912,441 +1212,65 @@ export default function MoneyTransactionsPage() {
 
   function exportTransactionsToExcel() {
     const fileDate = new Date().toISOString().slice(0, 10);
-    const exportedAt = new Date().toLocaleString("en-GB");
 
-    const baseFilterLabel =
-      filter === "all"
-        ? "All Transactions"
-        : filter === "income"
-        ? "Money In"
-        : filter === "expense"
-        ? "Money Out"
-        : filter === "personal"
-        ? "Personal Funds"
-        : "Sponsorship";
+    const rows = filteredTransactions.map((item) => ({
+      Year: selectedYear,
+      Date: formatDate(item.transaction_date),
+      Title: item.title,
+      Description: item.description || "",
+      Type: item.type === "income" ? "Money In" : "Money Out",
+      Payment: item.payment_method || "",
+      Source: sourceLabel(item.source),
+      Sponsor: item.sponsor_name || "",
+      "Sponsorship Note": item.sponsorship_note || "",
+      "Personal Funds": isPersonalFundsTransaction(item) ? "Yes" : "No",
+      "Paid By": item.personal_funds_name || "",
+      "Repayment Status": isPersonalFundsTransaction(item)
+        ? item.personal_funds_repaid
+          ? "Paid back"
+          : "Not paid back"
+        : "",
+      Invoice: item.invoice_image_url || "",
+      Amount: money(item.amount_pence),
+    }));
 
-    const filterLabel = selectedSponsor
-      ? `${baseFilterLabel} — ${selectedSponsor.sponsor_name}`
-      : baseFilterLabel;
+    const headers = Object.keys(
+      rows[0] || {
+        Year: "",
+        Date: "",
+        Title: "",
+        Description: "",
+        Type: "",
+        Payment: "",
+        Source: "",
+        Sponsor: "",
+        "Sponsorship Note": "",
+        "Personal Funds": "",
+        "Paid By": "",
+        "Repayment Status": "",
+        Invoice: "",
+        Amount: "",
+      }
+    );
 
-    const rows = filteredTransactions;
+    const csv = [
+      headers.join(","),
+      ...rows.map((row: any) =>
+        headers
+          .map((header) => `"${String(row[header] ?? "").replace(/"/g, '""')}"`)
+          .join(",")
+      ),
+    ].join("\n");
 
-    function x(value: string | number | null | undefined) {
-      return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-    }
-
-    function cell(
-      value: string | number | null | undefined,
-      style = "Normal",
-      mergeAcross?: number
-    ) {
-      return `
-        <Cell ss:StyleID="${style}"${
-        mergeAcross ? ` ss:MergeAcross="${mergeAcross}"` : ""
-      }>
-          <Data ss:Type="String">${x(value)}</Data>
-        </Cell>
-      `;
-    }
-
-    function row(cells: string, height?: number) {
-      return `<Row${height ? ` ss:Height="${height}"` : ""}>${cells}</Row>`;
-    }
-
-    const sponsorRows =
-      sponsorBreakdown.length === 0
-        ? row(cell("No sponsors added.", "Empty", 19))
-        : sponsorBreakdown
-            .map((sponsor) =>
-              row(`
-                ${cell(sponsor.sponsor_name, "Bold")}
-                ${cell(sponsor.contact_name || "—")}
-                ${cell(sponsor.email || "—")}
-                ${cell(sponsor.phone || "—")}
-                ${cell(money(sponsor.agreed_amount_pence), "AmountGrey")}
-                ${cell(money(sponsor.received_pence), "AmountGreen")}
-                ${cell(money(sponsor.spent_pence), "AmountRed")}
-                ${cell(money(sponsor.remaining_pence), "AmountAmber")}
-                ${cell("", "Blank", 11)}
-              `)
-            )
-            .join("");
-
-    const transactionRows =
-      rows.length === 0
-        ? row(cell("No transactions to export.", "Empty", 19))
-        : rows
-            .map((item) => {
-              const isIncome = item.type === "income";
-              const isPersonal = isPersonalFundsTransaction(item);
-              const hasSponsor = isSponsorshipTransaction(item);
-
-              return row(`
-                ${cell(formatDate(item.transaction_date))}
-                ${cell(formatDate(item.created_at))}
-                ${cell(item.title, "Bold")}
-                ${cell(item.description || "—")}
-                ${cell(
-                  isIncome ? "Money In" : "Money Out",
-                  isIncome ? "MoneyIn" : "MoneyOut"
-                )}
-                ${cell(item.category || "Other")}
-                ${cell(item.payment_method || "—")}
-                ${cell(
-                  sourceLabel(item.source),
-                  item.source === "sponsorship"
-                    ? "SponsorSource"
-                    : "ManualSource"
-                )}
-                ${cell(
-                  hasSponsor ? item.sponsor_name || "Sponsor" : "—",
-                  hasSponsor ? "SponsorCell" : "Normal"
-                )}
-                ${cell(item.sponsorship_note || "—")}
-                ${cell(
-                  isPersonal ? "Yes" : "No",
-                  isPersonal ? "PersonalCell" : "Normal"
-                )}
-                ${cell(item.personal_funds_name || "—")}
-                ${cell(
-                  isPersonal
-                    ? item.personal_funds_repaid
-                      ? "Paid back"
-                      : "Not paid back"
-                    : "—",
-                  isPersonal
-                    ? item.personal_funds_repaid
-                      ? "PaidBack"
-                      : "NotPaidBack"
-                    : "Normal"
-                )}
-                ${cell(formatDate(item.personal_funds_repaid_at))}
-                ${cell(item.invoice_image_url || "—")}
-                ${cell(item.stripe_session_id || "—")}
-                ${cell(item.stripe_invoice_id || "—")}
-                ${cell(item.stripe_customer_id || "—")}
-                ${cell(item.stripe_payment_intent_id || "—")}
-                ${cell(money(item.amount_pence), "Amount")}
-              `);
-            })
-            .join("");
-
-    const xml = `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook
-  xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:o="urn:schemas-microsoft-com:office:office"
-  xmlns:x="urn:schemas-microsoft-com:office:excel"
-  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-
-  <Styles>
-    <Style ss:ID="Normal">
-      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
-      <Font ss:FontName="Arial" ss:Size="10"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-      </Borders>
-    </Style>
-
-    <Style ss:ID="Blank">
-      <Font ss:FontName="Arial" ss:Size="10"/>
-    </Style>
-
-    <Style ss:ID="Title">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="18" ss:Bold="1" ss:Color="#FFFFFF"/>
-      <Interior ss:Color="#07111F" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Subtitle">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Color="#E5E7EB"/>
-      <Interior ss:Color="#374151" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Filter">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#111827"/>
-      <Interior ss:Color="#F3F4F6" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Section">
-      <Alignment ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>
-      <Interior ss:Color="#111827" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Header">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#FFFFFF"/>
-      <Interior ss:Color="#07111F" ss:Pattern="Solid"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#07111F"/>
-        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#07111F"/>
-        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#07111F"/>
-        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#07111F"/>
-      </Borders>
-    </Style>
-
-    <Style ss:ID="Bold">
-      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/>
-      <Borders>
-        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D1D5DB"/>
-      </Borders>
-    </Style>
-
-    <Style ss:ID="MoneyIn">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#166534"/>
-      <Interior ss:Color="#DCFCE7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="MoneyOut">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#991B1B"/>
-      <Interior ss:Color="#FEE2E2" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="ManualSource">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#065F46"/>
-      <Interior ss:Color="#D1FAE5" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SponsorSource">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#92400E"/>
-      <Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SponsorCell">
-      <Alignment ss:Vertical="Center" ss:WrapText="1"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#92400E"/>
-      <Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="PersonalCell">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#075985"/>
-      <Interior ss:Color="#E0F2FE" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="PaidBack">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#166534"/>
-      <Interior ss:Color="#DCFCE7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="NotPaidBack">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#9A3412"/>
-      <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Amount">
-      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/>
-    </Style>
-
-    <Style ss:ID="AmountGrey">
-      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1"/>
-      <Interior ss:Color="#F3F4F6" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="AmountGreen">
-      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#166534"/>
-      <Interior ss:Color="#DCFCE7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="AmountRed">
-      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#991B1B"/>
-      <Interior ss:Color="#FEE2E2" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="AmountAmber">
-      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#92400E"/>
-      <Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="Empty">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="10" ss:Bold="1" ss:Color="#6B7280"/>
-      <Interior ss:Color="#F9FAFB" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummaryIncome">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#166534"/>
-      <Interior ss:Color="#DCFCE7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummaryExpense">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#991B1B"/>
-      <Interior ss:Color="#FEE2E2" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummaryPersonal">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#075985"/>
-      <Interior ss:Color="#E0F2FE" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummaryOwed">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#9A3412"/>
-      <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummarySponsor">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#92400E"/>
-      <Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/>
-    </Style>
-
-    <Style ss:ID="SummaryBalance">
-      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-      <Font ss:FontName="Arial" ss:Size="11" ss:Bold="1" ss:Color="#1E40AF"/>
-      <Interior ss:Color="#DBEAFE" ss:Pattern="Solid"/>
-    </Style>
-  </Styles>
-
-  <Worksheet ss:Name="Money Transactions">
-    <Table ss:ExpandedColumnCount="20" ss:DefaultRowHeight="20">
-      <Column ss:AutoFitWidth="0" ss:Width="95"/>
-      <Column ss:AutoFitWidth="0" ss:Width="95"/>
-      <Column ss:AutoFitWidth="0" ss:Width="160"/>
-      <Column ss:AutoFitWidth="0" ss:Width="240"/>
-      <Column ss:AutoFitWidth="0" ss:Width="90"/>
-      <Column ss:AutoFitWidth="0" ss:Width="110"/>
-      <Column ss:AutoFitWidth="0" ss:Width="120"/>
-      <Column ss:AutoFitWidth="0" ss:Width="120"/>
-      <Column ss:AutoFitWidth="0" ss:Width="140"/>
-      <Column ss:AutoFitWidth="0" ss:Width="220"/>
-      <Column ss:AutoFitWidth="0" ss:Width="110"/>
-      <Column ss:AutoFitWidth="0" ss:Width="130"/>
-      <Column ss:AutoFitWidth="0" ss:Width="130"/>
-      <Column ss:AutoFitWidth="0" ss:Width="120"/>
-      <Column ss:AutoFitWidth="0" ss:Width="160"/>
-      <Column ss:AutoFitWidth="0" ss:Width="180"/>
-      <Column ss:AutoFitWidth="0" ss:Width="180"/>
-      <Column ss:AutoFitWidth="0" ss:Width="180"/>
-      <Column ss:AutoFitWidth="0" ss:Width="180"/>
-      <Column ss:AutoFitWidth="0" ss:Width="100"/>
-
-      ${row(cell("Burton Pride Money Tracker", "Title", 19), 32)}
-      ${row(cell(`Exported on ${exportedAt}`, "Subtitle", 19), 24)}
-
-      ${row(
-        `
-          ${cell(`Filter: ${filterLabel}`, "Filter", 4)}
-          ${cell(`Rows Exported: ${rows.length}`, "Filter", 4)}
-          ${cell(`Sponsors: ${sponsorBreakdown.length}`, "Filter", 4)}
-          ${cell("Burton Pride C.I.C", "Filter", 4)}
-        `,
-        24
-      )}
-
-      ${row(
-        `
-          ${cell(`Money In: ${money(filteredTotals.income)}`, "SummaryIncome", 2)}
-          ${cell(`Money Out: ${money(filteredTotals.expense)}`, "SummaryExpense", 2)}
-          ${cell(`Personal Funds: ${money(filteredTotals.personalFunds)}`, "SummaryPersonal", 2)}
-          ${cell(`Still Owed: ${money(filteredTotals.personalFundsOutstanding)}`, "SummaryOwed", 2)}
-          ${cell(`Sponsorship Left: ${money(totals.sponsorshipRemaining)}`, "SummarySponsor", 3)}
-          ${cell(`Balance: ${money(filteredTotals.balance)}`, "SummaryBalance", 3)}
-        `,
-        28
-      )}
-
-      ${row(cell("", "Blank", 19), 12)}
-      ${row(cell("Sponsorship Breakdown", "Section", 19), 24)}
-
-      ${row(
-        `
-          ${cell("Sponsor", "Header")}
-          ${cell("Contact", "Header")}
-          ${cell("Email", "Header")}
-          ${cell("Phone", "Header")}
-          ${cell("Agreed", "Header")}
-          ${cell("Received", "Header")}
-          ${cell("Spent", "Header")}
-          ${cell("Remaining", "Header")}
-          ${cell("", "Header", 11)}
-        `,
-        24
-      )}
-
-      ${sponsorRows}
-
-      ${row(cell("", "Blank", 19), 12)}
-      ${row(cell("Transactions", "Section", 19), 24)}
-
-      ${row(
-        `
-          ${cell("Date", "Header")}
-          ${cell("Created At", "Header")}
-          ${cell("Title", "Header")}
-          ${cell("Description", "Header")}
-          ${cell("Type", "Header")}
-          ${cell("Category", "Header")}
-          ${cell("Payment Method", "Header")}
-          ${cell("Source", "Header")}
-          ${cell("Sponsor", "Header")}
-          ${cell("Sponsorship Note", "Header")}
-          ${cell("Personal Funds", "Header")}
-          ${cell("Paid By", "Header")}
-          ${cell("Paid Back Status", "Header")}
-          ${cell("Paid Back Date", "Header")}
-          ${cell("Invoice / Receipt", "Header")}
-          ${cell("Stripe Session ID", "Header")}
-          ${cell("Stripe Invoice ID", "Header")}
-          ${cell("Stripe Customer ID", "Header")}
-          ${cell("Stripe Payment Intent ID", "Header")}
-          ${cell("Amount", "Header")}
-        `,
-        26
-      )}
-
-      ${transactionRows}
-    </Table>
-
-    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
-      <FreezePanes/>
-      <FrozenNoSplit/>
-      <SplitHorizontal>10</SplitHorizontal>
-      <TopRowBottomPane>10</TopRowBottomPane>
-      <ActivePane>2</ActivePane>
-      <ProtectObjects>False</ProtectObjects>
-      <ProtectScenarios>False</ProtectScenarios>
-    </WorksheetOptions>
-  </Worksheet>
-</Workbook>`;
-
-    const blob = new Blob([xml], {
-      type: "application/vnd.ms-excel;charset=utf-8;",
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;",
     });
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `burton-pride-money-transactions-${fileDate}.xls`;
+    link.download = `burton-pride-money-transactions-${selectedYear}-${fileDate}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1357,33 +1281,30 @@ export default function MoneyTransactionsPage() {
   function printTransactions() {
     const printedAt = new Date().toLocaleString("en-GB");
 
-    const baseFilterLabel =
-      filter === "all"
-        ? "All Transactions"
-        : filter === "income"
-        ? "Money In"
-        : filter === "expense"
-        ? "Money Out"
-        : filter === "personal"
-        ? "Personal Funds"
-        : "Sponsorship";
-
-    const filterLabel = selectedSponsor
-      ? `${baseFilterLabel} — ${selectedSponsor.sponsor_name}`
-      : baseFilterLabel;
-
     const sponsorRows =
-      sponsorBreakdown.length === 0
-        ? `
-          <tr>
-            <td colspan="7" class="empty">No sponsors added.</td>
-          </tr>
-        `
-        : sponsorBreakdown
+      yearlySponsorBreakdown.length === 0
+        ? `<tr><td colspan="7" class="empty">No sponsors added for ${escapeHtml(
+            selectedYear
+          )}.</td></tr>`
+        : yearlySponsorBreakdown
             .map(
               (sponsor) => `
                 <tr>
-                  <td><strong>${escapeHtml(sponsor.sponsor_name)}</strong></td>
+                  <td>
+                    <strong>${escapeHtml(sponsor.sponsor_name)}</strong>
+                    ${
+                      sponsor.notes
+                        ? `<div class="muted">${escapeHtml(sponsor.notes)}</div>`
+                        : ""
+                    }
+                    ${
+                      (sponsor.carried_forward_pence || 0) > 0
+                        ? `<div class="muted">Carried forward: ${escapeHtml(
+                            money(sponsor.carried_forward_pence || 0)
+                          )}</div>`
+                        : ""
+                    }
+                  </td>
                   <td>${escapeHtml(sponsor.contact_name || "—")}</td>
                   <td>${escapeHtml(sponsor.email || "—")}</td>
                   <td class="amount">${escapeHtml(
@@ -1405,11 +1326,9 @@ export default function MoneyTransactionsPage() {
 
     const transactionRows =
       filteredTransactions.length === 0
-        ? `
-          <tr>
-            <td colspan="12" class="empty">No transactions to print.</td>
-          </tr>
-        `
+        ? `<tr><td colspan="11" class="empty">No transactions to print for ${escapeHtml(
+            selectedYear
+          )}.</td></tr>`
         : filteredTransactions
             .map((item) => {
               const isIncome = item.type === "income";
@@ -1419,7 +1338,6 @@ export default function MoneyTransactionsPage() {
               return `
                 <tr>
                   <td>${escapeHtml(formatDate(item.transaction_date))}</td>
-
                   <td>
                     <strong>${escapeHtml(item.title)}</strong>
                     ${
@@ -1429,19 +1347,12 @@ export default function MoneyTransactionsPage() {
                           )}</div>`
                         : ""
                     }
-                    ${
-                      item.category
-                        ? `<div class="small">${escapeHtml(item.category)}</div>`
-                        : ""
-                    }
                   </td>
-
                   <td>
                     <span class="badge ${isIncome ? "income" : "expense"}">
                       ${escapeHtml(isIncome ? "Money In" : "Money Out")}
                     </span>
                   </td>
-
                   <td>
                     ${
                       hasSponsor
@@ -1451,35 +1362,18 @@ export default function MoneyTransactionsPage() {
                         : "—"
                     }
                   </td>
-
                   <td>${escapeHtml(item.sponsorship_note || "—")}</td>
-
-                  <td>
-                    ${
-                      isPersonal
-                        ? `<span class="badge personal">Personal funds</span>`
-                        : "—"
-                    }
-                  </td>
-
+                  <td>${isPersonal ? "Personal funds" : "—"}</td>
                   <td>${escapeHtml(item.personal_funds_name || "—")}</td>
-
-                  <td>
-                    ${
-                      isPersonal
-                        ? item.personal_funds_repaid
-                          ? `<span class="badge paid">Paid back</span>`
-                          : `<span class="badge unpaid">Not paid back</span>`
-                        : "—"
-                    }
-                  </td>
-
+                  <td>${
+                    isPersonal
+                      ? item.personal_funds_repaid
+                        ? "Paid back"
+                        : "Not paid back"
+                      : "—"
+                  }</td>
                   <td>${escapeHtml(item.payment_method || "—")}</td>
-
-                  <td>${escapeHtml(sourceLabel(item.source))}</td>
-
                   <td>${escapeHtml(item.invoice_image_url ? "Yes" : "—")}</td>
-
                   <td class="amount">${escapeHtml(money(item.amount_pence))}</td>
                 </tr>
               `;
@@ -1491,13 +1385,10 @@ export default function MoneyTransactionsPage() {
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Burton Pride Money Tracker Report</title>
-
+          <title>Burton Pride Money Tracker Report ${escapeHtml(
+            selectedYear
+          )}</title>
           <style>
-            * {
-              box-sizing: border-box;
-            }
-
             body {
               margin: 0;
               padding: 24px;
@@ -1517,13 +1408,6 @@ export default function MoneyTransactionsPage() {
             .header h1 {
               margin: 0;
               font-size: 26px;
-              line-height: 1.1;
-            }
-
-            .header p {
-              margin: 8px 0 0;
-              font-size: 12px;
-              color: #d1d5db;
             }
 
             .meta {
@@ -1537,7 +1421,7 @@ export default function MoneyTransactionsPage() {
 
             .summary {
               display: grid;
-              grid-template-columns: repeat(6, 1fr);
+              grid-template-columns: repeat(7, 1fr);
               gap: 10px;
               margin: 18px 0;
             }
@@ -1546,7 +1430,6 @@ export default function MoneyTransactionsPage() {
               border: 1px solid #d1d5db;
               border-radius: 12px;
               padding: 12px;
-              min-height: 70px;
             }
 
             .card span {
@@ -1554,54 +1437,24 @@ export default function MoneyTransactionsPage() {
               font-size: 10px;
               font-weight: 800;
               text-transform: uppercase;
-              letter-spacing: 0.06em;
               margin-bottom: 6px;
             }
 
             .card strong {
-              font-size: 18px;
+              font-size: 16px;
             }
 
-            .income-card {
-              background: #dcfce7;
-              color: #166534;
-              border-color: #86efac;
-            }
-
-            .expense-card {
-              background: #fee2e2;
-              color: #991b1b;
-              border-color: #fca5a5;
-            }
-
-            .personal-card {
-              background: #e0f2fe;
-              color: #075985;
-              border-color: #7dd3fc;
-            }
-
-            .owed-card {
-              background: #ffedd5;
-              color: #9a3412;
-              border-color: #fdba74;
-            }
-
-            .sponsor-card {
-              background: #fef3c7;
-              color: #92400e;
-              border-color: #fcd34d;
-            }
-
-            .balance-card {
-              background: #dbeafe;
-              color: #1e40af;
-              border-color: #93c5fd;
-            }
+            .opening-card { background: #f3e8ff; color: #6b21a8; }
+            .income-card { background: #dcfce7; color: #166534; }
+            .expense-card { background: #fee2e2; color: #991b1b; }
+            .personal-card { background: #e0f2fe; color: #075985; }
+            .owed-card { background: #ffedd5; color: #9a3412; }
+            .sponsor-card { background: #fef3c7; color: #92400e; }
+            .balance-card { background: #dbeafe; color: #1e40af; }
 
             h2 {
               margin: 22px 0 10px;
               font-size: 17px;
-              color: #111827;
             }
 
             table {
@@ -1618,8 +1471,6 @@ export default function MoneyTransactionsPage() {
               padding: 8px;
               border: 1px solid #07111f;
               font-size: 9.5px;
-              text-transform: uppercase;
-              letter-spacing: 0.03em;
             }
 
             td {
@@ -1638,20 +1489,9 @@ export default function MoneyTransactionsPage() {
               font-weight: 800;
             }
 
-            .green {
-              color: #166534;
-              background: #dcfce7;
-            }
-
-            .red {
-              color: #991b1b;
-              background: #fee2e2;
-            }
-
-            .amber {
-              color: #92400e;
-              background: #fef3c7;
-            }
+            .green { color: #166534; }
+            .red { color: #991b1b; }
+            .amber { color: #92400e; }
 
             .badge {
               display: inline-block;
@@ -1662,47 +1502,15 @@ export default function MoneyTransactionsPage() {
               white-space: nowrap;
             }
 
-            .badge.income {
-              background: #dcfce7;
-              color: #166534;
-            }
-
-            .badge.expense {
-              background: #fee2e2;
-              color: #991b1b;
-            }
-
-            .badge.sponsor {
-              background: #fef3c7;
-              color: #92400e;
-            }
-
-            .badge.personal {
-              background: #e0f2fe;
-              color: #075985;
-            }
-
-            .badge.paid {
-              background: #dcfce7;
-              color: #166534;
-            }
-
-            .badge.unpaid {
-              background: #ffedd5;
-              color: #9a3412;
-            }
+            .badge.income { background: #dcfce7; color: #166534; }
+            .badge.expense { background: #fee2e2; color: #991b1b; }
+            .badge.sponsor { background: #fef3c7; color: #92400e; }
 
             .muted {
               margin-top: 4px;
               color: #6b7280;
               font-size: 9.5px;
               white-space: pre-wrap;
-            }
-
-            .small {
-              margin-top: 4px;
-              color: #6b7280;
-              font-size: 9px;
             }
 
             .empty {
@@ -1721,36 +1529,16 @@ export default function MoneyTransactionsPage() {
             }
 
             @media print {
-              body {
-                padding: 10mm;
-              }
+              body { padding: 10mm; }
 
               @page {
                 size: A4 landscape;
                 margin: 10mm;
               }
 
-              .summary {
-                grid-template-columns: repeat(6, 1fr);
-                page-break-inside: avoid;
-              }
-
-              table {
-                page-break-inside: auto;
-              }
-
-              thead {
-                display: table-header-group;
-              }
-
-              tr {
-                page-break-inside: avoid;
-                page-break-after: auto;
-              }
-
-              h2 {
-                page-break-after: avoid;
-              }
+              thead { display: table-header-group; }
+              tr { page-break-inside: avoid; }
+              h2 { page-break-after: avoid; }
             }
           </style>
         </head>
@@ -1762,12 +1550,19 @@ export default function MoneyTransactionsPage() {
           </div>
 
           <div class="meta">
-            Printed on ${escapeHtml(printedAt)} • Filter: ${escapeHtml(
-      filterLabel
-    )} • Rows: ${filteredTransactions.length}
+            Tracker year: Jan to Dec ${escapeHtml(
+              selectedYear
+            )} • Printed on ${escapeHtml(printedAt)} • Rows: ${
+      filteredTransactions.length
+    }
           </div>
 
           <div class="summary">
+            <div class="card opening-card">
+              <span>Opening Balance</span>
+              <strong>${escapeHtml(money(totals.openingBalance || 0))}</strong>
+            </div>
+
             <div class="card income-card">
               <span>Money In</span>
               <strong>${escapeHtml(money(filteredTotals.income))}</strong>
@@ -1801,7 +1596,7 @@ export default function MoneyTransactionsPage() {
             </div>
           </div>
 
-          <h2>Sponsorship Breakdown</h2>
+          <h2>Sponsorship Breakdown — ${escapeHtml(selectedYear)}</h2>
 
           <table>
             <thead>
@@ -1815,13 +1610,10 @@ export default function MoneyTransactionsPage() {
                 <th>Remaining</th>
               </tr>
             </thead>
-
-            <tbody>
-              ${sponsorRows}
-            </tbody>
+            <tbody>${sponsorRows}</tbody>
           </table>
 
-          <h2>Transactions</h2>
+          <h2>Transactions — ${escapeHtml(selectedYear)}</h2>
 
           <table>
             <thead>
@@ -1835,20 +1627,14 @@ export default function MoneyTransactionsPage() {
                 <th>Paid By</th>
                 <th>Repayment</th>
                 <th>Payment</th>
-                <th>Source</th>
                 <th>Invoice</th>
                 <th>Amount</th>
               </tr>
             </thead>
-
-            <tbody>
-              ${transactionRows}
-            </tbody>
+            <tbody>${transactionRows}</tbody>
           </table>
 
-          <div class="footer">
-            Burton Pride Money Management App
-          </div>
+          <div class="footer">Burton Pride Money Management App</div>
 
           <script>
             window.onload = function () {
@@ -1897,32 +1683,67 @@ export default function MoneyTransactionsPage() {
     return () => {
       window.removeEventListener("keydown", handlePrintShortcut);
     };
-  }, [filteredTransactions, filter, sponsorBreakdown, filteredTotals, totals]);
+  }, [
+    filteredTransactions,
+    filteredTotals,
+    totals,
+    yearlySponsorBreakdown,
+    selectedYear,
+  ]);
 
   return (
     <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1600px] space-y-6">
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold">Money Tracker</h1>
               <p className="text-sm text-white/60">
-                Track donations, spending, personal funds, and sponsorship
-                money.
+                Track donations, spending, personal funds, and sponsorship money
+                by year.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                loadTransactions();
-                loadSponsors();
-              }}
-              className="flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
-            >
-              <RefreshCcw className="h-4 w-4" />
-              Refresh
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2">
+                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-white/50">
+                  Tracker Year
+                </label>
+
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    setSelectedYear(e.target.value);
+                    setSelectedSponsorId("all");
+                    setFilter("all");
+                    setSearchTerm("");
+                  }}
+                  className="bg-transparent text-sm font-bold text-white outline-none"
+                >
+                  {yearOptions.map((year) => (
+                    <option
+                      key={year}
+                      value={year}
+                      className="bg-[#11111f] text-white"
+                    >
+                      Jan to Dec {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  loadTransactions();
+                  loadSponsors();
+                }}
+                className="flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm hover:bg-white/20"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1943,7 +1764,24 @@ export default function MoneyTransactionsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
+          <p className="text-sm font-bold text-white">
+            Showing money tracker for Jan to Dec {selectedYear}
+          </p>
+          <p className="mt-1 text-xs text-white/50">
+            {yearTransactions.length} transaction
+            {yearTransactions.length === 1 ? "" : "s"} saved for this year.
+          </p>
+        </section>
+
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+          <div className="min-w-0 rounded-3xl bg-purple-500/10 p-5">
+            <p className="text-sm text-purple-200">Opening Balance</p>
+            <p className="break-words text-3xl font-bold">
+              {money(totals.openingBalance || 0)}
+            </p>
+          </div>
+
           <div className="min-w-0 rounded-3xl bg-emerald-500/10 p-5">
             <p className="text-sm text-emerald-200">Money In</p>
             <p className="break-words text-3xl font-bold">
@@ -1994,8 +1832,8 @@ export default function MoneyTransactionsPage() {
                 Sponsorship Breakdown
               </h2>
               <p className="text-sm text-amber-100/70">
-                Track who sponsored, what came in, what has been spent, and what
-                is left.
+                Jan to Dec {selectedYear}: track who sponsored, what came in,
+                what has been spent, and what is left.
               </p>
             </div>
 
@@ -2008,13 +1846,13 @@ export default function MoneyTransactionsPage() {
             </button>
           </div>
 
-          {sponsorBreakdown.length === 0 ? (
+          {yearlySponsorBreakdown.length === 0 ? (
             <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-              No sponsors added yet.
+              No sponsors added for {selectedYear} yet.
             </div>
           ) : (
             <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {sponsorBreakdown.map((sponsor) => (
+              {yearlySponsorBreakdown.map((sponsor) => (
                 <div
                   key={sponsor.sponsor_id}
                   className="min-w-0 rounded-2xl border border-white/10 bg-black/20 p-4"
@@ -2061,6 +1899,26 @@ export default function MoneyTransactionsPage() {
                     <p className="break-words text-sm text-white/50">
                       {sponsor.phone}
                     </p>
+                  )}
+
+                  {sponsor.notes && (
+                    <div className="mt-3 rounded-xl bg-white/5 p-3 text-xs text-white/60">
+                      <p className="mb-1 font-bold text-white/80">
+                        Sponsor notes
+                      </p>
+                      <p className="whitespace-pre-wrap break-words">
+                        {sponsor.notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {(sponsor.carried_forward_pence || 0) > 0 && (
+                    <div className="mt-3 rounded-xl bg-purple-500/10 p-3 text-xs text-purple-100 ring-1 ring-purple-300/20">
+                      Carried forward into {selectedYear}:{" "}
+                      <strong>
+                        {money(sponsor.carried_forward_pence || 0)}
+                      </strong>
+                    </div>
                   )}
 
                   <div className="mt-4 space-y-2 text-sm">
@@ -2150,23 +2008,44 @@ export default function MoneyTransactionsPage() {
                 className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
               />
 
-              <select
-                value={form.type}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    type: e.target.value as "income" | "expense",
-                    isPersonalFunds:
-                      e.target.value === "income" ? false : prev.isPersonalFunds,
-                    personalFundsName:
-                      e.target.value === "income" ? "" : prev.personalFundsName,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              >
-                <option value="income">Money In</option>
-                <option value="expense">Money Out</option>
-              </select>
+              {form.sponsorId ? (
+                <div className="rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100">
+                  <p className="font-bold">Transaction type</p>
+                  <p className="mt-1 text-lg font-black text-white">
+                    Money Out
+                  </p>
+                  <p className="mt-1 text-xs text-red-100/70">
+                    This is locked because sponsor transactions are spending
+                    from sponsor money.
+                  </p>
+                </div>
+              ) : (
+                <select
+                  value={form.type}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      type: e.target.value as "income" | "expense",
+                      isPersonalFunds:
+                        e.target.value === "income"
+                          ? false
+                          : prev.isPersonalFunds,
+                      personalFundsName:
+                        e.target.value === "income"
+                          ? ""
+                          : prev.personalFundsName,
+                    }))
+                  }
+                  className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
+                >
+                  <option className="bg-[#11111f] text-white" value="income">
+                    Money In
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="expense">
+                    Money Out
+                  </option>
+                </select>
+              )}
 
               <input
                 value={form.amount}
@@ -2179,19 +2058,15 @@ export default function MoneyTransactionsPage() {
                 className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
               />
 
-              <input
-                value={form.category}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, category: e.target.value }))
-                }
-                placeholder="Category"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              />
-
               <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
-                <label className="mb-2 block text-sm font-bold text-amber-100">
-                  Sponsorship tracking
+                <label className="mb-1 block text-sm font-bold text-amber-100">
+                  Use sponsor money for this spending
                 </label>
+
+                <p className="mb-2 text-xs text-amber-100/70">
+                  Choose a sponsor only when this payment is being paid from
+                  sponsorship money.
+                </p>
 
                 <select
                   value={form.sponsorId}
@@ -2204,11 +2079,8 @@ export default function MoneyTransactionsPage() {
                       ...prev,
                       sponsorId: selected?.id || "",
                       sponsorName: selected?.sponsor_name || "",
-                      category: selected
-                        ? "Sponsorship"
-                        : prev.category === "Sponsorship"
-                        ? ""
-                        : prev.category,
+                      type: selected ? "expense" : prev.type,
+                      category: selected ? "Sponsorship" : "",
                       paymentMethod: selected
                         ? "Sponsorship Money"
                         : prev.paymentMethod === "Sponsorship Money"
@@ -2220,10 +2092,16 @@ export default function MoneyTransactionsPage() {
                   }}
                   className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
                 >
-                  <option value="">Choose sponsor...</option>
+                  <option className="bg-[#11111f] text-white" value="">
+                    Choose sponsor...
+                  </option>
 
                   {displaySponsors.map((sponsor) => (
-                    <option key={sponsor.id} value={sponsor.id}>
+                    <option
+                      className="bg-[#11111f] text-white"
+                      key={sponsor.id}
+                      value={sponsor.id}
+                    >
                       {sponsor.sponsor_name}
                     </option>
                   ))}
@@ -2257,36 +2135,64 @@ export default function MoneyTransactionsPage() {
                     Sponsorship Money
                   </p>
                   <p className="mt-1 text-xs text-amber-100/70">
-                    This is locked because a sponsor is linked. Remove the sponsor if this was paid another way.
+                    This is locked because a sponsor is linked. Remove the
+                    sponsor if this was paid another way.
                   </p>
                 </div>
               ) : (
-                <select
-                  value={form.paymentMethod}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      paymentMethod: e.target.value,
-                      isPersonalFunds:
-                        e.target.value === "Personal Funds"
-                          ? true
-                          : prev.isPersonalFunds,
-                    }))
-                  }
-                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-                >
-                  <option value="">Choose payment method...</option>
-                  <option value="Stripe">Stripe</option>
-                  <option value="Online">Online Payment</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
-                  <option value="PayPal">PayPal</option>
-                  <option value="Card Machine">Card Machine</option>
-                  <option value="Personal Funds">Personal Funds</option>
-                </select>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="mb-3 text-sm font-bold text-white/70">
+                    Payment method
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {paymentMethods.map((method) => {
+                      const active = form.paymentMethod === method;
+
+                      return (
+                        <button
+                          key={method}
+                          type="button"
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              paymentMethod: method,
+                              isPersonalFunds:
+                                method === "Personal Funds"
+                                  ? true
+                                  : prev.isPersonalFunds,
+                            }))
+                          }
+                          className={`rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
+                            active
+                              ? "bg-pink-500 text-white ring-2 ring-pink-200/50"
+                              : "bg-white/10 text-white/80 ring-1 ring-white/10 hover:bg-white/20"
+                          }`}
+                        >
+                          {method}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {!form.paymentMethod && (
+                    <p className="mt-3 text-xs text-white/40">
+                      Choose how this money was paid.
+                    </p>
+                  )}
+
+                  {form.paymentMethod && (
+                    <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
+                      Selected:{" "}
+                      <span className="font-bold text-white">
+                        {form.paymentMethod}
+                      </span>
+                    </p>
+                  )}
+                </div>
               )}
 
-              {form.type === "expense" && (
+              {form.type === "expense" && !form.sponsorId && (
                 <label className="flex items-start gap-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
                   <input
                     type="checkbox"
@@ -2320,7 +2226,7 @@ export default function MoneyTransactionsPage() {
                 </label>
               )}
 
-              {form.isPersonalFunds && (
+              {form.isPersonalFunds && !form.sponsorId && (
                 <input
                   value={form.personalFundsName}
                   onChange={(e) =>
@@ -2334,17 +2240,24 @@ export default function MoneyTransactionsPage() {
                 />
               )}
 
-              <input
-                type="date"
-                value={form.transactionDate}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    transactionDate: e.target.value,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              />
+              <div>
+                <input
+                  type="date"
+                  value={form.transactionDate}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      transactionDate: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
+                />
+
+                <p className="mt-2 text-xs text-white/40">
+                  This transaction will be saved under Jan to Dec{" "}
+                  {getTransactionYear(form.transactionDate)}.
+                </p>
+              </div>
 
               <textarea
                 value={form.description}
@@ -2411,8 +2324,8 @@ export default function MoneyTransactionsPage() {
               <div className="min-w-0">
                 <h2 className="text-xl font-bold">Transactions</h2>
                 <p className="text-sm text-white/50">
-                  {transactions.length} total transaction
-                  {transactions.length === 1 ? "" : "s"}
+                  {yearTransactions.length} transaction
+                  {yearTransactions.length === 1 ? "" : "s"} in {selectedYear}
                 </p>
               </div>
 
@@ -2439,6 +2352,16 @@ export default function MoneyTransactionsPage() {
 
                 <button
                   type="button"
+                  onClick={() => setDeleteYearOpen(true)}
+                  disabled={yearTransactions.length === 0 || deletingYear}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500/15 px-4 py-2 text-sm font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete {selectedYear}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setDeleteAllOpen(true)}
                   disabled={transactions.length === 0 || deletingAll}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-2 text-sm font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2450,6 +2373,13 @@ export default function MoneyTransactionsPage() {
             </div>
 
             <div className="mb-4 space-y-3">
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={`Search ${selectedYear} transactions...`}
+                className="w-full rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
+              />
+
               <div className="flex flex-wrap gap-2">
                 {(
                   ["all", "income", "expense", "personal", "sponsorship"] as const
@@ -2484,7 +2414,8 @@ export default function MoneyTransactionsPage() {
                       Organise by sponsor
                     </p>
                     <p className="text-xs text-amber-100/70">
-                      Choose one sponsor to only show money in and spending linked to them.
+                      Choose one sponsor to only show money in and spending
+                      linked to them for {selectedYear}.
                     </p>
                   </div>
 
@@ -2501,10 +2432,16 @@ export default function MoneyTransactionsPage() {
                       }}
                       className="min-w-[240px] rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/50"
                     >
-                      <option value="all">All sponsors</option>
+                      <option className="bg-[#11111f] text-white" value="all">
+                        All sponsors
+                      </option>
 
                       {displaySponsors.map((sponsor) => (
-                        <option key={sponsor.id} value={sponsor.id}>
+                        <option
+                          className="bg-[#11111f] text-white"
+                          key={sponsor.id}
+                          value={sponsor.id}
+                        >
                           {sponsor.sponsor_name}
                         </option>
                       ))}
@@ -2527,7 +2464,9 @@ export default function MoneyTransactionsPage() {
 
                 {selectedSponsor && (
                   <div className="mt-3 rounded-xl bg-black/20 px-4 py-3 text-sm text-amber-100">
-                    Showing transactions for <strong>{selectedSponsor.sponsor_name}</strong>. Export Excel and Print will also use this sponsor view.
+                    Showing {selectedYear} transactions for{" "}
+                    <strong>{selectedSponsor.sponsor_name}</strong>. Export
+                    Excel and Print will also use this sponsor view.
                   </div>
                 )}
               </div>
@@ -2537,11 +2476,11 @@ export default function MoneyTransactionsPage() {
               <p>Loading...</p>
             ) : filteredTransactions.length === 0 ? (
               <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-                No transactions yet
+                No transactions found for {selectedYear}
               </div>
             ) : (
               <div className="max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-                <table className="w-full min-w-[1350px] text-sm">
+                <table className="w-full min-w-[1250px] text-sm">
                   <thead className="bg-white/10 text-white/60">
                     <tr>
                       <th className="p-3 text-left">Date</th>
@@ -2553,7 +2492,6 @@ export default function MoneyTransactionsPage() {
                       <th className="p-3 text-left">Paid By</th>
                       <th className="p-3 text-left">Repayment</th>
                       <th className="p-3 text-left">Payment</th>
-                      <th className="p-3 text-left">Source</th>
                       <th className="p-3 text-left">Invoice</th>
                       <th className="p-3 text-right">Amount</th>
                       <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
@@ -2581,12 +2519,6 @@ export default function MoneyTransactionsPage() {
                             {item.description && (
                               <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
                                 {item.description}
-                              </p>
-                            )}
-
-                            {item.category && (
-                              <p className="mt-1 break-words text-xs text-white/40">
-                                {item.category}
                               </p>
                             )}
                           </td>
@@ -2679,21 +2611,6 @@ export default function MoneyTransactionsPage() {
 
                           <td className="whitespace-nowrap p-3">
                             {item.payment_method || "—"}
-                          </td>
-
-                          <td className="p-3">
-                            <span
-                              className={`inline-flex min-w-[110px] items-center justify-center rounded-2xl px-3 py-2 text-xs font-bold leading-tight ${
-                                item.source === "website_donation" ||
-                                item.source === "website_monthly_donation"
-                                  ? "bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-300/20"
-                                  : item.source === "sponsorship"
-                                  ? "bg-amber-500/20 text-amber-100 ring-1 ring-amber-300/20"
-                                  : "bg-white/10 text-white/80 ring-1 ring-white/10"
-                              }`}
-                            >
-                              {sourceLabel(item.source)}
-                            </span>
                           </td>
 
                           <td className="p-3">
@@ -2901,6 +2818,63 @@ export default function MoneyTransactionsPage() {
         </div>
       )}
 
+      {deleteYearOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
+            <h2 className="text-xl font-bold">
+              Delete {selectedYear} transactions?
+            </h2>
+
+            <p className="mt-3 text-sm text-white/70">
+              This will only delete transactions dated between January and
+              December {selectedYear}. Other years will stay safe.
+            </p>
+
+            <div className="mt-5 rounded-2xl border border-orange-400/20 bg-orange-500/10 p-4 text-sm text-orange-100">
+              This will delete {yearTransactions.length} transaction
+              {yearTransactions.length === 1 ? "" : "s"} from {selectedYear}.
+            </div>
+
+            <label className="mt-5 block text-sm font-bold text-white/80">
+              Main admin delete password
+            </label>
+
+            <input
+              type="password"
+              value={deleteYearPassword}
+              onChange={(e) => setDeleteYearPassword(e.target.value)}
+              placeholder="Enter main admin delete password"
+              autoComplete="new-password"
+              name="money-delete-year-password"
+              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-orange-300/40"
+            />
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteYearOpen(false);
+                  setDeleteYearPassword("");
+                }}
+                disabled={deletingYear}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={deleteSelectedYearTransactions}
+                disabled={deletingYear || !deleteYearPassword.trim()}
+                className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingYear ? "Deleting..." : `Delete ${selectedYear}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deleteSponsorId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
@@ -2985,14 +2959,32 @@ export default function MoneyTransactionsPage() {
             </p>
 
             <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              This will delete {transactions.length} transaction
-              {transactions.length === 1 ? "" : "s"}.
+              This will delete every transaction in the database, not just{" "}
+              {selectedYear}. There are currently {transactions.length} total
+              transaction{transactions.length === 1 ? "" : "s"} saved.
             </div>
+
+            <label className="mt-5 block text-sm font-bold text-white/80">
+              Main admin delete password
+            </label>
+
+            <input
+              type="password"
+              value={deleteAllPassword}
+              onChange={(e) => setDeleteAllPassword(e.target.value)}
+              placeholder="Enter main admin delete password"
+              autoComplete="new-password"
+              name="money-delete-all-password"
+              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
+            />
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={() => setDeleteAllOpen(false)}
+                onClick={() => {
+                  setDeleteAllOpen(false);
+                  setDeleteAllPassword("");
+                }}
                 disabled={deletingAll}
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
               >
@@ -3002,8 +2994,8 @@ export default function MoneyTransactionsPage() {
               <button
                 type="button"
                 onClick={deleteAllTransactions}
-                disabled={deletingAll}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
+                disabled={deletingAll || !deleteAllPassword.trim()}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {deletingAll ? "Deleting..." : "Delete Everything"}
               </button>
@@ -3014,3 +3006,104 @@ export default function MoneyTransactionsPage() {
     </main>
   );
 }
+
+/*
+  MONEY TRACKER TODO / FUTURE FEATURES
+
+  1. Delete selected year with main admin password
+     - Make “Delete selected year” ask for the main admin delete password.
+     - Connect it to /api/admin/settings/delete-password.
+     - Use the same protection as Delete All.
+
+  2. Export full yearly report
+     - Add a yearly report export button.
+     - Include opening balance, money in, money out, personal funds,
+       sponsorship breakdown, and all transactions.
+
+  3. Audit log
+     - Save a log every time someone creates, edits, deletes,
+       restores, or marks a transaction paid back.
+     - Store who did it, what changed, and when.
+
+  4. Undo delete / soft delete
+     - Do not permanently delete transactions straight away.
+     - Add deleted_at and deleted_by fields.
+     - Hide deleted transactions by default.
+     - Add a restore deleted transactions area.
+
+  5. Receipt preview
+     - Show a small preview or file name in the transaction row.
+     - Keep the View button as well.
+
+  6. Required sponsor spending notes
+     - When sponsor money is used, make sponsorshipNote required.
+     - This helps prove why sponsor money was spent.
+
+  7. Remaining sponsor warning
+     - Warn if sponsor spending is more than the sponsor has left.
+     - Example: “This spend is £50 over the remaining sponsor balance.”
+
+  8. Monthly breakdown
+     - Add a Jan to Dec monthly view.
+     - Show money in, money out, donations, expenses, and balance by month.
+
+  9. Search by amount
+     - Update search so typing “25” finds £25 transactions.
+     - Match against amount_pence converted to pounds.
+
+  10. Filter by payment method
+      - Add filter for Stripe, Cash, Bank Transfer, PayPal,
+        Card Machine, Personal Funds, and Item Donation.
+
+  11. Dashboard charts
+      - Add simple charts for:
+        - money in/out by month
+        - donations vs expenses
+        - sponsor money left
+
+  12. Lock old years
+      - Add a lock year button when accounts are finished.
+      - Example: lock 2026 after year-end.
+      - Only main admin can unlock/edit locked years.
+
+  13. Transaction reference number
+      - Give each transaction a reference like BP-2026-001.
+      - Useful for accounts, receipts, and reports.
+
+  14. Multiple file attachments
+      - Allow more than one file per transaction.
+      - Useful for receipts, invoices, bank screenshots, or emails.
+
+  15. Mark transaction as checked
+      - Add “Checked by admin” tick box.
+      - Store checked_by and checked_at.
+
+  16. CSV import
+      - Allow bank statement CSV upload.
+      - Let admin match/import transactions manually.
+
+  17. Separate Stripe sync button
+      - Stop syncing Stripe automatically on page load.
+      - Add button: “Sync Stripe Donations”.
+      - Keep manual money tracker work separate from Stripe.
+
+  18. Year-end carry forward note
+      - Show how opening balance was calculated from previous years.
+      - Make it clear for accounts.
+
+  19. Role permissions
+      - Main admin only:
+        - delete all
+        - delete selected year
+        - edit old years
+        - change sponsor totals
+      - Normal admins:
+        - add transactions only
+
+  20. Confirmation typing
+      - For dangerous actions, ask admin to type:
+        - DELETE ALL
+        - DELETE YEAR
+        - DELETE 2026 / selected year
+      - Also require the main admin delete password.
+*/
