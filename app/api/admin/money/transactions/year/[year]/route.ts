@@ -6,9 +6,35 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     year: string;
-  };
+  }>;
+};
+
+type MoneyTransaction = {
+  id: string;
+  created_at: string | null;
+  transaction_date: string | null;
+  type: "income" | "expense" | string | null;
+  category: string | null;
+  amount_pence: number | null;
+  payment_method: string | null;
+  is_personal_funds: boolean | null;
+  personal_funds_repaid: boolean | null;
+  sponsor_id: string | null;
+  sponsor_name: string | null;
+  source: string | null;
+};
+
+type MoneySponsor = {
+  id: string;
+  created_at: string | null;
+  sponsor_name: string | null;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  agreed_amount_pence: number | null;
+  received_amount_pence: number | null;
 };
 
 function isValidYear(year: string) {
@@ -35,7 +61,7 @@ function sponsorNameMatches(
   return Boolean(a && b && a.toLowerCase().trim() === b.toLowerCase().trim());
 }
 
-function isSponsorshipTransaction(item: any) {
+function isSponsorshipTransaction(item: MoneyTransaction) {
   return (
     Boolean(item.sponsor_id || item.sponsor_name) ||
     item.source === "sponsorship" ||
@@ -43,7 +69,7 @@ function isSponsorshipTransaction(item: any) {
   );
 }
 
-function isPersonalFundsTransaction(item: any) {
+function isPersonalFundsTransaction(item: MoneyTransaction) {
   return (
     item.type === "expense" &&
     (item.is_personal_funds === true ||
@@ -80,7 +106,7 @@ async function checkDeletePasswordThroughSettingsApi(
           error: passwordData.error || "Main admin password check failed.",
           details: passwordData,
         },
-        { status: passwordCheck.status }
+        { status: passwordCheck.status || 500 }
       ),
     };
   }
@@ -95,7 +121,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
   try {
     await requireMainAdmin();
 
-    const year = String(params.year || "").trim();
+    const { year: rawYear } = await params;
+    const year = String(rawYear || "").trim();
 
     if (!isValidYear(year)) {
       return NextResponse.json(
@@ -141,7 +168,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const yearTransactions = (transactions || []).filter((item) => {
+    const allTransactions = (transactions || []) as MoneyTransaction[];
+    const allSponsors = (sponsors || []) as MoneySponsor[];
+
+    const yearTransactions = allTransactions.filter((item) => {
       const transactionYear = getYearFromDate(
         item.transaction_date || item.created_at
       );
@@ -149,7 +179,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       return transactionYear === year;
     });
 
-    const sponsorBreakdown = (sponsors || [])
+    const sponsorBreakdown = allSponsors
       .map((sponsor) => {
         const sponsorTransactions = yearTransactions.filter((item) => {
           if (!isSponsorshipTransaction(item)) return false;
@@ -176,8 +206,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
           receivedFromTransactions > 0
             ? receivedFromTransactions
             : wasCreatedThisYear
-            ? sponsor.received_amount_pence || 0
-            : 0;
+              ? sponsor.received_amount_pence || 0
+              : 0;
 
         const agreedAmountPence =
           wasCreatedThisYear || hasTransactionsThisYear
@@ -210,7 +240,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     const personalFundsRepaid = yearTransactions
       .filter(
         (item) =>
-          isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
+          isPersonalFundsTransaction(item) &&
+          item.personal_funds_repaid === true
       )
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
@@ -241,7 +272,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         ok: true,
         year,
         transactions: yearTransactions,
-        sponsors: sponsors || [],
+        sponsors: allSponsors,
         breakdown: sponsorBreakdown,
         totals: {
           income,
@@ -279,7 +310,8 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
   try {
     await requireMainAdmin();
 
-    const year = String(params.year || "").trim();
+    const { year: rawYear } = await params;
+    const year = String(rawYear || "").trim();
 
     if (!isValidYear(year)) {
       return NextResponse.json(
@@ -328,7 +360,10 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const ids = (transactions || [])
+    const ids = ((transactions || []) as Pick<
+      MoneyTransaction,
+      "id" | "transaction_date" | "created_at"
+    >[])
       .filter((item) => {
         const transactionYear = getYearFromDate(
           item.transaction_date || item.created_at
