@@ -87,7 +87,12 @@ export default function SitePagesAdminPage() {
   const [syncing, setSyncing] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | SitePageStatus>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | SitePageStatus>(
+    "all"
+  );
+  const [visiblePasswords, setVisiblePasswords] = useState<
+    Record<string, boolean>
+  >({});
   const [notice, setNotice] = useState<{
     type: "success" | "error";
     text: string;
@@ -214,33 +219,43 @@ export default function SitePagesAdminPage() {
       ...patch,
     };
 
+    const isSettingPassword = Object.prototype.hasOwnProperty.call(
+      patch,
+      "page_password"
+    );
+
     setPages((prev) => prev.map((p) => (p.id === id ? optimistic : p)));
     setSavingId(id);
 
     try {
+      const body: Record<string, any> = {
+        id,
+        title: optimistic.title,
+        status: optimistic.status,
+        is_enabled: optimistic.is_enabled,
+        show_in_nav: optimistic.show_in_nav,
+        nav_label: optimistic.nav_label || "",
+        template: optimistic.template || "",
+        sort_order: Number(optimistic.sort_order || 0),
+        hidden_title: optimistic.hidden_title || "",
+        hidden_message: optimistic.hidden_message || "",
+        coming_soon_title: optimistic.coming_soon_title || "",
+        coming_soon_message: optimistic.coming_soon_message || "",
+        locked_title: optimistic.locked_title || "",
+        locked_message: optimistic.locked_message || "",
+        password_protected: optimistic.password_protected,
+      };
+
+      if (isSettingPassword) {
+        body.page_password = String(optimistic.page_password || "").trim();
+      }
+
       const res = await fetch("/api/admin/site-pages", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          id,
-          title: optimistic.title,
-          status: optimistic.status,
-          is_enabled: optimistic.is_enabled,
-          show_in_nav: optimistic.show_in_nav,
-          nav_label: optimistic.nav_label || "",
-          template: optimistic.template || "",
-          sort_order: Number(optimistic.sort_order || 0),
-          hidden_title: optimistic.hidden_title || "",
-          hidden_message: optimistic.hidden_message || "",
-          coming_soon_title: optimistic.coming_soon_title || "",
-          coming_soon_message: optimistic.coming_soon_message || "",
-          locked_title: optimistic.locked_title || "",
-          locked_message: optimistic.locked_message || "",
-          password_protected: optimistic.password_protected,
-          page_password: optimistic.page_password || "",
-        }),
+        body: JSON.stringify(body),
       });
 
       const json = await res.json();
@@ -259,6 +274,11 @@ export default function SitePagesAdminPage() {
             : p
         )
       );
+
+      setVisiblePasswords((prev) => ({
+        ...prev,
+        [id]: false,
+      }));
 
       setNotice({
         type: "success",
@@ -279,6 +299,39 @@ export default function SitePagesAdminPage() {
     setPages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }
 
+  function togglePasswordVisible(id: string) {
+    setVisiblePasswords((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  }
+
+  function savePagePassword(page: SitePage) {
+    if (!page.password_protected) {
+      setNotice({
+        type: "error",
+        text: "Turn on password protection before setting a password.",
+      });
+      return;
+    }
+
+    if (!page.page_password?.trim()) {
+      setNotice({
+        type: "error",
+        text: "Please type a password before saving.",
+      });
+      return;
+    }
+
+    updatePage(
+      page.id,
+      {
+        page_password: page.page_password,
+      },
+      `Updated ${page.title} page password`
+    );
+  }
+
   function resetPageDetails(page: SitePage) {
     updatePage(
       page.id,
@@ -292,7 +345,6 @@ export default function SitePagesAdminPage() {
         locked_title: "",
         locked_message: "",
         password_protected: false,
-        page_password: "",
       },
       `${page.title} details reset`
     );
@@ -315,9 +367,9 @@ export default function SitePagesAdminPage() {
                 </h1>
 
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
-                  Sync routes from your Next.js app folder, then control which pages
-                  are live, hidden, password protected, or marked as coming soon from
-                  the admin portal.
+                  Sync routes from your Next.js app folder, then control which
+                  pages are live, hidden, password protected, or marked as
+                  coming soon from the admin portal.
                 </p>
 
                 <div className="mt-5 flex flex-wrap gap-3 text-xs text-white/55 sm:text-sm">
@@ -356,7 +408,9 @@ export default function SitePagesAdminPage() {
                   disabled={syncing}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-400/30 bg-sky-500/15 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                  />
                   {syncing ? "Syncing pages..." : "Sync pages"}
                 </button>
               </div>
@@ -419,13 +473,15 @@ export default function SitePagesAdminPage() {
                 </div>
                 <h2 className="mt-4 text-lg font-semibold">No pages found</h2>
                 <p className="mt-2 text-sm text-white/60">
-                  Try clearing your search or click Sync pages to pull in new routes.
+                  Try clearing your search or click Sync pages to pull in new
+                  routes.
                 </p>
               </div>
             ) : (
               <div className="grid gap-4">
                 {filteredPages.map((page) => {
                   const isSaving = savingId === page.id;
+                  const passwordIsVisible = visiblePasswords[page.id] === true;
 
                   return (
                     <div
@@ -678,7 +734,10 @@ export default function SitePagesAdminPage() {
                                 onBlur={() =>
                                   updatePage(
                                     page.id,
-                                    { hidden_message: page.hidden_message || "" },
+                                    {
+                                      hidden_message:
+                                        page.hidden_message || "",
+                                    },
                                     `Updated ${page.title} hidden message`
                                   )
                                 }
@@ -716,6 +775,60 @@ export default function SitePagesAdminPage() {
                           </div>
 
                           <div className="grid gap-3 sm:grid-cols-2">
+                            <label className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3">
+                              <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-violet-200/70">
+                                Locked title
+                              </span>
+                              <input
+                                type="text"
+                                value={page.locked_title || ""}
+                                disabled={isSaving}
+                                onChange={(e) =>
+                                  updateLocalPage(page.id, {
+                                    locked_title: e.target.value,
+                                  })
+                                }
+                                onBlur={() =>
+                                  updatePage(
+                                    page.id,
+                                    { locked_title: page.locked_title || "" },
+                                    `Updated ${page.title} locked title`
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                                placeholder="This page is locked"
+                              />
+                            </label>
+
+                            <label className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-3">
+                              <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-violet-200/70">
+                                Locked message
+                              </span>
+                              <textarea
+                                value={page.locked_message || ""}
+                                disabled={isSaving}
+                                onChange={(e) =>
+                                  updateLocalPage(page.id, {
+                                    locked_message: e.target.value,
+                                  })
+                                }
+                                onBlur={() =>
+                                  updatePage(
+                                    page.id,
+                                    {
+                                      locked_message:
+                                        page.locked_message || "",
+                                    },
+                                    `Updated ${page.title} locked message`
+                                  )
+                                }
+                                className="min-h-[110px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                                placeholder="This page is password protected. Enter the password below to continue."
+                              />
+                            </label>
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-2">
                             <button
                               type="button"
                               disabled={isSaving}
@@ -725,7 +838,6 @@ export default function SitePagesAdminPage() {
                                   {
                                     password_protected:
                                       !page.password_protected,
-                                    page_password: "",
                                   },
                                   page.password_protected
                                     ? `${page.title} password protection disabled`
@@ -748,34 +860,72 @@ export default function SitePagesAdminPage() {
                               <span className="mb-2 block text-xs uppercase tracking-[0.2em] text-white/40">
                                 Set new password
                               </span>
-                              <input
-                                type="password"
-                                value={page.page_password || ""}
-                                disabled={isSaving || !page.password_protected}
-                                onChange={(e) =>
-                                  updateLocalPage(page.id, {
-                                    page_password: e.target.value,
-                                  })
-                                }
-                                onBlur={() => {
-                                  if (
-                                    !page.password_protected ||
-                                    !page.page_password?.trim()
-                                  ) {
-                                    return;
-                                  }
 
-                                  updatePage(
-                                    page.id,
-                                    {
-                                      page_password: page.page_password,
-                                    },
-                                    `Updated ${page.title} page password`
-                                  );
-                                }}
-                                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
-                                placeholder="Enter new password"
-                              />
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type={passwordIsVisible ? "text" : "password"}
+                                  value={page.page_password || ""}
+                                  disabled={
+                                    isSaving || !page.password_protected
+                                  }
+                                  onChange={(e) =>
+                                    updateLocalPage(page.id, {
+                                      page_password: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                  placeholder={
+                                    page.password_protected
+                                      ? "Enter new password"
+                                      : "Turn on password first"
+                                  }
+                                />
+
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isSaving || !page.password_protected
+                                  }
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => togglePasswordVisible(page.id)}
+                                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  aria-label={
+                                    passwordIsVisible
+                                      ? "Hide password"
+                                      : "Show password"
+                                  }
+                                  title={
+                                    passwordIsVisible
+                                      ? "Hide password"
+                                      : "Show password"
+                                  }
+                                >
+                                  {passwordIsVisible ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={
+                                  isSaving ||
+                                  !page.password_protected ||
+                                  !page.page_password?.trim()
+                                }
+                                onClick={() => savePagePassword(page)}
+                                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-300/30 bg-violet-500/20 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Lock className="h-4 w-4" />
+                                Save password
+                              </button>
+
+                              <p className="mt-2 text-xs leading-5 text-white/45">
+                                Type the password, use the eye button to check
+                                it, then click Save password.
+                              </p>
                             </label>
                           </div>
 
@@ -830,7 +980,9 @@ export default function SitePagesAdminPage() {
                               } disabled:cursor-not-allowed disabled:opacity-60`}
                             >
                               <Globe className="h-4 w-4" />
-                              {page.show_in_nav ? "Show in nav" : "Hidden from nav"}
+                              {page.show_in_nav
+                                ? "Show in nav"
+                                : "Hidden from nav"}
                             </button>
                           </div>
 

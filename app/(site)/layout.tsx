@@ -4,6 +4,7 @@ import ConditionalNavbar from "./components/Rooting/ConditionalNavbar";
 import ConditionalFooter from "./components/Rooting/ConditionalFooter";
 import Watermark from "./components/Rooting/Watermark";
 import HiddenPageGate from "./components/Rooting/HiddenPageGate";
+import GlobalRelockPageButton from "./components/Client/GlobalRelockPageButton";
 import { enforceCurrentSitePage } from "@/lib/sitePage";
 
 export default async function SiteLayout({
@@ -78,6 +79,8 @@ export default async function SiteLayout({
 
       <ConditionalFooter />
       <Watermark />
+
+      <GlobalRelockPageButton />
     </div>
   );
 }

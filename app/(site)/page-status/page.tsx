@@ -22,16 +22,34 @@ type SitePageRow = {
 
 function normalisePath(pathname: string) {
   if (!pathname) return "/";
+
   const onlyPath = pathname.split("?")[0].split("#")[0];
+
   if (!onlyPath || onlyPath === "/") return "/";
-  return onlyPath.endsWith("/") ? onlyPath.slice(0, -1) : onlyPath;
+
+  const cleanPath = onlyPath.startsWith("/") ? onlyPath : `/${onlyPath}`;
+
+  return cleanPath.endsWith("/") ? cleanPath.slice(0, -1) : cleanPath;
+}
+
+function cleanMode(mode: string | undefined) {
+  if (mode === "locked") return "locked";
+  if (mode === "coming_soon") return "coming_soon";
+  return "hidden";
 }
 
 async function getManagedPage(route: string): Promise<SitePageRow | null> {
-  const admin = supabaseAdmin;
   const normalisedRoute = normalisePath(route);
+  const lowerRoute = normalisedRoute.toLowerCase();
 
-  const { data, error } = await admin
+  /*
+    This checks:
+    /Raffle
+    /raffle
+
+    This helps stop the locked page failing because of route capital letters.
+  */
+  const { data, error } = await supabaseAdmin
     .from("site_pages")
     .select(
       `
@@ -47,11 +65,15 @@ async function getManagedPage(route: string): Promise<SitePageRow | null> {
         password_protected
       `
     )
-    .eq("route", normalisedRoute)
+    .or(`route.eq.${normalisedRoute},route.eq.${lowerRoute}`)
     .maybeSingle();
 
-  if (error || !data) return null;
-  return data;
+  if (error) {
+    console.error("Page status lookup error:", error);
+    return null;
+  }
+
+  return (data as SitePageRow | null) || null;
 }
 
 export default async function PageStatusPage({
@@ -62,7 +84,8 @@ export default async function PageStatusPage({
   noStore();
 
   const params = await searchParams;
-  const mode = params.mode || "hidden";
+
+  const mode = cleanMode(params.mode);
   const from = normalisePath(params.from || "/");
 
   const page = await getManagedPage(from);
@@ -107,7 +130,7 @@ export default async function PageStatusPage({
       <PageStatusCard
         mode={mode}
         pageId={page?.id ?? ""}
-        route={from}
+        route={page?.route || from}
         badge={badge}
         title={title}
         message={message}

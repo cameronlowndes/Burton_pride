@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type SitePagePasswordRow = {
   id: string;
   route: string;
@@ -10,14 +13,59 @@ type SitePagePasswordRow = {
 
 function normalisePath(pathname: string) {
   if (!pathname) return "/";
-  const onlyPath = pathname.split("?")[0].split("#")[0];
+
+  const onlyPath = pathname.split("?")[0].split("#")[0].trim();
+
   if (!onlyPath || onlyPath === "/") return "/";
-  return onlyPath.endsWith("/") ? onlyPath.slice(0, -1) : onlyPath;
+
+  const withSlash = onlyPath.startsWith("/") ? onlyPath : `/${onlyPath}`;
+
+  return withSlash.endsWith("/") ? withSlash.slice(0, -1) : withSlash;
+}
+
+async function findPageById(pageId: string) {
+  if (!pageId) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("site_pages")
+    .select("id, route, password_protected, page_password")
+    .eq("id", pageId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as SitePagePasswordRow | null;
+}
+
+async function findPageByRoute(route: string) {
+  const normalisedRoute = normalisePath(route);
+  const lowerRoute = normalisedRoute.toLowerCase();
+
+  /*
+    This checks both:
+    /Raffle
+    /raffle
+
+    This helps when your page route has capital letters but the browser/API sends lowercase.
+  */
+  const { data, error } = await supabaseAdmin
+    .from("site_pages")
+    .select("id, route, password_protected, page_password")
+    .or(`route.eq.${normalisedRoute},route.eq.${lowerRoute}`)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as SitePagePasswordRow | null;
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
     const pageId = String(body.pageId || "").trim();
     const route = normalisePath(String(body.route || "").trim());
@@ -25,62 +73,71 @@ export async function POST(req: Request) {
 
     if (!password) {
       return NextResponse.json(
-        { ok: false, error: "Please enter the page password." },
+        {
+          ok: false,
+          error: "Please enter the page password.",
+        },
         { status: 400 }
       );
     }
 
-    const admin = supabaseAdmin;
-
-    let data: SitePagePasswordRow | null = null;
-    let error: { message: string } | null = null;
+    let page: SitePagePasswordRow | null = null;
 
     if (pageId) {
-      const result = await admin
-        .from("site_pages")
-        .select("id, route, password_protected, page_password")
-        .eq("id", pageId)
-        .maybeSingle<SitePagePasswordRow>();
-
-      data = result.data;
-      error = result.error;
+      page = await findPageById(pageId);
     }
 
-    if ((!data || error) && route) {
-      const fallbackResult = await admin
-        .from("site_pages")
-        .select("id, route, password_protected, page_password")
-        .eq("route", route)
-        .maybeSingle<SitePagePasswordRow>();
-
-      data = fallbackResult.data;
-      error = fallbackResult.error;
+    if (!page && route) {
+      page = await findPageByRoute(route);
     }
 
-    if (error || !data) {
+    if (!page) {
       return NextResponse.json(
-        { ok: false, error: "This page could not be found." },
+        {
+          ok: false,
+          error: "This page could not be found in site_pages.",
+          received: {
+            pageId,
+            route,
+            routeLowercase: route.toLowerCase(),
+          },
+          help:
+            "Check that the route column in site_pages matches this route exactly, for example /Raffle or /raffle.",
+        },
         { status: 404 }
       );
     }
 
-    if (!data.password_protected) {
+    if (!page.password_protected) {
       return NextResponse.json(
-        { ok: false, error: "This page is not currently password protected." },
+        {
+          ok: false,
+          error: "This page is not currently password protected.",
+          pageId: page.id,
+          route: page.route,
+        },
         { status: 400 }
       );
     }
 
-    if (!data.page_password || data.page_password !== password) {
+    if (!page.page_password || page.page_password !== password) {
       return NextResponse.json(
-        { ok: false, error: "Incorrect password." },
+        {
+          ok: false,
+          error: "Incorrect password.",
+        },
         { status: 401 }
       );
     }
 
-    const response = NextResponse.json({ ok: true });
+    const response = NextResponse.json({
+      ok: true,
+      pageId: page.id,
+      route: page.route,
+      message: "Page unlocked successfully.",
+    });
 
-    response.cookies.set(`site_page_access_${data.id}`, "granted", {
+    response.cookies.set(`site_page_access_${page.id}`, "granted", {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
@@ -90,10 +147,13 @@ export async function POST(req: Request) {
 
     return response;
   } catch (error) {
+    console.error("Unlock site page error:", error);
+
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Failed to unlock page.",
+        error:
+          error instanceof Error ? error.message : "Failed to unlock page.",
       },
       { status: 500 }
     );

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,6 +19,7 @@ type RaffleEntry = {
   full_name: string;
   email: string;
   phone: string | null;
+  date_of_birth: string | null;
   ticket_amount: string | null;
   message: string | null;
   status: string | null;
@@ -28,6 +28,12 @@ type RaffleEntry = {
   currency: string | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
+
+  consent_given: boolean | null;
+  age_confirmed: boolean | null;
+  terms_accepted: boolean | null;
+  eligibility_confirmed: boolean | null;
+
   raffle_winner_position: number | null;
   raffle_won_at: string | null;
   raffle_draw_notes: string | null;
@@ -96,6 +102,61 @@ function formatDate(value: string | null) {
   });
 }
 
+function formatDob(value: string | null) {
+  if (!value) return "—";
+
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function getAge(value: string | null) {
+  if (!value) return null;
+
+  const dob = new Date(value);
+
+  if (Number.isNaN(dob.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+
+  const hasHadBirthdayThisYear =
+    today.getMonth() > dob.getMonth() ||
+    (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+
+  if (!hasHadBirthdayThisYear) {
+    age -= 1;
+  }
+
+  return age;
+}
+
+function YesNoBadge({
+  value,
+  yesText = "Yes",
+  noText = "No",
+}: {
+  value: boolean | null | undefined;
+  yesText?: string;
+  noText?: string;
+}) {
+  return (
+    <span
+      className={`rounded-xl px-3 py-2 text-xs font-black ${
+        value === true
+          ? "bg-emerald-500/15 text-emerald-100"
+          : "bg-red-500/15 text-red-100"
+      }`}
+    >
+      {value === true ? yesText : noText}
+    </span>
+  );
+}
+
 export default function AdminRafflePage() {
   const drawSectionRef = useRef<HTMLElement | null>(null);
 
@@ -110,7 +171,7 @@ export default function AdminRafflePage() {
   });
 
   const [filter, setFilter] = useState<
-    "all" | "paid" | "checkout_started" | "winners"
+    "all" | "paid" | "checkout_started" | "winners" | "age_checked"
   >("all");
 
   const [loading, setLoading] = useState(true);
@@ -181,6 +242,19 @@ export default function AdminRafflePage() {
     loadEntries();
   }, []);
 
+  const ageConfirmedCount = useMemo(() => {
+    return entries.filter((entry) => entry.age_confirmed === true).length;
+  }, [entries]);
+
+  const termsAcceptedCount = useMemo(() => {
+    return entries.filter((entry) => entry.terms_accepted === true).length;
+  }, [entries]);
+
+  const eligibilityConfirmedCount = useMemo(() => {
+    return entries.filter((entry) => entry.eligibility_confirmed === true)
+      .length;
+  }, [entries]);
+
   const filteredEntries = useMemo(() => {
     if (filter === "all") return entries;
 
@@ -196,6 +270,15 @@ export default function AdminRafflePage() {
 
     if (filter === "winners") {
       return entries.filter((entry) => entry.raffle_winner_position);
+    }
+
+    if (filter === "age_checked") {
+      return entries.filter(
+        (entry) =>
+          entry.age_confirmed === true &&
+          entry.terms_accepted === true &&
+          entry.eligibility_confirmed === true
+      );
     }
 
     return entries;
@@ -593,8 +676,8 @@ export default function AdminRafflePage() {
             <div>
               <h1 className="text-3xl font-bold">Raffle Admin</h1>
               <p className="text-sm text-white/60">
-                View raffle entries, paid tickets, total raised, and randomly
-                draw winners.
+                View raffle entries, paid tickets, age checks, total raised, and
+                randomly draw winners.
               </p>
             </div>
 
@@ -769,7 +852,7 @@ export default function AdminRafflePage() {
           </section>
         )}
 
-        <section className="grid gap-4 md:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
           <div className="rounded-3xl bg-pink-500/10 p-5">
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-pink-400/20">
               <Users className="h-5 w-5 text-pink-100" />
@@ -812,6 +895,61 @@ export default function AdminRafflePage() {
             <p className="text-3xl font-bold">
               {money(stats.totalRaisedPence)}
             </p>
+          </div>
+
+          <div className="rounded-3xl bg-cyan-500/10 p-5">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-400/20">
+              <ShieldCheck className="h-5 w-5 text-cyan-100" />
+            </div>
+            <p className="text-sm text-cyan-100">Age Confirmed</p>
+            <p className="text-3xl font-bold">{ageConfirmedCount}</p>
+          </div>
+
+          <div className="rounded-3xl bg-indigo-500/10 p-5">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-400/20">
+              <ShieldCheck className="h-5 w-5 text-indigo-100" />
+            </div>
+            <p className="text-sm text-indigo-100">Terms Accepted</p>
+            <p className="text-3xl font-bold">{termsAcceptedCount}</p>
+          </div>
+
+          <div className="rounded-3xl bg-lime-500/10 p-5">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-lime-400/20">
+              <ShieldCheck className="h-5 w-5 text-lime-100" />
+            </div>
+            <p className="text-sm text-lime-100">Eligible</p>
+            <p className="text-3xl font-bold">{eligibilityConfirmedCount}</p>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="text-xl font-bold">Age, Terms and Eligibility Checks</h2>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+              <p className="text-lg font-black">18+ only</p>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                The raffle is open to residents of Great Britain aged 18 years
+                or over. The website asks for date of birth and blocks under 18s
+                before payment.
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+              <p className="text-lg font-black">Terms must be accepted</p>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Entrants must confirm they agree to the raffle terms, are buying
+                tickets for themselves, and are eligible to enter.
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+              <p className="text-lg font-black">Winner ID may be checked</p>
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Burton Pride C.I.C. may ask a winner for proof of age, identity,
+                or eligibility before confirming or releasing a prize.
+              </p>
+            </div>
           </div>
         </section>
 
@@ -902,12 +1040,33 @@ export default function AdminRafflePage() {
                       </p>
 
                       <p className="mt-1 text-xs text-white/60">
+                        DOB: {formatDob(existingWinner.date_of_birth)}
+                      </p>
+
+                      <p className="mt-1 text-xs text-white/60">
+                        Age: {getAge(existingWinner.date_of_birth) || "—"}
+                      </p>
+
+                      <p className="mt-1 text-xs text-white/60">
                         Tickets: {ticketCount(existingWinner.ticket_amount)}
                       </p>
 
                       <p className="mt-1 text-xs text-white/60">
                         Drawn: {formatDate(existingWinner.raffle_won_at)}
                       </p>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <YesNoBadge
+                          value={existingWinner.age_confirmed}
+                          yesText="18+ confirmed"
+                          noText="Age not confirmed"
+                        />
+                        <YesNoBadge
+                          value={existingWinner.terms_accepted}
+                          yesText="Terms accepted"
+                          noText="Terms missing"
+                        />
+                      </div>
 
                       {existingWinner.raffle_draw_notes && (
                         <p className="mt-2 text-xs text-white/50">
@@ -945,33 +1104,42 @@ export default function AdminRafflePage() {
             <div>
               <h2 className="text-xl font-bold">Raffle Entries</h2>
               <p className="text-sm text-white/60">
-                All raffle checkouts and paid entries.
+                All raffle checkouts, paid entries, age checks, and terms
+                confirmations.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {(["all", "paid", "checkout_started", "winners"] as const).map(
-                (item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setFilter(item)}
-                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                      filter === item
-                        ? "bg-white text-black"
-                        : "bg-white/10 text-white"
-                    }`}
-                  >
-                    {item === "all"
-                      ? "All"
-                      : item === "paid"
-                      ? "Paid"
-                      : item === "checkout_started"
-                      ? "Started"
-                      : "Winners"}
-                  </button>
-                )
-              )}
+              {(
+                [
+                  "all",
+                  "paid",
+                  "checkout_started",
+                  "age_checked",
+                  "winners",
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setFilter(item)}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                    filter === item
+                      ? "bg-white text-black"
+                      : "bg-white/10 text-white"
+                  }`}
+                >
+                  {item === "all"
+                    ? "All"
+                    : item === "paid"
+                    ? "Paid"
+                    : item === "checkout_started"
+                    ? "Started"
+                    : item === "age_checked"
+                    ? "Age/Terms OK"
+                    : "Winners"}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -981,16 +1149,21 @@ export default function AdminRafflePage() {
             <p className="text-white/60">No raffle entries found.</p>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1350px] text-sm">
+              <table className="w-full min-w-[1800px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
                     <th className="p-3 text-left">Name</th>
                     <th className="p-3 text-left">Email</th>
                     <th className="p-3 text-left">Phone</th>
+                    <th className="p-3 text-left">DOB</th>
+                    <th className="p-3 text-left">Age</th>
                     <th className="p-3 text-left">Tickets</th>
                     <th className="p-3 text-left">Payment</th>
                     <th className="p-3 text-right">Amount</th>
+                    <th className="p-3 text-left">18+</th>
+                    <th className="p-3 text-left">Terms</th>
+                    <th className="p-3 text-left">Eligible</th>
                     <th className="p-3 text-left">Winner</th>
                     <th className="p-3 text-left">Message</th>
                     <th className="p-3 text-right">Actions</th>
@@ -998,66 +1171,110 @@ export default function AdminRafflePage() {
                 </thead>
 
                 <tbody>
-                  {filteredEntries.map((entry) => (
-                    <tr key={entry.id} className="border-t border-white/10">
-                      <td className="p-3">{formatDate(entry.created_at)}</td>
+                  {filteredEntries.map((entry) => {
+                    const age = getAge(entry.date_of_birth);
 
-                      <td className="p-3 font-bold">{entry.full_name}</td>
+                    return (
+                      <tr key={entry.id} className="border-t border-white/10">
+                        <td className="p-3">{formatDate(entry.created_at)}</td>
 
-                      <td className="p-3">{entry.email}</td>
+                        <td className="p-3 font-bold">{entry.full_name}</td>
 
-                      <td className="p-3">{entry.phone || "—"}</td>
+                        <td className="p-3">{entry.email}</td>
 
-                      <td className="p-3 font-bold">
-                        {ticketCount(entry.ticket_amount)}
-                      </td>
+                        <td className="p-3">{entry.phone || "—"}</td>
 
-                      <td className="p-3">
-                        <span
-                          className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                            entry.payment_status === "paid"
-                              ? "bg-emerald-500/15 text-emerald-100"
-                              : entry.payment_status === "checkout_started"
-                              ? "bg-yellow-500/15 text-yellow-100"
-                              : "bg-white/10 text-white/60"
-                          }`}
-                        >
-                          {entry.payment_status || "not_paid"}
-                        </span>
-                      </td>
+                        <td className="p-3">{formatDob(entry.date_of_birth)}</td>
 
-                      <td className="p-3 text-right font-bold">
-                        {money(entry.amount_pence || 0)}
-                      </td>
+                        <td className="p-3">
+                          {age !== null ? (
+                            <span
+                              className={`font-black ${
+                                age >= 18 ? "text-emerald-100" : "text-red-100"
+                              }`}
+                            >
+                              {age}
+                            </span>
+                          ) : (
+                            <span className="text-white/40">—</span>
+                          )}
+                        </td>
 
-                      <td className="p-3">
-                        {entry.raffle_winner_position ? (
-                          <span className="rounded-xl bg-yellow-400/15 px-3 py-2 text-xs font-black text-yellow-100">
-                            {prizeLabel(entry.raffle_winner_position)}
+                        <td className="p-3 font-bold">
+                          {ticketCount(entry.ticket_amount)}
+                        </td>
+
+                        <td className="p-3">
+                          <span
+                            className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                              entry.payment_status === "paid"
+                                ? "bg-emerald-500/15 text-emerald-100"
+                                : entry.payment_status === "checkout_started"
+                                ? "bg-yellow-500/15 text-yellow-100"
+                                : "bg-white/10 text-white/60"
+                            }`}
+                          >
+                            {entry.payment_status || "not_paid"}
                           </span>
-                        ) : (
-                          <span className="text-white/40">—</span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="p-3 text-white/60">
-                        <div className="max-w-[280px] whitespace-pre-wrap">
-                          {entry.message || "—"}
-                        </div>
-                      </td>
+                        <td className="p-3 text-right font-bold">
+                          {money(entry.amount_pence || 0)}
+                        </td>
 
-                      <td className="p-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setDeleteModal(entry)}
-                          disabled={deleting}
-                          className="rounded-xl border border-red-300/30 bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="p-3">
+                          <YesNoBadge
+                            value={entry.age_confirmed}
+                            yesText="Yes"
+                            noText="No"
+                          />
+                        </td>
+
+                        <td className="p-3">
+                          <YesNoBadge
+                            value={entry.terms_accepted}
+                            yesText="Yes"
+                            noText="No"
+                          />
+                        </td>
+
+                        <td className="p-3">
+                          <YesNoBadge
+                            value={entry.eligibility_confirmed}
+                            yesText="Yes"
+                            noText="No"
+                          />
+                        </td>
+
+                        <td className="p-3">
+                          {entry.raffle_winner_position ? (
+                            <span className="rounded-xl bg-yellow-400/15 px-3 py-2 text-xs font-black text-yellow-100">
+                              {prizeLabel(entry.raffle_winner_position)}
+                            </span>
+                          ) : (
+                            <span className="text-white/40">—</span>
+                          )}
+                        </td>
+
+                        <td className="p-3 text-white/60">
+                          <div className="max-w-[280px] whitespace-pre-wrap">
+                            {entry.message || "—"}
+                          </div>
+                        </td>
+
+                        <td className="p-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDeleteModal(entry)}
+                            disabled={deleting}
+                            className="rounded-xl border border-red-300/30 bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1087,16 +1304,43 @@ export default function AdminRafflePage() {
                 {deleteModal.email}
               </p>
               <p className="mt-1 text-sm text-white/60">
+                Phone: {deleteModal.phone || "—"}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                DOB: {formatDob(deleteModal.date_of_birth)}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                Age: {getAge(deleteModal.date_of_birth) || "—"}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
                 Tickets: {ticketCount(deleteModal.ticket_amount)}
               </p>
               <p className="mt-1 text-sm text-white/60">
                 Payment: {deleteModal.payment_status || "not_paid"}
               </p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <YesNoBadge
+                  value={deleteModal.age_confirmed}
+                  yesText="18+ confirmed"
+                  noText="Age not confirmed"
+                />
+                <YesNoBadge
+                  value={deleteModal.terms_accepted}
+                  yesText="Terms accepted"
+                  noText="Terms missing"
+                />
+                <YesNoBadge
+                  value={deleteModal.eligibility_confirmed}
+                  yesText="Eligible"
+                  noText="Eligibility missing"
+                />
+              </div>
             </div>
 
             <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-              This will permanently delete this raffle entry from Supabase.
-              This cannot be undone.
+              This will permanently delete this raffle entry from Supabase. This
+              cannot be undone.
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -1141,8 +1385,8 @@ export default function AdminRafflePage() {
             </div>
 
             <p className="mt-4 text-sm leading-6 text-white/70">
-              This will delete all fake test raffle entries created by the
-              <strong> Create 10 Test Entries</strong> button.
+              This will delete all fake test raffle entries created by the{" "}
+              <strong>Create 10 Test Entries</strong> button.
             </p>
 
             <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
@@ -1241,6 +1485,11 @@ export default function AdminRafflePage() {
             <div className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-400/10 p-4 text-sm text-yellow-100">
               This action saves the winner in Supabase. Only click this when you
               are ready to do the official draw.
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-blue-300/20 bg-blue-400/10 p-4 text-sm text-blue-100">
+              Before releasing a prize, you may ask the winner for proof of age,
+              identity, or eligibility if required.
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

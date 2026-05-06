@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { Lock, EyeOff, Clock3, Loader2 } from "lucide-react";
+import { Lock, Eye, EyeOff, Clock3, Loader2 } from "lucide-react";
 
 type Props = {
   mode: string;
@@ -34,6 +34,7 @@ export default function PageStatusCard({
   const isLocked = mode === "locked";
 
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -49,10 +50,11 @@ export default function PageStatusCard({
       setSubmitting(true);
       setError("");
 
-      const res = await fetch("/api/site-pages/unlock", {
+      const res = await fetch("/api/admin/site-pages/unlock", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify({
           pageId,
@@ -61,16 +63,32 @@ export default function PageStatusCard({
         }),
       });
 
-      const json = await res.json();
+      const text = await res.text();
+
+      let json: any = {};
+
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        console.error("Unlock API returned non-JSON response:", {
+          status: res.status,
+          statusText: res.statusText,
+          responseText: text,
+        });
+
+        throw new Error(
+          `Unlock API did not return JSON. Status: ${res.status}. Check that app/api/admin/site-pages/unlock/route.ts exists and that the fetch URL matches.`
+        );
+      }
 
       if (!res.ok || !json.ok) {
-        throw new Error(json.error || "Incorrect password");
+        throw new Error(json.error || "Incorrect password.");
       }
 
       router.push(route);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Incorrect password");
+      setError(err instanceof Error ? err.message : "Incorrect password.");
     } finally {
       setSubmitting(false);
     }
@@ -97,13 +115,39 @@ export default function PageStatusCard({
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-white/60">
               Page password
             </span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter page password"
-              className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-white/40"
-            />
+
+            <div className="flex items-center gap-2">
+              <input
+                type={passwordVisible ? "text" : "password"}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+
+                  if (error) {
+                    setError("");
+                  }
+                }}
+                placeholder="Enter page password"
+                disabled={submitting}
+                className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+
+              <button
+                type="button"
+                disabled={submitting}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setPasswordVisible((current) => !current)}
+                className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/10 text-white/80 transition hover:bg-white/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                aria-label={passwordVisible ? "Hide password" : "Show password"}
+                title={passwordVisible ? "Hide password" : "Show password"}
+              >
+                {passwordVisible ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </label>
 
           {error ? (
@@ -139,6 +183,12 @@ export default function PageStatusCard({
               Go to homepage
             </Link>
           </div>
+
+          <p className="mt-4 text-xs leading-5 text-white/45">
+            If this shows “Unlock API did not return JSON”, check that your API
+            file is exactly at app/api/admin/site-pages/unlock/route.ts and that
+            there is no old fetch still using /api/site-pages/unlock.
+          </p>
         </form>
       ) : (
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">

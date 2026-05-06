@@ -8,6 +8,44 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
+function isOver18(dateOfBirth: string) {
+  if (!dateOfBirth) return false;
+
+  const dob = new Date(dateOfBirth);
+
+  if (Number.isNaN(dob.getTime())) {
+    return false;
+  }
+
+  const today = new Date();
+
+  const eighteenthBirthday = new Date(
+    dob.getFullYear() + 18,
+    dob.getMonth(),
+    dob.getDate()
+  );
+
+  return today >= eighteenthBirthday;
+}
+
+function isValidDateOfBirth(dateOfBirth: string) {
+  if (!dateOfBirth) return false;
+
+  const dob = new Date(dateOfBirth);
+
+  if (Number.isNaN(dob.getTime())) {
+    return false;
+  }
+
+  const today = new Date();
+
+  if (dob > today) {
+    return false;
+  }
+
+  return true;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -15,25 +53,97 @@ export async function POST(req: Request) {
     const fullName = String(body.fullName || "").trim();
     const email = String(body.email || "").trim().toLowerCase();
     const phone = String(body.phone || "").trim();
+    const dateOfBirth = String(body.dateOfBirth || "").trim();
     const ticketAmount = Number(body.ticketAmount || 1);
     const message = String(body.message || "").trim();
 
+    const ageConfirmed = body.ageConfirmed === true;
+    const termsAccepted = body.termsAccepted === true;
+
     if (!fullName || !email || !phone) {
       return NextResponse.json(
-        { ok: false, error: "Name, email and phone are required" },
+        {
+          ok: false,
+          error: "Name, email and phone are required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!dateOfBirth) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Date of birth is required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidDateOfBirth(dateOfBirth)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Please enter a valid date of birth.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!isOver18(dateOfBirth)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "You must be aged 18 or over to buy Burton Pride raffle tickets.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!ageConfirmed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "You must confirm that you are aged 18 or over, a resident of Great Britain, and buying the tickets for yourself.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!termsAccepted) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "You must agree to the raffle terms before buying tickets.",
+        },
         { status: 400 }
       );
     }
 
     if (!ticketAmount || ticketAmount < 1) {
       return NextResponse.json(
-        { ok: false, error: "Please choose at least 1 ticket" },
+        {
+          ok: false,
+          error: "Please choose at least 1 ticket.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (![1, 2, 5].includes(ticketAmount)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid ticket amount selected.",
+        },
         { status: 400 }
       );
     }
 
     /**
-     * ✅ ONE-TIME ONLY CHECK
+     * ONE-TIME ONLY CHECK
      * This stops someone using the same email more than once.
      */
     const { data: existingEntry, error: existingError } = await supabaseAdmin
@@ -87,10 +197,15 @@ export async function POST(req: Request) {
       fullName,
       email,
       phone,
+      dateOfBirth,
       ticketAmount: String(ticketAmount),
       message,
       source: "website_raffle",
       amountPence: String(amountPence),
+      ageConfirmed: String(ageConfirmed),
+      termsAccepted: String(termsAccepted),
+      eligibilityConfirmed: "true",
+      licenceNumber: "SL0507",
     };
 
     const checkoutSession = await stripe.checkout.sessions.create({
@@ -110,7 +225,8 @@ export async function POST(req: Request) {
             unit_amount: 100,
             product_data: {
               name: "Burton Pride Raffle Ticket",
-              description: "£1 raffle ticket supporting Burton Pride C.I.C",
+              description:
+                "£1 raffle ticket supporting Burton Pride C.I.C. Licensed by East Staffordshire Council under registration number SL0507.",
               metadata,
             },
           },
@@ -124,9 +240,14 @@ export async function POST(req: Request) {
         full_name: fullName,
         email,
         phone,
+        date_of_birth: dateOfBirth,
         ticket_amount: String(ticketAmount),
         message: message || null,
+
         consent_given: true,
+        age_confirmed: ageConfirmed,
+        terms_accepted: termsAccepted,
+        eligibility_confirmed: true,
 
         status: "checkout_started",
         payment_status: "checkout_started",
