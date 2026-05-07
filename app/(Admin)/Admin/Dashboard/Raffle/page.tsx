@@ -5,6 +5,7 @@ import {
   Bug,
   Gift,
   RefreshCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Ticket,
@@ -12,6 +13,11 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+
+type RaffleTicketNumber = {
+  id?: string;
+  ticket_number: number;
+};
 
 type RaffleEntry = {
   id: string;
@@ -37,6 +43,8 @@ type RaffleEntry = {
   raffle_winner_position: number | null;
   raffle_won_at: string | null;
   raffle_draw_notes: string | null;
+
+  raffle_tickets?: RaffleTicketNumber[];
 };
 
 type ApiStats = {
@@ -67,6 +75,7 @@ type BigMessage = {
   winnerPhone: string;
   prize: string;
   tickets: number;
+  raffleNumbers: string;
   notes: string;
 };
 
@@ -81,6 +90,54 @@ function ticketCount(value: string | null) {
   const n = Number(value || 1);
   if (!Number.isFinite(n) || n < 1) return 1;
   return Math.floor(n);
+}
+
+function getTicketNumbers(entry: RaffleEntry | null | undefined) {
+  return (entry?.raffle_tickets || [])
+    .map((ticket) => Number(ticket.ticket_number))
+    .filter((number) => Number.isFinite(number))
+    .sort((a, b) => a - b);
+}
+
+function formatTicketNumbers(entry: RaffleEntry | null | undefined) {
+  const numbers = getTicketNumbers(entry);
+
+  if (numbers.length === 0) return "—";
+
+  return numbers.map((number) => `#${number}`).join(", ");
+}
+
+function entryHasRaffleNumber(entry: RaffleEntry, searchValue: string) {
+  const cleanSearch = searchValue.replace("#", "").trim();
+
+  if (!cleanSearch) return true;
+
+  const searchNumber = Number(cleanSearch);
+
+  if (!Number.isFinite(searchNumber)) return false;
+
+  return getTicketNumbers(entry).includes(searchNumber);
+}
+
+function RaffleNumberBadges({ entry }: { entry: RaffleEntry }) {
+  const numbers = getTicketNumbers(entry);
+
+  if (numbers.length === 0) {
+    return <span className="text-white/40">—</span>;
+  }
+
+  return (
+    <div className="flex max-w-[280px] flex-wrap gap-2">
+      {numbers.map((number) => (
+        <span
+          key={number}
+          className="rounded-xl bg-purple-500/20 px-3 py-2 text-xs font-black text-purple-100"
+        >
+          #{number}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function prizeLabel(position: number | null) {
@@ -174,6 +231,8 @@ export default function AdminRafflePage() {
     "all" | "paid" | "checkout_started" | "winners" | "age_checked"
   >("all");
 
+  const [raffleNumberSearch, setRaffleNumberSearch] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [creatingTestEntries, setCreatingTestEntries] = useState(false);
   const [drawing, setDrawing] = useState<number | null>(null);
@@ -256,24 +315,24 @@ export default function AdminRafflePage() {
   }, [entries]);
 
   const filteredEntries = useMemo(() => {
-    if (filter === "all") return entries;
+    let list = entries;
 
     if (filter === "paid") {
-      return entries.filter((entry) => entry.payment_status === "paid");
+      list = list.filter((entry) => entry.payment_status === "paid");
     }
 
     if (filter === "checkout_started") {
-      return entries.filter(
+      list = list.filter(
         (entry) => entry.payment_status === "checkout_started"
       );
     }
 
     if (filter === "winners") {
-      return entries.filter((entry) => entry.raffle_winner_position);
+      list = list.filter((entry) => entry.raffle_winner_position);
     }
 
     if (filter === "age_checked") {
-      return entries.filter(
+      list = list.filter(
         (entry) =>
           entry.age_confirmed === true &&
           entry.terms_accepted === true &&
@@ -281,8 +340,14 @@ export default function AdminRafflePage() {
       );
     }
 
-    return entries;
-  }, [entries, filter]);
+    if (raffleNumberSearch.trim()) {
+      list = list.filter((entry) =>
+        entryHasRaffleNumber(entry, raffleNumberSearch)
+      );
+    }
+
+    return list;
+  }, [entries, filter, raffleNumberSearch]);
 
   function scrollToDraw() {
     const section = drawSectionRef.current;
@@ -343,6 +408,7 @@ export default function AdminRafflePage() {
         winnerPhone: "01283 000000",
         prize: "Test Prize",
         tickets: 1,
+        raffleNumbers: "—",
         notes:
           "This is a demo test message only. It has NOT saved anything and it is NOT the official raffle draw.",
       });
@@ -363,6 +429,7 @@ export default function AdminRafflePage() {
       winnerPhone: testWinner.phone || "—",
       prize: "Test Prize",
       tickets: ticketCount(testWinner.ticket_amount),
+      raffleNumbers: formatTicketNumbers(testWinner),
       notes: `Test randomly picked ticket ${randomIndex + 1} of ${
         ticketPool.length
       }. This test can use checkout-started entries if no paid entries exist yet.`,
@@ -413,6 +480,10 @@ export default function AdminRafflePage() {
         winnerPhone: "—",
         prize: "Test Data",
         tickets: data.totalTickets || 10,
+        raffleNumbers:
+          Array.isArray(data.ticketNumbers) && data.ticketNumbers.length > 0
+            ? data.ticketNumbers.map((number: number) => `#${number}`).join(", ")
+            : "Test ticket numbers will show after refresh if your API returns raffle_tickets.",
         notes:
           "You can now test the official draw. Remember to delete test entries before doing the real raffle.",
       });
@@ -476,6 +547,9 @@ export default function AdminRafflePage() {
         winnerPhone: data.winner.phone || "—",
         prize: data.draw.prize,
         tickets: ticketCount(data.winner.ticket_amount),
+        raffleNumbers: data.draw?.randomWinningTicketNumber
+          ? `Winning ticket: #${data.draw.randomWinningTicketNumber}`
+          : formatTicketNumbers(data.winner),
         notes: data.draw.notes,
       });
 
@@ -538,6 +612,7 @@ export default function AdminRafflePage() {
         winnerPhone: "—",
         prize: prizeLabel(position),
         tickets: 0,
+        raffleNumbers: "—",
         notes:
           "The previous winner has been removed from this prize only. You can now draw this prize again.",
       });
@@ -597,6 +672,7 @@ export default function AdminRafflePage() {
         winnerPhone: entry.phone || "—",
         prize: "Deleted Entry",
         tickets: ticketCount(entry.ticket_amount),
+        raffleNumbers: formatTicketNumbers(entry),
         notes:
           "This entry has been removed from Supabase and will no longer be included in the raffle draw.",
       });
@@ -655,6 +731,7 @@ export default function AdminRafflePage() {
         winnerPhone: "—",
         prize: "Cleaned Test Data",
         tickets: 0,
+        raffleNumbers: "—",
         notes:
           "Only entries marked as test raffle entries were deleted. Real raffle entries were not removed.",
       });
@@ -676,8 +753,8 @@ export default function AdminRafflePage() {
             <div>
               <h1 className="text-3xl font-bold">Raffle Admin</h1>
               <p className="text-sm text-white/60">
-                View raffle entries, paid tickets, age checks, total raised, and
-                randomly draw winners.
+                View raffle entries, paid tickets, raffle numbers, age checks,
+                total raised, and randomly draw winners.
               </p>
             </div>
 
@@ -805,7 +882,7 @@ export default function AdminRafflePage() {
                 {bigMessage.winnerName}
               </h3>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-4">
+              <div className="mt-6 grid gap-4 md:grid-cols-5">
                 <div className="rounded-2xl bg-white/10 p-4">
                   <p className="text-xs text-white/50">Prize</p>
                   <p className="text-lg font-black">{bigMessage.prize}</p>
@@ -814,6 +891,13 @@ export default function AdminRafflePage() {
                 <div className="rounded-2xl bg-white/10 p-4">
                   <p className="text-xs text-white/50">Tickets</p>
                   <p className="text-lg font-black">{bigMessage.tickets}</p>
+                </div>
+
+                <div className="rounded-2xl bg-white/10 p-4">
+                  <p className="text-xs text-white/50">Raffle Numbers</p>
+                  <p className="break-words text-sm font-black text-purple-100">
+                    {bigMessage.raffleNumbers}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl bg-white/10 p-4">
@@ -847,6 +931,18 @@ export default function AdminRafflePage() {
               <strong>{latestDraw.prize}</strong> winner is{" "}
               <strong>{latestWinner.full_name}</strong>.
             </p>
+
+            <p className="mt-2 text-sm text-white/60">
+              Raffle numbers:{" "}
+              <strong>{formatTicketNumbers(latestWinner)}</strong>
+            </p>
+
+            {latestDraw.randomWinningTicketNumber && (
+              <p className="mt-2 text-sm text-yellow-100">
+                Winning ticket number:{" "}
+                <strong>#{latestDraw.randomWinningTicketNumber}</strong>
+              </p>
+            )}
 
             <p className="mt-2 text-sm text-white/60">{latestDraw.notes}</p>
           </section>
@@ -1052,6 +1148,10 @@ export default function AdminRafflePage() {
                       </p>
 
                       <p className="mt-1 text-xs text-white/60">
+                        Raffle numbers: {formatTicketNumbers(existingWinner)}
+                      </p>
+
+                      <p className="mt-1 text-xs text-white/60">
                         Drawn: {formatDate(existingWinner.raffle_won_at)}
                       </p>
 
@@ -1104,8 +1204,8 @@ export default function AdminRafflePage() {
             <div>
               <h2 className="text-xl font-bold">Raffle Entries</h2>
               <p className="text-sm text-white/60">
-                All raffle checkouts, paid entries, age checks, and terms
-                confirmations.
+                All raffle checkouts, paid entries, raffle numbers, age checks,
+                and terms confirmations.
               </p>
             </div>
 
@@ -1143,13 +1243,58 @@ export default function AdminRafflePage() {
             </div>
           </div>
 
+          <div className="mb-5 rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5">
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <div>
+                <label className="mb-2 flex items-center gap-2 text-sm font-black text-purple-100">
+                  <Search className="h-4 w-4" />
+                  Search by raffle number
+                </label>
+
+                <input
+                  type="text"
+                  value={raffleNumberSearch}
+                  onChange={(e) => setRaffleNumberSearch(e.target.value)}
+                  placeholder="Example: 481 or #481"
+                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white placeholder:text-white/35 outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-400/40"
+                />
+
+                <p className="mt-2 text-xs text-white/45">
+                  Use this if you draw a raffle number manually and need to find
+                  the matching person.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setRaffleNumberSearch("")}
+                className="self-end rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/20"
+              >
+                Clear Search
+              </button>
+            </div>
+          </div>
+
+          {raffleNumberSearch.trim() && (
+            <div className="mb-4 rounded-2xl border border-purple-300/30 bg-purple-500/10 p-4">
+              <p className="text-sm font-black text-purple-100">
+                Searching raffle number: #
+                {raffleNumberSearch.replace("#", "").trim()}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                Found {filteredEntries.length} matching entr
+                {filteredEntries.length === 1 ? "y" : "ies"}.
+              </p>
+            </div>
+          )}
+
           {loading ? (
             <p className="text-white/60">Loading raffle entries...</p>
           ) : filteredEntries.length === 0 ? (
             <p className="text-white/60">No raffle entries found.</p>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1800px] text-sm">
+              <table className="w-full min-w-[1950px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
@@ -1159,6 +1304,7 @@ export default function AdminRafflePage() {
                     <th className="p-3 text-left">DOB</th>
                     <th className="p-3 text-left">Age</th>
                     <th className="p-3 text-left">Tickets</th>
+                    <th className="p-3 text-left">Raffle Numbers</th>
                     <th className="p-3 text-left">Payment</th>
                     <th className="p-3 text-right">Amount</th>
                     <th className="p-3 text-left">18+</th>
@@ -1202,6 +1348,10 @@ export default function AdminRafflePage() {
 
                         <td className="p-3 font-bold">
                           {ticketCount(entry.ticket_amount)}
+                        </td>
+
+                        <td className="p-3">
+                          <RaffleNumberBadges entry={entry} />
                         </td>
 
                         <td className="p-3">
@@ -1314,6 +1464,9 @@ export default function AdminRafflePage() {
               </p>
               <p className="mt-1 text-sm text-white/60">
                 Tickets: {ticketCount(deleteModal.ticket_amount)}
+              </p>
+              <p className="mt-1 text-sm text-white/60">
+                Raffle numbers: {formatTicketNumbers(deleteModal)}
               </p>
               <p className="mt-1 text-sm text-white/60">
                 Payment: {deleteModal.payment_status || "not_paid"}
