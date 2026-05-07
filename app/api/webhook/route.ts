@@ -58,9 +58,10 @@ function safeTicketCount(value: string | number | null | undefined) {
 }
 
 /**
- * ✅ RAFFLE PAYMENT COMPLETE
+ * RAFFLE PAYMENT COMPLETE
  * When Stripe confirms checkout.session.completed for raffle,
  * this updates raffle_entries from checkout_started to paid,
+ * loads the generated raffle ticket numbers,
  * sends confirmation email to the person,
  * and sends notification email to Burton Pride.
  */
@@ -101,6 +102,65 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
 
     console.log("Raffle entry marked as paid:", data);
 
+    const { data: raffleTickets, error: ticketError } = await supabaseAdmin
+      .from("raffle_tickets")
+      .select("ticket_number")
+      .eq("raffle_entry_id", data.id)
+      .order("ticket_number", { ascending: true });
+
+    if (ticketError) {
+      console.error("Failed to load raffle ticket numbers:", {
+        message: ticketError.message,
+        details: ticketError,
+        raffleEntryId: data.id,
+      });
+    }
+
+    const ticketNumbers = (raffleTickets || [])
+      .map((ticket) => Number(ticket.ticket_number))
+      .filter((number) => Number.isFinite(number))
+      .sort((a, b) => a - b);
+
+    const ticketNumbersText =
+      ticketNumbers.length > 0
+        ? ticketNumbers.map((number) => `#${number}`).join(", ")
+        : "Ticket numbers are being confirmed";
+
+    const ticketNumbersHtml =
+      ticketNumbers.length > 0
+        ? ticketNumbers
+            .map(
+              (number) => `
+                <span style="
+                  display:inline-block;
+                  background:#7c3aed;
+                  color:#ffffff;
+                  padding:10px 16px;
+                  border-radius:999px;
+                  font-weight:900;
+                  margin:5px;
+                  font-size:18px;
+                ">
+                  #${escapeHtml(String(number))}
+                </span>
+              `
+            )
+            .join("")
+        : `
+            <span style="
+              display:inline-block;
+              background:#f59e0b;
+              color:#111827;
+              padding:10px 16px;
+              border-radius:999px;
+              font-weight:900;
+              margin:5px;
+              font-size:16px;
+            ">
+              Ticket numbers are being confirmed
+            </span>
+          `;
+
     const fullName = String(data.full_name || "Supporter").trim();
     const email = String(
       data.email || session.customer_details?.email || ""
@@ -119,6 +179,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
     const safeEntryId = escapeHtml(data.id);
     const safeSessionId = escapeHtml(sessionId);
     const safePaymentIntentId = escapeHtml(paymentIntentId || "Not available");
+    const safeTicketNumbersText = escapeHtml(ticketNumbersText);
 
     const FROM =
       process.env.EMAIL_FROM?.trim() ||
@@ -145,7 +206,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
         from: FROM,
         to: email,
         replyTo: REPLY_TO,
-        subject: "You are entered into the Burton Pride raffle",
+        subject: "Your Burton Pride raffle ticket numbers",
         headers: emailHeaders,
         html: `
           <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
@@ -163,12 +224,38 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                 Thank you for entering the Burton Pride raffle. Your payment has been received and your raffle entry is now confirmed.
               </p>
 
+              <div style="background: #f3e8ff; border: 1px solid #d8b4fe; border-radius: 16px; padding: 22px; margin: 22px 0; text-align: center;">
+                <p style="margin: 0 0 10px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: #6b21a8;">
+                  Your raffle ticket number${ticketNumbers.length === 1 ? "" : "s"}
+                </p>
+
+                <div style="margin-top: 12px;">
+                  ${ticketNumbersHtml}
+                </div>
+
+                <p style="margin: 16px 0 0; font-size: 13px; color: #4b5563;">
+                  Please keep ${
+                    ticketNumbers.length === 1 ? "this number" : "these numbers"
+                  } safe for the raffle draw.
+                </p>
+              </div>
+
               <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; margin: 22px 0;">
                 <p style="margin: 0 0 8px;"><strong>Name:</strong> ${safeFullName}</p>
-                <p style="margin: 0 0 8px;"><strong>Tickets:</strong> ${safeTickets}</p>
+                <p style="margin: 0 0 8px;"><strong>Tickets bought:</strong> ${safeTickets}</p>
+                <p style="margin: 0 0 8px;"><strong>Ticket number${ticketNumbers.length === 1 ? "" : "s"}:</strong> ${safeTicketNumbersText}</p>
                 <p style="margin: 0 0 8px;"><strong>Amount paid:</strong> £${safeAmount}</p>
                 <p style="margin: 0;"><strong>Entry reference:</strong> ${safeEntryId}</p>
               </div>
+
+              <p>
+                Winning tickets will be announced at Burton Pride 2026 on <strong>27th June 2026</strong>.
+                Winners will be contacted using the details provided when entering.
+              </p>
+
+              <p>
+                Burton Pride C.I.C may request proof of age, identity, or eligibility before confirming a winner or releasing a prize.
+              </p>
 
               <p>
                 Every ticket helps us keep Burton Pride community-led, grassroots, and created by the community, for the community.
@@ -189,10 +276,17 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
 
 Thank you for entering the Burton Pride raffle. Your payment has been received and your raffle entry is now confirmed.
 
+Your raffle ticket number${ticketNumbers.length === 1 ? "" : "s"}:
+${ticketNumbersText}
+
 Name: ${fullName}
-Tickets: ${tickets}
+Tickets bought: ${tickets}
 Amount paid: £${amount}
 Entry reference: ${data.id}
+
+Winning tickets will be announced at Burton Pride 2026 on 27th June 2026.
+
+Burton Pride C.I.C may request proof of age, identity, or eligibility before confirming a winner or releasing a prize.
 
 Every ticket helps us keep Burton Pride community-led, grassroots, and created by the community, for the community.
 
@@ -220,6 +314,16 @@ Burton Pride C.I.C`,
           <div style="background: #ffffff; border: 1px solid #e5e7eb; border-top: 0; border-radius: 0 0 20px 20px; padding: 24px;">
             <p>A new paid raffle entry has been confirmed by Stripe.</p>
 
+            <div style="background: #f3e8ff; border: 1px solid #d8b4fe; border-radius: 16px; padding: 18px; margin: 18px 0; text-align: center;">
+              <p style="margin: 0 0 10px; font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: #6b21a8;">
+                Raffle ticket number${ticketNumbers.length === 1 ? "" : "s"}
+              </p>
+
+              <div style="margin-top: 10px;">
+                ${ticketNumbersHtml}
+              </div>
+            </div>
+
             <table style="width: 100%; border-collapse: collapse; margin-top: 16px;">
               <tr>
                 <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Name</strong></td>
@@ -234,8 +338,12 @@ Burton Pride C.I.C`,
                 <td style="border: 1px solid #e5e7eb; padding: 10px;">${safePhone}</td>
               </tr>
               <tr>
-                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Tickets</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Tickets bought</strong></td>
                 <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeTickets}</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Ticket number${ticketNumbers.length === 1 ? "" : "s"}</strong></td>
+                <td style="border: 1px solid #e5e7eb; padding: 10px;">${safeTicketNumbersText}</td>
               </tr>
               <tr>
                 <td style="border: 1px solid #e5e7eb; padding: 10px;"><strong>Amount</strong></td>
@@ -266,7 +374,8 @@ Burton Pride C.I.C`,
 Name: ${fullName}
 Email: ${email || "No email provided"}
 Phone: ${phone || "No phone provided"}
-Tickets: ${tickets}
+Tickets bought: ${tickets}
+Ticket number${ticketNumbers.length === 1 ? "" : "s"}: ${ticketNumbersText}
 Amount: £${amount}
 Message: ${message || "No message provided"}
 Entry ID: ${data.id}
@@ -681,6 +790,7 @@ async function handleCompetitionSession(session: Stripe.Checkout.Session) {
   const FROM =
     process.env.EMAIL_FROM?.trim() ||
     "Burton Pride <noreply@burtonpride.co.uk>";
+
   const REPLY_TO =
     process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
 

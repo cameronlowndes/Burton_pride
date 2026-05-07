@@ -1,11 +1,33 @@
 import Link from "next/link";
 import Image from "next/image";
-import { CheckCircle2, Home, Ticket, Heart, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  Home,
+  Ticket,
+  Heart,
+  ShieldCheck,
+  Hash,
+  AlertCircle,
+} from "lucide-react";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 type PageProps = {
   searchParams?: Promise<{
     session_id?: string;
   }>;
+};
+
+type RaffleEntry = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  payment_status: string | null;
+  stripe_checkout_session_id: string | null;
+};
+
+type RaffleTicket = {
+  id: string;
+  ticket_number: number;
 };
 
 export const metadata = {
@@ -14,9 +36,63 @@ export const metadata = {
     "Thank you for buying raffle tickets and supporting Burton Pride C.I.C.",
 };
 
+async function getRaffleEntryAndTickets(sessionId: string) {
+  if (!sessionId) {
+    return {
+      entry: null as RaffleEntry | null,
+      tickets: [] as RaffleTicket[],
+      error: "Missing Stripe session reference.",
+    };
+  }
+
+  const { data: entry, error: entryError } = await supabaseAdmin
+    .from("raffle_entries")
+    .select("id, full_name, email, payment_status, stripe_checkout_session_id")
+    .eq("stripe_checkout_session_id", sessionId)
+    .maybeSingle();
+
+  if (entryError) {
+    return {
+      entry: null as RaffleEntry | null,
+      tickets: [] as RaffleTicket[],
+      error: entryError.message,
+    };
+  }
+
+  if (!entry) {
+    return {
+      entry: null as RaffleEntry | null,
+      tickets: [] as RaffleTicket[],
+      error: "We could not find your raffle entry yet.",
+    };
+  }
+
+  const { data: tickets, error: ticketsError } = await supabaseAdmin
+    .from("raffle_tickets")
+    .select("id, ticket_number")
+    .eq("raffle_entry_id", entry.id)
+    .order("ticket_number", { ascending: true });
+
+  if (ticketsError) {
+    return {
+      entry: entry as RaffleEntry,
+      tickets: [] as RaffleTicket[],
+      error: ticketsError.message,
+    };
+  }
+
+  return {
+    entry: entry as RaffleEntry,
+    tickets: (tickets || []) as RaffleTicket[],
+    error: null as string | null,
+  };
+}
+
 export default async function RaffleSuccessPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const sessionId = params?.session_id || "";
+
+  const { entry, tickets, error } = await getRaffleEntryAndTickets(sessionId);
 
   return (
     <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 py-16 text-white sm:px-8">
@@ -48,12 +124,74 @@ export default async function RaffleSuccessPage({ searchParams }: PageProps) {
           community.
         </p>
 
+        {entry?.full_name && (
+          <p className="mt-4 rounded-full border border-white/20 bg-black/20 px-5 py-3 text-sm font-bold text-white/90">
+            Entry name: {entry.full_name}
+          </p>
+        )}
+
+        <div className="mt-8 w-full max-w-3xl rounded-[2rem] border border-white/25 bg-black/25 p-6 shadow-2xl backdrop-blur-md">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-purple-700 shadow-xl">
+            <Hash className="h-8 w-8" />
+          </div>
+
+          <h2 className="text-3xl font-black">Your Raffle Number</h2>
+
+          {tickets.length > 0 ? (
+            <>
+              <p className="mt-3 text-white/85">
+                Please keep these numbers safe. These are your official raffle
+                ticket numbers for the draw.
+              </p>
+
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                {tickets.map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    className="rounded-2xl border border-white/30 bg-white px-6 py-4 text-center text-purple-700 shadow-xl"
+                  >
+                    <p className="text-xs font-black uppercase tracking-[0.2em] text-purple-500">
+                      Ticket
+                    </p>
+                    <p className="mt-1 text-4xl font-black">
+                      #{ticket.ticket_number}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-yellow-300/50 bg-yellow-300/20 p-5 text-left">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-1 h-6 w-6 shrink-0 text-yellow-100" />
+                <div>
+                  <p className="font-black text-white">
+                    Your ticket number is being confirmed.
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-white/85">
+                    Your payment has gone through, but your ticket number has
+                    not appeared on this page yet. Please keep your Stripe
+                    checkout reference below and contact Burton Pride if needed.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {sessionId && (
           <div className="mt-6 max-w-3xl rounded-2xl border border-white/20 bg-black/20 p-4 text-left">
             <p className="text-sm font-bold text-white/70">
               Stripe checkout reference
             </p>
             <p className="mt-1 break-all text-sm text-white/90">{sessionId}</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-6 max-w-3xl rounded-2xl border border-red-300/50 bg-red-500/20 p-4 text-left">
+            <p className="font-black text-white">Admin note</p>
+            <p className="mt-1 text-sm text-white/85">{error}</p>
           </div>
         )}
 
@@ -120,9 +258,9 @@ export default async function RaffleSuccessPage({ searchParams }: PageProps) {
         </div>
 
         <p className="mt-8 max-w-2xl text-sm leading-6 text-white/75">
-          Please keep your payment confirmation for your records. If you have
-          any questions about your raffle entry, contact Burton Pride C.I.C
-          through our official contact details.
+          Please keep your payment confirmation and raffle ticket number for
+          your records. If you have any questions about your raffle entry,
+          contact Burton Pride C.I.C through our official contact details.
         </p>
       </section>
     </main>

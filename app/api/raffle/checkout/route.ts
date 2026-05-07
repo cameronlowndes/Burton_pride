@@ -46,6 +46,75 @@ function isValidDateOfBirth(dateOfBirth: string) {
   return true;
 }
 
+async function generateRandomTicketNumbers(quantity: number) {
+  const { data: usedTickets, error } = await supabaseAdmin
+    .from("raffle_tickets")
+    .select("ticket_number");
+
+  if (error) {
+    throw new Error(error.message || "Could not check raffle ticket numbers.");
+  }
+
+  const used = new Set<number>(
+    (usedTickets || [])
+      .map((ticket) => Number(ticket.ticket_number))
+      .filter((number) => Number.isInteger(number))
+  );
+
+  if (used.size + quantity > 1000) {
+    throw new Error("There are not enough raffle ticket numbers left.");
+  }
+
+  const numbers: number[] = [];
+
+  while (numbers.length < quantity) {
+    const number = Math.floor(Math.random() * 1000) + 1;
+
+    if (!used.has(number) && !numbers.includes(number)) {
+      numbers.push(number);
+    }
+  }
+
+  return numbers;
+}
+
+async function createTicketNumbersForEntry(
+  raffleEntryId: string,
+  quantity: number
+) {
+  let attempt = 0;
+
+  while (attempt < 5) {
+    attempt += 1;
+
+    const ticketNumbers = await generateRandomTicketNumbers(quantity);
+
+    const { error } = await supabaseAdmin.from("raffle_tickets").insert(
+      ticketNumbers.map((ticketNumber) => ({
+        raffle_entry_id: raffleEntryId,
+        ticket_number: ticketNumber,
+      }))
+    );
+
+    if (!error) {
+      return ticketNumbers;
+    }
+
+    /**
+     * 23505 = duplicate key.
+     * If two people buy at the same time and randomly hit the same number,
+     * try again with new numbers.
+     */
+    if (error.code !== "23505") {
+      throw new Error(error.message);
+    }
+  }
+
+  throw new Error(
+    "Could not safely create raffle ticket numbers. Please try again."
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -224,7 +293,10 @@ export async function POST(req: Request) {
             currency: "gbp",
             unit_amount: 100,
             product_data: {
-              name: "Burton Pride Raffle Ticket",
+              name:
+                ticketAmount === 1
+                  ? "Burton Pride Raffle Ticket"
+                  : "Burton Pride Raffle Tickets",
               description:
                 "£1 raffle ticket supporting Burton Pride C.I.C. Licensed by East Staffordshire Council under registration number SL0507.",
               metadata,
@@ -234,7 +306,7 @@ export async function POST(req: Request) {
       ],
     });
 
-    const { error: insertError } = await supabaseAdmin
+    const { data: raffleEntry, error: insertError } = await supabaseAdmin
       .from("raffle_entries")
       .insert({
         full_name: fullName,
@@ -256,14 +328,45 @@ export async function POST(req: Request) {
 
         stripe_checkout_session_id: checkoutSession.id,
         source: "website_raffle",
-      });
+      })
+      .select("id")
+      .single();
 
-    if (insertError) {
+    if (insertError || !raffleEntry) {
       return NextResponse.json(
         {
           ok: false,
-          error: insertError.message,
+          error: insertError?.message || "Could not save raffle entry.",
           details: insertError,
+        },
+        { status: 500 }
+      );
+    }
+
+    let ticketNumbers: number[] = [];
+
+    try {
+      ticketNumbers = await createTicketNumbersForEntry(
+        raffleEntry.id,
+        ticketAmount
+      );
+    } catch (ticketError) {
+      /**
+       * If ticket number creation fails, remove the raffle entry.
+       * This stops broken checkout_started records being left behind.
+       */
+      await supabaseAdmin
+        .from("raffle_entries")
+        .delete()
+        .eq("id", raffleEntry.id);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            ticketError instanceof Error
+              ? ticketError.message
+              : "Could not create raffle ticket numbers.",
         },
         { status: 500 }
       );
@@ -273,6 +376,8 @@ export async function POST(req: Request) {
       ok: true,
       url: checkoutSession.url,
       sessionId: checkoutSession.id,
+      raffleEntryId: raffleEntry.id,
+      ticketNumbers,
     });
   } catch (error) {
     console.error("Raffle checkout error:", error);
