@@ -1,6 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Banknote,
+  BarChart3,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  Coins,
+  CreditCard,
+  FileText,
+  Gift,
+  HandCoins,
+  Landmark,
+  LayoutDashboard,
+  Logs,
+  PiggyBank,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  Store,
+  Tags,
+  Trophy,
+  Users,
+  Wallet,
+} from "lucide-react";
+
+const MONEY_MANAGEMENT_ROOT = "/Admin/MoneyManagement";
+const TRACKING_MONEY_ROOT = "/Admin/MoneyManagement/TrackingMoney";
+const AUDIT_LOGS_ROUTE = "/Admin/MoneyManagement/TrackingMoney/AuditLogs";
 
 type Notice =
   | { type: "success"; message: string }
@@ -48,7 +76,88 @@ const iconOptions = [
   "Wallet",
   "CreditCard",
   "PiggyBank",
-];
+  "Banknote",
+  "Coins",
+  "HandCoins",
+  "Landmark",
+  "BarChart3",
+  "FileText",
+  "ClipboardList",
+  "ShieldCheck",
+  "Logs",
+  "Settings",
+  "CalendarDays",
+  "Users",
+  "Gift",
+  "Trophy",
+  "Building2",
+  "Store",
+  "Tags",
+] as const;
+
+function getIcon(name: string) {
+  switch (name) {
+    case "LayoutDashboard":
+      return LayoutDashboard;
+    case "Receipt":
+      return Receipt;
+    case "Wallet":
+      return Wallet;
+    case "CreditCard":
+      return CreditCard;
+    case "PiggyBank":
+      return PiggyBank;
+    case "Banknote":
+      return Banknote;
+    case "Coins":
+      return Coins;
+    case "HandCoins":
+      return HandCoins;
+    case "Landmark":
+      return Landmark;
+    case "BarChart3":
+      return BarChart3;
+    case "FileText":
+      return FileText;
+    case "ClipboardList":
+      return ClipboardList;
+    case "ShieldCheck":
+      return ShieldCheck;
+    case "Logs":
+      return Logs;
+    case "Settings":
+      return Settings;
+    case "CalendarDays":
+      return CalendarDays;
+    case "Users":
+      return Users;
+    case "Gift":
+      return Gift;
+    case "Trophy":
+      return Trophy;
+    case "Building2":
+      return Building2;
+    case "Store":
+      return Store;
+    case "Tags":
+      return Tags;
+    default:
+      return Wallet;
+  }
+}
+
+function clsx(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
+function normaliseHref(value: string) {
+  const clean = String(value || "").trim();
+
+  if (!clean) return "";
+  if (clean.startsWith("/")) return clean;
+
+  return `/${clean}`;
+}
 
 export default function MoneySidebarAdminClient() {
   const [items, setItems] = useState<MoneySidebarItem[]>([]);
@@ -65,6 +174,16 @@ export default function MoneySidebarAdminClient() {
     loadItems();
   }, []);
 
+  async function readJson(res: Response) {
+    const text = await res.text();
+
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return { rawResponse: text };
+    }
+  }
+
   async function loadItems() {
     setLoading(true);
 
@@ -73,14 +192,14 @@ export default function MoneySidebarAdminClient() {
         cache: "no-store",
       });
 
-      const data: MoneySidebarResponse = await res.json();
+      const data: MoneySidebarResponse = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to load money sidebar items");
       }
 
       const sorted = [...(data.items || [])].sort(
-        (a, b) => a.sort_order - b.sort_order
+        (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
       );
 
       setItems(sorted);
@@ -125,6 +244,48 @@ export default function MoneySidebarAdminClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function prepareHomeLink() {
+    setEditorMode("create");
+    setEditingId(null);
+    setForm({
+      label: "Home",
+      href: MONEY_MANAGEMENT_ROOT,
+      icon: "LayoutDashboard",
+      sort_order: items.length,
+      is_enabled: true,
+    });
+    setNotice(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function prepareTrackingMoneyLink() {
+    setEditorMode("create");
+    setEditingId(null);
+    setForm({
+      label: "Tracking Money",
+      href: TRACKING_MONEY_ROOT,
+      icon: "Banknote",
+      sort_order: items.length,
+      is_enabled: true,
+    });
+    setNotice(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function prepareAuditLogsLink() {
+    setEditorMode("create");
+    setEditingId(null);
+    setForm({
+      label: "Audit Logs",
+      href: AUDIT_LOGS_ROUTE,
+      icon: "Logs",
+      sort_order: items.length,
+      is_enabled: true,
+    });
+    setNotice(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function startEdit(item: MoneySidebarItem) {
     setEditorMode("edit");
     setEditingId(item.id);
@@ -146,11 +307,19 @@ export default function MoneySidebarAdminClient() {
     try {
       const payload = {
         label: form.label.trim(),
-        href: form.href.trim(),
+        href: normaliseHref(form.href),
         icon: form.icon,
         sort_order: Number(form.sort_order) || 0,
         is_enabled: form.is_enabled,
       };
+
+      if (!payload.label) {
+        throw new Error("Please enter a label.");
+      }
+
+      if (!payload.href) {
+        throw new Error("Please enter a URL / href.");
+      }
 
       const url = editingId
         ? `/api/admin/money-sidebar/${editingId}`
@@ -164,7 +333,7 @@ export default function MoneySidebarAdminClient() {
         body: JSON.stringify(payload),
       });
 
-      const data: MoneySidebarResponse = await res.json();
+      const data: MoneySidebarResponse = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save money sidebar item");
@@ -196,6 +365,7 @@ export default function MoneySidebarAdminClient() {
     const ok = window.confirm(
       "Are you sure you want to delete this money sidebar item?"
     );
+
     if (!ok) return;
 
     try {
@@ -203,7 +373,7 @@ export default function MoneySidebarAdminClient() {
         method: "DELETE",
       });
 
-      const data = await res.json();
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to delete item");
@@ -242,7 +412,7 @@ export default function MoneySidebarAdminClient() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to update item");
@@ -265,14 +435,14 @@ export default function MoneySidebarAdminClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: `${item.label} Copy`,
-          href: item.href,
+          href: `${item.href}-copy`,
           icon: item.icon,
           sort_order: item.sort_order + 1,
-          is_enabled: item.is_enabled,
+          is_enabled: false,
         }),
       });
 
-      const data = await res.json();
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to duplicate item");
@@ -294,7 +464,10 @@ export default function MoneySidebarAdminClient() {
   }
 
   async function moveItem(item: MoneySidebarItem, direction: "up" | "down") {
-    const siblings = [...items].sort((a, b) => a.sort_order - b.sort_order);
+    const siblings = [...items].sort(
+      (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
+    );
+
     const index = siblings.findIndex((x) => x.id === item.id);
     if (index === -1) return;
 
@@ -302,6 +475,7 @@ export default function MoneySidebarAdminClient() {
     if (targetIndex < 0 || targetIndex >= siblings.length) return;
 
     const reordered = [...siblings];
+
     [reordered[index], reordered[targetIndex]] = [
       reordered[targetIndex],
       reordered[index],
@@ -337,14 +511,17 @@ export default function MoneySidebarAdminClient() {
   const editorTitle =
     editorMode === "edit" ? "Edit money sidebar item" : "Create money link";
 
+  const SelectedIcon = getIcon(form.icon);
+
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
         <h1 className="text-2xl font-extrabold text-white">
           Money Sidebar Editor
         </h1>
+
         <p className="mt-2 text-sm text-white/70">
-          Manage the admin money sidebar links online.
+          Manage the MoneyManagement sidebar links online.
         </p>
       </div>
 
@@ -373,6 +550,33 @@ export default function MoneySidebarAdminClient() {
               >
                 + Create money link
               </button>
+
+              <button
+                type="button"
+                onClick={prepareHomeLink}
+                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Prepare Home link
+              </button>
+
+              <button
+                type="button"
+                onClick={prepareTrackingMoneyLink}
+                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
+              >
+                <Banknote className="h-4 w-4" />
+                Prepare Tracking Money link
+              </button>
+
+              <button
+                type="button"
+                onClick={prepareAuditLogsLink}
+                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
+              >
+                <Logs className="h-4 w-4" />
+                Prepare Audit Logs link
+              </button>
             </div>
           </div>
 
@@ -384,13 +588,14 @@ export default function MoneySidebarAdminClient() {
                 <label className="mb-2 block text-sm font-medium text-white/80">
                   Label
                 </label>
+
                 <input
                   value={form.label}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, label: e.target.value }))
                   }
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="e.g. Transactions"
+                  placeholder="e.g. Audit Logs"
                   required
                 />
               </div>
@@ -399,40 +604,97 @@ export default function MoneySidebarAdminClient() {
                 <label className="mb-2 block text-sm font-medium text-white/80">
                   URL / href
                 </label>
+
                 <input
                   value={form.href}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, href: e.target.value }))
                   }
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="/Admin/Money/Transactions"
+                  placeholder={AUDIT_LOGS_ROUTE}
                   required
                 />
+
+                <p className="mt-2 text-xs text-white/50">
+                  Example: {AUDIT_LOGS_ROUTE}
+                </p>
               </div>
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
                   Icon
                 </label>
-                <select
-                  value={form.icon}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, icon: e.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                >
-                  {iconOptions.map((icon) => (
-                    <option key={icon} value={icon}>
-                      {icon}
-                    </option>
-                  ))}
-                </select>
+
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <select
+                    value={form.icon}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, icon: e.target.value }))
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                  >
+                    {iconOptions.map((icon) => (
+                      <option
+                        key={icon}
+                        value={icon}
+                        className="bg-[#11111f] text-white"
+                      >
+                        {icon}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 px-5 text-white">
+                    <SelectedIcon className="h-5 w-5" />
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <p className="mb-3 text-xs font-bold uppercase tracking-wide text-white/50">
+                    Click an icon
+                  </p>
+
+                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+                    {iconOptions.map((icon) => {
+                      const Icon = getIcon(icon);
+                      const active = form.icon === icon;
+
+                      return (
+                        <button
+                          key={icon}
+                          type="button"
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              icon,
+                            }))
+                          }
+                          title={icon}
+                          className={clsx(
+                            "flex h-12 items-center justify-center rounded-2xl border transition",
+                            active
+                              ? "border-white bg-white text-purple-700"
+                              : "border-white/10 bg-white/10 text-white hover:bg-white/20"
+                          )}
+                        >
+                          <Icon className="h-5 w-5" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <p className="mt-2 text-xs text-white/60">
+                  Selected icon:{" "}
+                  <span className="font-bold text-white">{form.icon}</span>
+                </p>
               </div>
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
                   Sort order
                 </label>
+
                 <input
                   type="number"
                   value={form.sort_order}
@@ -504,7 +766,7 @@ export default function MoneySidebarAdminClient() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search label or URL..."
+              placeholder="Search label, URL, or icon..."
               className="mb-5 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
             />
 
@@ -560,10 +822,16 @@ function ItemRow({
   onToggle: () => void;
   onDuplicate: () => void;
 }) {
+  const Icon = getIcon(item.icon);
+
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white">
+            <Icon className="h-4 w-4" />
+          </div>
+
           <div className="text-sm font-bold text-white">{item.label}</div>
 
           <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
@@ -592,6 +860,7 @@ function ItemRow({
         >
           {item.is_enabled ? "Disable" : "Enable"}
         </button>
+
         <button
           type="button"
           onClick={onMoveUp}
@@ -599,6 +868,7 @@ function ItemRow({
         >
           Up
         </button>
+
         <button
           type="button"
           onClick={onMoveDown}
@@ -606,6 +876,7 @@ function ItemRow({
         >
           Down
         </button>
+
         <button
           type="button"
           onClick={onDuplicate}
@@ -613,6 +884,7 @@ function ItemRow({
         >
           Duplicate
         </button>
+
         <button
           type="button"
           onClick={onEdit}
@@ -620,6 +892,7 @@ function ItemRow({
         >
           Edit
         </button>
+
         <button
           type="button"
           onClick={onDelete}

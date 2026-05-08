@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bug,
   Gift,
+  Printer,
   RefreshCcw,
   Search,
   ShieldCheck,
@@ -214,6 +215,34 @@ function YesNoBadge({
   );
 }
 
+function PrintTicketCard({ entry }: { entry: RaffleEntry }) {
+  const numbers = getTicketNumbers(entry);
+
+  return (
+    <tr className="raffle-print-row">
+      <td className="raffle-print-cell raffle-print-name-cell">
+        {entry.full_name}
+      </td>
+
+      <td className="raffle-print-cell raffle-print-count-cell">
+        {ticketCount(entry.ticket_amount)}
+      </td>
+
+      <td className="raffle-print-cell raffle-print-numbers-cell">
+        {numbers.length > 0 ? (
+          numbers.map((number) => (
+            <span key={number} className="raffle-print-number">
+              #{number}
+            </span>
+          ))
+        ) : (
+          <span className="raffle-print-empty">No raffle numbers found</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function AdminRafflePage() {
   const drawSectionRef = useRef<HTMLElement | null>(null);
 
@@ -232,6 +261,9 @@ export default function AdminRafflePage() {
   >("all");
 
   const [raffleNumberSearch, setRaffleNumberSearch] = useState("");
+  const [printEntriesOverride, setPrintEntriesOverride] = useState<
+    RaffleEntry[] | null
+  >(null);
 
   const [loading, setLoading] = useState(true);
   const [creatingTestEntries, setCreatingTestEntries] = useState(false);
@@ -301,6 +333,18 @@ export default function AdminRafflePage() {
     loadEntries();
   }, []);
 
+  useEffect(() => {
+    function clearSinglePrintMode() {
+      setPrintEntriesOverride(null);
+    }
+
+    window.addEventListener("afterprint", clearSinglePrintMode);
+
+    return () => {
+      window.removeEventListener("afterprint", clearSinglePrintMode);
+    };
+  }, []);
+
   const ageConfirmedCount = useMemo(() => {
     return entries.filter((entry) => entry.age_confirmed === true).length;
   }, [entries]);
@@ -348,6 +392,34 @@ export default function AdminRafflePage() {
 
     return list;
   }, [entries, filter, raffleNumberSearch]);
+
+  const entriesForPrint = printEntriesOverride || filteredEntries;
+
+  function printAllVisibleTickets() {
+    setError("");
+    setErrorDetails(null);
+
+    if (filteredEntries.length === 0) {
+      setError("No raffle entries found to print.");
+      return;
+    }
+
+    setPrintEntriesOverride(null);
+
+    window.setTimeout(() => {
+      window.print();
+    }, 100);
+  }
+
+  function printSingleTicket(entry: RaffleEntry) {
+    setError("");
+    setErrorDetails(null);
+    setPrintEntriesOverride([entry]);
+
+    window.setTimeout(() => {
+      window.print();
+    }, 100);
+  }
 
   function scrollToDraw() {
     const section = drawSectionRef.current;
@@ -746,927 +818,1196 @@ export default function AdminRafflePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">Raffle Admin</h1>
-              <p className="text-sm text-white/60">
-                View raffle entries, paid tickets, raffle numbers, age checks,
-                total raised, and randomly draw winners.
+    <>
+      <main className="raffle-admin-screen min-h-screen bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl space-y-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold">Raffle Admin</h1>
+                <p className="text-sm text-white/60">
+                  View raffle entries, paid tickets, raffle numbers, age checks,
+                  total raised, and randomly draw winners.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <button
+                  type="button"
+                  onClick={scrollToDraw}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white shadow-lg shadow-pink-500/20 hover:bg-pink-400"
+                >
+                  <Trophy className="h-4 w-4" />
+                  Go To Draw Raffle
+                </button>
+
+                <button
+                  type="button"
+                  onClick={printAllVisibleTickets}
+                  disabled={filteredEntries.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-500/20 hover:bg-blue-400 disabled:opacity-50"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print All Tickets
+                </button>
+
+                <button
+                  type="button"
+                  onClick={testRandomDraw}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 px-5 py-3 text-sm font-black text-black hover:bg-yellow-300"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Test Random Draw
+                </button>
+
+                <button
+                  type="button"
+                  onClick={createTestEntries}
+                  disabled={creatingTestEntries}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-400 px-5 py-3 text-sm font-black text-black hover:bg-blue-300 disabled:opacity-60"
+                >
+                  <Bug className="h-4 w-4" />
+                  {creatingTestEntries ? "Creating..." : "Create 10 Test Entries"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteAllModal(true)}
+                  disabled={deleting}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+                >
+                  <Bug className="h-4 w-4" />
+                  Delete all Test Entries
+                </button>
+
+                <button
+                  type="button"
+                  onClick={loadEntries}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-5 py-3 text-sm font-bold hover:bg-white/20"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {error && (
+            <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5">
+              <div className="flex items-center gap-2 font-bold text-red-100">
+                <Bug className="h-5 w-5" />
+                Error
+              </div>
+
+              <p className="mt-2 text-sm text-red-100">{error}</p>
+
+              {errorDetails && (
+                <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-black/40 p-4 text-xs text-red-100">
+                  {JSON.stringify(errorDetails, null, 2)}
+                </pre>
+              )}
+            </section>
+          )}
+
+          {bigMessage && (
+            <section
+              className={`rounded-[2rem] border p-8 shadow-2xl ${
+                bigMessage.type === "official"
+                  ? "border-yellow-300/40 bg-yellow-400/15"
+                  : "border-blue-300/40 bg-blue-500/15"
+              }`}
+            >
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`flex h-14 w-14 items-center justify-center rounded-3xl ${
+                        bigMessage.type === "official"
+                          ? "bg-yellow-400 text-black"
+                          : "bg-blue-400 text-black"
+                      }`}
+                    >
+                      <Trophy className="h-8 w-8" />
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-black uppercase tracking-widest text-white/60">
+                        {bigMessage.type === "official"
+                          ? "Official Draw"
+                          : "Test Draw"}
+                      </p>
+                      <h2 className="text-3xl font-black sm:text-5xl">
+                        {bigMessage.title}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 max-w-3xl text-base leading-7 text-white/75">
+                    {bigMessage.subtitle}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setBigMessage(null)}
+                  className="rounded-xl bg-white/10 px-5 py-3 text-sm font-bold hover:bg-white/20"
+                >
+                  Close Message
+                </button>
+              </div>
+
+              <div className="mt-8 rounded-[2rem] border border-white/10 bg-black/25 p-6">
+                <p className="text-sm font-bold uppercase tracking-widest text-white/50">
+                  Winner / Message
+                </p>
+
+                <h3 className="mt-2 text-4xl font-black text-white sm:text-6xl">
+                  {bigMessage.winnerName}
+                </h3>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-5">
+                  <div className="rounded-2xl bg-white/10 p-4">
+                    <p className="text-xs text-white/50">Prize</p>
+                    <p className="text-lg font-black">{bigMessage.prize}</p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/10 p-4">
+                    <p className="text-xs text-white/50">Tickets</p>
+                    <p className="text-lg font-black">{bigMessage.tickets}</p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/10 p-4">
+                    <p className="text-xs text-white/50">Raffle Numbers</p>
+                    <p className="break-words text-sm font-black text-purple-100">
+                      {bigMessage.raffleNumbers}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/10 p-4">
+                    <p className="text-xs text-white/50">Email</p>
+                    <p className="break-words text-sm font-bold">
+                      {bigMessage.winnerEmail}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/10 p-4">
+                    <p className="text-xs text-white/50">Phone</p>
+                    <p className="text-sm font-bold">{bigMessage.winnerPhone}</p>
+                  </div>
+                </div>
+
+                <p className="mt-5 rounded-2xl bg-white/10 p-4 text-sm leading-6 text-white/70">
+                  {bigMessage.notes}
+                </p>
+              </div>
+            </section>
+          )}
+
+          {latestWinner && latestDraw && (
+            <section className="rounded-3xl border border-yellow-300/30 bg-yellow-400/10 p-5">
+              <div className="flex items-center gap-2 text-xl font-black text-yellow-100">
+                <Trophy className="h-6 w-6" />
+                Last Official Winner
+              </div>
+
+              <p className="mt-2 text-white">
+                <strong>{latestDraw.prize}</strong> winner is{" "}
+                <strong>{latestWinner.full_name}</strong>.
+              </p>
+
+              <p className="mt-2 text-sm text-white/60">
+                Raffle numbers:{" "}
+                <strong>{formatTicketNumbers(latestWinner)}</strong>
+              </p>
+
+              {latestDraw.randomWinningTicketNumber && (
+                <p className="mt-2 text-sm text-yellow-100">
+                  Winning ticket number:{" "}
+                  <strong>#{latestDraw.randomWinningTicketNumber}</strong>
+                </p>
+              )}
+
+              <p className="mt-2 text-sm text-white/60">{latestDraw.notes}</p>
+            </section>
+          )}
+
+          <section className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
+            <div className="rounded-3xl bg-pink-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-pink-400/20">
+                <Users className="h-5 w-5 text-pink-100" />
+              </div>
+              <p className="text-sm text-pink-100">Total Entries</p>
+              <p className="text-3xl font-bold">{stats.totalEntries}</p>
+            </div>
+
+            <div className="rounded-3xl bg-emerald-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/20">
+                <Ticket className="h-5 w-5 text-emerald-100" />
+              </div>
+              <p className="text-sm text-emerald-100">Paid Entries</p>
+              <p className="text-3xl font-bold">{stats.paidEntries}</p>
+            </div>
+
+            <div className="rounded-3xl bg-yellow-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-yellow-400/20">
+                <ShieldCheck className="h-5 w-5 text-yellow-100" />
+              </div>
+              <p className="text-sm text-yellow-100">Started</p>
+              <p className="text-3xl font-bold">
+                {stats.checkoutStartedEntries}
               </p>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-              <button
-                type="button"
-                onClick={scrollToDraw}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white shadow-lg shadow-pink-500/20 hover:bg-pink-400"
-              >
-                <Trophy className="h-4 w-4" />
-                Go To Draw Raffle
-              </button>
+            <div className="rounded-3xl bg-blue-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-400/20">
+                <Gift className="h-5 w-5 text-blue-100" />
+              </div>
+              <p className="text-sm text-blue-100">Tickets In Draw</p>
+              <p className="text-3xl font-bold">{stats.totalTickets}</p>
+            </div>
+
+            <div className="rounded-3xl bg-purple-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-400/20">
+                <Wallet className="h-5 w-5 text-purple-100" />
+              </div>
+              <p className="text-sm text-purple-100">Total Raised</p>
+              <p className="text-3xl font-bold">
+                {money(stats.totalRaisedPence)}
+              </p>
+            </div>
+
+            <div className="rounded-3xl bg-cyan-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-400/20">
+                <ShieldCheck className="h-5 w-5 text-cyan-100" />
+              </div>
+              <p className="text-sm text-cyan-100">Age Confirmed</p>
+              <p className="text-3xl font-bold">{ageConfirmedCount}</p>
+            </div>
+
+            <div className="rounded-3xl bg-indigo-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-400/20">
+                <ShieldCheck className="h-5 w-5 text-indigo-100" />
+              </div>
+              <p className="text-sm text-indigo-100">Terms Accepted</p>
+              <p className="text-3xl font-bold">{termsAcceptedCount}</p>
+            </div>
+
+            <div className="rounded-3xl bg-lime-500/10 p-5">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-lime-400/20">
+                <ShieldCheck className="h-5 w-5 text-lime-100" />
+              </div>
+              <p className="text-sm text-lime-100">Eligible</p>
+              <p className="text-3xl font-bold">{eligibilityConfirmedCount}</p>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <h2 className="text-xl font-bold">Age, Terms and Eligibility Checks</h2>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">18+ only</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  The raffle is open to residents of Great Britain aged 18 years
+                  or over. The website asks for date of birth and blocks under 18s
+                  before payment.
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">Terms must be accepted</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  Entrants must confirm they agree to the raffle terms, are buying
+                  tickets for themselves, and are eligible to enter.
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">Winner ID may be checked</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  Burton Pride C.I.C. may ask a winner for proof of age, identity,
+                  or eligibility before confirming or releasing a prize.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <h2 className="text-xl font-bold">How the Random Draw Works</h2>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">1 ticket = 1 chance</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  If someone buys 5 tickets, their entry goes into the draw 5
+                  times. If someone buys 1 ticket, they go in once.
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">Paid entries only</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  Entries are only included if Stripe has confirmed payment and
+                  the status is marked as paid.
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-black">Official server draw</p>
+                <p className="mt-2 text-sm leading-6 text-white/60">
+                  The official draw uses crypto.randomInt on the server to choose
+                  one ticket from the paid ticket pool.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section
+            id="draw-raffle-section"
+            ref={drawSectionRef}
+            tabIndex={-1}
+            className={`scroll-mt-28 rounded-3xl border bg-white/[0.04] p-5 outline-none transition-all duration-500 ${
+              drawHighlight
+                ? "scale-[1.01] border-pink-300 ring-4 ring-pink-400/80 shadow-2xl shadow-pink-500/40"
+                : "border-white/10"
+            }`}
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-black">Draw Winners</h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Winners are drawn from paid entries only. More tickets means
+                  more chances in the draw. Once someone wins, they are removed
+                  from the next prize draw.
+                </p>
+              </div>
 
               <button
                 type="button"
                 onClick={testRandomDraw}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 px-5 py-3 text-sm font-black text-black hover:bg-yellow-300"
+                className="rounded-xl bg-yellow-400 px-5 py-3 text-sm font-black text-black hover:bg-yellow-300"
               >
-                <Sparkles className="h-4 w-4" />
-                Test Random Draw
-              </button>
-
-              <button
-                type="button"
-                onClick={createTestEntries}
-                disabled={creatingTestEntries}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-400 px-5 py-3 text-sm font-black text-black hover:bg-blue-300 disabled:opacity-60"
-              >
-                <Bug className="h-4 w-4" />
-                {creatingTestEntries ? "Creating..." : "Create 10 Test Entries"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDeleteAllModal(true)}
-                disabled={deleting}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                <Bug className="h-4 w-4" />
-                Delete all Test Entries
-              </button>
-
-              <button
-                type="button"
-                onClick={loadEntries}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-5 py-3 text-sm font-bold hover:bg-white/20"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Refresh
+                Test Draw Here
               </button>
             </div>
-          </div>
-        </section>
 
-        {error && (
-          <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5">
-            <div className="flex items-center gap-2 font-bold text-red-100">
-              <Bug className="h-5 w-5" />
-              Error
-            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              {[1, 2, 3].map((position) => {
+                const existingWinner = stats.winners.find(
+                  (winner) => winner.raffle_winner_position === position
+                );
 
-            <p className="mt-2 text-sm text-red-100">{error}</p>
-
-            {errorDetails && (
-              <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-black/40 p-4 text-xs text-red-100">
-                {JSON.stringify(errorDetails, null, 2)}
-              </pre>
-            )}
-          </section>
-        )}
-
-        {bigMessage && (
-          <section
-            className={`rounded-[2rem] border p-8 shadow-2xl ${
-              bigMessage.type === "official"
-                ? "border-yellow-300/40 bg-yellow-400/15"
-                : "border-blue-300/40 bg-blue-500/15"
-            }`}
-          >
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="flex items-center gap-3">
+                return (
                   <div
-                    className={`flex h-14 w-14 items-center justify-center rounded-3xl ${
-                      bigMessage.type === "official"
-                        ? "bg-yellow-400 text-black"
-                        : "bg-blue-400 text-black"
-                    }`}
+                    key={position}
+                    className="rounded-3xl border border-white/10 bg-black/20 p-5"
                   >
-                    <Trophy className="h-8 w-8" />
-                  </div>
+                    <p className="text-lg font-black">{prizeLabel(position)}</p>
 
-                  <div>
-                    <p className="text-sm font-black uppercase tracking-widest text-white/60">
-                      {bigMessage.type === "official"
-                        ? "Official Draw"
-                        : "Test Draw"}
-                    </p>
-                    <h2 className="text-3xl font-black sm:text-5xl">
-                      {bigMessage.title}
-                    </h2>
-                  </div>
-                </div>
-
-                <p className="mt-4 max-w-3xl text-base leading-7 text-white/75">
-                  {bigMessage.subtitle}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setBigMessage(null)}
-                className="rounded-xl bg-white/10 px-5 py-3 text-sm font-bold hover:bg-white/20"
-              >
-                Close Message
-              </button>
-            </div>
-
-            <div className="mt-8 rounded-[2rem] border border-white/10 bg-black/25 p-6">
-              <p className="text-sm font-bold uppercase tracking-widest text-white/50">
-                Winner / Message
-              </p>
-
-              <h3 className="mt-2 text-4xl font-black text-white sm:text-6xl">
-                {bigMessage.winnerName}
-              </h3>
-
-              <div className="mt-6 grid gap-4 md:grid-cols-5">
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Prize</p>
-                  <p className="text-lg font-black">{bigMessage.prize}</p>
-                </div>
-
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Tickets</p>
-                  <p className="text-lg font-black">{bigMessage.tickets}</p>
-                </div>
-
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Raffle Numbers</p>
-                  <p className="break-words text-sm font-black text-purple-100">
-                    {bigMessage.raffleNumbers}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Email</p>
-                  <p className="break-words text-sm font-bold">
-                    {bigMessage.winnerEmail}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl bg-white/10 p-4">
-                  <p className="text-xs text-white/50">Phone</p>
-                  <p className="text-sm font-bold">{bigMessage.winnerPhone}</p>
-                </div>
-              </div>
-
-              <p className="mt-5 rounded-2xl bg-white/10 p-4 text-sm leading-6 text-white/70">
-                {bigMessage.notes}
-              </p>
-            </div>
-          </section>
-        )}
-
-        {latestWinner && latestDraw && (
-          <section className="rounded-3xl border border-yellow-300/30 bg-yellow-400/10 p-5">
-            <div className="flex items-center gap-2 text-xl font-black text-yellow-100">
-              <Trophy className="h-6 w-6" />
-              Last Official Winner
-            </div>
-
-            <p className="mt-2 text-white">
-              <strong>{latestDraw.prize}</strong> winner is{" "}
-              <strong>{latestWinner.full_name}</strong>.
-            </p>
-
-            <p className="mt-2 text-sm text-white/60">
-              Raffle numbers:{" "}
-              <strong>{formatTicketNumbers(latestWinner)}</strong>
-            </p>
-
-            {latestDraw.randomWinningTicketNumber && (
-              <p className="mt-2 text-sm text-yellow-100">
-                Winning ticket number:{" "}
-                <strong>#{latestDraw.randomWinningTicketNumber}</strong>
-              </p>
-            )}
-
-            <p className="mt-2 text-sm text-white/60">{latestDraw.notes}</p>
-          </section>
-        )}
-
-        <section className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
-          <div className="rounded-3xl bg-pink-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-pink-400/20">
-              <Users className="h-5 w-5 text-pink-100" />
-            </div>
-            <p className="text-sm text-pink-100">Total Entries</p>
-            <p className="text-3xl font-bold">{stats.totalEntries}</p>
-          </div>
-
-          <div className="rounded-3xl bg-emerald-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-400/20">
-              <Ticket className="h-5 w-5 text-emerald-100" />
-            </div>
-            <p className="text-sm text-emerald-100">Paid Entries</p>
-            <p className="text-3xl font-bold">{stats.paidEntries}</p>
-          </div>
-
-          <div className="rounded-3xl bg-yellow-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-yellow-400/20">
-              <ShieldCheck className="h-5 w-5 text-yellow-100" />
-            </div>
-            <p className="text-sm text-yellow-100">Started</p>
-            <p className="text-3xl font-bold">
-              {stats.checkoutStartedEntries}
-            </p>
-          </div>
-
-          <div className="rounded-3xl bg-blue-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-400/20">
-              <Gift className="h-5 w-5 text-blue-100" />
-            </div>
-            <p className="text-sm text-blue-100">Tickets In Draw</p>
-            <p className="text-3xl font-bold">{stats.totalTickets}</p>
-          </div>
-
-          <div className="rounded-3xl bg-purple-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-400/20">
-              <Wallet className="h-5 w-5 text-purple-100" />
-            </div>
-            <p className="text-sm text-purple-100">Total Raised</p>
-            <p className="text-3xl font-bold">
-              {money(stats.totalRaisedPence)}
-            </p>
-          </div>
-
-          <div className="rounded-3xl bg-cyan-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-400/20">
-              <ShieldCheck className="h-5 w-5 text-cyan-100" />
-            </div>
-            <p className="text-sm text-cyan-100">Age Confirmed</p>
-            <p className="text-3xl font-bold">{ageConfirmedCount}</p>
-          </div>
-
-          <div className="rounded-3xl bg-indigo-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-400/20">
-              <ShieldCheck className="h-5 w-5 text-indigo-100" />
-            </div>
-            <p className="text-sm text-indigo-100">Terms Accepted</p>
-            <p className="text-3xl font-bold">{termsAcceptedCount}</p>
-          </div>
-
-          <div className="rounded-3xl bg-lime-500/10 p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-lime-400/20">
-              <ShieldCheck className="h-5 w-5 text-lime-100" />
-            </div>
-            <p className="text-sm text-lime-100">Eligible</p>
-            <p className="text-3xl font-bold">{eligibilityConfirmedCount}</p>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <h2 className="text-xl font-bold">Age, Terms and Eligibility Checks</h2>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">18+ only</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                The raffle is open to residents of Great Britain aged 18 years
-                or over. The website asks for date of birth and blocks under 18s
-                before payment.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">Terms must be accepted</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Entrants must confirm they agree to the raffle terms, are buying
-                tickets for themselves, and are eligible to enter.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">Winner ID may be checked</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Burton Pride C.I.C. may ask a winner for proof of age, identity,
-                or eligibility before confirming or releasing a prize.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <h2 className="text-xl font-bold">How the Random Draw Works</h2>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">1 ticket = 1 chance</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                If someone buys 5 tickets, their entry goes into the draw 5
-                times. If someone buys 1 ticket, they go in once.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">Paid entries only</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Entries are only included if Stripe has confirmed payment and
-                the status is marked as paid.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-lg font-black">Official server draw</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                The official draw uses crypto.randomInt on the server to choose
-                one ticket from the paid ticket pool.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section
-          id="draw-raffle-section"
-          ref={drawSectionRef}
-          tabIndex={-1}
-          className={`scroll-mt-28 rounded-3xl border bg-white/[0.04] p-5 outline-none transition-all duration-500 ${
-            drawHighlight
-              ? "scale-[1.01] border-pink-300 ring-4 ring-pink-400/80 shadow-2xl shadow-pink-500/40"
-              : "border-white/10"
-          }`}
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-2xl font-black">Draw Winners</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Winners are drawn from paid entries only. More tickets means
-                more chances in the draw. Once someone wins, they are removed
-                from the next prize draw.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={testRandomDraw}
-              className="rounded-xl bg-yellow-400 px-5 py-3 text-sm font-black text-black hover:bg-yellow-300"
-            >
-              Test Draw Here
-            </button>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {[1, 2, 3].map((position) => {
-              const existingWinner = stats.winners.find(
-                (winner) => winner.raffle_winner_position === position
-              );
-
-              return (
-                <div
-                  key={position}
-                  className="rounded-3xl border border-white/10 bg-black/20 p-5"
-                >
-                  <p className="text-lg font-black">{prizeLabel(position)}</p>
-
-                  {existingWinner ? (
-                    <div className="mt-3 rounded-2xl bg-yellow-400/10 p-4">
-                      <p className="font-bold text-yellow-100">
-                        {existingWinner.full_name}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        {existingWinner.email}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        Phone: {existingWinner.phone || "—"}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        DOB: {formatDob(existingWinner.date_of_birth)}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        Age: {getAge(existingWinner.date_of_birth) || "—"}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        Tickets: {ticketCount(existingWinner.ticket_amount)}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        Raffle numbers: {formatTicketNumbers(existingWinner)}
-                      </p>
-
-                      <p className="mt-1 text-xs text-white/60">
-                        Drawn: {formatDate(existingWinner.raffle_won_at)}
-                      </p>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <YesNoBadge
-                          value={existingWinner.age_confirmed}
-                          yesText="18+ confirmed"
-                          noText="Age not confirmed"
-                        />
-                        <YesNoBadge
-                          value={existingWinner.terms_accepted}
-                          yesText="Terms accepted"
-                          noText="Terms missing"
-                        />
-                      </div>
-
-                      {existingWinner.raffle_draw_notes && (
-                        <p className="mt-2 text-xs text-white/50">
-                          {existingWinner.raffle_draw_notes}
+                    {existingWinner ? (
+                      <div className="mt-3 rounded-2xl bg-yellow-400/10 p-4">
+                        <p className="font-bold text-yellow-100">
+                          {existingWinner.full_name}
                         </p>
-                      )}
 
+                        <p className="mt-1 text-xs text-white/60">
+                          {existingWinner.email}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          Phone: {existingWinner.phone || "—"}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          DOB: {formatDob(existingWinner.date_of_birth)}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          Age: {getAge(existingWinner.date_of_birth) || "—"}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          Tickets: {ticketCount(existingWinner.ticket_amount)}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          Raffle numbers: {formatTicketNumbers(existingWinner)}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/60">
+                          Drawn: {formatDate(existingWinner.raffle_won_at)}
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <YesNoBadge
+                            value={existingWinner.age_confirmed}
+                            yesText="18+ confirmed"
+                            noText="Age not confirmed"
+                          />
+                          <YesNoBadge
+                            value={existingWinner.terms_accepted}
+                            yesText="Terms accepted"
+                            noText="Terms missing"
+                          />
+                        </div>
+
+                        {existingWinner.raffle_draw_notes && (
+                          <p className="mt-2 text-xs text-white/50">
+                            {existingWinner.raffle_draw_notes}
+                          </p>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setRedoModal(position)}
+                          disabled={drawing !== null}
+                          className="mt-4 w-full rounded-2xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                        >
+                          Redo {prizeLabel(position)}
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => setRedoModal(position)}
-                        disabled={drawing !== null}
-                        className="mt-4 w-full rounded-2xl border border-red-300/30 bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                        onClick={() => setDrawModal(position)}
+                        disabled={drawing !== null || stats.totalTickets < 1}
+                        className="mt-4 w-full rounded-2xl bg-pink-500 px-4 py-3 text-sm font-black text-white hover:bg-pink-400 disabled:opacity-50"
                       >
-                        Redo {prizeLabel(position)}
+                        Draw {prizeLabel(position)}
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDrawModal(position)}
-                      disabled={drawing !== null || stats.totalTickets < 1}
-                      className="mt-4 w-full rounded-2xl bg-pink-500 px-4 py-3 text-sm font-black text-white hover:bg-pink-400 disabled:opacity-50"
-                    >
-                      Draw {prizeLabel(position)}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-bold">Raffle Entries</h2>
-              <p className="text-sm text-white/60">
-                All raffle checkouts, paid entries, raffle numbers, age checks,
-                and terms confirmations.
-              </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          </section>
 
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  "all",
-                  "paid",
-                  "checkout_started",
-                  "age_checked",
-                  "winners",
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setFilter(item)}
-                  className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                    filter === item
-                      ? "bg-white text-black"
-                      : "bg-white/10 text-white"
-                  }`}
-                >
-                  {item === "all"
-                    ? "All"
-                    : item === "paid"
-                    ? "Paid"
-                    : item === "checkout_started"
-                    ? "Started"
-                    : item === "age_checked"
-                    ? "Age/Terms OK"
-                    : "Winners"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mb-5 rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5">
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <label className="mb-2 flex items-center gap-2 text-sm font-black text-purple-100">
-                  <Search className="h-4 w-4" />
-                  Search by raffle number
-                </label>
-
-                <input
-                  type="text"
-                  value={raffleNumberSearch}
-                  onChange={(e) => setRaffleNumberSearch(e.target.value)}
-                  placeholder="Example: 481 or #481"
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white placeholder:text-white/35 outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-400/40"
-                />
-
-                <p className="mt-2 text-xs text-white/45">
-                  Use this if you draw a raffle number manually and need to find
-                  the matching person.
+                <h2 className="text-xl font-bold">Raffle Entries</h2>
+                <p className="text-sm text-white/60">
+                  All raffle checkouts, paid entries, raffle numbers, age checks,
+                  and terms confirmations.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setRaffleNumberSearch("")}
-                className="self-end rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/20"
-              >
-                Clear Search
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={printAllVisibleTickets}
+                  disabled={filteredEntries.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-black text-white hover:bg-blue-400 disabled:opacity-50"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print All Tickets
+                </button>
+
+                {(
+                  [
+                    "all",
+                    "paid",
+                    "checkout_started",
+                    "age_checked",
+                    "winners",
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setFilter(item)}
+                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
+                      filter === item
+                        ? "bg-white text-black"
+                        : "bg-white/10 text-white"
+                    }`}
+                  >
+                    {item === "all"
+                      ? "All"
+                      : item === "paid"
+                      ? "Paid"
+                      : item === "checkout_started"
+                      ? "Started"
+                      : item === "age_checked"
+                      ? "Age/Terms OK"
+                      : "Winners"}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {raffleNumberSearch.trim() && (
-            <div className="mb-4 rounded-2xl border border-purple-300/30 bg-purple-500/10 p-4">
-              <p className="text-sm font-black text-purple-100">
-                Searching raffle number: #
-                {raffleNumberSearch.replace("#", "").trim()}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Found {filteredEntries.length} matching entr
-                {filteredEntries.length === 1 ? "y" : "ies"}.
-              </p>
+            <div className="mb-5 rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5">
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <div>
+                  <label className="mb-2 flex items-center gap-2 text-sm font-black text-purple-100">
+                    <Search className="h-4 w-4" />
+                    Search by raffle number
+                  </label>
+
+                  <input
+                    type="text"
+                    value={raffleNumberSearch}
+                    onChange={(e) => setRaffleNumberSearch(e.target.value)}
+                    placeholder="Example: 481 or #481"
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white placeholder:text-white/35 outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-400/40"
+                  />
+
+                  <p className="mt-2 text-xs text-white/45">
+                    Use this if you draw a raffle number manually and need to find
+                    the matching person. Ctrl+P will print the currently visible
+                    filtered tickets.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setRaffleNumberSearch("")}
+                  className="self-end rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/20"
+                >
+                  Clear Search
+                </button>
+              </div>
             </div>
-          )}
 
-          {loading ? (
-            <p className="text-white/60">Loading raffle entries...</p>
-          ) : filteredEntries.length === 0 ? (
-            <p className="text-white/60">No raffle entries found.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1950px] text-sm">
-                <thead className="bg-white/10 text-white/60">
-                  <tr>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Name</th>
-                    <th className="p-3 text-left">Email</th>
-                    <th className="p-3 text-left">Phone</th>
-                    <th className="p-3 text-left">DOB</th>
-                    <th className="p-3 text-left">Age</th>
-                    <th className="p-3 text-left">Tickets</th>
-                    <th className="p-3 text-left">Raffle Numbers</th>
-                    <th className="p-3 text-left">Payment</th>
-                    <th className="p-3 text-right">Amount</th>
-                    <th className="p-3 text-left">18+</th>
-                    <th className="p-3 text-left">Terms</th>
-                    <th className="p-3 text-left">Eligible</th>
-                    <th className="p-3 text-left">Winner</th>
-                    <th className="p-3 text-left">Message</th>
-                    <th className="p-3 text-right">Actions</th>
-                  </tr>
-                </thead>
+            {raffleNumberSearch.trim() && (
+              <div className="mb-4 rounded-2xl border border-purple-300/30 bg-purple-500/10 p-4">
+                <p className="text-sm font-black text-purple-100">
+                  Searching raffle number: #
+                  {raffleNumberSearch.replace("#", "").trim()}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Found {filteredEntries.length} matching entr
+                  {filteredEntries.length === 1 ? "y" : "ies"}.
+                </p>
+              </div>
+            )}
 
-                <tbody>
-                  {filteredEntries.map((entry) => {
-                    const age = getAge(entry.date_of_birth);
+            {loading ? (
+              <p className="text-white/60">Loading raffle entries...</p>
+            ) : filteredEntries.length === 0 ? (
+              <p className="text-white/60">No raffle entries found.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-white/10">
+                <table className="w-full min-w-[2100px] text-sm">
+                  <thead className="bg-white/10 text-white/60">
+                    <tr>
+                      <th className="p-3 text-left">Date</th>
+                      <th className="p-3 text-left">Name</th>
+                      <th className="p-3 text-left">Email</th>
+                      <th className="p-3 text-left">Phone</th>
+                      <th className="p-3 text-left">DOB</th>
+                      <th className="p-3 text-left">Age</th>
+                      <th className="p-3 text-left">Tickets</th>
+                      <th className="p-3 text-left">Raffle Numbers</th>
+                      <th className="p-3 text-left">Payment</th>
+                      <th className="p-3 text-right">Amount</th>
+                      <th className="p-3 text-left">18+</th>
+                      <th className="p-3 text-left">Terms</th>
+                      <th className="p-3 text-left">Eligible</th>
+                      <th className="p-3 text-left">Winner</th>
+                      <th className="p-3 text-left">Message</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
 
-                    return (
-                      <tr key={entry.id} className="border-t border-white/10">
-                        <td className="p-3">{formatDate(entry.created_at)}</td>
+                  <tbody>
+                    {filteredEntries.map((entry) => {
+                      const age = getAge(entry.date_of_birth);
 
-                        <td className="p-3 font-bold">{entry.full_name}</td>
+                      return (
+                        <tr key={entry.id} className="border-t border-white/10">
+                          <td className="p-3">{formatDate(entry.created_at)}</td>
 
-                        <td className="p-3">{entry.email}</td>
+                          <td className="p-3 font-bold">{entry.full_name}</td>
 
-                        <td className="p-3">{entry.phone || "—"}</td>
+                          <td className="p-3">{entry.email}</td>
 
-                        <td className="p-3">{formatDob(entry.date_of_birth)}</td>
+                          <td className="p-3">{entry.phone || "—"}</td>
 
-                        <td className="p-3">
-                          {age !== null ? (
+                          <td className="p-3">{formatDob(entry.date_of_birth)}</td>
+
+                          <td className="p-3">
+                            {age !== null ? (
+                              <span
+                                className={`font-black ${
+                                  age >= 18
+                                    ? "text-emerald-100"
+                                    : "text-red-100"
+                                }`}
+                              >
+                                {age}
+                              </span>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
+
+                          <td className="p-3 font-bold">
+                            {ticketCount(entry.ticket_amount)}
+                          </td>
+
+                          <td className="p-3">
+                            <RaffleNumberBadges entry={entry} />
+                          </td>
+
+                          <td className="p-3">
                             <span
-                              className={`font-black ${
-                                age >= 18 ? "text-emerald-100" : "text-red-100"
+                              className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                                entry.payment_status === "paid"
+                                  ? "bg-emerald-500/15 text-emerald-100"
+                                  : entry.payment_status === "checkout_started"
+                                  ? "bg-yellow-500/15 text-yellow-100"
+                                  : "bg-white/10 text-white/60"
                               }`}
                             >
-                              {age}
+                              {entry.payment_status || "not_paid"}
                             </span>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td className="p-3 font-bold">
-                          {ticketCount(entry.ticket_amount)}
-                        </td>
+                          <td className="p-3 text-right font-bold">
+                            {money(entry.amount_pence || 0)}
+                          </td>
 
-                        <td className="p-3">
-                          <RaffleNumberBadges entry={entry} />
-                        </td>
+                          <td className="p-3">
+                            <YesNoBadge
+                              value={entry.age_confirmed}
+                              yesText="Yes"
+                              noText="No"
+                            />
+                          </td>
 
-                        <td className="p-3">
-                          <span
-                            className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                              entry.payment_status === "paid"
-                                ? "bg-emerald-500/15 text-emerald-100"
-                                : entry.payment_status === "checkout_started"
-                                ? "bg-yellow-500/15 text-yellow-100"
-                                : "bg-white/10 text-white/60"
-                            }`}
-                          >
-                            {entry.payment_status || "not_paid"}
-                          </span>
-                        </td>
+                          <td className="p-3">
+                            <YesNoBadge
+                              value={entry.terms_accepted}
+                              yesText="Yes"
+                              noText="No"
+                            />
+                          </td>
 
-                        <td className="p-3 text-right font-bold">
-                          {money(entry.amount_pence || 0)}
-                        </td>
+                          <td className="p-3">
+                            <YesNoBadge
+                              value={entry.eligibility_confirmed}
+                              yesText="Yes"
+                              noText="No"
+                            />
+                          </td>
 
-                        <td className="p-3">
-                          <YesNoBadge
-                            value={entry.age_confirmed}
-                            yesText="Yes"
-                            noText="No"
-                          />
-                        </td>
+                          <td className="p-3">
+                            {entry.raffle_winner_position ? (
+                              <span className="rounded-xl bg-yellow-400/15 px-3 py-2 text-xs font-black text-yellow-100">
+                                {prizeLabel(entry.raffle_winner_position)}
+                              </span>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
 
-                        <td className="p-3">
-                          <YesNoBadge
-                            value={entry.terms_accepted}
-                            yesText="Yes"
-                            noText="No"
-                          />
-                        </td>
+                          <td className="p-3 text-white/60">
+                            <div className="max-w-[280px] whitespace-pre-wrap">
+                              {entry.message || "—"}
+                            </div>
+                          </td>
 
-                        <td className="p-3">
-                          <YesNoBadge
-                            value={entry.eligibility_confirmed}
-                            yesText="Yes"
-                            noText="No"
-                          />
-                        </td>
+                          <td className="p-3 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => printSingleTicket(entry)}
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-300/30 bg-blue-500/15 px-3 py-2 text-xs font-black text-blue-100 hover:bg-blue-500/25"
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                                Print Ticket
+                              </button>
 
-                        <td className="p-3">
-                          {entry.raffle_winner_position ? (
-                            <span className="rounded-xl bg-yellow-400/15 px-3 py-2 text-xs font-black text-yellow-100">
-                              {prizeLabel(entry.raffle_winner_position)}
-                            </span>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteModal(entry)}
+                                disabled={deleting}
+                                className="rounded-xl border border-red-300/30 bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
 
-                        <td className="p-3 text-white/60">
-                          <div className="max-w-[280px] whitespace-pre-wrap">
-                            {entry.message || "—"}
-                          </div>
-                        </td>
+        {deleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                  <Bug className="h-6 w-6" />
+                </div>
 
-                        <td className="p-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setDeleteModal(entry)}
-                            disabled={deleting}
-                            className="rounded-xl border border-red-300/30 bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/25 disabled:opacity-50"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                    Delete Entry
+                  </p>
+                  <h2 className="text-xl font-black">Delete raffle entry?</h2>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="font-black text-white">{deleteModal.full_name}</p>
+                <p className="mt-1 text-sm text-white/60">
+                  {deleteModal.email}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Phone: {deleteModal.phone || "—"}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  DOB: {formatDob(deleteModal.date_of_birth)}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Age: {getAge(deleteModal.date_of_birth) || "—"}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Tickets: {ticketCount(deleteModal.ticket_amount)}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Raffle numbers: {formatTicketNumbers(deleteModal)}
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  Payment: {deleteModal.payment_status || "not_paid"}
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <YesNoBadge
+                    value={deleteModal.age_confirmed}
+                    yesText="18+ confirmed"
+                    noText="Age not confirmed"
+                  />
+                  <YesNoBadge
+                    value={deleteModal.terms_accepted}
+                    yesText="Terms accepted"
+                    noText="Terms missing"
+                  />
+                  <YesNoBadge
+                    value={deleteModal.eligibility_confirmed}
+                    yesText="Eligible"
+                    noText="Eligibility missing"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+                This will permanently delete this raffle entry from Supabase. This
+                cannot be undone.
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteModal(null)}
+                  disabled={deleting}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => deleteEntry(deleteModal)}
+                  disabled={deleting}
+                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+                >
+                  {deleting ? "Deleting..." : "Yes, Delete Entry"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteAllModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                  <Bug className="h-6 w-6" />
+                </div>
+
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                    Delete Test Entries
+                  </p>
+                  <h2 className="text-xl font-black">
+                    Delete all test entries?
+                  </h2>
+                </div>
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-white/70">
+                This will delete all fake test raffle entries created by the{" "}
+                <strong>Create 10 Test Entries</strong> button.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+                Real raffle entries will not be deleted. Only entries with test
+                email/session details will be removed.
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteAllModal(false)}
+                  disabled={deleting}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={deleteAllTestEntries}
+                  disabled={deleting}
+                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+                >
+                  {deleting ? "Deleting..." : "Yes, Delete Test Entries"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {redoModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
+                  <RefreshCcw className="h-6 w-6" />
+                </div>
+
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
+                    Redo Draw
+                  </p>
+                  <h2 className="text-xl font-black">
+                    Redo {prizeLabel(redoModal)}?
+                  </h2>
+                </div>
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-white/70">
+                This will remove the current saved winner for{" "}
+                <strong>{prizeLabel(redoModal)}</strong>. After this, you can draw
+                that prize again.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+                This does not delete the raffle entry. It only clears the winner
+                fields for this prize.
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setRedoModal(null)}
+                  disabled={drawing !== null}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => redoDraw(redoModal)}
+                  disabled={drawing !== null}
+                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
+                >
+                  {drawing ? "Resetting..." : `Yes, Redo ${prizeLabel(redoModal)}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {drawModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
+              <h2 className="text-xl font-bold">
+                Draw {prizeLabel(drawModal)}?
+              </h2>
+
+              <p className="mt-3 text-sm text-white/70">
+                This will randomly choose one winning ticket from all paid tickets.
+                If someone bought 5 tickets, they have 5 chances. Once a person
+                wins, they cannot win another prize.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-400/10 p-4 text-sm text-yellow-100">
+                This action saves the winner in Supabase. Only click this when you
+                are ready to do the official draw.
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-blue-300/20 bg-blue-400/10 p-4 text-sm text-blue-100">
+                Before releasing a prize, you may ask the winner for proof of age,
+                identity, or eligibility if required.
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDrawModal(null)}
+                  disabled={drawing !== null}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => drawWinner(drawModal)}
+                  disabled={drawing !== null}
+                  className="rounded-xl bg-pink-500 px-4 py-2 text-sm font-bold text-white hover:bg-pink-400 disabled:opacity-60"
+                >
+                  {drawing ? "Drawing..." : "Draw Winner"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      <div className="raffle-print-area">
+        <div className="raffle-print-sheet">
+          <div className="raffle-print-top">
+            <div>
+              <p className="raffle-print-eyebrow">Burton Pride C.I.C.</p>
+              <h1>Raffle Ticket List</h1>
+            </div>
+
+            <div className="raffle-print-summary">
+              <strong>{entriesForPrint.length}</strong> entr
+              {entriesForPrint.length === 1 ? "y" : "ies"} printed
+            </div>
+          </div>
+
+          {entriesForPrint.length > 0 ? (
+            <table className="raffle-print-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Tickets Bought</th>
+                  <th>Raffle Numbers</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {entriesForPrint.map((entry) => (
+                  <PrintTicketCard key={entry.id} entry={entry} />
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="raffle-print-empty-page">
+              No raffle entries found to print.
             </div>
           )}
-        </section>
+
+          <div className="raffle-print-footer">
+            <div>
+              <strong>Burton Pride C.I.C.</strong>
+              <br />
+              Grassroots pride, powered by local people.
+            </div>
+
+            <div>
+              Printed: {formatDate(new Date().toISOString())}
+              <br />
+              Ctrl+P prints this list.
+            </div>
+          </div>
+        </div>
       </div>
 
-      {deleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
-                <Bug className="h-6 w-6" />
-              </div>
+      <style jsx global>{`
+        .raffle-print-area {
+          display: none;
+        }
 
-              <div>
-                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                  Delete Entry
-                </p>
-                <h2 className="text-xl font-black">Delete raffle entry?</h2>
-              </div>
-            </div>
+        @media print {
+          @page {
+            size: A4;
+            margin: 10mm;
+          }
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-              <p className="font-black text-white">{deleteModal.full_name}</p>
-              <p className="mt-1 text-sm text-white/60">
-                {deleteModal.email}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Phone: {deleteModal.phone || "—"}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                DOB: {formatDob(deleteModal.date_of_birth)}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Age: {getAge(deleteModal.date_of_birth) || "—"}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Tickets: {ticketCount(deleteModal.ticket_amount)}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Raffle numbers: {formatTicketNumbers(deleteModal)}
-              </p>
-              <p className="mt-1 text-sm text-white/60">
-                Payment: {deleteModal.payment_status || "not_paid"}
-              </p>
+          html,
+          body {
+            background: white !important;
+            color: #111827 !important;
+          }
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <YesNoBadge
-                  value={deleteModal.age_confirmed}
-                  yesText="18+ confirmed"
-                  noText="Age not confirmed"
-                />
-                <YesNoBadge
-                  value={deleteModal.terms_accepted}
-                  yesText="Terms accepted"
-                  noText="Terms missing"
-                />
-                <YesNoBadge
-                  value={deleteModal.eligibility_confirmed}
-                  yesText="Eligible"
-                  noText="Eligibility missing"
-                />
-              </div>
-            </div>
+          body * {
+            visibility: hidden !important;
+          }
 
-            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-              This will permanently delete this raffle entry from Supabase. This
-              cannot be undone.
-            </div>
+          .raffle-print-area,
+          .raffle-print-area * {
+            visibility: visible !important;
+          }
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteModal(null)}
-                disabled={deleting}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
+          .raffle-admin-screen {
+            display: none !important;
+          }
 
-              <button
-                type="button"
-                onClick={() => deleteEntry(deleteModal)}
-                disabled={deleting}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deleting ? "Deleting..." : "Yes, Delete Entry"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          .raffle-print-area {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            background: white !important;
+            color: #111827 !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+          }
 
-      {deleteAllModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
-                <Bug className="h-6 w-6" />
-              </div>
+          .raffle-print-sheet {
+            display: block !important;
+            width: 100% !important;
+            background: white !important;
+            color: #111827 !important;
+          }
 
-              <div>
-                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                  Delete Test Entries
-                </p>
-                <h2 className="text-xl font-black">
-                  Delete all test entries?
-                </h2>
-              </div>
-            </div>
+          .raffle-print-top {
+            display: flex !important;
+            align-items: flex-start !important;
+            justify-content: space-between !important;
+            gap: 20px !important;
+            margin-bottom: 14px !important;
+            padding-bottom: 12px !important;
+            border-bottom: 2px solid #111827 !important;
+          }
 
-            <p className="mt-4 text-sm leading-6 text-white/70">
-              This will delete all fake test raffle entries created by the{" "}
-              <strong>Create 10 Test Entries</strong> button.
-            </p>
+          .raffle-print-eyebrow {
+            margin: 0 0 4px !important;
+            font-size: 11px !important;
+            letter-spacing: 2px !important;
+            text-transform: uppercase !important;
+            font-weight: 900 !important;
+            color: #4c1d95 !important;
+          }
 
-            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-              Real raffle entries will not be deleted. Only entries with test
-              email/session details will be removed.
-            </div>
+          .raffle-print-top h1 {
+            margin: 0 !important;
+            font-size: 26px !important;
+            line-height: 1.1 !important;
+            font-weight: 900 !important;
+            color: #111827 !important;
+          }
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteAllModal(false)}
-                disabled={deleting}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
+          .raffle-print-summary {
+            border: 1px solid #111827 !important;
+            border-radius: 10px !important;
+            padding: 8px 12px !important;
+            font-size: 12px !important;
+            font-weight: 800 !important;
+            white-space: nowrap !important;
+          }
 
-              <button
-                type="button"
-                onClick={deleteAllTestEntries}
-                disabled={deleting}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deleting ? "Deleting..." : "Yes, Delete Test Entries"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          .raffle-print-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            font-size: 13px !important;
+          }
 
-      {redoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-red-300/20 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
-                <RefreshCcw className="h-6 w-6" />
-              </div>
+          .raffle-print-table th {
+            border: 1px solid #111827 !important;
+            background: #eeeeee !important;
+            color: #111827 !important;
+            padding: 8px !important;
+            text-align: left !important;
+            font-size: 11px !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.8px !important;
+            font-weight: 900 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+          }
 
-              <div>
-                <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                  Redo Draw
-                </p>
-                <h2 className="text-xl font-black">
-                  Redo {prizeLabel(redoModal)}?
-                </h2>
-              </div>
-            </div>
+          .raffle-print-table th:nth-child(1) {
+            width: 30% !important;
+          }
 
-            <p className="mt-4 text-sm leading-6 text-white/70">
-              This will remove the current saved winner for{" "}
-              <strong>{prizeLabel(redoModal)}</strong>. After this, you can draw
-              that prize again.
-            </p>
+          .raffle-print-table th:nth-child(2) {
+            width: 16% !important;
+            text-align: center !important;
+          }
 
-            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-              This does not delete the raffle entry. It only clears the winner
-              fields for this prize.
-            </div>
+          .raffle-print-table th:nth-child(3) {
+            width: 54% !important;
+          }
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setRedoModal(null)}
-                disabled={drawing !== null}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
+          .raffle-print-cell {
+            border: 1px solid #111827 !important;
+            padding: 9px 8px !important;
+            vertical-align: top !important;
+            color: #111827 !important;
+          }
 
-              <button
-                type="button"
-                onClick={() => redoDraw(redoModal)}
-                disabled={drawing !== null}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {drawing ? "Resetting..." : `Yes, Redo ${prizeLabel(redoModal)}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          .raffle-print-name-cell {
+            font-size: 15px !important;
+            font-weight: 900 !important;
+            word-break: break-word !important;
+          }
 
-      {drawModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">
-              Draw {prizeLabel(drawModal)}?
-            </h2>
+          .raffle-print-count-cell {
+            text-align: center !important;
+            font-size: 18px !important;
+            font-weight: 900 !important;
+          }
 
-            <p className="mt-3 text-sm text-white/70">
-              This will randomly choose one winning ticket from all paid tickets.
-              If someone bought 5 tickets, they have 5 chances. Once a person
-              wins, they cannot win another prize.
-            </p>
+          .raffle-print-numbers-cell {
+            line-height: 2.1 !important;
+          }
 
-            <div className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-400/10 p-4 text-sm text-yellow-100">
-              This action saves the winner in Supabase. Only click this when you
-              are ready to do the official draw.
-            </div>
+          .raffle-print-number {
+            display: inline-block !important;
+            margin: 0 5px 5px 0 !important;
+            border: 1px solid #111827 !important;
+            border-radius: 8px !important;
+            padding: 4px 8px !important;
+            background: white !important;
+            color: #111827 !important;
+            font-size: 13px !important;
+            font-weight: 900 !important;
+            white-space: nowrap !important;
+          }
 
-            <div className="mt-4 rounded-2xl border border-blue-300/20 bg-blue-400/10 p-4 text-sm text-blue-100">
-              Before releasing a prize, you may ask the winner for proof of age,
-              identity, or eligibility if required.
-            </div>
+          .raffle-print-empty {
+            color: #555555 !important;
+            font-weight: 800 !important;
+          }
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDrawModal(null)}
-                disabled={drawing !== null}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
+          .raffle-print-footer {
+            display: flex !important;
+            justify-content: space-between !important;
+            gap: 20px !important;
+            margin-top: 14px !important;
+            padding-top: 10px !important;
+            border-top: 1px solid #111827 !important;
+            color: #4b5563 !important;
+            font-size: 11px !important;
+            line-height: 1.4 !important;
+          }
 
-              <button
-                type="button"
-                onClick={() => drawWinner(drawModal)}
-                disabled={drawing !== null}
-                className="rounded-xl bg-pink-500 px-4 py-2 text-sm font-bold text-white hover:bg-pink-400 disabled:opacity-60"
-              >
-                {drawing ? "Drawing..." : "Draw Winner"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+          .raffle-print-empty-page {
+            visibility: visible !important;
+            display: block !important;
+            padding: 30px !important;
+            color: #111827 !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            font-size: 18px !important;
+            font-weight: 900 !important;
+          }
+        }
+      `}</style>
+    </>
   );
 }

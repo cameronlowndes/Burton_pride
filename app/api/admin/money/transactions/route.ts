@@ -1,6 +1,12 @@
 import Stripe from "stripe";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireMainAdmin } from "@/lib/isMainAdmin";
+import {
+  createMoneyAuditLog,
+  createBulkMoneyAuditLogs,
+} from "@/lib/adminMoneyAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +43,70 @@ function toBoolean(value: string) {
   return value === "true" || value === "1" || value === "yes";
 }
 
+async function getActorLabel() {
+  try {
+    const user = await currentUser();
+
+    const actorName =
+      user?.fullName ||
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      null;
+
+    const actorEmail =
+      user?.primaryEmailAddress?.emailAddress ||
+      user?.emailAddresses?.[0]?.emailAddress ||
+      null;
+
+    if (actorName && actorEmail) return `${actorName} (${actorEmail})`;
+    if (actorName) return actorName;
+    if (actorEmail) return actorEmail;
+
+    return "Unknown admin";
+  } catch {
+    return "Unknown admin";
+  }
+}
+
+async function checkDeletePasswordThroughSettingsApi(
+  req: NextRequest,
+  password: string
+) {
+  const passwordCheck = await fetch(
+    `${req.nextUrl.origin}/api/admin/settings/delete-password`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: req.headers.get("cookie") || "",
+      },
+      body: JSON.stringify({
+        password,
+      }),
+    }
+  );
+
+  const passwordData = await passwordCheck.json().catch(() => ({}));
+
+  if (!passwordCheck.ok || !passwordData.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: passwordData.error || "Main admin password check failed.",
+          details: passwordData,
+        },
+        { status: passwordCheck.status || 500 }
+      ),
+    };
+  }
+
+  return {
+    ok: true,
+    response: null,
+  };
+}
+
 async function syncPaidDonationsToMoneyTracker() {
   try {
     const { data: donations, error: donationError } = await supabaseAdmin
@@ -60,20 +130,13 @@ async function syncPaidDonationsToMoneyTracker() {
 
       if (!sessionId) continue;
 
-      /**
-       * Important:
-       * Local/dev uses sk_test_ and can only retrieve cs_test_ sessions.
-       * Live uses sk_live_ and can only retrieve cs_live_ sessions.
-       *
-       * This stops your dev server trying to retrieve old live sessions.
-       */
       if (!sessionMatchesCurrentStripeMode(sessionId)) {
         continue;
       }
 
       const { data: existing, error: existingError } = await supabaseAdmin
         .from("money_transactions")
-        .select("id")
+        .select("id, deleted_at")
         .eq("stripe_session_id", sessionId)
         .maybeSingle();
 
@@ -151,38 +214,45 @@ async function syncPaidDonationsToMoneyTracker() {
         sessionId ? `Stripe session: ${sessionId}` : "",
       ].filter(Boolean);
 
-      const { error: insertError } = await supabaseAdmin
+      const insertData = {
+        title: `${donationType} - ${donorName}`,
+        description: descriptionParts.join("\n") || null,
+        type: "income",
+        category: "Donation",
+        amount_pence: amountPence,
+        payment_method: "Stripe",
+        transaction_date: transactionDate,
+
+        is_personal_funds: false,
+        personal_funds_name: null,
+        personal_funds_repaid: false,
+        personal_funds_repaid_at: null,
+
+        sponsor_id: null,
+        sponsor_name: null,
+        sponsorship_note: null,
+
+        invoice_image_url: null,
+
+        stripe_session_id: sessionId,
+        stripe_invoice_id: stripeInvoiceId,
+        stripe_customer_id: stripeCustomerId,
+        stripe_payment_intent_id: stripePaymentIntentId,
+
+        source:
+          donation.donation_type === "monthly"
+            ? "website_monthly_donation"
+            : "website_donation",
+
+        deleted_at: null,
+        deleted_by: null,
+      };
+
+      const { data: inserted, error: insertError } = await supabaseAdmin
         .from("money_transactions")
-        .insert({
-          title: `${donationType} - ${donorName}`,
-          description: descriptionParts.join("\n") || null,
-          type: "income",
-          category: "Donation",
-          amount_pence: amountPence,
-          payment_method: "Stripe",
-          transaction_date: transactionDate,
-
-          is_personal_funds: false,
-          personal_funds_name: null,
-          personal_funds_repaid: false,
-          personal_funds_repaid_at: null,
-
-          sponsor_id: null,
-          sponsor_name: null,
-          sponsorship_note: null,
-
-          invoice_image_url: null,
-
-          stripe_session_id: sessionId,
-          stripe_invoice_id: stripeInvoiceId,
-          stripe_customer_id: stripeCustomerId,
-          stripe_payment_intent_id: stripePaymentIntentId,
-
-          source:
-            donation.donation_type === "monthly"
-              ? "website_monthly_donation"
-              : "website_donation",
-        });
+        .insert(insertData)
+        .select("*")
+        .single();
 
       if (insertError) {
         console.error("Failed to sync donation into money tracker:", {
@@ -190,7 +260,22 @@ async function syncPaidDonationsToMoneyTracker() {
           sessionId,
           donationId: donation.id,
         });
+        continue;
       }
+
+      await createMoneyAuditLog({
+        action: "create",
+        transactionId: inserted?.id || null,
+        transactionTitle: inserted?.title || insertData.title,
+        beforeData: null,
+        afterData: inserted,
+        metadata: {
+          source: "stripe_donation_sync",
+          route: "/api/admin/money/transactions",
+          stripe_session_id: sessionId,
+          donation_id: donation.id,
+        },
+      });
     }
   } catch (err) {
     console.error("Money tracker donation sync failed:", err);
@@ -204,6 +289,7 @@ export async function GET() {
     const { data, error } = await supabaseAdmin
       .from("money_transactions")
       .select("*")
+      .order("deleted_at", { ascending: true, nullsFirst: true })
       .order("transaction_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -242,7 +328,7 @@ export async function GET() {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
@@ -313,7 +399,8 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Please enter the name of the person who paid with personal funds.",
+          error:
+            "Please enter the name of the person who paid with personal funds.",
         },
         { status: 400 }
       );
@@ -357,16 +444,6 @@ export async function POST(req: Request) {
       invoiceImageUrl = publicUrlData.publicUrl;
     }
 
-    /**
-     * Manual admin transactions should never retrieve Stripe.
-     * This insert simply saves the row into Supabase.
-     *
-     * If sponsor is selected:
-     * - source becomes sponsorship
-     * - payment method becomes Sponsorship Money
-     * - category becomes Sponsorship if empty or already sponsor related
-     * - sponsor_id/sponsor_name are saved so sponsor breakdown can take spending away.
-     */
     const insertData = {
       title,
       description: cleanOrNull(description),
@@ -383,7 +460,9 @@ export async function POST(req: Request) {
 
       is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
       personal_funds_name:
-        isSponsorLinked || !isPersonalFunds ? null : cleanOrNull(personalFundsName),
+        isSponsorLinked || !isPersonalFunds
+          ? null
+          : cleanOrNull(personalFundsName),
       personal_funds_repaid: false,
       personal_funds_repaid_at: null,
 
@@ -397,6 +476,9 @@ export async function POST(req: Request) {
       stripe_invoice_id: null,
       stripe_customer_id: null,
       stripe_payment_intent_id: null,
+
+      deleted_at: null,
+      deleted_by: null,
     };
 
     const { data, error } = await supabaseAdmin
@@ -417,6 +499,18 @@ export async function POST(req: Request) {
       );
     }
 
+    await createMoneyAuditLog({
+      action: "create",
+      transactionId: data?.id || null,
+      transactionTitle: data?.title || title,
+      beforeData: null,
+      afterData: data,
+      metadata: {
+        source: "money_tracker",
+        route: "/api/admin/money/transactions",
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       transaction: data,
@@ -434,11 +528,36 @@ export async function POST(req: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   try {
+    await requireMainAdmin();
+
+    const body = await req.json().catch(() => ({}));
+    const password = String(body.password || "").trim();
+
+    if (!password) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Main admin password is required.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const passwordCheck = await checkDeletePasswordThroughSettingsApi(
+      req,
+      password
+    );
+
+    if (!passwordCheck.ok && passwordCheck.response) {
+      return passwordCheck.response;
+    }
+
     const { data: transactions, error: loadError } = await supabaseAdmin
       .from("money_transactions")
-      .select("id");
+      .select("*")
+      .is("deleted_at", null);
 
     if (loadError) {
       return NextResponse.json(
@@ -451,23 +570,33 @@ export async function DELETE() {
       );
     }
 
-    const ids = (transactions || []).map((item) => item.id);
+    const rows = transactions || [];
+    const ids = rows.map((item) => item.id);
 
     if (ids.length === 0) {
       return NextResponse.json({
         ok: true,
         deletedCount: 0,
-        message: "No transactions to delete",
+        message: "No active transactions to move to deleted area",
       });
     }
 
-    const { error: deleteError } = await supabaseAdmin
+    const deletedAt = new Date().toISOString();
+    const deletedBy = await getActorLabel();
+
+    const { data: deletedRows, error: deleteError } = await supabaseAdmin
       .from("money_transactions")
-      .delete()
-      .in("id", ids);
+      .update({
+        deleted_at: deletedAt,
+        deleted_by: deletedBy,
+        updated_at: deletedAt,
+      })
+      .in("id", ids)
+      .is("deleted_at", null)
+      .select("*");
 
     if (deleteError) {
-      console.error("Delete all money transactions error:", deleteError);
+      console.error("Soft delete all money transactions error:", deleteError);
 
       return NextResponse.json(
         {
@@ -479,13 +608,61 @@ export async function DELETE() {
       );
     }
 
+    await createMoneyAuditLog({
+      action: "delete_all",
+      transactionId: null,
+      transactionTitle: "Delete all transactions",
+      beforeData: null,
+      afterData: null,
+      changedFields: {
+        deleted_at: {
+          before: null,
+          after: deletedAt,
+        },
+        deleted_by: {
+          before: null,
+          after: deletedBy,
+        },
+      },
+      metadata: {
+        source: "money_tracker",
+        route: "/api/admin/money/transactions",
+        delete_type: "soft_delete_all",
+        deleted_count: ids.length,
+        deleted_ids: ids,
+      },
+    });
+
+    await createBulkMoneyAuditLogs(
+      rows.map((beforeRow) => {
+        const afterRow =
+          deletedRows?.find((item) => item.id === beforeRow.id) || null;
+
+        return {
+          action: "delete",
+          transactionId: beforeRow.id,
+          transactionTitle: beforeRow.title || null,
+          beforeData: beforeRow,
+          afterData: afterRow,
+          metadata: {
+            source: "money_tracker",
+            route: "/api/admin/money/transactions",
+            delete_type: "soft_delete_from_delete_all",
+            parent_action: "delete_all",
+            deleted_at: deletedAt,
+            deleted_by: deletedBy,
+          },
+        };
+      })
+    );
+
     return NextResponse.json({
       ok: true,
       deletedCount: ids.length,
-      message: "All transactions deleted successfully",
+      message: "All active transactions moved to deleted area successfully",
     });
   } catch (err) {
-    console.error("Unexpected delete all transactions error:", err);
+    console.error("Unexpected soft delete all transactions error:", err);
 
     return NextResponse.json(
       {

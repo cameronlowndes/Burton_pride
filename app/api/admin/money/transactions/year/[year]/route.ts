@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
+import {
+  createMoneyAuditLog,
+  createBulkMoneyAuditLogs,
+} from "@/lib/adminMoneyAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +19,11 @@ type RouteContext = {
 type MoneyTransaction = {
   id: string;
   created_at: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  title?: string | null;
+  description?: string | null;
   transaction_date: string | null;
   type: "income" | "expense" | string | null;
   category: string | null;
@@ -77,6 +87,30 @@ function isPersonalFundsTransaction(item: MoneyTransaction) {
   );
 }
 
+async function getActorLabel() {
+  try {
+    const user = await currentUser();
+
+    const actorName =
+      user?.fullName ||
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      null;
+
+    const actorEmail =
+      user?.primaryEmailAddress?.emailAddress ||
+      user?.emailAddresses?.[0]?.emailAddress ||
+      null;
+
+    if (actorName && actorEmail) return `${actorName} (${actorEmail})`;
+    if (actorName) return actorName;
+    if (actorEmail) return actorEmail;
+
+    return "Unknown admin";
+  } catch {
+    return "Unknown admin";
+  }
+}
+
 async function checkDeletePasswordThroughSettingsApi(
   req: NextRequest,
   password: string
@@ -84,7 +118,7 @@ async function checkDeletePasswordThroughSettingsApi(
   const passwordCheck = await fetch(
     `${req.nextUrl.origin}/api/admin/settings/delete-password`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         cookie: req.headers.get("cookie") || "",
@@ -138,6 +172,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       await supabaseAdmin
         .from("money_transactions")
         .select("*")
+        .is("deleted_at", null)
         .order("transaction_date", { ascending: false })
         .order("created_at", { ascending: false });
 
@@ -206,8 +241,8 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
           receivedFromTransactions > 0
             ? receivedFromTransactions
             : wasCreatedThisYear
-              ? sponsor.received_amount_pence || 0
-              : 0;
+            ? sponsor.received_amount_pence || 0
+            : 0;
 
         const agreedAmountPence =
           wasCreatedThisYear || hasTransactionsThisYear
@@ -347,7 +382,8 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
 
     const { data: transactions, error: loadError } = await supabaseAdmin
       .from("money_transactions")
-      .select("id, transaction_date, created_at");
+      .select("*")
+      .is("deleted_at", null);
 
     if (loadError) {
       return NextResponse.json(
@@ -360,32 +396,40 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const ids = ((transactions || []) as Pick<
-      MoneyTransaction,
-      "id" | "transaction_date" | "created_at"
-    >[])
-      .filter((item) => {
+    const rowsToSoftDelete = ((transactions || []) as MoneyTransaction[]).filter(
+      (item) => {
         const transactionYear = getYearFromDate(
           item.transaction_date || item.created_at
         );
 
         return transactionYear === year;
-      })
-      .map((item) => item.id);
+      }
+    );
+
+    const ids = rowsToSoftDelete.map((item) => item.id);
 
     if (ids.length === 0) {
       return NextResponse.json({
         ok: true,
         year,
         deletedCount: 0,
-        message: `No transactions found for ${year}.`,
+        message: `No active transactions found for ${year}.`,
       });
     }
 
-    const { error: deleteError } = await supabaseAdmin
+    const deletedAt = new Date().toISOString();
+    const deletedBy = await getActorLabel();
+
+    const { data: deletedRows, error: deleteError } = await supabaseAdmin
       .from("money_transactions")
-      .delete()
-      .in("id", ids);
+      .update({
+        deleted_at: deletedAt,
+        deleted_by: deletedBy,
+        updated_at: deletedAt,
+      })
+      .in("id", ids)
+      .is("deleted_at", null)
+      .select("*");
 
     if (deleteError) {
       return NextResponse.json(
@@ -398,11 +442,61 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    await createMoneyAuditLog({
+      action: "delete_year",
+      transactionId: null,
+      transactionTitle: `Delete ${year} transactions`,
+      beforeData: null,
+      afterData: null,
+      changedFields: {
+        deleted_at: {
+          before: null,
+          after: deletedAt,
+        },
+        deleted_by: {
+          before: null,
+          after: deletedBy,
+        },
+      },
+      metadata: {
+        source: "money_tracker",
+        route: "/api/admin/money/transactions/year/[year]",
+        delete_type: "soft_delete_year",
+        year,
+        deleted_count: ids.length,
+        deleted_ids: ids,
+      },
+    });
+
+    await createBulkMoneyAuditLogs(
+      rowsToSoftDelete.map((beforeRow) => {
+        const afterRow =
+          deletedRows?.find((item) => item.id === beforeRow.id) || null;
+
+        return {
+          action: "delete",
+          transactionId: beforeRow.id,
+          transactionTitle: beforeRow.title || null,
+          beforeData: beforeRow,
+          afterData: afterRow,
+          metadata: {
+            source: "money_tracker",
+            route: "/api/admin/money/transactions/year/[year]",
+            delete_type: "soft_delete_from_delete_year",
+            parent_action: "delete_year",
+            year,
+            deleted_at: deletedAt,
+            deleted_by: deletedBy,
+          },
+        };
+      })
+    );
+
     return NextResponse.json({
       ok: true,
       year,
       deletedCount: ids.length,
-      message: `All ${year} money tracker transactions deleted successfully.`,
+      message: `All active ${year} money tracker transactions moved to deleted area successfully.`,
     });
   } catch (err) {
     console.error("Money transactions year DELETE error:", err);
