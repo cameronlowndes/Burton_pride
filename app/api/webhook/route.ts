@@ -846,44 +846,44 @@ function rafflePrintableAttachmentSvg({
   <rect x="8" y="8" width="46" height="544" fill="url(#stubRainbow)"/>
   <rect x="54" y="8" width="80" height="544" fill="#f1f5f9" stroke="#cbd5e1"/>
   <line x1="428" y1="8" x2="428" y2="552" stroke="#111827" stroke-width="4" stroke-dasharray="10 8"/>
-  <text x="96" y="280" transform="rotate(-90 96 280)" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900" letter-spacing="2" fill="#111827">RAFFLE TICKET STUB</text>
-  <text x="150" y="55" font-family="Arial" font-size="18" font-weight="900" fill="#111827">BURTON PRIDE C.I.C</text>
-  <text x="150" y="100" font-family="Arial" font-size="12" font-weight="900">NAME</text>
-  <text x="150" y="124" font-family="Arial" font-size="15" font-weight="900">${safeName}</text>
+  <text x="96" y="280" transform="rotate(-90 96 280)" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="900" letter-spacing="2" fill="#111827">RAFFLE TICKET STUB</text>
+  <text x="150" y="55" font-family="sans-serif" font-size="18" font-weight="900" fill="#111827">BURTON PRIDE C.I.C</text>
+  <text x="150" y="100" font-family="sans-serif" font-size="12" font-weight="900">NAME</text>
+  <text x="150" y="124" font-family="sans-serif" font-size="15" font-weight="900">${safeName}</text>
   <line x1="150" y1="154" x2="400" y2="154" stroke="#111827" stroke-width="2"/>
-  <text x="150" y="188" font-family="Arial" font-size="12" font-weight="900">PHONE</text>
-  <text x="150" y="212" font-family="Arial" font-size="15" font-weight="900">${safePhone}</text>
+  <text x="150" y="188" font-family="sans-serif" font-size="12" font-weight="900">PHONE</text>
+  <text x="150" y="212" font-family="sans-serif" font-size="15" font-weight="900">${safePhone}</text>
   <line x1="150" y1="242" x2="400" y2="242" stroke="#111827" stroke-width="2"/>
-  <text x="150" y="276" font-family="Arial" font-size="12" font-weight="900">EMAIL</text>
-  <text x="150" y="300" font-family="Arial" font-size="14" font-weight="900">${safeEmail}</text>
+  <text x="150" y="276" font-family="sans-serif" font-size="12" font-weight="900">EMAIL</text>
+  <text x="150" y="300" font-family="sans-serif" font-size="14" font-weight="900">${safeEmail}</text>
   <line x1="150" y1="338" x2="400" y2="338" stroke="#111827" stroke-width="2"/>
-  <text x="150" y="515" font-family="Courier New" font-size="30" font-weight="900" letter-spacing="2">${safeNumber}</text>
-  <text x="398" y="512" text-anchor="end" font-family="Arial" font-size="12" font-weight="900">${escapeHtml(stubPriceLabel)}</text>
+  <text x="150" y="515" font-family="monospace" font-size="30" font-weight="900" letter-spacing="2">${safeNumber}</text>
+  <text x="398" y="512" text-anchor="end" font-family="sans-serif" font-size="12" font-weight="900">${escapeHtml(stubPriceLabel)}</text>
 
   <rect x="442" y="18" width="1132" height="524" fill="url(#mainRainbow)"/>
   <rect x="456" y="32" width="1104" height="496" fill="#ffffff" stroke="#cbd5e1"/>
   <text x="560" y="100" font-size="16" fill="#ef4444" opacity="0.35">▰</text><text x="690" y="72" font-size="16" fill="#2563eb" opacity="0.35">●</text><text x="820" y="90" font-size="16" fill="#16a34a" opacity="0.35">◆</text><text x="1040" y="78" font-size="16" fill="#ef4444" opacity="0.35">●</text><text x="1270" y="88" font-size="16" fill="#2563eb" opacity="0.35">▰</text><text x="1450" y="72" font-size="16" fill="#eab308" opacity="0.35">◆</text>
   <circle cx="800" cy="100" r="48" fill="#ffffff" stroke="#111827" stroke-width="2"/>
-  <text x="800" y="108" text-anchor="middle" font-family="Arial" font-size="18" font-weight="900" fill="#7e22ce">BP</text>
-  <text x="1050" y="92" text-anchor="middle" font-family="Arial" font-size="48" font-weight="900" fill="#7e22ce">RAFFLE TICKET</text>
-  <text x="1050" y="135" text-anchor="middle" font-family="Arial" font-size="28" font-weight="900" letter-spacing="1" fill="#374151">BURTON PRIDE 2026 RAFFLE</text>
+  <text x="800" y="108" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="900" fill="#7e22ce">BP</text>
+  <text x="1050" y="92" text-anchor="middle" font-family="sans-serif" font-size="48" font-weight="900" fill="#7e22ce">RAFFLE TICKET</text>
+  <text x="1050" y="135" text-anchor="middle" font-family="sans-serif" font-size="28" font-weight="900" letter-spacing="1" fill="#374151">BURTON PRIDE 2026 RAFFLE</text>
   <rect x="500" y="180" width="320" height="84" rx="6" fill="url(#gold)" stroke="#111827" stroke-width="2"/>
-  <text x="660" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">1st PRIZE:</text><text x="660" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£100</text>
+  <text x="660" y="208" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="900">1st PRIZE:</text><text x="660" y="250" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="900">£100</text>
   <rect x="850" y="180" width="320" height="84" rx="6" fill="url(#silver)" stroke="#111827" stroke-width="2"/>
-  <text x="1010" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">2nd PRIZE:</text><text x="1010" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£60</text>
+  <text x="1010" y="208" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="900">2nd PRIZE:</text><text x="1010" y="250" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="900">£60</text>
   <rect x="1200" y="180" width="320" height="84" rx="6" fill="url(#bronze)" stroke="#111827" stroke-width="2"/>
-  <text x="1360" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">3rd PRIZE:</text><text x="1360" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£30</text>
+  <text x="1360" y="208" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="900">3rd PRIZE:</text><text x="1360" y="250" text-anchor="middle" font-family="sans-serif" font-size="36" font-weight="900">£30</text>
   <rect x="500" y="310" width="190" height="92" rx="10" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
-  <text x="595" y="338" text-anchor="middle" font-family="Arial" font-size="13" font-weight="900">TICKET PRICE:</text>
-  <text x="595" y="369" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900">${escapeHtml(ticketLabel)}</text>
-  <text x="595" y="394" text-anchor="middle" font-family="Arial" font-size="16" font-weight="900">${escapeHtml(priceLabel)}</text>
-  <text x="1040" y="330" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900">THE DRAW DATE &amp; LOCATION:</text>
-  <text x="1040" y="370" text-anchor="middle" font-family="Arial" font-size="29" font-weight="900">SATURDAY 27th JUNE 2026</text>
-  <text x="1040" y="402" text-anchor="middle" font-family="Arial" font-size="16" font-weight="900">AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX</text>
-  <text x="1040" y="432" text-anchor="middle" font-family="Arial" font-size="12" font-weight="900">DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB</text>
-  <text x="1040" y="462" text-anchor="middle" font-family="Arial" font-size="11" font-weight="900">Licensed by East Staffordshire Council under registration number SL0507.</text>
+  <text x="595" y="338" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="900">TICKET PRICE:</text>
+  <text x="595" y="369" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="900">${escapeHtml(ticketLabel)}</text>
+  <text x="595" y="394" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="900">${escapeHtml(priceLabel)}</text>
+  <text x="1040" y="330" text-anchor="middle" font-family="sans-serif" font-size="17" font-weight="900">THE DRAW DATE &amp; LOCATION:</text>
+  <text x="1040" y="370" text-anchor="middle" font-family="sans-serif" font-size="29" font-weight="900">SATURDAY 27th JUNE 2026</text>
+  <text x="1040" y="402" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="900">AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX</text>
+  <text x="1040" y="432" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="900">DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB</text>
+  <text x="1040" y="462" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="900">Licensed by East Staffordshire Council under registration number SL0507.</text>
   <rect x="1400" y="410" width="120" height="66" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
-  <text x="1460" y="452" text-anchor="middle" font-family="Courier New" font-size="28" font-weight="900" letter-spacing="2">${safeNumber}</text>
+  <text x="1460" y="452" text-anchor="middle" font-family="monospace" font-size="28" font-weight="900" letter-spacing="2">${safeNumber}</text>
   <circle cx="430" cy="560" r="130" fill="url(#stubRainbow)" opacity="0.20"/>
 </svg>`;
 }
