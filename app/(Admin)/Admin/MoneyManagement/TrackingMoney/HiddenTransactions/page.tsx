@@ -137,7 +137,7 @@ export default function HiddenTransactionsPage() {
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
@@ -260,37 +260,6 @@ export default function HiddenTransactionsPage() {
     }
   }
 
-  async function verifyMainAdminDeletePassword(password: string) {
-    const res = await fetch("/api/admin/settings/delete-password", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        password,
-      }),
-    });
-
-    const text = await res.text();
-
-    let data: any = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { rawResponse: text };
-    }
-
-    if (!res.ok || !data.ok) {
-      throw {
-        message: data.error || "Incorrect main admin delete password.",
-        details: data,
-        status: res.status,
-      };
-    }
-
-    return true;
-  }
-
   async function permanentlyDeleteTransaction() {
     if (!deleteId) return;
 
@@ -299,15 +268,13 @@ export default function HiddenTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const cleanPassword = deletePassword.trim();
+      const cleanConfirmText = deleteConfirmText.trim();
 
-      if (!cleanPassword) {
-        setError("Please enter the main admin delete password.");
+      if (cleanConfirmText !== "DELETE") {
+        setError("Please type DELETE in capital letters to confirm.");
         setDeleting(false);
         return;
       }
-
-      await verifyMainAdminDeletePassword(cleanPassword);
 
       const res = await fetch(
         `/api/admin/money/transactions/${deleteId}/permanent`,
@@ -317,7 +284,7 @@ export default function HiddenTransactionsPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            password: cleanPassword,
+            confirmText: cleanConfirmText,
           }),
         }
       );
@@ -341,7 +308,7 @@ export default function HiddenTransactionsPage() {
 
       setTransactions((prev) => prev.filter((item) => item.id !== deleteId));
       setDeleteId(null);
-      setDeletePassword("");
+      setDeleteConfirmText("");
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -595,7 +562,10 @@ export default function HiddenTransactionsPage() {
                             <button
                               type="button"
                               disabled={deleting}
-                              onClick={() => setDeleteId(item.id)}
+                              onClick={() => {
+                                setDeleteId(item.id);
+                                setDeleteConfirmText("");
+                              }}
                               className="inline-flex items-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:opacity-50"
                               title="Permanently delete transaction"
                             >
@@ -629,25 +599,30 @@ export default function HiddenTransactionsPage() {
             </div>
 
             <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
+              Type DELETE to confirm
             </label>
 
             <input
-              type="password"
-              value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-hidden-delete-password"
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type DELETE"
+              autoComplete="off"
+              name="money-hidden-delete-confirm"
               className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
             />
+
+            <p className="mt-2 text-xs text-white/45">
+              This must be typed exactly as{" "}
+              <span className="font-bold text-red-200">DELETE</span>.
+            </p>
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setDeleteId(null);
-                  setDeletePassword("");
+                  setDeleteConfirmText("");
                 }}
                 disabled={deleting}
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
@@ -658,7 +633,7 @@ export default function HiddenTransactionsPage() {
               <button
                 type="button"
                 onClick={permanentlyDeleteTransaction}
-                disabled={deleting || !deletePassword.trim()}
+                disabled={deleting || deleteConfirmText.trim() !== "DELETE"}
                 className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {deleting ? "Deleting..." : "Delete Forever"}

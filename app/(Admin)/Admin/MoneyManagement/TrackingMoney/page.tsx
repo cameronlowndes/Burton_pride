@@ -1,101 +1,40 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import ExcelJS from "exceljs";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { SyntheticEvent } from "react";
+
+import type {
+  FormState,
+  Sponsor,
+  SponsorBreakdown,
+  SponsorFormState,
+  Transaction,
+} from "@/lib/money/types";
+
 import {
-  Banknote,
-  Bug,
-  Download,
-  FileText,
-  Pencil,
-  Printer,
-  RefreshCcw,
-  Trash2,
-  X,
-} from "lucide-react";
+  addRepeatingDate,
+  getTransactionMonthKey,
+  getTransactionYear,
+  isPersonalFundsTransaction,
+  isSponsorshipTransaction,
+  monthNameFromKey,
+  repeatFrequencyLabel,
+  sponsorNameMatches,
+} from "@/lib/money/utils";
 
-type Transaction = {
-  id: string;
-  created_at: string;
-  title: string;
-  description: string | null;
-  type: "income" | "expense";
-  category: string | null;
-  amount_pence: number;
-  payment_method: string | null;
-  transaction_date: string | null;
-  invoice_image_url: string | null;
+import {
+  exportFullYearlyReportFile,
+  exportTransactionsToExcelFile,
+} from "@/lib/money/excel";
 
-  is_personal_funds: boolean | null;
-  personal_funds_name: string | null;
-  personal_funds_repaid: boolean | null;
-  personal_funds_repaid_at: string | null;
+import { printMoneyReport } from "@/lib/money/print";
 
-  sponsor_id: string | null;
-  sponsor_name: string | null;
-  sponsorship_note: string | null;
-
-  source: string | null;
-  stripe_session_id: string | null;
-  stripe_invoice_id: string | null;
-  stripe_customer_id: string | null;
-  stripe_payment_intent_id: string | null;
-
-  deleted_at?: string | null;
-  deleted_by?: string | null;
-};
-
-type Sponsor = {
-  id: string;
-  sponsor_name: string;
-  contact_name: string | null;
-  email: string | null;
-  phone: string | null;
-  agreed_amount_pence: number;
-  received_amount_pence: number;
-  notes: string | null;
-  is_active: boolean;
-  created_at: string;
-};
-
-type SponsorBreakdown = {
-  sponsor_id: string;
-  sponsor_name: string;
-  contact_name: string | null;
-  email: string | null;
-  phone: string | null;
-  agreed_amount_pence: number;
-  received_pence: number;
-  spent_pence: number;
-  remaining_pence: number;
-  carried_forward_pence?: number;
-  notes?: string | null;
-};
-
-type FormState = {
-  title: string;
-  description: string;
-  type: "income" | "expense";
-  category: string;
-  amount: string;
-  paymentMethod: string;
-  transactionDate: string;
-  isPersonalFunds: boolean;
-  personalFundsName: string;
-  sponsorId: string;
-  sponsorName: string;
-  sponsorshipNote: string;
-};
-
-type SponsorFormState = {
-  sponsorName: string;
-  contactName: string;
-  email: string;
-  phone: string;
-  agreedAmount: string;
-  receivedAmount: string;
-  notes: string;
-};
+import MoneyHeader from "../../components/money/MoneyHeader";
+import MoneyStatsCards from "../../components/money/MoneySummaryCards";
+import SponsorshipBreakdown from "../../components/money/SponsorshipBreakdown";
+import MoneyTransactionForm from "../../components/money/MoneyTransactionForm";
+import MoneyTransactionsTable from "../../components/money/MoneyTransactionsTable";
+import MoneyModals from "../../components/money/MoneyModals";
 
 const initialForm: FormState = {
   title: "",
@@ -110,6 +49,9 @@ const initialForm: FormState = {
   sponsorId: "",
   sponsorName: "",
   sponsorshipNote: "",
+  isRepeating: false,
+  repeatFrequency: "monthly",
+  repeatCount: "12",
 };
 
 const initialSponsorForm: SponsorFormState = {
@@ -122,288 +64,14 @@ const initialSponsorForm: SponsorFormState = {
   notes: "",
 };
 
-const paymentMethods = [
-  "Stripe",
-  "Online Payment",
-  "Cash",
-  "Bank Transfer",
-  "PayPal",
-  "Card Machine",
-  "Personal Funds",
-  "Item Donation",
-];
+async function readJsonResponse(res: Response) {
+  const text = await res.text();
 
-function money(amountPence: number) {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format((amountPence || 0) / 100);
-}
-
-function pounds(amountPence: number | null | undefined) {
-  return (amountPence || 0) / 100;
-}
-
-function sourceLabel(source: string | null) {
-  if (source === "website_donation") return "Website Donation";
-  if (source === "website_monthly_donation") return "Monthly Donation";
-  if (source === "sponsorship") return "Sponsorship";
-  if (source === "manual") return "Manual";
-  if (!source) return "Manual";
-
-  return source
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function escapeHtml(value: string | number | null | undefined) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { rawResponse: text };
   }
-
-  return date.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function getTransactionYear(value: string | null | undefined) {
-  if (!value) return new Date().getFullYear().toString();
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return new Date().getFullYear().toString();
-  }
-
-  return date.getFullYear().toString();
-}
-
-function getTransactionMonthKey(value: string | null | undefined) {
-  const fallback = new Date();
-
-  if (!value) {
-    return `${fallback.getFullYear()}-${String(
-      fallback.getMonth() + 1
-    ).padStart(2, "0")}`;
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return `${fallback.getFullYear()}-${String(
-      fallback.getMonth() + 1
-    ).padStart(2, "0")}`;
-  }
-
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
-    2,
-    "0"
-  )}`;
-}
-
-function monthNameFromKey(monthKey: string) {
-  if (monthKey === "all") return "Full Year";
-
-  const [year, month] = monthKey.split("-");
-  const date = new Date(Number(year), Number(month) - 1, 1);
-
-  return date.toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function isPersonalFundsTransaction(item: Transaction) {
-  return (
-    item.type === "expense" &&
-    (item.is_personal_funds === true ||
-      item.payment_method?.toLowerCase() === "personal funds")
-  );
-}
-
-function isSponsorshipTransaction(item: Transaction) {
-  return (
-    Boolean(item.sponsor_id || item.sponsor_name) ||
-    item.source === "sponsorship" ||
-    item.category?.toLowerCase() === "sponsorship"
-  );
-}
-
-function sponsorNameMatches(
-  a: string | null | undefined,
-  b: string | null | undefined
-) {
-  return Boolean(a && b && a.toLowerCase().trim() === b.toLowerCase().trim());
-}
-
-async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: string) {
-  const buffer = await workbook.xlsx.writeBuffer();
-
-  const blob = new Blob([buffer as BlobPart], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = filename;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-}
-
-function styleTitleCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    size: 18,
-    color: { argb: "FFFFFFFF" },
-  };
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF111827" },
-  };
-  cell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-  };
-}
-
-function styleSubtitleCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    size: 11,
-    color: { argb: "FF374151" },
-  };
-  cell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-  };
-}
-
-function styleSectionCell(cell: ExcelJS.Cell, argb = "FF7C3AED") {
-  cell.font = {
-    bold: true,
-    size: 13,
-    color: { argb: "FFFFFFFF" },
-  };
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb },
-  };
-  cell.alignment = {
-    horizontal: "left",
-    vertical: "middle",
-  };
-}
-
-function styleHeaderRow(row: ExcelJS.Row, argb = "FF111827") {
-  row.eachCell((cell) => {
-    cell.font = {
-      bold: true,
-      color: { argb: "FFFFFFFF" },
-    };
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb },
-    };
-    cell.alignment = {
-      horizontal: "center",
-      vertical: "middle",
-      wrapText: true,
-    };
-    cell.border = {
-      top: { style: "thin", color: { argb: "FFD1D5DB" } },
-      left: { style: "thin", color: { argb: "FFD1D5DB" } },
-      bottom: { style: "thin", color: { argb: "FFD1D5DB" } },
-      right: { style: "thin", color: { argb: "FFD1D5DB" } },
-    };
-  });
-
-  row.height = 24;
-}
-
-function styleBodyRow(row: ExcelJS.Row) {
-  row.eachCell((cell) => {
-    cell.alignment = {
-      vertical: "top",
-      wrapText: true,
-    };
-    cell.border = {
-      top: { style: "thin", color: { argb: "FFE5E7EB" } },
-      left: { style: "thin", color: { argb: "FFE5E7EB" } },
-      bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-      right: { style: "thin", color: { argb: "FFE5E7EB" } },
-    };
-  });
-}
-
-function styleCurrencyCell(cell: ExcelJS.Cell, bold = false) {
-  cell.numFmt = '£#,##0.00;[Red]-£#,##0.00';
-  cell.font = {
-    bold,
-  };
-  cell.alignment = {
-    horizontal: "right",
-    vertical: "top",
-  };
-}
-
-function addMergedTitle(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleTitleCell(cell);
-}
-
-function addMergedSubtitle(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleSubtitleCell(cell);
-}
-
-function addMergedSection(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string,
-  colour = "FF7C3AED"
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleSectionCell(cell, colour);
 }
 
 export default function MoneyTransactionsPage() {
@@ -487,14 +155,7 @@ export default function MoneyTransactionsPage() {
         cache: "no-store",
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -526,14 +187,7 @@ export default function MoneyTransactionsPage() {
         cache: "no-store",
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -629,9 +283,7 @@ export default function MoneyTransactionsPage() {
   }, [selectedYear, yearTransactions]);
 
   const monthViewTransactions = useMemo(() => {
-    if (selectedViewMonth === "all") {
-      return yearTransactions;
-    }
+    if (selectedViewMonth === "all") return yearTransactions;
 
     return yearTransactions.filter((item) => {
       return (
@@ -708,7 +360,8 @@ export default function MoneyTransactionsPage() {
           : "";
 
         const sponsorStartedBeforeThisYear =
-          sponsorCreatedYear && Number(sponsorCreatedYear) < Number(selectedYear);
+          sponsorCreatedYear &&
+          Number(sponsorCreatedYear) < Number(selectedYear);
 
         const sponsorStartedThisYear = sponsorCreatedYear === selectedYear;
 
@@ -823,9 +476,7 @@ export default function MoneyTransactionsPage() {
   ]);
 
   const printTransactionsList = useMemo(() => {
-    if (selectedPrintMonth === "all") {
-      return filteredTransactions;
-    }
+    if (selectedPrintMonth === "all") return filteredTransactions;
 
     return filteredTransactions.filter((item) => {
       return (
@@ -912,7 +563,9 @@ export default function MoneyTransactionsPage() {
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const sponsorshipSpent = printTransactionsList
-      .filter((item) => item.type === "expense" && isSponsorshipTransaction(item))
+      .filter(
+        (item) => item.type === "expense" && isSponsorshipTransaction(item)
+      )
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const personalFundsOutstanding = personalFunds - personalFundsRepaid;
@@ -990,14 +643,7 @@ export default function MoneyTransactionsPage() {
         }
       );
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1030,14 +676,7 @@ export default function MoneyTransactionsPage() {
         method: "DELETE",
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1092,6 +731,9 @@ export default function MoneyTransactionsPage() {
       sponsorId: "",
       sponsorName: "",
       sponsorshipNote: "",
+      isRepeating: false,
+      repeatFrequency: "monthly",
+      repeatCount: "12",
     });
 
     setInvoiceFile(null);
@@ -1129,6 +771,9 @@ export default function MoneyTransactionsPage() {
       sponsorId: matchingSponsor?.id || item.sponsor_id || "",
       sponsorName: matchingSponsor?.sponsor_name || item.sponsor_name || "",
       sponsorshipNote: item.sponsorship_note || "",
+      isRepeating: false,
+      repeatFrequency: "monthly",
+      repeatCount: "12",
     });
 
     setInvoiceFile(null);
@@ -1149,7 +794,7 @@ export default function MoneyTransactionsPage() {
     setErrorDetails(null);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
 
     try {
@@ -1183,6 +828,28 @@ export default function MoneyTransactionsPage() {
         return;
       }
 
+      if (form.isRepeating && editingTransaction) {
+        setError(
+          "Repeating payments can only be created as new transactions, not while editing."
+        );
+        setSaving(false);
+        return;
+      }
+
+      const repeatCount = form.isRepeating ? Number(form.repeatCount) : 1;
+
+      if (form.isRepeating && (!repeatCount || repeatCount < 2)) {
+        setError("Please enter at least 2 repeating payments.");
+        setSaving(false);
+        return;
+      }
+
+      if (form.isRepeating && repeatCount > 60) {
+        setError("Please keep repeating payments to 60 or fewer at one time.");
+        setSaving(false);
+        return;
+      }
+
       const selectedSponsorForSave = form.sponsorId
         ? displaySponsors.find((sponsor) => sponsor.id === form.sponsorId)
         : null;
@@ -1206,61 +873,91 @@ export default function MoneyTransactionsPage() {
         return;
       }
 
-      const uploadData = new FormData();
-
-      uploadData.append("title", form.title);
-      uploadData.append("description", form.description);
-      uploadData.append("type", isSponsorLinked ? "expense" : form.type);
-      uploadData.append("category", isSponsorLinked ? "Sponsorship" : "");
-      uploadData.append("amount", form.amount);
-      uploadData.append(
-        "paymentMethod",
-        isSponsorLinked ? "Sponsorship Money" : form.paymentMethod
-      );
-      uploadData.append("transactionDate", form.transactionDate);
-      uploadData.append("source", isSponsorLinked ? "sponsorship" : "manual");
-      uploadData.append(
-        "isPersonalFunds",
-        String(isSponsorLinked ? false : form.isPersonalFunds)
-      );
-      uploadData.append(
-        "personalFundsName",
-        isSponsorLinked ? "" : form.personalFundsName
-      );
-      uploadData.append("sponsorId", finalSponsorId);
-      uploadData.append("sponsorName", finalSponsorName);
-      uploadData.append("sponsorshipNote", form.sponsorshipNote);
-
-      if (invoiceFile) {
-        uploadData.append("invoiceFile", invoiceFile);
+      if (isSponsorLinked && !form.sponsorshipNote.trim()) {
+        setError(
+          "Please add a sponsorship note explaining what this sponsor money was spent on."
+        );
+        setSaving(false);
+        return;
       }
 
-      const res = await fetch(
-        editingTransaction
-          ? `/api/admin/money/transactions/${editingTransaction.id}`
-          : "/api/admin/money/transactions",
-        {
-          method: editingTransaction ? "PATCH" : "POST",
-          body: uploadData,
+      const datesToCreate = Array.from({ length: repeatCount }).map((_, index) =>
+        addRepeatingDate(form.transactionDate, index, form.repeatFrequency)
+      );
+
+      for (let index = 0; index < datesToCreate.length; index += 1) {
+        const transactionDate = datesToCreate[index];
+        const uploadData = new FormData();
+
+        uploadData.append(
+          "title",
+          form.isRepeating
+            ? `${form.title} (${index + 1}/${repeatCount})`
+            : form.title
+        );
+
+        uploadData.append(
+          "description",
+          form.isRepeating
+            ? `${form.description || ""}${
+                form.description ? "\n\n" : ""
+              }Repeating payment: ${repeatFrequencyLabel(
+                form.repeatFrequency
+              )}. Payment ${index + 1} of ${repeatCount}.`
+            : form.description
+        );
+
+        uploadData.append("type", isSponsorLinked ? "expense" : form.type);
+        uploadData.append("category", isSponsorLinked ? "Sponsorship" : "");
+        uploadData.append("amount", form.amount);
+        uploadData.append(
+          "paymentMethod",
+          isSponsorLinked ? "Sponsorship Money" : form.paymentMethod
+        );
+        uploadData.append("transactionDate", transactionDate);
+        uploadData.append("source", isSponsorLinked ? "sponsorship" : "manual");
+        uploadData.append(
+          "isPersonalFunds",
+          String(isSponsorLinked ? false : form.isPersonalFunds)
+        );
+        uploadData.append(
+          "personalFundsName",
+          isSponsorLinked ? "" : form.personalFundsName
+        );
+        uploadData.append("sponsorId", finalSponsorId);
+        uploadData.append("sponsorName", finalSponsorName);
+        uploadData.append("sponsorshipNote", form.sponsorshipNote);
+        uploadData.append("isRepeating", String(form.isRepeating));
+        uploadData.append("repeatFrequency", form.repeatFrequency);
+        uploadData.append("repeatCount", String(repeatCount));
+        uploadData.append("repeatIndex", String(index + 1));
+
+        if (invoiceFile) {
+          uploadData.append("invoiceFile", invoiceFile);
         }
-      );
 
-      const text = await res.text();
+        const res = await fetch(
+          editingTransaction
+            ? `/api/admin/money/transactions/${editingTransaction.id}`
+            : "/api/admin/money/transactions",
+          {
+            method: editingTransaction ? "PATCH" : "POST",
+            body: uploadData,
+          }
+        );
 
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+        const data = await readJsonResponse(res);
 
-      if (!res.ok || !data.ok) {
-        throw {
-          message: data.error || "Failed to save transaction",
-          details: data,
-          status: res.status,
-          sentForm: form,
-        };
+        if (!res.ok || !data.ok) {
+          throw {
+            message:
+              data.error ||
+              `Failed to save transaction ${index + 1} of ${repeatCount}`,
+            details: data,
+            status: res.status,
+            sentForm: form,
+          };
+        }
       }
 
       setForm(initialForm);
@@ -1294,14 +991,7 @@ export default function MoneyTransactionsPage() {
         }),
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1337,14 +1027,7 @@ export default function MoneyTransactionsPage() {
       }),
     });
 
-    const text = await res.text();
-
-    let data: any = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { rawResponse: text };
-    }
+    const data = await readJsonResponse(res);
 
     if (!res.ok || !data.ok) {
       throw {
@@ -1386,14 +1069,7 @@ export default function MoneyTransactionsPage() {
         }
       );
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1443,14 +1119,7 @@ export default function MoneyTransactionsPage() {
         }),
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1495,14 +1164,7 @@ export default function MoneyTransactionsPage() {
         }
       );
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -1526,166 +1188,11 @@ export default function MoneyTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const fileDate = new Date().toISOString().slice(0, 10);
-      const workbook = new ExcelJS.Workbook();
-
-      workbook.creator = "Burton Pride C.I.C";
-      workbook.created = new Date();
-
-      const sheet = workbook.addWorksheet("Filtered Transactions", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
+      await exportTransactionsToExcelFile({
+        selectedYear,
+        selectedViewMonth,
+        filteredTransactions,
       });
-
-      sheet.properties.defaultRowHeight = 20;
-
-      sheet.columns = [
-        { key: "year", width: 14 },
-        { key: "date", width: 16 },
-        { key: "title", width: 30 },
-        { key: "description", width: 36 },
-        { key: "type", width: 16 },
-        { key: "payment", width: 20 },
-        { key: "source", width: 22 },
-        { key: "sponsor", width: 24 },
-        { key: "sponsorshipNote", width: 36 },
-        { key: "personalFunds", width: 16 },
-        { key: "paidBy", width: 22 },
-        { key: "repaymentStatus", width: 20 },
-        { key: "invoice", width: 30 },
-        { key: "amount", width: 16 },
-      ];
-
-      addMergedTitle(
-        sheet,
-        "Burton Pride C.I.C - Money Transactions Export",
-        "A1",
-        "N1"
-      );
-      addMergedSubtitle(
-        sheet,
-        `View: ${
-          selectedViewMonth === "all"
-            ? `Jan to Dec ${selectedYear}`
-            : monthNameFromKey(selectedViewMonth)
-        } | Exported: ${new Date().toLocaleString("en-GB")} | Rows: ${
-          filteredTransactions.length
-        }`,
-        "A2",
-        "N2"
-      );
-
-      sheet.addRow([]);
-      sheet.addRow([
-        "Year",
-        "Date",
-        "Title",
-        "Description",
-        "Type",
-        "Payment Method",
-        "Source",
-        "Sponsor",
-        "Sponsorship Note",
-        "Personal Funds",
-        "Paid By",
-        "Repayment Status",
-        "Invoice / Receipt",
-        "Amount",
-      ]);
-
-      styleHeaderRow(sheet.getRow(4), "FF047857");
-
-      filteredTransactions.forEach((item) => {
-        const isPersonal = isPersonalFundsTransaction(item);
-
-        const row = sheet.addRow({
-          year: selectedYear,
-          date: formatDate(item.transaction_date || item.created_at),
-          title: item.title,
-          description: item.description || "",
-          type: item.type === "income" ? "Money In" : "Money Out",
-          payment: item.payment_method || "",
-          source: sourceLabel(item.source),
-          sponsor: item.sponsor_name || "",
-          sponsorshipNote: item.sponsorship_note || "",
-          personalFunds: isPersonal ? "Yes" : "No",
-          paidBy: item.personal_funds_name || "",
-          repaymentStatus: isPersonal
-            ? item.personal_funds_repaid
-              ? "Paid back"
-              : "Not paid back"
-            : "",
-          invoice: item.invoice_image_url || "",
-          amount: pounds(item.amount_pence),
-        });
-
-        styleBodyRow(row);
-        styleCurrencyCell(row.getCell("amount"), true);
-
-        if (item.type === "income") {
-          row.getCell("type").fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFDCFCE7" },
-          };
-          row.getCell("type").font = {
-            bold: true,
-            color: { argb: "FF166534" },
-          };
-        }
-
-        if (item.type === "expense") {
-          row.getCell("type").fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFEE2E2" },
-          };
-          row.getCell("type").font = {
-            bold: true,
-            color: { argb: "FF991B1B" },
-          };
-        }
-
-        if (isPersonal) {
-          row.getCell("personalFunds").fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFE0F2FE" },
-          };
-          row.getCell("personalFunds").font = {
-            bold: true,
-            color: { argb: "FF075985" },
-          };
-        }
-
-        if (isSponsorshipTransaction(item)) {
-          row.getCell("sponsor").fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFEF3C7" },
-          };
-          row.getCell("sponsor").font = {
-            bold: true,
-            color: { argb: "FF92400E" },
-          };
-        }
-      });
-
-      sheet.autoFilter = {
-        from: "A4",
-        to: "N4",
-      };
-
-      await downloadWorkbook(
-        workbook,
-        `burton-pride-money-transactions-${selectedYear}-${fileDate}.xlsx`
-      );
     } catch (err: any) {
       setError(err?.message || "Failed to export Excel file");
       setErrorDetails(err);
@@ -1697,748 +1204,46 @@ export default function MoneyTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const fileDate = new Date().toISOString().slice(0, 10);
-      const workbook = new ExcelJS.Workbook();
-
-      workbook.creator = "Burton Pride C.I.C";
-      workbook.created = new Date();
-
-      const summarySheet = workbook.addWorksheet("Year Summary", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
+      await exportFullYearlyReportFile({
+        selectedYear,
+        totals,
+        yearlySponsorBreakdown,
+        yearTransactions,
       });
-
-      summarySheet.columns = [
-        { key: "label", width: 36 },
-        { key: "amount", width: 20 },
-        { key: "notes", width: 60 },
-      ];
-
-      addMergedTitle(
-        summarySheet,
-        "Burton Pride C.I.C - Full Yearly Money Report",
-        "A1",
-        "C1"
-      );
-      addMergedSubtitle(
-        summarySheet,
-        `Year: Jan to Dec ${selectedYear} | Generated: ${new Date().toLocaleString(
-          "en-GB"
-        )}`,
-        "A2",
-        "C2"
-      );
-
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Year Summary", "A4", "C4", "FF7C3AED");
-
-      const summaryHeader = summarySheet.addRow(["Item", "Amount", "Notes"]);
-      styleHeaderRow(summaryHeader, "FF111827");
-
-      const summaryRows: Array<[string, number, string]> = [
-        [
-          "Opening Balance",
-          pounds(totals.openingBalance || 0),
-          "Money carried forward from previous years.",
-        ],
-        ["Money In", pounds(totals.income), "All income in the selected year."],
-        [
-          "Money Out",
-          pounds(totals.expense),
-          "Burton Pride money out, including personal funds only once marked paid back.",
-        ],
-        [
-          "Personal Funds Paid",
-          pounds(totals.personalFunds),
-          "Money paid personally by people on behalf of Burton Pride.",
-        ],
-        [
-          "Personal Funds Paid Back",
-          pounds(totals.personalFundsRepaid),
-          "Personal funds marked as paid back.",
-        ],
-        [
-          "Personal Funds Still Owed",
-          pounds(totals.personalFundsOutstanding),
-          "Personal funds not yet paid back.",
-        ],
-        [
-          "Sponsorship Money Received",
-          pounds(totals.sponsorshipIncome),
-          "Sponsor money received or carried forward.",
-        ],
-        [
-          "Sponsorship Money Spent",
-          pounds(totals.sponsorshipSpent),
-          "Spending linked to sponsors.",
-        ],
-        [
-          "Sponsorship Money Left",
-          pounds(totals.sponsorshipRemaining),
-          "Sponsor money remaining after sponsor spending.",
-        ],
-        [
-          "Closing Balance",
-          pounds(totals.balance),
-          "Opening balance plus income minus eligible expenses.",
-        ],
-      ];
-
-      summaryRows.forEach(([label, amount, notes]) => {
-        const row = summarySheet.addRow([label, amount, notes]);
-        styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
-        styleCurrencyCell(row.getCell(2), true);
-      });
-
-      const sponsorSheet = workbook.addWorksheet("Sponsorship Breakdown", {
-        views: [{ state: "frozen", ySplit: 4 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      sponsorSheet.columns = [
-        { key: "sponsor", width: 30 },
-        { key: "contact", width: 24 },
-        { key: "email", width: 30 },
-        { key: "phone", width: 18 },
-        { key: "agreed", width: 16 },
-        { key: "received", width: 16 },
-        { key: "spent", width: 16 },
-        { key: "remaining", width: 16 },
-        { key: "carriedForward", width: 18 },
-        { key: "notes", width: 45 },
-      ];
-
-      addMergedTitle(
-        sponsorSheet,
-        "Burton Pride C.I.C - Sponsorship Breakdown",
-        "A1",
-        "J1"
-      );
-      addMergedSubtitle(
-        sponsorSheet,
-        `Year: Jan to Dec ${selectedYear}`,
-        "A2",
-        "J2"
-      );
-
-      sponsorSheet.addRow([]);
-      const sponsorHeader = sponsorSheet.addRow([
-        "Sponsor",
-        "Contact",
-        "Email",
-        "Phone",
-        "Agreed",
-        "Received",
-        "Spent",
-        "Remaining",
-        "Carried Forward",
-        "Notes",
-      ]);
-      styleHeaderRow(sponsorHeader, "FF92400E");
-
-      if (yearlySponsorBreakdown.length === 0) {
-        const row = sponsorSheet.addRow([
-          `No sponsors added for ${selectedYear}`,
-        ]);
-        styleBodyRow(row);
-      } else {
-        yearlySponsorBreakdown.forEach((sponsor) => {
-          const row = sponsorSheet.addRow({
-            sponsor: sponsor.sponsor_name,
-            contact: sponsor.contact_name || "",
-            email: sponsor.email || "",
-            phone: sponsor.phone || "",
-            agreed: pounds(sponsor.agreed_amount_pence),
-            received: pounds(sponsor.received_pence),
-            spent: pounds(sponsor.spent_pence),
-            remaining: pounds(sponsor.remaining_pence),
-            carriedForward: pounds(sponsor.carried_forward_pence || 0),
-            notes: sponsor.notes || "",
-          });
-
-          styleBodyRow(row);
-          styleCurrencyCell(row.getCell("agreed"), true);
-          styleCurrencyCell(row.getCell("received"), true);
-          styleCurrencyCell(row.getCell("spent"), true);
-          styleCurrencyCell(row.getCell("remaining"), true);
-          styleCurrencyCell(row.getCell("carriedForward"), true);
-
-          row.getCell("received").font = {
-            bold: true,
-            color: { argb: "FF166534" },
-          };
-          row.getCell("spent").font = {
-            bold: true,
-            color: { argb: "FF991B1B" },
-          };
-          row.getCell("remaining").font = {
-            bold: true,
-            color: { argb: "FF92400E" },
-          };
-        });
-      }
-
-      sponsorSheet.autoFilter = {
-        from: "A4",
-        to: "J4",
-      };
-
-      const transactionSheet = workbook.addWorksheet("All Transactions", {
-        views: [{ state: "frozen", ySplit: 4 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      transactionSheet.columns = [
-        { key: "year", width: 14 },
-        { key: "date", width: 16 },
-        { key: "title", width: 30 },
-        { key: "description", width: 36 },
-        { key: "type", width: 16 },
-        { key: "payment", width: 20 },
-        { key: "source", width: 22 },
-        { key: "sponsor", width: 24 },
-        { key: "sponsorshipNote", width: 36 },
-        { key: "personalFunds", width: 16 },
-        { key: "paidBy", width: 22 },
-        { key: "repaymentStatus", width: 20 },
-        { key: "invoice", width: 30 },
-        { key: "amount", width: 16 },
-      ];
-
-      addMergedTitle(
-        transactionSheet,
-        "Burton Pride C.I.C - All Transactions",
-        "A1",
-        "N1"
-      );
-      addMergedSubtitle(
-        transactionSheet,
-        `Year: Jan to Dec ${selectedYear} | Rows: ${yearTransactions.length}`,
-        "A2",
-        "N2"
-      );
-
-      transactionSheet.addRow([]);
-      const transactionHeader = transactionSheet.addRow([
-        "Year",
-        "Date",
-        "Title",
-        "Description",
-        "Type",
-        "Payment Method",
-        "Source",
-        "Sponsor",
-        "Sponsorship Note",
-        "Personal Funds",
-        "Paid By",
-        "Repayment Status",
-        "Invoice / Receipt",
-        "Amount",
-      ]);
-      styleHeaderRow(transactionHeader, "FF047857");
-
-      if (yearTransactions.length === 0) {
-        const row = transactionSheet.addRow([
-          `No transactions saved for ${selectedYear}`,
-        ]);
-        styleBodyRow(row);
-      } else {
-        yearTransactions.forEach((item) => {
-          const isPersonal = isPersonalFundsTransaction(item);
-          const hasSponsor = isSponsorshipTransaction(item);
-
-          const row = transactionSheet.addRow({
-            year: selectedYear,
-            date: formatDate(item.transaction_date || item.created_at),
-            title: item.title,
-            description: item.description || "",
-            type: item.type === "income" ? "Money In" : "Money Out",
-            payment: item.payment_method || "",
-            source: sourceLabel(item.source),
-            sponsor: item.sponsor_name || "",
-            sponsorshipNote: item.sponsorship_note || "",
-            personalFunds: isPersonal ? "Yes" : "No",
-            paidBy: item.personal_funds_name || "",
-            repaymentStatus: isPersonal
-              ? item.personal_funds_repaid
-                ? "Paid back"
-                : "Not paid back"
-              : "",
-            invoice: item.invoice_image_url || "",
-            amount: pounds(item.amount_pence),
-          });
-
-          styleBodyRow(row);
-          styleCurrencyCell(row.getCell("amount"), true);
-
-          if (item.type === "income") {
-            row.getCell("type").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFDCFCE7" },
-            };
-            row.getCell("type").font = {
-              bold: true,
-              color: { argb: "FF166534" },
-            };
-          }
-
-          if (item.type === "expense") {
-            row.getCell("type").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFFEE2E2" },
-            };
-            row.getCell("type").font = {
-              bold: true,
-              color: { argb: "FF991B1B" },
-            };
-          }
-
-          if (hasSponsor) {
-            row.getCell("sponsor").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFFEF3C7" },
-            };
-            row.getCell("sponsor").font = {
-              bold: true,
-              color: { argb: "FF92400E" },
-            };
-          }
-
-          if (isPersonal) {
-            row.getCell("personalFunds").fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFE0F2FE" },
-            };
-            row.getCell("personalFunds").font = {
-              bold: true,
-              color: { argb: "FF075985" },
-            };
-          }
-        });
-      }
-
-      transactionSheet.autoFilter = {
-        from: "A4",
-        to: "N4",
-      };
-
-      await downloadWorkbook(
-        workbook,
-        `burton-pride-full-yearly-report-${selectedYear}-${fileDate}.xlsx`
-      );
     } catch (err: any) {
       setError(err?.message || "Failed to export yearly report");
       setErrorDetails(err);
     }
   }
 
-  function printTransactions() {
-    const printedAt = new Date().toLocaleString("en-GB");
+  const printTransactions = useCallback(() => {
+    try {
+      setError("");
+      setErrorDetails(null);
 
-    const printScopeLabel =
-      selectedPrintMonth === "all"
-        ? `Jan to Dec ${selectedYear}`
-        : monthNameFromKey(selectedPrintMonth);
-
-    const sponsorRows =
-      yearlySponsorBreakdown.length === 0
-        ? `<tr><td colspan="7" class="empty">No sponsors added for ${escapeHtml(
-            selectedYear
-          )}.</td></tr>`
-        : yearlySponsorBreakdown
-            .map(
-              (sponsor) => `
-                <tr>
-                  <td>
-                    <strong>${escapeHtml(sponsor.sponsor_name)}</strong>
-                    ${
-                      sponsor.notes
-                        ? `<div class="muted">${escapeHtml(sponsor.notes)}</div>`
-                        : ""
-                    }
-                    ${
-                      (sponsor.carried_forward_pence || 0) > 0
-                        ? `<div class="muted">Carried forward: ${escapeHtml(
-                            money(sponsor.carried_forward_pence || 0)
-                          )}</div>`
-                        : ""
-                    }
-                  </td>
-                  <td>${escapeHtml(sponsor.contact_name || "—")}</td>
-                  <td>${escapeHtml(sponsor.email || "—")}</td>
-                  <td class="amount">${escapeHtml(
-                    money(sponsor.agreed_amount_pence)
-                  )}</td>
-                  <td class="amount green">${escapeHtml(
-                    money(sponsor.received_pence)
-                  )}</td>
-                  <td class="amount red">${escapeHtml(
-                    money(sponsor.spent_pence)
-                  )}</td>
-                  <td class="amount amber">${escapeHtml(
-                    money(sponsor.remaining_pence)
-                  )}</td>
-                </tr>
-              `
-            )
-            .join("");
-
-    const transactionRows =
-      printTransactionsList.length === 0
-        ? `<tr><td colspan="11" class="empty">No transactions to print for ${escapeHtml(
-            printScopeLabel
-          )}.</td></tr>`
-        : printTransactionsList
-            .map((item) => {
-              const isIncome = item.type === "income";
-              const isPersonal = isPersonalFundsTransaction(item);
-              const hasSponsor = isSponsorshipTransaction(item);
-
-              return `
-                <tr>
-                  <td>${escapeHtml(formatDate(item.transaction_date))}</td>
-                  <td>
-                    <strong>${escapeHtml(item.title)}</strong>
-                    ${
-                      item.description
-                        ? `<div class="muted">${escapeHtml(
-                            item.description
-                          )}</div>`
-                        : ""
-                    }
-                  </td>
-                  <td>
-                    <span class="badge ${isIncome ? "income" : "expense"}">
-                      ${escapeHtml(isIncome ? "Money In" : "Money Out")}
-                    </span>
-                  </td>
-                  <td>
-                    ${
-                      hasSponsor
-                        ? `<span class="badge sponsor">${escapeHtml(
-                            item.sponsor_name || "Sponsor"
-                          )}</span>`
-                        : "—"
-                    }
-                  </td>
-                  <td>${escapeHtml(item.sponsorship_note || "—")}</td>
-                  <td>${isPersonal ? "Personal funds" : "—"}</td>
-                  <td>${escapeHtml(item.personal_funds_name || "—")}</td>
-                  <td>${
-                    isPersonal
-                      ? item.personal_funds_repaid
-                        ? "Paid back"
-                        : "Not paid back"
-                      : "—"
-                  }</td>
-                  <td>${escapeHtml(item.payment_method || "—")}</td>
-                  <td>${escapeHtml(item.invoice_image_url ? "Yes" : "—")}</td>
-                  <td class="amount">${escapeHtml(money(item.amount_pence))}</td>
-                </tr>
-              `;
-            })
-            .join("");
-
-    const printHtml = `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Burton Pride Money Tracker Report ${escapeHtml(
-            printScopeLabel
-          )}</title>
-          <style>
-            body {
-              margin: 0;
-              padding: 24px;
-              font-family: Arial, Helvetica, sans-serif;
-              color: #111827;
-              background: #ffffff;
-            }
-
-            .header {
-              background: #07111f;
-              color: #ffffff;
-              padding: 18px 20px;
-              border-radius: 14px 14px 0 0;
-              text-align: center;
-            }
-
-            .header h1 {
-              margin: 0;
-              font-size: 26px;
-            }
-
-            .meta {
-              background: #374151;
-              color: #e5e7eb;
-              padding: 10px 16px;
-              text-align: center;
-              font-size: 12px;
-              border-radius: 0 0 14px 14px;
-            }
-
-            .summary {
-              display: grid;
-              grid-template-columns: repeat(7, 1fr);
-              gap: 10px;
-              margin: 18px 0;
-            }
-
-            .card {
-              border: 1px solid #d1d5db;
-              border-radius: 12px;
-              padding: 12px;
-            }
-
-            .card span {
-              display: block;
-              font-size: 10px;
-              font-weight: 800;
-              text-transform: uppercase;
-              margin-bottom: 6px;
-            }
-
-            .card strong {
-              font-size: 16px;
-            }
-
-            .opening-card { background: #f3e8ff; color: #6b21a8; }
-            .income-card { background: #dcfce7; color: #166534; }
-            .expense-card { background: #fee2e2; color: #991b1b; }
-            .personal-card { background: #e0f2fe; color: #075985; }
-            .owed-card { background: #ffedd5; color: #9a3412; }
-            .sponsor-card { background: #fef3c7; color: #92400e; }
-            .balance-card { background: #dbeafe; color: #1e40af; }
-
-            h2 {
-              margin: 22px 0 10px;
-              font-size: 17px;
-            }
-
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 18px;
-              font-size: 10.5px;
-            }
-
-            th {
-              background: #07111f;
-              color: #ffffff;
-              text-align: left;
-              padding: 8px;
-              border: 1px solid #07111f;
-              font-size: 9.5px;
-            }
-
-            td {
-              padding: 8px;
-              border: 1px solid #d1d5db;
-              vertical-align: top;
-            }
-
-            tr:nth-child(even) td {
-              background: #f9fafb;
-            }
-
-            .amount {
-              text-align: right;
-              white-space: nowrap;
-              font-weight: 800;
-            }
-
-            .green { color: #166534; }
-            .red { color: #991b1b; }
-            .amber { color: #92400e; }
-
-            .badge {
-              display: inline-block;
-              border-radius: 999px;
-              padding: 4px 8px;
-              font-size: 9.5px;
-              font-weight: 800;
-              white-space: nowrap;
-            }
-
-            .badge.income { background: #dcfce7; color: #166534; }
-            .badge.expense { background: #fee2e2; color: #991b1b; }
-            .badge.sponsor { background: #fef3c7; color: #92400e; }
-
-            .muted {
-              margin-top: 4px;
-              color: #6b7280;
-              font-size: 9.5px;
-              white-space: pre-wrap;
-            }
-
-            .empty {
-              text-align: center;
-              color: #6b7280;
-              padding: 18px;
-            }
-
-            .footer {
-              margin-top: 18px;
-              padding-top: 12px;
-              border-top: 1px solid #d1d5db;
-              text-align: center;
-              font-size: 10px;
-              color: #6b7280;
-            }
-
-            @media print {
-              body { padding: 10mm; }
-
-              @page {
-                size: A4 landscape;
-                margin: 10mm;
-              }
-
-              thead { display: table-header-group; }
-              tr { page-break-inside: avoid; }
-              h2 { page-break-after: avoid; }
-            }
-          </style>
-        </head>
-
-        <body>
-          <div class="header">
-            <h1>Burton Pride Money Tracker</h1>
-            <p>Money report for Burton Pride C.I.C</p>
-          </div>
-
-          <div class="meta">
-            Report period: ${escapeHtml(printScopeLabel)} • Printed on ${escapeHtml(
-      printedAt
-    )} • Rows: ${printTransactionsList.length}
-          </div>
-
-          <div class="summary">
-            <div class="card opening-card">
-              <span>Opening Balance</span>
-              <strong>${escapeHtml(money(totals.openingBalance || 0))}</strong>
-            </div>
-
-            <div class="card income-card">
-              <span>Money In</span>
-              <strong>${escapeHtml(money(filteredTotals.income))}</strong>
-            </div>
-
-            <div class="card expense-card">
-              <span>Money Out</span>
-              <strong>${escapeHtml(money(filteredTotals.expense))}</strong>
-            </div>
-
-            <div class="card personal-card">
-              <span>Personal Funds</span>
-              <strong>${escapeHtml(money(filteredTotals.personalFunds))}</strong>
-            </div>
-
-            <div class="card owed-card">
-              <span>Still Owed</span>
-              <strong>${escapeHtml(
-                money(filteredTotals.personalFundsOutstanding)
-              )}</strong>
-            </div>
-
-            <div class="card sponsor-card">
-              <span>Sponsorship Left</span>
-              <strong>${escapeHtml(money(totals.sponsorshipRemaining))}</strong>
-            </div>
-
-            <div class="card balance-card">
-              <span>Balance</span>
-              <strong>${escapeHtml(money(filteredTotals.balance))}</strong>
-            </div>
-          </div>
-
-          <h2>Sponsorship Breakdown — ${escapeHtml(selectedYear)}</h2>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Sponsor</th>
-                <th>Contact</th>
-                <th>Email</th>
-                <th>Agreed</th>
-                <th>Received</th>
-                <th>Spent</th>
-                <th>Remaining</th>
-              </tr>
-            </thead>
-            <tbody>${sponsorRows}</tbody>
-          </table>
-
-          <h2>Transactions — ${escapeHtml(printScopeLabel)}</h2>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Title / Notes</th>
-                <th>Type</th>
-                <th>Sponsor</th>
-                <th>Sponsorship Note</th>
-                <th>Personal</th>
-                <th>Paid By</th>
-                <th>Repayment</th>
-                <th>Payment</th>
-                <th>Invoice</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>${transactionRows}</tbody>
-          </table>
-
-          <div class="footer">Burton Pride Money Management App</div>
-
-          <script>
-            window.onload = function () {
-              window.focus();
-              setTimeout(function () {
-                window.print();
-              }, 300);
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open("", "_blank", "width=1200,height=800");
-
-    if (!printWindow) {
-      setError("Popup blocked. Please allow popups to print this report.");
-      return;
+      printMoneyReport({
+        selectedYear,
+        selectedPrintMonth,
+        totals,
+        filteredTotals,
+        yearlySponsorBreakdown,
+        printTransactionsList,
+        onPopupBlocked: () => {
+          setError("Popup blocked. Please allow popups to print this report.");
+        },
+      });
+    } catch (err: any) {
+      setError(err?.message || "Failed to print report");
+      setErrorDetails(err);
     }
-
-    printWindow.document.open();
-    printWindow.document.write(printHtml);
-    printWindow.document.close();
-  }
+  }, [
+    selectedYear,
+    selectedPrintMonth,
+    totals,
+    filteredTotals,
+    yearlySponsorBreakdown,
+    printTransactionsList,
+  ]);
 
   useEffect(() => {
     function handlePrintShortcut(event: KeyboardEvent) {
@@ -2451,11 +1256,7 @@ export default function MoneyTransactionsPage() {
       event.stopPropagation();
 
       if (printTransactionsList.length === 0) {
-        setError(
-          `There are no transactions to print for ${monthNameFromKey(
-            selectedPrintMonth
-          )}.`
-        );
+        setError("There are no transactions to print.");
         return;
       }
 
@@ -2467,80 +1268,31 @@ export default function MoneyTransactionsPage() {
     return () => {
       window.removeEventListener("keydown", handlePrintShortcut);
     };
-  }, [
-    filteredTransactions,
-    printTransactionsList,
-    filteredTotals,
-    totals,
-    yearlySponsorBreakdown,
-    selectedYear,
-    selectedPrintMonth,
-  ]);
+  }, [printTransactions, printTransactionsList.length]);
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1600px] space-y-6">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold">Money Tracker</h1>
-              <p className="text-sm text-white/60">
-                Track donations, spending, personal funds, and sponsorship money
-                by year.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2">
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-white/50">
-                  Tracker Year
-                </label>
-
-                <select
-                  value={selectedYear}
-                  onChange={(e) => {
-                    setSelectedYear(e.target.value);
-                    setSelectedSponsorId("all");
-                    setFilter("all");
-                    setSearchTerm("");
-                    setSelectedPrintMonth("all");
-                    setSelectedViewMonth("all");
-                  }}
-                  className="bg-transparent text-sm font-bold text-white outline-none"
-                >
-                  {yearOptions.map((year) => (
-                    <option
-                      key={year}
-                      value={year}
-                      className="bg-[#11111f] text-white"
-                    >
-                      Jan to Dec {year}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  loadTransactions();
-                  loadSponsors();
-                }}
-                className="flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm hover:bg-white/20"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Refresh
-              </button>
-            </div>
-          </div>
-        </section>
+    <main className="min-h-screen w-full max-w-full overflow-x-auto bg-[#070716] px-3 py-5 text-white sm:px-5 lg:px-6">
+      <div className="mx-auto w-full max-w-[1600px] min-w-0 space-y-6">
+        <MoneyHeader
+          selectedYear={selectedYear}
+          yearOptions={yearOptions}
+          onYearChange={(year) => {
+            setSelectedYear(year);
+            setSelectedSponsorId("all");
+            setFilter("all");
+            setSearchTerm("");
+            setSelectedPrintMonth("all");
+            setSelectedViewMonth("all");
+          }}
+          onRefresh={() => {
+            loadTransactions();
+            loadSponsors();
+          }}
+        />
 
         {error && (
           <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5">
-            <div className="flex items-center gap-2 font-bold text-red-100">
-              <Bug className="h-5 w-5" />
-              Error
-            </div>
+            <div className="font-bold text-red-100">Error</div>
 
             <p className="mt-2 text-sm text-red-100">{error}</p>
 
@@ -2559,6 +1311,7 @@ export default function MoneyTransactionsPage() {
               ? `Jan to Dec ${selectedYear}`
               : monthNameFromKey(selectedViewMonth)}
           </p>
+
           <p className="mt-1 text-xs text-white/50">
             {filteredTransactions.length} transaction
             {filteredTransactions.length === 1 ? "" : "s"} showing.{" "}
@@ -2566,1334 +1319,105 @@ export default function MoneyTransactionsPage() {
           </p>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
-          <div className="min-w-0 rounded-3xl bg-purple-500/10 p-5">
-            <p className="text-sm text-purple-200">Opening Balance</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.openingBalance || 0)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-emerald-500/10 p-5">
-            <p className="text-sm text-emerald-200">Money In</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.income)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-red-500/10 p-5">
-            <p className="text-sm text-red-200">Burton Pride Money Out</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.expense)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-sky-500/10 p-5">
-            <p className="text-sm text-sky-200">Personal Funds</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.personalFunds)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-orange-500/10 p-5">
-            <p className="text-sm text-orange-200">Still Owed</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.personalFundsOutstanding)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-amber-500/10 p-5">
-            <p className="text-sm text-amber-200">Sponsorship Left</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.sponsorshipRemaining)}
-            </p>
-          </div>
-
-          <div className="min-w-0 rounded-3xl bg-blue-500/10 p-5">
-            <p className="text-sm text-blue-200">Balance</p>
-            <p className="break-words text-3xl font-bold">
-              {money(totals.balance)}
-            </p>
-          </div>
-        </section>
-
-        <section className="min-w-0 overflow-hidden rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <h2 className="text-xl font-bold text-amber-100">
-                Sponsorship Breakdown
-              </h2>
-              <p className="text-sm text-amber-100/70">
-                Jan to Dec {selectedYear}: track who sponsored, what came in,
-                what has been spent, and what is left.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={openNewSponsorForm}
-              className="shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-black hover:bg-amber-400"
-            >
-              Add Sponsor
-            </button>
-          </div>
-
-          {yearlySponsorBreakdown.length === 0 ? (
-            <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-              No sponsors added for {selectedYear} yet.
-            </div>
-          ) : (
-            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {yearlySponsorBreakdown.map((sponsor) => (
-                <div
-                  key={sponsor.sponsor_id}
-                  className="min-w-0 rounded-2xl border border-white/10 bg-black/20 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="break-words text-lg font-bold text-white">
-                      {sponsor.sponsor_name}
-                    </h3>
-
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEditSponsor(sponsor.sponsor_id)}
-                        className="rounded-xl bg-amber-500/15 p-2 text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25"
-                        title="Edit sponsor"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeleteSponsorId(sponsor.sponsor_id)}
-                        className="rounded-xl bg-red-500/15 p-2 text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25"
-                        title="Delete sponsor"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {sponsor.contact_name && (
-                    <p className="mt-1 break-words text-sm text-white/50">
-                      Contact: {sponsor.contact_name}
-                    </p>
-                  )}
-
-                  {sponsor.email && (
-                    <p className="break-words text-sm text-white/50">
-                      {sponsor.email}
-                    </p>
-                  )}
-
-                  {sponsor.phone && (
-                    <p className="break-words text-sm text-white/50">
-                      {sponsor.phone}
-                    </p>
-                  )}
-
-                  {sponsor.notes && (
-                    <div className="mt-3 rounded-xl bg-white/5 p-3 text-xs text-white/60">
-                      <p className="mb-1 font-bold text-white/80">
-                        Sponsor notes
-                      </p>
-                      <p className="whitespace-pre-wrap break-words">
-                        {sponsor.notes}
-                      </p>
-                    </div>
-                  )}
-
-                  {(sponsor.carried_forward_pence || 0) > 0 && (
-                    <div className="mt-3 rounded-xl bg-purple-500/10 p-3 text-xs text-purple-100 ring-1 ring-purple-300/20">
-                      Carried forward into {selectedYear}:{" "}
-                      <strong>
-                        {money(sponsor.carried_forward_pence || 0)}
-                      </strong>
-                    </div>
-                  )}
-
-                  <div className="mt-4 space-y-2 text-sm">
-                    <div className="flex justify-between gap-3">
-                      <span className="text-white/60">Agreed</span>
-                      <span className="font-bold text-white">
-                        {money(sponsor.agreed_amount_pence)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <span className="text-white/60">Received</span>
-                      <span className="font-bold text-emerald-300">
-                        {money(sponsor.received_pence)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <span className="text-white/60">Spent</span>
-                      <span className="font-bold text-red-300">
-                        {money(sponsor.spent_pence)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between gap-3 rounded-xl bg-amber-500/10 px-3 py-2">
-                      <span className="text-amber-100">Remaining</span>
-                      <span className="font-bold text-amber-100">
-                        {money(sponsor.remaining_pence)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[400px_minmax(0,1fr)]">
-          <form
-            onSubmit={handleSubmit}
-            className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-5"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-xl font-bold">
-                  {editingTransaction ? "Edit Transaction" : "Add Transaction"}
-                </h2>
-
-                {editingTransaction && (
-                  <p className="mt-1 break-words text-xs text-sky-200">
-                    Editing: {editingTransaction.title}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex shrink-0 gap-2">
-                {editingTransaction && (
-                  <button
-                    type="button"
-                    onClick={cancelEditTransaction}
-                    className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20"
-                  >
-                    <X className="h-3 w-3" />
-                    Cancel
-                  </button>
-                )}
-
-                {!editingTransaction && (
-                  <button
-                    type="button"
-                    onClick={fillTestTransaction}
-                    className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20"
-                  >
-                    Test
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <input
-                value={form.title}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, title: e.target.value }))
-                }
-                placeholder="Title"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              />
-
-              {form.sponsorId ? (
-                <div className="rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100">
-                  <p className="font-bold">Transaction type</p>
-                  <p className="mt-1 text-lg font-black text-white">
-                    Money Out
-                  </p>
-                  <p className="mt-1 text-xs text-red-100/70">
-                    This is locked because sponsor transactions are spending
-                    from sponsor money.
-                  </p>
-                </div>
-              ) : (
-                <select
-                  value={form.type}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      type: e.target.value as "income" | "expense",
-                      isPersonalFunds:
-                        e.target.value === "income"
-                          ? false
-                          : prev.isPersonalFunds,
-                      personalFundsName:
-                        e.target.value === "income"
-                          ? ""
-                          : prev.personalFundsName,
-                    }))
-                  }
-                  className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-                >
-                  <option className="bg-[#11111f] text-white" value="income">
-                    Money In
-                  </option>
-                  <option className="bg-[#11111f] text-white" value="expense">
-                    Money Out
-                  </option>
-                </select>
-              )}
-
-              <input
-                value={form.amount}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, amount: e.target.value }))
-                }
-                placeholder="Amount"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              />
-
-              <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
-                <label className="mb-1 block text-sm font-bold text-amber-100">
-                  Use sponsor money for this spending
-                </label>
-
-                <p className="mb-2 text-xs text-amber-100/70">
-                  Choose a sponsor only when this payment is being paid from
-                  sponsorship money.
-                </p>
-
-                <select
-                  value={form.sponsorId}
-                  onChange={(e) => {
-                    const selected = displaySponsors.find(
-                      (sponsor) => sponsor.id === e.target.value
-                    );
-
-                    setForm((prev) => ({
-                      ...prev,
-                      sponsorId: selected?.id || "",
-                      sponsorName: selected?.sponsor_name || "",
-                      type: selected ? "expense" : prev.type,
-                      category: selected ? "Sponsorship" : "",
-                      paymentMethod: selected
-                        ? "Sponsorship Money"
-                        : prev.paymentMethod === "Sponsorship Money"
-                        ? ""
-                        : prev.paymentMethod,
-                      isPersonalFunds: selected ? false : prev.isPersonalFunds,
-                      personalFundsName: selected ? "" : prev.personalFundsName,
-                    }));
-                  }}
-                  className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
-                >
-                  <option className="bg-[#11111f] text-white" value="">
-                    Choose sponsor...
-                  </option>
-
-                  {displaySponsors.map((sponsor) => (
-                    <option
-                      className="bg-[#11111f] text-white"
-                      key={sponsor.id}
-                      value={sponsor.id}
-                    >
-                      {sponsor.sponsor_name}
-                    </option>
-                  ))}
-                </select>
-
-                <textarea
-                  value={form.sponsorshipNote}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      sponsorshipNote: e.target.value,
-                    }))
-                  }
-                  placeholder="Example: Paid from CTS Wholesale sponsorship money"
-                  className="mt-3 min-h-20 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-amber-300/40"
-                />
-
-                <button
-                  type="button"
-                  onClick={openNewSponsorForm}
-                  className="mt-3 rounded-xl bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/30"
-                >
-                  Add New Sponsor
-                </button>
-              </div>
-
-              {form.sponsorId ? (
-                <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
-                  <p className="font-bold">Payment method</p>
-                  <p className="mt-1 text-lg font-black text-white">
-                    Sponsorship Money
-                  </p>
-                  <p className="mt-1 text-xs text-amber-100/70">
-                    This is locked because a sponsor is linked. Remove the
-                    sponsor if this was paid another way.
-                  </p>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                  <p className="mb-3 text-sm font-bold text-white/70">
-                    Payment method
-                  </p>
-
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {paymentMethods.map((method) => {
-                      const active = form.paymentMethod === method;
-
-                      return (
-                        <button
-                          key={method}
-                          type="button"
-                          onClick={() =>
-                            setForm((prev) => ({
-                              ...prev,
-                              paymentMethod: method,
-                              isPersonalFunds:
-                                method === "Personal Funds"
-                                  ? true
-                                  : prev.isPersonalFunds,
-                            }))
-                          }
-                          className={`rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
-                            active
-                              ? "bg-pink-500 text-white ring-2 ring-pink-200/50"
-                              : "bg-white/10 text-white/80 ring-1 ring-white/10 hover:bg-white/20"
-                          }`}
-                        >
-                          {method}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {!form.paymentMethod && (
-                    <p className="mt-3 text-xs text-white/40">
-                      Choose how this money was paid.
-                    </p>
-                  )}
-
-                  {form.paymentMethod && (
-                    <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
-                      Selected:{" "}
-                      <span className="font-bold text-white">
-                        {form.paymentMethod}
-                      </span>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {form.type === "expense" && !form.sponsorId && (
-                <label className="flex items-start gap-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
-                  <input
-                    type="checkbox"
-                    checked={form.isPersonalFunds}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        isPersonalFunds: e.target.checked,
-                        paymentMethod: e.target.checked
-                          ? "Personal Funds"
-                          : prev.paymentMethod === "Personal Funds"
-                          ? ""
-                          : prev.paymentMethod,
-                        personalFundsName: e.target.checked
-                          ? prev.personalFundsName
-                          : "",
-                      }))
-                    }
-                    className="mt-1 h-4 w-4 rounded border-white/20"
-                  />
-
-                  <span>
-                    <span className="block text-sm font-bold text-white">
-                      Paid with personal funds
-                    </span>
-                    <span className="block text-xs text-white/50">
-                      This will be recorded, but it will not come off Burton
-                      Pride’s balance until it is marked paid back.
-                    </span>
-                  </span>
-                </label>
-              )}
-
-              {form.isPersonalFunds && !form.sponsorId && (
-                <input
-                  value={form.personalFundsName}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      personalFundsName: e.target.value,
-                    }))
-                  }
-                  placeholder="Name of person who paid"
-                  className="w-full rounded-xl bg-sky-500/10 p-3 text-white outline-none ring-1 ring-sky-300/20 placeholder:text-white/40 focus:ring-sky-300/50"
-                />
-              )}
-
-              <div>
-                <input
-                  type="date"
-                  value={form.transactionDate}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      transactionDate: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-                />
-
-                <p className="mt-2 text-xs text-white/40">
-                  This transaction will be saved under Jan to Dec{" "}
-                  {getTransactionYear(form.transactionDate)}.
-                </p>
-              </div>
-
-              <textarea
-                value={form.description}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                placeholder="Notes"
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-              />
-
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <label className="mb-2 flex items-center gap-2 text-sm font-bold text-white/70">
-                  <FileText className="h-4 w-4" />
-                  Upload invoice / receipt
-                </label>
-
-                <input
-                  type="file"
-                  accept="image/*,.pdf"
-                  onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-white/70 file:mr-4 file:rounded-xl file:border-0 file:bg-pink-500 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:file:bg-pink-400"
-                />
-
-                {invoiceFile && (
-                  <p className="mt-2 break-words text-xs text-white/50">
-                    Selected: {invoiceFile.name}
-                  </p>
-                )}
-
-                {editingTransaction?.invoice_image_url && !invoiceFile && (
-                  <a
-                    href={editingTransaction.invoice_image_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-2 inline-flex break-all text-xs font-bold text-sky-200 hover:text-sky-100"
-                  >
-                    View current invoice / receipt
-                  </a>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-pink-500 p-3 font-bold text-white hover:bg-pink-400 disabled:opacity-60"
-              >
-                <Banknote className="h-4 w-4" />
-                {saving
-                  ? editingTransaction
-                    ? "Updating..."
-                    : "Saving..."
-                  : editingTransaction
-                  ? "Update Transaction"
-                  : "Save Transaction"}
-              </button>
-            </div>
-          </form>
-
-          <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="text-xl font-bold">Transactions</h2>
-                <p className="text-sm text-white/50">
-                  {filteredTransactions.length} transaction
-                  {filteredTransactions.length === 1 ? "" : "s"} showing for{" "}
-                  {selectedViewMonth === "all"
-                    ? selectedYear
-                    : monthNameFromKey(selectedViewMonth)}
-                </p>
-              </div>
-
-              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                <select
-                  value={selectedPrintMonth}
-                  onChange={(e) => setSelectedPrintMonth(e.target.value)}
-                  className="rounded-xl bg-black/30 px-4 py-2 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20 focus:ring-sky-300/50"
-                  title="Choose print month"
-                >
-                  {printMonthOptions.map((month) => (
-                    <option
-                      key={month.key}
-                      value={month.key}
-                      className="bg-[#11111f] text-white"
-                    >
-                      Print {month.label} ({month.count})
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  onClick={printTransactions}
-                  disabled={printTransactionsList.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500/15 px-4 py-2 text-sm font-bold text-sky-200 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Printer className="h-4 w-4" />
-                  {selectedPrintMonth === "all"
-                    ? "Print Year"
-                    : `Print ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={exportTransactionsToExcel}
-                  disabled={filteredTransactions.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500/15 px-4 py-2 text-sm font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Download className="h-4 w-4" />
-                  Export Excel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={exportFullYearlyReport}
-                  disabled={yearTransactions.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-2 text-sm font-bold text-purple-200 ring-1 ring-purple-300/20 hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <FileText className="h-4 w-4" />
-                  Yearly Report
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeleteYearOpen(true)}
-                  disabled={yearTransactions.length === 0 || deletingYear}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500/15 px-4 py-2 text-sm font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete {selectedYear}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDeleteAllOpen(true)}
-                  disabled={transactions.length === 0 || deletingAll}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-2 text-sm font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete All
-                </button>
-              </div>
-            </div>
-
-            <div className="mb-4 space-y-3">
-              <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-sky-100">
-                      View transactions by month
-                    </p>
-                    <p className="text-xs text-sky-100/70">
-                      Choose a month to only show that month on screen. Export
-                      Excel uses this current view. Yearly Report still exports
-                      the full year.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <select
-                      value={selectedViewMonth}
-                      onChange={(e) => {
-                        setSelectedViewMonth(e.target.value);
-                        setSearchTerm("");
-                      }}
-                      className="min-w-[240px] rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20 focus:ring-sky-300/50"
-                    >
-                      {printMonthOptions.map((month) => (
-                        <option
-                          key={month.key}
-                          value={month.key}
-                          className="bg-[#11111f] text-white"
-                        >
-                          View {month.label} ({month.count})
-                        </option>
-                      ))}
-                    </select>
-
-                    {selectedViewMonth !== "all" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedViewMonth("all");
-                          setSearchTerm("");
-                        }}
-                        className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20"
-                      >
-                        Clear month
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <input
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={`Search ${
-                  selectedViewMonth === "all"
-                    ? selectedYear
-                    : monthNameFromKey(selectedViewMonth)
-                } transactions...`}
-                className="w-full rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
-              />
-
-              <div className="flex flex-wrap gap-2">
-                {(
-                  ["all", "income", "expense", "personal", "sponsorship"] as const
-                ).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setFilter(item)}
-                    className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                      filter === item
-                        ? "bg-white text-black"
-                        : "bg-white/10 text-white hover:bg-white/20"
-                    }`}
-                  >
-                    {item === "all"
-                      ? "All"
-                      : item === "income"
-                      ? "Money In"
-                      : item === "expense"
-                      ? "Money Out"
-                      : item === "personal"
-                      ? "Personal Funds"
-                      : "Sponsorship"}
-                  </button>
-                ))}
-              </div>
-
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-amber-100">
-                      Organise by sponsor
-                    </p>
-                    <p className="text-xs text-amber-100/70">
-                      Choose one sponsor to only show money in and spending
-                      linked to them for{" "}
-                      {selectedViewMonth === "all"
-                        ? selectedYear
-                        : monthNameFromKey(selectedViewMonth)}
-                      .
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <select
-                      value={selectedSponsorId}
-                      onChange={(e) => {
-                        const nextSponsorId = e.target.value;
-                        setSelectedSponsorId(nextSponsorId);
-
-                        if (nextSponsorId !== "all") {
-                          setFilter("sponsorship");
-                        }
-                      }}
-                      className="min-w-[240px] rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/50"
-                    >
-                      <option className="bg-[#11111f] text-white" value="all">
-                        All sponsors
-                      </option>
-
-                      {displaySponsors.map((sponsor) => (
-                        <option
-                          className="bg-[#11111f] text-white"
-                          key={sponsor.id}
-                          value={sponsor.id}
-                        >
-                          {sponsor.sponsor_name}
-                        </option>
-                      ))}
-                    </select>
-
-                    {selectedSponsorId !== "all" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedSponsorId("all");
-                          setFilter("all");
-                        }}
-                        className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20"
-                      >
-                        Clear sponsor
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {selectedSponsor && (
-                  <div className="mt-3 rounded-xl bg-black/20 px-4 py-3 text-sm text-amber-100">
-                    Showing transactions for{" "}
-                    <strong>{selectedSponsor.sponsor_name}</strong>. Export
-                    Excel and Print will also use this sponsor view. Yearly
-                    Report will export the full selected year.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {loading ? (
-              <p>Loading...</p>
-            ) : filteredTransactions.length === 0 ? (
-              <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-                No transactions found for{" "}
-                {selectedViewMonth === "all"
-                  ? selectedYear
-                  : monthNameFromKey(selectedViewMonth)}
-              </div>
-            ) : (
-              <div className="max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-                <table className="w-full min-w-[1250px] text-sm">
-                  <thead className="bg-white/10 text-white/60">
-                    <tr>
-                      <th className="p-3 text-left">Date</th>
-                      <th className="p-3 text-left">Title</th>
-                      <th className="p-3 text-left">Type</th>
-                      <th className="p-3 text-left">Sponsor</th>
-                      <th className="p-3 text-left">Sponsorship Note</th>
-                      <th className="p-3 text-left">Personal</th>
-                      <th className="p-3 text-left">Paid By</th>
-                      <th className="p-3 text-left">Repayment</th>
-                      <th className="p-3 text-left">Payment</th>
-                      <th className="p-3 text-left">Invoice</th>
-                      <th className="p-3 text-right">Amount</th>
-                      <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
-                        Action
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredTransactions.map((item) => {
-                      const isPersonal = isPersonalFundsTransaction(item);
-                      const hasSponsor = isSponsorshipTransaction(item);
-
-                      return (
-                        <tr key={item.id} className="border-t border-white/10">
-                          <td className="whitespace-nowrap p-3">
-                            {item.transaction_date}
-                          </td>
-
-                          <td className="max-w-[220px] p-3">
-                            <p className="break-words font-semibold">
-                              {item.title}
-                            </p>
-
-                            {item.description && (
-                              <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
-                                {item.description}
-                              </p>
-                            )}
-                          </td>
-
-                          <td className="whitespace-nowrap p-3">
-                            {item.type === "income" ? "Money In" : "Money Out"}
-                          </td>
-
-                          <td className="max-w-[160px] p-3">
-                            {hasSponsor ? (
-                              <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
-                                {item.sponsor_name || "Sponsor"}
-                              </span>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="max-w-[220px] p-3">
-                            {item.sponsorship_note ? (
-                              <span className="line-clamp-3 break-words text-sm text-amber-100">
-                                {item.sponsorship_note}
-                              </span>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="p-3">
-                            {isPersonal ? (
-                              <span className="inline-flex whitespace-nowrap rounded-2xl bg-sky-500/20 px-3 py-1 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20">
-                                Personal funds
-                              </span>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="max-w-[160px] p-3">
-                            {item.personal_funds_name ? (
-                              <span className="break-words font-semibold text-sky-200">
-                                {item.personal_funds_name}
-                              </span>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="p-3">
-                            {isPersonal ? (
-                              <div className="space-y-2">
-                                {item.personal_funds_repaid ? (
-                                  <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
-                                    Paid back
-                                    {item.personal_funds_repaid_at && (
-                                      <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
-                                        {formatDate(
-                                          item.personal_funds_repaid_at
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="rounded-2xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20">
-                                    Not paid back
-                                  </div>
-                                )}
-
-                                <button
-                                  type="button"
-                                  disabled={repayingId === item.id}
-                                  onClick={() => togglePersonalFundsRepaid(item)}
-                                  className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:opacity-60 ${
-                                    item.personal_funds_repaid
-                                      ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25"
-                                      : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"
-                                  }`}
-                                >
-                                  {repayingId === item.id
-                                    ? "Updating..."
-                                    : item.personal_funds_repaid
-                                    ? "Mark not paid back"
-                                    : "Mark paid back"}
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="whitespace-nowrap p-3">
-                            {item.payment_method || "—"}
-                          </td>
-
-                          <td className="p-3">
-                            {item.invoice_image_url ? (
-                              <a
-                                href={item.invoice_image_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
-                              >
-                                <FileText className="h-4 w-4" />
-                                View
-                              </a>
-                            ) : (
-                              <span className="text-white/40">—</span>
-                            )}
-                          </td>
-
-                          <td className="whitespace-nowrap p-3 text-right font-bold">
-                            <div>{money(item.amount_pence)}</div>
-
-                            {hasSponsor && (
-                              <div className="mt-1 text-xs font-semibold text-amber-300">
-                                {item.type === "income"
-                                  ? "Sponsor money in"
-                                  : "Sponsor-funded spend"}
-                              </div>
-                            )}
-
-                            {isPersonal && item.personal_funds_repaid && (
-                              <div className="mt-1 text-xs font-semibold text-emerald-300">
-                                Taken from balance
-                              </div>
-                            )}
-
-                            {isPersonal && !item.personal_funds_repaid && (
-                              <div className="mt-1 text-xs font-semibold text-orange-300">
-                                Not taken yet
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="sticky right-0 bg-[#11111f] p-3 text-right">
-                            <div className="inline-flex items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => startEditTransaction(item)}
-                                className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25"
-                                title="Edit transaction"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={deleting}
-                                onClick={() => setDeleteId(item.id)}
-                                className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:opacity-50"
-                                title="Hide transaction"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+        <MoneyStatsCards totals={totals} />
+
+        <SponsorshipBreakdown
+          selectedYear={selectedYear}
+          yearlySponsorBreakdown={yearlySponsorBreakdown}
+          openNewSponsorForm={openNewSponsorForm}
+          startEditSponsor={startEditSponsor}
+          setDeleteSponsorId={setDeleteSponsorId}
+        />
+
+        <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
+          <MoneyTransactionForm
+            form={form}
+            setForm={setForm}
+            invoiceFile={invoiceFile}
+            setInvoiceFile={setInvoiceFile}
+            editingTransaction={editingTransaction}
+            displaySponsors={displaySponsors}
+            saving={saving}
+            handleSubmit={handleSubmit}
+            cancelEditTransaction={cancelEditTransaction}
+            fillTestTransaction={fillTestTransaction}
+            openNewSponsorForm={openNewSponsorForm}
+          />
+
+          <MoneyTransactionsTable
+            loading={loading}
+            transactions={transactions}
+            filteredTransactions={filteredTransactions}
+            yearTransactions={yearTransactions}
+            printTransactionsList={printTransactionsList}
+            printMonthOptions={printMonthOptions}
+            selectedYear={selectedYear}
+            selectedViewMonth={selectedViewMonth}
+            setSelectedViewMonth={setSelectedViewMonth}
+            selectedPrintMonth={selectedPrintMonth}
+            setSelectedPrintMonth={setSelectedPrintMonth}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            filter={filter}
+            setFilter={setFilter}
+            selectedSponsorId={selectedSponsorId}
+            setSelectedSponsorId={setSelectedSponsorId}
+            selectedSponsor={selectedSponsor}
+            displaySponsors={displaySponsors}
+            deletingYear={deletingYear}
+            deletingAll={deletingAll}
+            repayingId={repayingId}
+            deleting={deleting}
+            onPrint={printTransactions}
+            onExportExcel={exportTransactionsToExcel}
+            onExportYearlyReport={exportFullYearlyReport}
+            onOpenDeleteYear={() => setDeleteYearOpen(true)}
+            onOpenDeleteAll={() => setDeleteAllOpen(true)}
+            onEditTransaction={startEditTransaction}
+            onHideTransaction={setDeleteId}
+            onTogglePersonalFundsRepaid={togglePersonalFundsRepaid}
+          />
         </section>
       </div>
 
-      {sponsorFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold">
-                  {editingSponsor ? "Edit Sponsor" : "Add Sponsor"}
-                </h2>
-                <p className="text-sm text-white/60">
-                  {editingSponsor
-                    ? "Update this sponsor’s details, agreed amount, and received money."
-                    : "Add sponsor details so income and spending can be tracked clearly."}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeSponsorForm}
-                className="rounded-xl bg-white/10 p-2 hover:bg-white/20"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <input
-                value={sponsorForm.sponsorName}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    sponsorName: e.target.value,
-                  }))
-                }
-                placeholder="Sponsor name"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.contactName}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    contactName: e.target.value,
-                  }))
-                }
-                placeholder="Contact name"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.email}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    email: e.target.value,
-                  }))
-                }
-                placeholder="Email"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.phone}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    phone: e.target.value,
-                  }))
-                }
-                placeholder="Phone"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.agreedAmount}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    agreedAmount: e.target.value,
-                  }))
-                }
-                placeholder="Agreed sponsorship amount, e.g. 1300"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.receivedAmount}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    receivedAmount: e.target.value,
-                  }))
-                }
-                placeholder="Received sponsorship money, e.g. 1300"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-emerald-500/10 p-3 outline-none ring-1 ring-emerald-300/20 focus:ring-emerald-300/40"
-              />
-
-              <textarea
-                value={sponsorForm.notes}
-                onChange={(e) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    notes: e.target.value,
-                  }))
-                }
-                placeholder="Notes / agreed use / restrictions"
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <button
-                type="button"
-                disabled={savingSponsor}
-                onClick={saveSponsor}
-                className="w-full rounded-xl bg-amber-500 px-4 py-3 font-bold text-black hover:bg-amber-400 disabled:opacity-60"
-              >
-                {savingSponsor
-                  ? editingSponsor
-                    ? "Updating..."
-                    : "Saving..."
-                  : editingSponsor
-                  ? "Update Sponsor"
-                  : "Save Sponsor"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteYearOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">
-              Delete {selectedYear} transactions?
-            </h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              This will only delete transactions dated between January and
-              December {selectedYear}. Other years will stay safe.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-orange-400/20 bg-orange-500/10 p-4 text-sm text-orange-100">
-              This will delete {yearTransactions.length} transaction
-              {yearTransactions.length === 1 ? "" : "s"} from {selectedYear}.
-            </div>
-
-            <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
-            </label>
-
-            <input
-              type="password"
-              value={deleteYearPassword}
-              onChange={(e) => setDeleteYearPassword(e.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-delete-year-password"
-              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-orange-300/40"
-            />
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteYearOpen(false);
-                  setDeleteYearPassword("");
-                }}
-                disabled={deletingYear}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={deleteSelectedYearTransactions}
-                disabled={deletingYear || !deleteYearPassword.trim()}
-                className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingYear ? "Deleting..." : `Delete ${selectedYear}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteSponsorId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Delete sponsor?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to delete this sponsor? Existing transactions
-              will stay in your money tracker, but the sponsor link will be
-              removed from those transactions.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-              Export your Excel report first if you need to keep a full sponsor
-              breakdown before deleting.
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteSponsorId(null)}
-                disabled={deletingSponsor}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={deleteSponsor}
-                disabled={deletingSponsor}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deletingSponsor ? "Deleting..." : "Delete Sponsor"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Hide payment?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to hide this transaction? It will be soft
-              deleted and hidden from the money tracker, totals, Excel exports,
-              and print reports.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              This will not permanently remove the transaction from Supabase.
-              It will only mark it as deleted and hide it from this page.
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteId(null)}
-                disabled={deleting}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={deleteTransaction}
-                disabled={deleting}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deleting ? "Hiding..." : "Hide Payment"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteAllOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Delete all transactions?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to delete every transaction? This will delete
-              all money in, money out, manual transactions, synced donation
-              entries, and sponsor-linked transactions. This cannot be undone.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              This will delete every transaction in the database, not just{" "}
-              {selectedYear}. There are currently {transactions.length} total
-              transaction{transactions.length === 1 ? "" : "s"} saved.
-            </div>
-
-            <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
-            </label>
-
-            <input
-              type="password"
-              value={deleteAllPassword}
-              onChange={(e) => setDeleteAllPassword(e.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-delete-all-password"
-              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
-            />
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteAllOpen(false);
-                  setDeleteAllPassword("");
-                }}
-                disabled={deletingAll}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={deleteAllTransactions}
-                disabled={deletingAll || !deleteAllPassword.trim()}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingAll ? "Deleting..." : "Delete Everything"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MoneyModals
+        sponsorFormOpen={sponsorFormOpen}
+        editingSponsor={editingSponsor}
+        sponsorForm={sponsorForm}
+        setSponsorForm={setSponsorForm}
+        savingSponsor={savingSponsor}
+        onCloseSponsorForm={closeSponsorForm}
+        onSaveSponsor={saveSponsor}
+        deleteYearOpen={deleteYearOpen}
+        selectedYear={selectedYear}
+        yearTransactionsLength={yearTransactions.length}
+        deletingYear={deletingYear}
+        deleteYearPassword={deleteYearPassword}
+        setDeleteYearPassword={setDeleteYearPassword}
+        onCloseDeleteYear={() => {
+          setDeleteYearOpen(false);
+          setDeleteYearPassword("");
+        }}
+        onDeleteYear={deleteSelectedYearTransactions}
+        deleteSponsorId={deleteSponsorId}
+        deletingSponsor={deletingSponsor}
+        onCloseDeleteSponsor={() => setDeleteSponsorId(null)}
+        onDeleteSponsor={deleteSponsor}
+        deleteId={deleteId}
+        deleting={deleting}
+        onCloseHidePayment={() => setDeleteId(null)}
+        onHidePayment={deleteTransaction}
+        deleteAllOpen={deleteAllOpen}
+        transactionsLength={transactions.length}
+        deletingAll={deletingAll}
+        deleteAllPassword={deleteAllPassword}
+        setDeleteAllPassword={setDeleteAllPassword}
+        onCloseDeleteAll={() => {
+          setDeleteAllOpen(false);
+          setDeleteAllPassword("");
+        }}
+        onDeleteAll={deleteAllTransactions}
+      />
     </main>
   );
 }

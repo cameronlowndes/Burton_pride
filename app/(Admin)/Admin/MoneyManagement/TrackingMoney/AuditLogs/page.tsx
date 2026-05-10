@@ -47,7 +47,7 @@ const actionOptions = [
   { value: "all", label: "All actions" },
   { value: "create", label: "Created" },
   { value: "edit", label: "Edited" },
-  { value: "delete", label: "Deleted one" },
+  { value: "delete", label: "Hidden" },
   { value: "delete_year", label: "Deleted year" },
   { value: "delete_all", label: "Deleted all" },
   { value: "restore", label: "Restored" },
@@ -88,7 +88,43 @@ function formatDateOnly(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
-function actionLabel(action: string) {
+function isHiddenAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "").toLowerCase().trim();
+
+  if (action !== "delete") return false;
+
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const source = String(log.metadata?.source || "").toLowerCase();
+
+  const isMoneyTransactionRoute =
+    route.includes("/api/admin/money/transactions") ||
+    route.includes("/admin/money/transactions");
+
+  const isPermanentDelete =
+    route.includes("/permanent") ||
+    log.metadata?.permanentDelete === true ||
+    log.metadata?.permanent_delete === true;
+
+  const hasSoftDeleteFlag =
+    log.metadata?.softDelete === true ||
+    log.metadata?.soft_delete === true ||
+    log.after_data?.deleted_at ||
+    log.after_data?.deleted_by ||
+    log.changed_fields?.deleted_at ||
+    log.changed_fields?.deleted_by;
+
+  if (isPermanentDelete) return false;
+
+  return (
+    source === "money_tracker" ||
+    isMoneyTransactionRoute ||
+    hasSoftDeleteFlag
+  );
+}
+
+function actionLabel(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return "Hidden";
+
   if (action === "create") return "Created";
   if (action === "edit") return "Edited";
   if (action === "delete") return "Deleted";
@@ -101,7 +137,11 @@ function actionLabel(action: string) {
   return action.replaceAll("_", " ");
 }
 
-function actionClass(action: string) {
+function actionClass(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) {
+    return "bg-orange-500/15 text-orange-200 ring-orange-300/20";
+  }
+
   if (action === "create") {
     return "bg-emerald-500/15 text-emerald-200 ring-emerald-300/20";
   }
@@ -129,7 +169,9 @@ function actionClass(action: string) {
   return "bg-white/10 text-white ring-white/10";
 }
 
-function actionExcelColour(action: string) {
+function actionExcelColour(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return "FFEA580C";
+
   if (action === "create") return "FF047857";
   if (action === "edit") return "FF0284C7";
   if (action === "delete" || action === "delete_year" || action === "delete_all") {
@@ -141,7 +183,9 @@ function actionExcelColour(action: string) {
   return "FF374151";
 }
 
-function actionIcon(action: string) {
+function actionIcon(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return Eye;
+
   if (action === "create") return CheckCircle2;
   if (action === "edit") return FileText;
   if (action === "delete" || action === "delete_year" || action === "delete_all") {
@@ -382,7 +426,7 @@ function addMergedSection(
   styleSectionCell(cell, colour);
 }
 
-function styleActionCell(cell: ExcelJS.Cell, action: string) {
+function styleActionCell(cell: ExcelJS.Cell, action: string, log?: MoneyAuditLog) {
   cell.font = {
     bold: true,
     color: { argb: "FFFFFFFF" },
@@ -391,7 +435,7 @@ function styleActionCell(cell: ExcelJS.Cell, action: string) {
   cell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: actionExcelColour(action) },
+    fgColor: { argb: actionExcelColour(action, log) },
   };
 
   cell.alignment = {
@@ -434,6 +478,15 @@ function styleDangerCell(cell: ExcelJS.Cell) {
 }
 
 function makeSummaryRows(logs: MoneyAuditLog[]) {
+  const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
+  const deleted = logs.filter(
+    (log) =>
+      !isHiddenAuditLog(log) &&
+      (log.action === "delete" ||
+        log.action === "delete_year" ||
+        log.action === "delete_all")
+  ).length;
+
   return [
     {
       label: "Total logs",
@@ -451,14 +504,14 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       notes: "Transactions or records edited.",
     },
     {
+      label: "Hidden",
+      value: hidden,
+      notes: "Single money tracker transactions soft-deleted and hidden.",
+    },
+    {
       label: "Deleted",
-      value: logs.filter(
-        (log) =>
-          log.action === "delete" ||
-          log.action === "delete_year" ||
-          log.action === "delete_all"
-      ).length,
-      notes: "Single, selected-year, or full delete actions.",
+      value: deleted,
+      notes: "Permanent, selected-year, or full delete actions.",
     },
     {
       label: "Restored",
@@ -558,7 +611,7 @@ export default function MoneyAuditLogsPage() {
       rows = rows.filter((log) => {
         return (
           log.action?.toLowerCase().includes(q) ||
-          actionLabel(log.action).toLowerCase().includes(q) ||
+          actionLabel(log.action, log).toLowerCase().includes(q) ||
           getTransactionTitle(log).toLowerCase().includes(q) ||
           log.transaction_id?.toLowerCase().includes(q) ||
           getActorDisplayName(log).toLowerCase().includes(q) ||
@@ -595,7 +648,7 @@ export default function MoneyAuditLogsPage() {
       }
 
       if (sortMode === "action") {
-        return actionLabel(a.action).localeCompare(actionLabel(b.action));
+        return actionLabel(a.action, a).localeCompare(actionLabel(b.action, b));
       }
 
       if (sortMode === "transaction") {
@@ -609,11 +662,14 @@ export default function MoneyAuditLogsPage() {
   }, [logs, searchTerm, dateFrom, dateTo, sortMode]);
 
   const stats = useMemo(() => {
+    const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
+
     const deleted = logs.filter(
       (log) =>
-        log.action === "delete" ||
-        log.action === "delete_year" ||
-        log.action === "delete_all"
+        !isHiddenAuditLog(log) &&
+        (log.action === "delete" ||
+          log.action === "delete_year" ||
+          log.action === "delete_all")
     ).length;
 
     return {
@@ -621,6 +677,7 @@ export default function MoneyAuditLogsPage() {
       visible: filteredLogs.length,
       created: logs.filter((log) => log.action === "create").length,
       edited: logs.filter((log) => log.action === "edit").length,
+      hidden,
       deleted,
       restored: logs.filter((log) => log.action === "restore").length,
       paidBack: logs.filter(
@@ -704,13 +761,13 @@ export default function MoneyAuditLogsPage() {
       });
 
       summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Filters Used", "A14", "C14", "FF4F46E5");
+      addMergedSection(summarySheet, "Filters Used", "A15", "C15", "FF4F46E5");
 
       const filterHeader = summarySheet.addRow(["Filter", "Value", "Notes"]);
       styleHeaderRow(filterHeader, "FF111827");
 
       const filterRows = [
-        ["Action", selectedAction === "all" ? "All actions" : actionLabel(selectedAction), "Action filter selected on page."],
+        ["Action", selectedAction === "all" ? "All actions" : actionOptions.find((item) => item.value === selectedAction)?.label || actionLabel(selectedAction), "Action filter selected on page."],
         ["Search", searchTerm || "No search", "Text search applied before export."],
         ["Date from", dateFrom || "No start date", "Start date filter."],
         ["Date to", dateTo || "No end date", "End date filter."],
@@ -724,21 +781,65 @@ export default function MoneyAuditLogsPage() {
       });
 
       summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Action Breakdown", "A22", "C22", "FF9333EA");
+      addMergedSection(summarySheet, "Action Breakdown", "A23", "C23", "FF9333EA");
 
       const actionBreakdownHeader = summarySheet.addRow(["Action", "Count", "Notes"]);
       styleHeaderRow(actionBreakdownHeader, "FF111827");
 
-      actionOptions
-        .filter((item) => item.value !== "all")
-        .forEach((item) => {
-          const count = filteredLogs.filter((log) => log.action === item.value).length;
-          const row = summarySheet.addRow([item.label, count, `Count of ${item.label.toLowerCase()} audit logs.`]);
-          styleBodyRow(row);
-          row.getCell(1).font = { bold: true };
-          row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-          row.getCell(2).font = { bold: true };
-        });
+      const actionBreakdownRows = [
+        {
+          label: "Created",
+          count: filteredLogs.filter((log) => log.action === "create").length,
+          notes: "Count of created audit logs.",
+        },
+        {
+          label: "Edited",
+          count: filteredLogs.filter((log) => log.action === "edit").length,
+          notes: "Count of edited audit logs.",
+        },
+        {
+          label: "Hidden",
+          count: filteredLogs.filter((log) => isHiddenAuditLog(log)).length,
+          notes: "Count of hidden soft-delete audit logs.",
+        },
+        {
+          label: "Deleted Year",
+          count: filteredLogs.filter((log) => log.action === "delete_year").length,
+          notes: "Count of selected-year delete audit logs.",
+        },
+        {
+          label: "Deleted All",
+          count: filteredLogs.filter((log) => log.action === "delete_all").length,
+          notes: "Count of delete-all audit logs.",
+        },
+        {
+          label: "Restored",
+          count: filteredLogs.filter((log) => log.action === "restore").length,
+          notes: "Count of restored audit logs.",
+        },
+        {
+          label: "Marked Paid Back",
+          count: filteredLogs.filter((log) => log.action === "mark_paid_back").length,
+          notes: "Count of marked paid back logs.",
+        },
+        {
+          label: "Marked Not Paid Back",
+          count: filteredLogs.filter((log) => log.action === "mark_not_paid_back").length,
+          notes: "Count of marked not paid back logs.",
+        },
+      ];
+
+      actionBreakdownRows.forEach((item) => {
+        const row = summarySheet.addRow([
+          item.label,
+          item.count,
+          item.notes,
+        ]);
+        styleBodyRow(row);
+        row.getCell(1).font = { bold: true };
+        row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
+        row.getCell(2).font = { bold: true };
+      });
 
       const logsSheet = workbook.addWorksheet("Audit Logs", {
         views: [{ state: "frozen", ySplit: 5 }],
@@ -803,7 +904,7 @@ export default function MoneyAuditLogsPage() {
           const changedNames = getChangedFieldNames(log.changed_fields);
           const row = logsSheet.addRow({
             createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action),
+            action: actionLabel(log.action, log),
             transactionTitle: getTransactionTitle(log),
             transactionId: log.transaction_id || "",
             actorName: getActorDisplayName(log),
@@ -819,7 +920,7 @@ export default function MoneyAuditLogsPage() {
           styleBodyRow(row);
 
           row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action);
+          styleActionCell(row.getCell("action"), log.action, log);
 
           row.getCell("transactionTitle").font = { bold: true };
           row.getCell("actorName").font = { bold: true };
@@ -898,7 +999,7 @@ export default function MoneyAuditLogsPage() {
 
           const row = changedSheet.addRow({
             createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action),
+            action: actionLabel(log.action, log),
             transactionTitle: getTransactionTitle(log),
             actorName: getActorDisplayName(log),
             field: cleanFieldName(field),
@@ -909,7 +1010,7 @@ export default function MoneyAuditLogsPage() {
 
           styleBodyRow(row);
           row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action);
+          styleActionCell(row.getCell("action"), log.action, log);
           row.getCell("transactionTitle").font = { bold: true };
           row.getCell("actorName").font = { bold: true };
           row.getCell("field").font = { bold: true };
@@ -948,17 +1049,18 @@ export default function MoneyAuditLogsPage() {
         { key: "total", width: 14 },
         { key: "created", width: 14 },
         { key: "edited", width: 14 },
+        { key: "hidden", width: 14 },
         { key: "deleted", width: 14 },
         { key: "paidBack", width: 18 },
         { key: "latest", width: 24 },
       ];
 
-      addMergedTitle(usersSheet, "Burton Pride C.I.C - Audit Users", "A1", "I1");
+      addMergedTitle(usersSheet, "Burton Pride C.I.C - Audit Users", "A1", "J1");
       addMergedSubtitle(
         usersSheet,
         "Summary by user / actor.",
         "A2",
-        "I2"
+        "J2"
       );
 
       usersSheet.addRow([]);
@@ -970,6 +1072,7 @@ export default function MoneyAuditLogsPage() {
         "Total Actions",
         "Created",
         "Edited",
+        "Hidden",
         "Deleted",
         "Paid Back Changes",
         "Latest Action",
@@ -1024,11 +1127,13 @@ export default function MoneyAuditLogsPage() {
             total: userLogs.length,
             created: userLogs.filter((log) => log.action === "create").length,
             edited: userLogs.filter((log) => log.action === "edit").length,
+            hidden: userLogs.filter((log) => isHiddenAuditLog(log)).length,
             deleted: userLogs.filter(
               (log) =>
-                log.action === "delete" ||
-                log.action === "delete_year" ||
-                log.action === "delete_all"
+                !isHiddenAuditLog(log) &&
+                (log.action === "delete" ||
+                  log.action === "delete_year" ||
+                  log.action === "delete_all")
             ).length,
             paidBack: userLogs.filter(
               (log) =>
@@ -1042,7 +1147,7 @@ export default function MoneyAuditLogsPage() {
           row.getCell("name").font = { bold: true };
           row.getCell("latest").numFmt = "dd mmm yyyy, hh:mm";
 
-          ["total", "created", "edited", "deleted", "paidBack"].forEach((key) => {
+          ["total", "created", "edited", "hidden", "deleted", "paidBack"].forEach((key) => {
             row.getCell(key).alignment = {
               horizontal: "center",
               vertical: "middle",
@@ -1053,7 +1158,7 @@ export default function MoneyAuditLogsPage() {
 
       usersSheet.autoFilter = {
         from: "A4",
-        to: "I4",
+        to: "J4",
       };
 
       const rawSheet = workbook.addWorksheet("Raw JSON", {
@@ -1108,7 +1213,7 @@ export default function MoneyAuditLogsPage() {
       filteredLogs.forEach((log) => {
         const row = rawSheet.addRow({
           createdAt: formatExcelDate(log.created_at),
-          action: actionLabel(log.action),
+          action: actionLabel(log.action, log),
           transactionTitle: getTransactionTitle(log),
           actorName: getActorDisplayName(log),
           beforeData: safeJson(log.before_data),
@@ -1120,7 +1225,7 @@ export default function MoneyAuditLogsPage() {
 
         styleBodyRow(row);
         row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-        styleActionCell(row.getCell("action"), log.action);
+        styleActionCell(row.getCell("action"), log.action, log);
         row.getCell("transactionTitle").font = { bold: true };
         row.getCell("actorName").font = { bold: true };
       });
@@ -1166,29 +1271,28 @@ export default function MoneyAuditLogsPage() {
   }
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1700px] space-y-6">
+    <main className="min-h-screen w-full overflow-x-auto bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1700px] min-w-0 space-y-6">
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur">
           <div className="relative p-6">
             <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-purple-500/20 blur-3xl" />
             <div className="absolute -bottom-24 left-10 h-56 w-56 rounded-full bg-pink-500/10 blur-3xl" />
 
             <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <div>
+              <div className="min-w-0">
                 <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-purple-500/15 px-4 py-2 text-xs font-bold text-purple-100 ring-1 ring-purple-300/20">
                   <ShieldCheck className="h-4 w-4" />
                   Money Tracker Audit Log
                 </div>
 
-                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+                <h1 className="break-words text-3xl font-black tracking-tight sm:text-4xl">
                   Audit Logs
                 </h1>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   View every money tracker action, including creates, edits,
-                  deletes, selected-year deletes, delete all actions, and
-                  personal funds paid-back changes. This helps protect your
-                  records and shows who changed what.
+                  hidden soft-deleted transactions, selected-year deletes, delete
+                  all actions, and personal funds paid-back changes.
                 </p>
 
                 {latestLog && (
@@ -1199,7 +1303,7 @@ export default function MoneyAuditLogsPage() {
                       {formatDateTime(latestLog.created_at)}
                     </span>
                     <span className="text-white/30">•</span>
-                    <span>{actionLabel(latestLog.action)}</span>
+                    <span>{actionLabel(latestLog.action, latestLog)}</span>
                   </div>
                 )}
               </div>
@@ -1248,14 +1352,15 @@ export default function MoneyAuditLogsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
           <StatCard label="Total Logs" value={stats.total} tone="white" />
           <StatCard label="Showing" value={stats.visible} tone="purple" />
           <StatCard label="Created" value={stats.created} tone="emerald" />
           <StatCard label="Edited" value={stats.edited} tone="sky" />
+          <StatCard label="Hidden" value={stats.hidden} tone="orange" />
           <StatCard label="Deleted" value={stats.deleted} tone="red" />
-          <StatCard label="Paid Back" value={stats.paidBack} tone="orange" />
-          <StatCard label="Users" value={stats.uniqueUsers} tone="pink" />
+          <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
+          <StatCard label="Users" value={stats.uniqueUsers} tone="white" />
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
@@ -1391,7 +1496,7 @@ export default function MoneyAuditLogsPage() {
                     {filteredLogs.map((log) => {
                       const changedNames = getChangedFieldNames(log.changed_fields);
                       const source = getSourceLabel(log);
-                      const ActionIcon = actionIcon(log.action);
+                      const ActionIcon = actionIcon(log.action, log);
 
                       return (
                         <tr key={log.id} className="border-t border-white/10">
@@ -1405,11 +1510,12 @@ export default function MoneyAuditLogsPage() {
                           <td className="p-3">
                             <span
                               className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold capitalize ring-1 ${actionClass(
-                                log.action
+                                log.action,
+                                log
                               )}`}
                             >
                               <ActionIcon className="h-3.5 w-3.5" />
-                              {actionLabel(log.action)}
+                              {actionLabel(log.action, log)}
                             </span>
                           </td>
 
@@ -1492,7 +1598,7 @@ export default function MoneyAuditLogsPage() {
 
               <div className="space-y-3 xl:hidden">
                 {filteredLogs.map((log) => {
-                  const ActionIcon = actionIcon(log.action);
+                  const ActionIcon = actionIcon(log.action, log);
                   const changedNames = getChangedFieldNames(log.changed_fields);
 
                   return (
@@ -1503,11 +1609,12 @@ export default function MoneyAuditLogsPage() {
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <span
                           className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
-                            log.action
+                            log.action,
+                            log
                           )}`}
                         >
                           <ActionIcon className="h-3.5 w-3.5" />
-                          {actionLabel(log.action)}
+                          {actionLabel(log.action, log)}
                         </span>
 
                         <button
@@ -1565,14 +1672,15 @@ export default function MoneyAuditLogsPage() {
                 <div className="min-w-0">
                   <div
                     className={`mb-3 inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
-                      selectedLog.action
+                      selectedLog.action,
+                      selectedLog
                     )}`}
                   >
                     {(() => {
-                      const Icon = actionIcon(selectedLog.action);
+                      const Icon = actionIcon(selectedLog.action, selectedLog);
                       return <Icon className="h-3.5 w-3.5" />;
                     })()}
-                    {actionLabel(selectedLog.action)}
+                    {actionLabel(selectedLog.action, selectedLog)}
                   </div>
 
                   <h2 className="break-words text-2xl font-black">
