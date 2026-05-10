@@ -803,6 +803,90 @@ function rafflePrintableAttachmentHtml({
 </html>`;
 }
 
+function rafflePrintableAttachmentSvg({
+  fullName,
+  email,
+  phone,
+  ticketNumber,
+  ticketsBought,
+}: {
+  fullName: string;
+  email: string;
+  phone: string;
+  ticketNumber: number;
+  ticketsBought: number;
+}) {
+  const count = safeTicketCount(ticketsBought);
+  const ticketLabel = count === 5 ? "BOOK OF 5" : `${count} TICKET${count === 1 ? "" : "S"}`;
+  const priceLabel = count === 5 ? "FOR £5.00" : `FOR £${count}.00`;
+  const stubPriceLabel = count === 5 ? "BOOK OF 5 £5.00" : `${count} TICKET${count === 1 ? "" : "S"} £${count}.00`;
+  const safeNumber = escapeHtml(String(ticketNumber).padStart(4, "0"));
+  const safeName = escapeHtml(fullName || "Supporter");
+  const safeEmail = escapeHtml(email || "No email provided");
+  const safePhone = escapeHtml(phone || "No phone provided");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560">
+  <defs>
+    <linearGradient id="stubRainbow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ef4444"/><stop offset="16%" stop-color="#f97316"/><stop offset="32%" stop-color="#facc15"/><stop offset="48%" stop-color="#22c55e"/><stop offset="64%" stop-color="#3b82f6"/><stop offset="80%" stop-color="#6366f1"/><stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <linearGradient id="mainRainbow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#dc2626"/><stop offset="17%" stop-color="#f97316"/><stop offset="34%" stop-color="#eab308"/><stop offset="50%" stop-color="#16a34a"/><stop offset="67%" stop-color="#2563eb"/><stop offset="84%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#db2777"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/></linearGradient>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f8fafc"/><stop offset="100%" stop-color="#94a3b8"/></linearGradient>
+    <linearGradient id="bronze" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fed7aa"/><stop offset="100%" stop-color="#b45309"/></linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="1584" height="544" rx="18" fill="#ffffff" stroke="#7e22ce" stroke-width="4"/>
+
+  <rect x="8" y="8" width="420" height="544" rx="18" fill="#f8fafc"/>
+  <rect x="8" y="8" width="46" height="544" fill="url(#stubRainbow)"/>
+  <rect x="54" y="8" width="80" height="544" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <line x1="428" y1="8" x2="428" y2="552" stroke="#111827" stroke-width="4" stroke-dasharray="10 8"/>
+  <text x="96" y="280" transform="rotate(-90 96 280)" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900" letter-spacing="2" fill="#111827">RAFFLE TICKET STUB</text>
+  <text x="150" y="55" font-family="Arial" font-size="18" font-weight="900" fill="#111827">BURTON PRIDE C.I.C</text>
+  <text x="150" y="100" font-family="Arial" font-size="12" font-weight="900">NAME</text>
+  <text x="150" y="124" font-family="Arial" font-size="15" font-weight="900">${safeName}</text>
+  <line x1="150" y1="154" x2="400" y2="154" stroke="#111827" stroke-width="2"/>
+  <text x="150" y="188" font-family="Arial" font-size="12" font-weight="900">PHONE</text>
+  <text x="150" y="212" font-family="Arial" font-size="15" font-weight="900">${safePhone}</text>
+  <line x1="150" y1="242" x2="400" y2="242" stroke="#111827" stroke-width="2"/>
+  <text x="150" y="276" font-family="Arial" font-size="12" font-weight="900">EMAIL</text>
+  <text x="150" y="300" font-family="Arial" font-size="14" font-weight="900">${safeEmail}</text>
+  <line x1="150" y1="338" x2="400" y2="338" stroke="#111827" stroke-width="2"/>
+  <text x="150" y="515" font-family="Courier New" font-size="30" font-weight="900" letter-spacing="2">${safeNumber}</text>
+  <text x="398" y="512" text-anchor="end" font-family="Arial" font-size="12" font-weight="900">${escapeHtml(stubPriceLabel)}</text>
+
+  <rect x="442" y="18" width="1132" height="524" fill="url(#mainRainbow)"/>
+  <rect x="456" y="32" width="1104" height="496" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="560" y="100" font-size="16" fill="#ef4444" opacity="0.35">▰</text><text x="690" y="72" font-size="16" fill="#2563eb" opacity="0.35">●</text><text x="820" y="90" font-size="16" fill="#16a34a" opacity="0.35">◆</text><text x="1040" y="78" font-size="16" fill="#ef4444" opacity="0.35">●</text><text x="1270" y="88" font-size="16" fill="#2563eb" opacity="0.35">▰</text><text x="1450" y="72" font-size="16" fill="#eab308" opacity="0.35">◆</text>
+  <circle cx="800" cy="100" r="48" fill="#ffffff" stroke="#111827" stroke-width="2"/>
+  <text x="800" y="108" text-anchor="middle" font-family="Arial" font-size="18" font-weight="900" fill="#7e22ce">BP</text>
+  <text x="1050" y="92" text-anchor="middle" font-family="Arial" font-size="48" font-weight="900" fill="#7e22ce">RAFFLE TICKET</text>
+  <text x="1050" y="135" text-anchor="middle" font-family="Arial" font-size="28" font-weight="900" letter-spacing="1" fill="#374151">BURTON PRIDE 2026 RAFFLE</text>
+  <rect x="500" y="180" width="320" height="84" rx="6" fill="url(#gold)" stroke="#111827" stroke-width="2"/>
+  <text x="660" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">1st PRIZE:</text><text x="660" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£100</text>
+  <rect x="850" y="180" width="320" height="84" rx="6" fill="url(#silver)" stroke="#111827" stroke-width="2"/>
+  <text x="1010" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">2nd PRIZE:</text><text x="1010" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£60</text>
+  <rect x="1200" y="180" width="320" height="84" rx="6" fill="url(#bronze)" stroke="#111827" stroke-width="2"/>
+  <text x="1360" y="208" text-anchor="middle" font-family="Arial" font-size="15" font-weight="900">3rd PRIZE:</text><text x="1360" y="250" text-anchor="middle" font-family="Arial" font-size="36" font-weight="900">£30</text>
+  <rect x="500" y="310" width="190" height="92" rx="10" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
+  <text x="595" y="338" text-anchor="middle" font-family="Arial" font-size="13" font-weight="900">TICKET PRICE:</text>
+  <text x="595" y="369" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900">${escapeHtml(ticketLabel)}</text>
+  <text x="595" y="394" text-anchor="middle" font-family="Arial" font-size="16" font-weight="900">${escapeHtml(priceLabel)}</text>
+  <text x="1040" y="330" text-anchor="middle" font-family="Arial" font-size="17" font-weight="900">THE DRAW DATE &amp; LOCATION:</text>
+  <text x="1040" y="370" text-anchor="middle" font-family="Arial" font-size="29" font-weight="900">SATURDAY 27th JUNE 2026</text>
+  <text x="1040" y="402" text-anchor="middle" font-family="Arial" font-size="16" font-weight="900">AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX</text>
+  <text x="1040" y="432" text-anchor="middle" font-family="Arial" font-size="12" font-weight="900">DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB</text>
+  <text x="1040" y="462" text-anchor="middle" font-family="Arial" font-size="11" font-weight="900">Licensed by East Staffordshire Council under registration number SL0507.</text>
+  <rect x="1400" y="410" width="120" height="66" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="1460" y="452" text-anchor="middle" font-family="Courier New" font-size="28" font-weight="900" letter-spacing="2">${safeNumber}</text>
+  <circle cx="430" cy="560" r="130" fill="url(#stubRainbow)" opacity="0.20"/>
+</svg>`;
+}
+
 /**
  * RAFFLE PAYMENT COMPLETE
  * When Stripe confirms checkout.session.completed for raffle,
@@ -935,18 +1019,38 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
       ticketCount: tickets,
     });
 
-    const printableTicketHtml = rafflePrintableAttachmentHtml({
-      fullName,
-      email,
-      phone,
-      ticketNumbers,
-      ticketsBought: tickets,
-    });
-
-    const printableTicketAttachment = Buffer.from(
-      printableTicketHtml,
-      "utf8"
-    ).toString("base64");
+    const printableTicketAttachments = ticketNumbers.length
+      ? ticketNumbers.map((ticketNumber) => ({
+          filename: `burton-pride-raffle-ticket-${String(ticketNumber).padStart(
+            4,
+            "0"
+          )}.svg`,
+          content: Buffer.from(
+            rafflePrintableAttachmentSvg({
+              fullName,
+              email,
+              phone,
+              ticketNumber,
+              ticketsBought: tickets,
+            }),
+            "utf8"
+          ).toString("base64"),
+        }))
+      : [
+          {
+            filename: "burton-pride-raffle-ticket.svg",
+            content: Buffer.from(
+              rafflePrintableAttachmentSvg({
+                fullName,
+                email,
+                phone,
+                ticketNumber: 0,
+                ticketsBought: tickets,
+              }),
+              "utf8"
+            ).toString("base64"),
+          },
+        ];
 
     const FROM =
       process.env.EMAIL_FROM?.trim() ||
@@ -975,14 +1079,9 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
         replyTo: REPLY_TO,
         subject: "Your Burton Pride raffle ticket numbers",
         headers: emailHeaders,
-        attachments: [
-          {
-            filename: "burton-pride-raffle-ticket.html",
-            content: printableTicketAttachment,
-          },
-        ],
+        attachments: printableTicketAttachments,
         html: `
-          <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 760px; margin: 0 auto;">
+          <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; width: 100%; max-width: 1180px; margin: 0 auto;">
             <div style="padding: 32px 24px; background: linear-gradient(135deg, #db2777, #a21caf, #2563eb); color: white; border-radius: 20px 20px 0 0; text-align: center;">
               <h1 style="margin: 0; font-size: 28px;">You Are In The Raffle</h1>
               <p style="margin: 12px 0 0; font-size: 16px; opacity: 0.95;">
@@ -1013,16 +1112,14 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                 </p>
               </div>
 
-              <div style="margin: 26px 0 10px;">
-                <p style="margin: 0 0 10px; font-size: 18px; font-weight: 900; color: #111827;">
-                  Your digital raffle ticket
+              <div style="margin: 26px 0; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px;">
+                <p style="margin: 0 0 8px; font-size: 18px; font-weight: 900; color: #111827;">
+                  Your printable raffle ticket is attached
                 </p>
-                <p style="margin: 0 0 16px; color: #4b5563; font-size: 14px;">
-                  This is a digital copy for you to view. A printable ticket is attached to this email if you want to print it.
+                <p style="margin: 0; color: #4b5563; font-size: 14px;">
+                  We have attached your raffle ticket as an image file so you can save it or print it if you want to. Your raffle numbers are also shown above.
                 </p>
               </div>
-
-              ${digitalTicketHtml}
 
               <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; margin: 22px 0;">
                 <p style="margin: 0 0 8px;"><strong>Name:</strong> ${safeFullName}</p>
