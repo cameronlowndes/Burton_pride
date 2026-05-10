@@ -368,6 +368,441 @@ function raffleTicketEmailHtml({
     .join("");
 }
 
+function rafflePrintableAttachmentHtml({
+  fullName,
+  email,
+  phone,
+  ticketNumbers,
+  ticketsBought,
+}: {
+  fullName: string;
+  email: string;
+  phone: string;
+  ticketNumbers: number[];
+  ticketsBought: number;
+}) {
+  const safeName = escapeHtml(fullName || "Supporter");
+  const safeEmail = escapeHtml(email || "No email provided");
+  const safePhone = escapeHtml(phone || "No phone provided");
+  const count = safeTicketCount(ticketsBought);
+  const ticketLabel = count === 5 ? "BOOK OF 5" : `${count} TICKET${count === 1 ? "" : "S"}`;
+  const priceLabel = count === 5 ? "FOR £5.00" : `FOR £${count}.00`;
+  const stubPriceLabel = count === 5 ? "BOOK OF 5 £5.00" : `${count} TICKET${count === 1 ? "" : "S"} £${count}.00`;
+
+  const safeTicketNumbers = ticketNumbers.length ? ticketNumbers : [0];
+
+  const ticketsHtml = safeTicketNumbers
+    .map((number) => {
+      const safeNumber = number ? escapeHtml(String(number).padStart(4, "0")) : "—";
+
+      return `
+        <section class="ticket-page">
+          <div class="ticket-card">
+            <aside class="stub">
+              <div class="rainbow-strip"></div>
+              <div class="stub-title"><span>RAFFLE TICKET STUB</span></div>
+              <div class="stub-content">
+                <h3>BURTON PRIDE C.I.C</h3>
+
+                <div class="field">
+                  <span>NAME</span>
+                  <strong>${safeName}</strong>
+                </div>
+
+                <div class="field">
+                  <span>PHONE</span>
+                  <strong>${safePhone}</strong>
+                </div>
+
+                <div class="field">
+                  <span>EMAIL</span>
+                  <strong>${safeEmail}</strong>
+                </div>
+
+                <div class="stub-bottom">
+                  <strong>${safeNumber}</strong>
+                  <span>${stubPriceLabel}</span>
+                </div>
+              </div>
+            </aside>
+
+            <main class="ticket-main">
+              <div class="ticket-inner">
+                <div class="confetti">
+                  <span>▰</span><span>●</span><span>◆</span><span>▰</span><span>●</span><span>◆</span><span>▰</span><span>●</span><span>◆</span><span>▰</span>
+                </div>
+
+                <div class="heading">
+                  <div class="bp-logo">BP</div>
+                  <div>
+                    <h1>RAFFLE TICKET</h1>
+                    <p>BURTON PRIDE 2026 RAFFLE</p>
+                  </div>
+                </div>
+
+                <div class="prizes">
+                  <div class="prize gold"><small>1st PRIZE:</small><strong>£100</strong></div>
+                  <div class="prize silver"><small>2nd PRIZE:</small><strong>£60</strong></div>
+                  <div class="prize bronze"><small>3rd PRIZE:</small><strong>£30</strong></div>
+                </div>
+
+                <div class="details-row">
+                  <div class="price-box">
+                    <small>TICKET PRICE:</small>
+                    <strong>${ticketLabel}</strong>
+                    <span>${priceLabel}</span>
+                  </div>
+
+                  <div class="draw-box">
+                    <small>THE DRAW DATE & LOCATION:</small>
+                    <h2>SATURDAY 27th JUNE 2026</h2>
+                    <strong>AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX</strong>
+                    <span>DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB</span>
+                    <em>Licensed by East Staffordshire Council under registration number SL0507.</em>
+                  </div>
+
+                  <div class="number-box">${safeNumber}</div>
+                </div>
+
+                <div class="corner-rainbow"></div>
+              </div>
+            </main>
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Burton Pride Raffle Ticket</title>
+  <style>
+    @page { size: A4 landscape; margin: 7mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: #111827;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    .ticket-page {
+      width: 100%;
+      break-after: page;
+      page-break-after: always;
+      padding: 0;
+    }
+    .ticket-page:last-child {
+      break-after: auto;
+      page-break-after: auto;
+    }
+    .ticket-card {
+      display: grid;
+      grid-template-columns: 78mm 1fr;
+      width: 100%;
+      height: 70mm;
+      overflow: hidden;
+      border: 2px solid #7e22ce;
+      border-radius: 3mm;
+      background: white;
+      color: #111827;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+    .stub {
+      display: grid;
+      grid-template-columns: 9mm 14mm 1fr;
+      height: 100%;
+      border-right: 2px dashed #111827;
+      background: #f8fafc;
+    }
+    .rainbow-strip {
+      background: linear-gradient(180deg,#ef4444 0%,#f97316 16%,#facc15 32%,#22c55e 48%,#3b82f6 64%,#6366f1 80%,#a855f7 100%);
+    }
+    .stub-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid #cbd5e1;
+      background: #f1f5f9;
+    }
+    .stub-title span {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      white-space: nowrap;
+      font-size: 10px;
+      font-weight: 1000;
+      letter-spacing: 1.4px;
+    }
+    .stub-content {
+      display: flex;
+      flex-direction: column;
+      padding: 4mm 4mm 4.8mm;
+      min-width: 0;
+    }
+    .stub-content h3 {
+      margin: 0 0 2.4mm;
+      font-size: 10px;
+      font-weight: 1000;
+      letter-spacing: .7px;
+    }
+    .field {
+      margin-bottom: 1.8mm;
+      border-bottom: 1px solid #111827;
+      padding-bottom: 1mm;
+    }
+    .field span {
+      display: block;
+      margin-bottom: .5mm;
+      font-size: 7px;
+      font-weight: 1000;
+      letter-spacing: .8px;
+    }
+    .field strong {
+      display: block;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-size: 8.4px;
+      line-height: 1.1;
+      font-weight: 900;
+    }
+    .stub-bottom {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 3mm;
+      min-height: 9mm;
+      transform: translateY(-2.2mm);
+    }
+    .stub-bottom strong {
+      font-family: "Courier New", monospace;
+      font-size: 17px;
+      line-height: 1;
+      font-weight: 1000;
+      letter-spacing: .7px;
+    }
+    .stub-bottom span {
+      text-align: right;
+      white-space: nowrap;
+      font-size: 6.8px;
+      line-height: 1.1;
+      font-weight: 1000;
+    }
+    .ticket-main {
+      height: 100%;
+      background: linear-gradient(90deg,#dc2626 0%,#f97316 17%,#eab308 34%,#16a34a 50%,#2563eb 67%,#7c3aed 84%,#db2777 100%);
+      padding: 2.5mm;
+    }
+    .ticket-inner {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      padding: 4mm;
+    }
+    .confetti {
+      position: absolute;
+      left: 0;
+      top: 0;
+      right: 0;
+      height: 16mm;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      font-size: 10px;
+      opacity: .45;
+      transform: rotate(-2deg);
+      z-index: 1;
+    }
+    .confetti span:nth-child(1n) { color: #ef4444; }
+    .confetti span:nth-child(2n) { color: #2563eb; }
+    .confetti span:nth-child(3n) { color: #16a34a; }
+    .confetti span:nth-child(4n) { color: #eab308; }
+    .heading, .prizes, .details-row { position: relative; z-index: 5; }
+    .heading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5mm;
+      text-align: center;
+    }
+    .bp-logo {
+      display: flex;
+      height: 16mm;
+      width: 16mm;
+      align-items: center;
+      justify-content: center;
+      border: 1.5px solid #111827;
+      border-radius: 999px;
+      background: white;
+      font-size: 10px;
+      font-weight: 1000;
+      color: #7e22ce;
+    }
+    .heading h1 {
+      margin: 0;
+      font-size: 29px;
+      line-height: .9;
+      font-weight: 1000;
+      letter-spacing: -1px;
+      color: #7e22ce;
+    }
+    .heading p {
+      margin: 2mm 0 0;
+      font-size: 15px;
+      font-weight: 1000;
+      letter-spacing: 1px;
+      color: #374151;
+    }
+    .prizes {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4mm;
+      margin-top: 4mm;
+    }
+    .prize {
+      border: 1.5px solid #111827;
+      border-radius: 1mm;
+      padding: 2mm 3mm;
+      text-align: center;
+    }
+    .prize small {
+      display: block;
+      margin: 0;
+      font-size: 9px;
+      font-weight: 1000;
+    }
+    .prize strong {
+      display: block;
+      margin-top: 1mm;
+      font-size: 22px;
+      line-height: 1;
+      font-weight: 1000;
+    }
+    .gold { background: linear-gradient(135deg,#fde68a,#d97706); }
+    .silver { background: linear-gradient(135deg,#f8fafc,#94a3b8); }
+    .bronze { background: linear-gradient(135deg,#fed7aa,#b45309); }
+    .details-row {
+      display: grid;
+      grid-template-columns: 34mm 1fr 30mm;
+      gap: 5mm;
+      margin-top: 4mm;
+      align-items: end;
+    }
+    .price-box {
+      text-align: center;
+      background: rgba(255,255,255,.96);
+      border: 1px solid #e5e7eb;
+      border-radius: 2mm;
+      padding: 2mm;
+      align-self: start;
+    }
+    .price-box small {
+      display: block;
+      font-size: 8px;
+      font-weight: 1000;
+    }
+    .price-box strong {
+      display: block;
+      margin-top: 1mm;
+      font-size: 10px;
+      font-weight: 1000;
+    }
+    .price-box span {
+      display: block;
+      font-size: 10px;
+      font-weight: 1000;
+    }
+    .draw-box {
+      text-align: center;
+      background: rgba(255,255,255,.96);
+      border-radius: 2mm;
+      padding: 1.5mm;
+    }
+    .draw-box small {
+      display: block;
+      font-size: 11px;
+      font-weight: 1000;
+    }
+    .draw-box h2 {
+      margin: 1mm 0 0;
+      font-size: 17px;
+      line-height: 1.1;
+      font-weight: 1000;
+    }
+    .draw-box strong {
+      display: block;
+      margin-top: 1mm;
+      font-size: 9px;
+      font-weight: 1000;
+    }
+    .draw-box span {
+      display: block;
+      margin-top: 1mm;
+      font-size: 7px;
+      font-weight: 800;
+    }
+    .draw-box em {
+      display: block;
+      margin-top: 1mm;
+      font-size: 6.5px;
+      line-height: 1.1;
+      font-style: normal;
+      font-weight: 1000;
+    }
+    .number-box {
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      padding: 1.5mm 3mm;
+      text-align: center;
+      font-family: "Courier New", monospace;
+      font-size: 16px;
+      font-weight: 1000;
+      letter-spacing: 1px;
+    }
+    .corner-rainbow {
+      position: absolute;
+      left: -16mm;
+      bottom: -22mm;
+      width: 40mm;
+      height: 40mm;
+      border-radius: 999px;
+      background: conic-gradient(#ef4444,#f97316,#facc15,#22c55e,#3b82f6,#7c3aed,#ef4444);
+      opacity: .26;
+      z-index: 0;
+    }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #111827;
+      color: #4b5563;
+      font-size: 10px;
+      line-height: 1.4;
+    }
+    @media screen {
+      body { padding: 16px; background: #f3f4f6; }
+      .ticket-page { margin: 0 auto 18px; max-width: 1180px; }
+      .ticket-card { box-shadow: 0 20px 50px rgba(17,24,39,.16); }
+    }
+  </style>
+</head>
+<body>
+  ${ticketsHtml}
+  <div class="footer">
+    <div><strong>Burton Pride C.I.C.</strong><br />Grassroots pride, powered by local people.</div>
+    <div>Use your browser print button or Ctrl+P to print this ticket.</div>
+  </div>
+</body>
+</html>`;
+}
+
 /**
  * RAFFLE PAYMENT COMPLETE
  * When Stripe confirms checkout.session.completed for raffle,
@@ -500,6 +935,19 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
       ticketCount: tickets,
     });
 
+    const printableTicketHtml = rafflePrintableAttachmentHtml({
+      fullName,
+      email,
+      phone,
+      ticketNumbers,
+      ticketsBought: tickets,
+    });
+
+    const printableTicketAttachment = Buffer.from(
+      printableTicketHtml,
+      "utf8"
+    ).toString("base64");
+
     const FROM =
       process.env.EMAIL_FROM?.trim() ||
       "Burton Pride <noreply@burtonpride.co.uk>";
@@ -527,6 +975,12 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
         replyTo: REPLY_TO,
         subject: "Your Burton Pride raffle ticket numbers",
         headers: emailHeaders,
+        attachments: [
+          {
+            filename: "burton-pride-raffle-ticket.html",
+            content: printableTicketAttachment,
+          },
+        ],
         html: `
           <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 760px; margin: 0 auto;">
             <div style="padding: 32px 24px; background: linear-gradient(135deg, #db2777, #a21caf, #2563eb); color: white; border-radius: 20px 20px 0 0; text-align: center;">
@@ -564,7 +1018,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                   Your digital raffle ticket
                 </p>
                 <p style="margin: 0 0 16px; color: #4b5563; font-size: 14px;">
-                  This is a digital copy for you to view. You do not need to print it.
+                  This is a digital copy for you to view. A printable ticket is attached to this email if you want to print it.
                 </p>
               </div>
 
