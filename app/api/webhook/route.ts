@@ -1061,38 +1061,13 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
       ticketCount: tickets,
     });
 
-    const printableTicketAttachments = ticketNumbers.length
-      ? ticketNumbers.map((ticketNumber) => ({
-          filename: `burton-pride-raffle-ticket-${String(ticketNumber).padStart(
-            4,
-            "0"
-          )}.svg`,
-          content: Buffer.from(
-            rafflePrintableAttachmentSvg({
-              fullName,
-              email,
-              phone,
-              ticketNumber,
-              ticketsBought: tickets,
-            }),
-            "utf8"
-          ).toString("base64"),
-        }))
-      : [
-          {
-            filename: "burton-pride-raffle-ticket.svg",
-            content: Buffer.from(
-              rafflePrintableAttachmentSvg({
-                fullName,
-                email,
-                phone,
-                ticketNumber: 0,
-                ticketsBought: tickets,
-              }),
-              "utf8"
-            ).toString("base64"),
-          },
-        ];
+    const printableTicketAttachments = await buildPrintableTicketAttachments({
+      fullName,
+      email,
+      phone,
+      ticketNumbers,
+      ticketsBought: tickets,
+    });
 
     const FROM =
       process.env.EMAIL_FROM?.trim() ||
@@ -1159,7 +1134,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                   Your printable raffle ticket is attached
                 </p>
                 <p style="margin: 0; color: #4b5563; font-size: 14px;">
-                  We have attached your raffle ticket as an image file so you can save it or print it if you want to. Your raffle numbers are also shown above.
+                  We have attached your raffle ticket as a PNG image file so you can save it or print it if you want to. Your raffle numbers are also shown above.
                 </p>
               </div>
 
