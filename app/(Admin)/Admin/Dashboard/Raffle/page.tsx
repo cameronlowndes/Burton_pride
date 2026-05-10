@@ -89,7 +89,11 @@ function money(amountPence: number) {
 
 function ticketCount(value: string | null) {
   const n = Number(value || 1);
-  if (!Number.isFinite(n) || n < 1) return 1;
+
+  if (!Number.isFinite(n) || n < 1) {
+    return 1;
+  }
+
   return Math.floor(n);
 }
 
@@ -218,29 +222,136 @@ function YesNoBadge({
 function PrintTicketCard({ entry }: { entry: RaffleEntry }) {
   const numbers = getTicketNumbers(entry);
 
-  return (
-    <tr className="raffle-print-row">
-      <td className="raffle-print-cell raffle-print-name-cell">
-        {entry.full_name}
-      </td>
+  const renderTicket = (number: number | null) => {
+    const displayNumber = number ? String(number).padStart(4, "0") : "—";
+    const count = ticketCount(entry.ticket_amount);
 
-      <td className="raffle-print-cell raffle-print-count-cell">
-        {ticketCount(entry.ticket_amount)}
-      </td>
+    const priceText =
+      count === 5
+        ? "BOOK OF 5 £5.00"
+        : `${count} TICKET${count === 1 ? "" : "S"} £${count}.00`;
 
-      <td className="raffle-print-cell raffle-print-numbers-cell">
-        {numbers.length > 0 ? (
-          numbers.map((number) => (
-            <span key={number} className="raffle-print-number">
-              #{number}
-            </span>
-          ))
-        ) : (
-          <span className="raffle-print-empty">No raffle numbers found</span>
-        )}
-      </td>
-    </tr>
-  );
+    const ticketLabel =
+      count === 5 ? "BOOK OF 5" : `${count} TICKET${count === 1 ? "" : "S"}`;
+
+    return (
+      <div
+        key={`${entry.id}-${number || "no-number"}`}
+        className="raffle-ticket-print-card"
+      >
+        <div className="raffle-ticket-stub">
+          <div className="raffle-stub-rainbow" />
+
+          <div className="raffle-stub-content">
+            <div className="raffle-stub-side-title">
+              <span>RAFFLE TICKET STUB</span>
+            </div>
+
+            <div className="raffle-stub-main">
+              <p className="raffle-stub-org">BURTON PRIDE C.I.C</p>
+
+              <div className="raffle-stub-field">
+                <span>Name</span>
+                <strong>{entry.full_name || "—"}</strong>
+              </div>
+
+              <div className="raffle-stub-field">
+                <span>Phone</span>
+                <strong>{entry.phone || "—"}</strong>
+              </div>
+
+              <div className="raffle-stub-field">
+                <span>Email</span>
+                <strong>{entry.email || "—"}</strong>
+              </div>
+
+              <div className="raffle-stub-bottom">
+                <strong>{displayNumber}</strong>
+                <span>{priceText}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="raffle-ticket-main">
+          <div className="raffle-ticket-main-inner">
+            <div className="raffle-ticket-confetti">
+              <span>▰</span>
+              <span>●</span>
+              <span>◆</span>
+              <span>▰</span>
+              <span>●</span>
+              <span>◆</span>
+              <span>▰</span>
+              <span>●</span>
+              <span>◆</span>
+              <span>▰</span>
+              <span>●</span>
+              <span>◆</span>
+            </div>
+
+            <div className="raffle-ticket-header">
+              <div className="raffle-logo-circle">
+                <span>BP</span>
+              </div>
+
+              <div>
+                <h2>RAFFLE TICKET</h2>
+                <p>BURTON PRIDE 2026 RAFFLE</p>
+              </div>
+            </div>
+
+            <div className="raffle-prize-row">
+              <div className="raffle-prize raffle-prize-gold">
+                <p>1st PRIZE:</p>
+                <strong>£100</strong>
+              </div>
+
+              <div className="raffle-prize raffle-prize-silver">
+                <p>2nd PRIZE:</p>
+                <strong>£60</strong>
+              </div>
+
+              <div className="raffle-prize raffle-prize-bronze">
+                <p>3rd PRIZE:</p>
+                <strong>£30</strong>
+              </div>
+            </div>
+
+            <div className="raffle-ticket-info-grid">
+              <div className="raffle-ticket-price-box">
+                <p>TICKET PRICE:</p>
+                <strong>{ticketLabel}</strong>
+                <span>FOR £{count}.00</span>
+              </div>
+
+              <div className="raffle-ticket-draw-box">
+                <p>THE DRAW DATE & LOCATION:</p>
+                <h3>SATURDAY 27th JUNE 2026</h3>
+                <strong>AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX</strong>
+                <span>
+                  DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB
+                </span>
+                <em>Licensed by East Staffordshire Council under registration number SL0507.</em>
+              </div>
+            </div>
+
+            <div className="raffle-ticket-bottom raffle-ticket-bottom-number-only">
+              <div className="raffle-main-number">{displayNumber}</div>
+            </div>
+
+            <div className="raffle-ticket-rainbow-corner" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (numbers.length === 0) {
+    return renderTicket(null);
+  }
+
+  return <>{numbers.map((number) => renderTicket(number))}</>;
 }
 
 export default function AdminRafflePage() {
@@ -1103,30 +1214,28 @@ export default function AdminRafflePage() {
 
           <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
             <h2 className="text-xl font-bold">Age, Terms and Eligibility Checks</h2>
-
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">18+ only</p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
                   The raffle is open to residents of Great Britain aged 18 years
-                  or over. The website asks for date of birth and blocks under 18s
-                  before payment.
+                  or over. The website asks for date of birth and blocks under
+                  18s before payment.
                 </p>
               </div>
-
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">Terms must be accepted</p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
-                  Entrants must confirm they agree to the raffle terms, are buying
-                  tickets for themselves, and are eligible to enter.
+                  Entrants must confirm they agree to the raffle terms, are
+                  buying tickets for themselves, and are eligible to enter.
                 </p>
               </div>
-
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">Winner ID may be checked</p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
-                  Burton Pride C.I.C. may ask a winner for proof of age, identity,
-                  or eligibility before confirming or releasing a prize.
+                  Burton Pride C.I.C. may ask a winner for proof of age,
+                  identity, or eligibility before confirming or releasing a
+                  prize.
                 </p>
               </div>
             </div>
@@ -1134,7 +1243,6 @@ export default function AdminRafflePage() {
 
           <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
             <h2 className="text-xl font-bold">How the Random Draw Works</h2>
-
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">1 ticket = 1 chance</p>
@@ -1143,7 +1251,6 @@ export default function AdminRafflePage() {
                   times. If someone buys 1 ticket, they go in once.
                 </p>
               </div>
-
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">Paid entries only</p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
@@ -1151,12 +1258,11 @@ export default function AdminRafflePage() {
                   the status is marked as paid.
                 </p>
               </div>
-
               <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
                 <p className="text-lg font-black">Official server draw</p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
-                  The official draw uses crypto.randomInt on the server to choose
-                  one ticket from the paid ticket pool.
+                  The official draw uses crypto.randomInt on the server to
+                  choose one ticket from the paid ticket pool.
                 </p>
               </div>
             </div>
@@ -1181,7 +1287,6 @@ export default function AdminRafflePage() {
                   from the next prize draw.
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={testRandomDraw}
@@ -1209,35 +1314,27 @@ export default function AdminRafflePage() {
                         <p className="font-bold text-yellow-100">
                           {existingWinner.full_name}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           {existingWinner.email}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           Phone: {existingWinner.phone || "—"}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           DOB: {formatDob(existingWinner.date_of_birth)}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           Age: {getAge(existingWinner.date_of_birth) || "—"}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           Tickets: {ticketCount(existingWinner.ticket_amount)}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           Raffle numbers: {formatTicketNumbers(existingWinner)}
                         </p>
-
                         <p className="mt-1 text-xs text-white/60">
                           Drawn: {formatDate(existingWinner.raffle_won_at)}
                         </p>
-
                         <div className="mt-3 flex flex-wrap gap-2">
                           <YesNoBadge
                             value={existingWinner.age_confirmed}
@@ -1250,13 +1347,11 @@ export default function AdminRafflePage() {
                             noText="Terms missing"
                           />
                         </div>
-
                         {existingWinner.raffle_draw_notes && (
                           <p className="mt-2 text-xs text-white/50">
                             {existingWinner.raffle_draw_notes}
                           </p>
                         )}
-
                         <button
                           type="button"
                           onClick={() => setRedoModal(position)}
@@ -1287,11 +1382,10 @@ export default function AdminRafflePage() {
               <div>
                 <h2 className="text-xl font-bold">Raffle Entries</h2>
                 <p className="text-sm text-white/60">
-                  All raffle checkouts, paid entries, raffle numbers, age checks,
-                  and terms confirmations.
+                  All raffle checkouts, paid entries, raffle numbers, age
+                  checks, and terms confirmations.
                 </p>
               </div>
-
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1303,23 +1397,13 @@ export default function AdminRafflePage() {
                   Print All Tickets
                 </button>
 
-                {(
-                  [
-                    "all",
-                    "paid",
-                    "checkout_started",
-                    "age_checked",
-                    "winners",
-                  ] as const
-                ).map((item) => (
+                {(["all", "paid", "checkout_started", "age_checked", "winners"] as const).map((item) => (
                   <button
                     key={item}
                     type="button"
                     onClick={() => setFilter(item)}
                     className={`rounded-xl px-4 py-2 text-sm font-bold ${
-                      filter === item
-                        ? "bg-white text-black"
-                        : "bg-white/10 text-white"
+                      filter === item ? "bg-white text-black" : "bg-white/10 text-white"
                     }`}
                   >
                     {item === "all"
@@ -1343,22 +1427,19 @@ export default function AdminRafflePage() {
                     <Search className="h-4 w-4" />
                     Search by raffle number
                   </label>
-
                   <input
                     type="text"
                     value={raffleNumberSearch}
                     onChange={(e) => setRaffleNumberSearch(e.target.value)}
-                    placeholder="Example: 481 or #481"
+                    placeholder="Example: 1001 or #1001"
                     className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white placeholder:text-white/35 outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-400/40"
                   />
-
                   <p className="mt-2 text-xs text-white/45">
-                    Use this if you draw a raffle number manually and need to find
-                    the matching person. Ctrl+P will print the currently visible
-                    filtered tickets.
+                    Use this if you draw a raffle number manually and need to
+                    find the matching person. Ctrl+P will print the currently
+                    visible filtered tickets.
                   </p>
                 </div>
-
                 <button
                   type="button"
                   onClick={() => setRaffleNumberSearch("")}
@@ -1372,12 +1453,10 @@ export default function AdminRafflePage() {
             {raffleNumberSearch.trim() && (
               <div className="mb-4 rounded-2xl border border-purple-300/30 bg-purple-500/10 p-4">
                 <p className="text-sm font-black text-purple-100">
-                  Searching raffle number: #
-                  {raffleNumberSearch.replace("#", "").trim()}
+                  Searching raffle number: #{raffleNumberSearch.replace("#", "").trim()}
                 </p>
                 <p className="mt-1 text-sm text-white/60">
-                  Found {filteredEntries.length} matching entr
-                  {filteredEntries.length === 1 ? "y" : "ies"}.
+                  Found {filteredEntries.length} matching entr{filteredEntries.length === 1 ? "y" : "ies"}.
                 </p>
               </div>
             )}
@@ -1417,39 +1496,19 @@ export default function AdminRafflePage() {
                       return (
                         <tr key={entry.id} className="border-t border-white/10">
                           <td className="p-3">{formatDate(entry.created_at)}</td>
-
                           <td className="p-3 font-bold">{entry.full_name}</td>
-
                           <td className="p-3">{entry.email}</td>
-
                           <td className="p-3">{entry.phone || "—"}</td>
-
                           <td className="p-3">{formatDob(entry.date_of_birth)}</td>
-
                           <td className="p-3">
                             {age !== null ? (
-                              <span
-                                className={`font-black ${
-                                  age >= 18
-                                    ? "text-emerald-100"
-                                    : "text-red-100"
-                                }`}
-                              >
-                                {age}
-                              </span>
+                              <span className={`font-black ${age >= 18 ? "text-emerald-100" : "text-red-100"}`}>{age}</span>
                             ) : (
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-
-                          <td className="p-3 font-bold">
-                            {ticketCount(entry.ticket_amount)}
-                          </td>
-
-                          <td className="p-3">
-                            <RaffleNumberBadges entry={entry} />
-                          </td>
-
+                          <td className="p-3 font-bold">{ticketCount(entry.ticket_amount)}</td>
+                          <td className="p-3"><RaffleNumberBadges entry={entry} /></td>
                           <td className="p-3">
                             <span
                               className={`rounded-xl px-3 py-2 text-xs font-bold ${
@@ -1463,35 +1522,10 @@ export default function AdminRafflePage() {
                               {entry.payment_status || "not_paid"}
                             </span>
                           </td>
-
-                          <td className="p-3 text-right font-bold">
-                            {money(entry.amount_pence || 0)}
-                          </td>
-
-                          <td className="p-3">
-                            <YesNoBadge
-                              value={entry.age_confirmed}
-                              yesText="Yes"
-                              noText="No"
-                            />
-                          </td>
-
-                          <td className="p-3">
-                            <YesNoBadge
-                              value={entry.terms_accepted}
-                              yesText="Yes"
-                              noText="No"
-                            />
-                          </td>
-
-                          <td className="p-3">
-                            <YesNoBadge
-                              value={entry.eligibility_confirmed}
-                              yesText="Yes"
-                              noText="No"
-                            />
-                          </td>
-
+                          <td className="p-3 text-right font-bold">{money(entry.amount_pence || 0)}</td>
+                          <td className="p-3"><YesNoBadge value={entry.age_confirmed} yesText="Yes" noText="No" /></td>
+                          <td className="p-3"><YesNoBadge value={entry.terms_accepted} yesText="Yes" noText="No" /></td>
+                          <td className="p-3"><YesNoBadge value={entry.eligibility_confirmed} yesText="Yes" noText="No" /></td>
                           <td className="p-3">
                             {entry.raffle_winner_position ? (
                               <span className="rounded-xl bg-yellow-400/15 px-3 py-2 text-xs font-black text-yellow-100">
@@ -1501,13 +1535,9 @@ export default function AdminRafflePage() {
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-
                           <td className="p-3 text-white/60">
-                            <div className="max-w-[280px] whitespace-pre-wrap">
-                              {entry.message || "—"}
-                            </div>
+                            <div className="max-w-[280px] whitespace-pre-wrap">{entry.message || "—"}</div>
                           </td>
-
                           <td className="p-3 text-right">
                             <div className="flex justify-end gap-2">
                               <button
@@ -1518,7 +1548,6 @@ export default function AdminRafflePage() {
                                 <Printer className="h-3.5 w-3.5" />
                                 Print Ticket
                               </button>
-
                               <button
                                 type="button"
                                 onClick={() => setDeleteModal(entry)}
@@ -1546,79 +1575,37 @@ export default function AdminRafflePage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
                   <Bug className="h-6 w-6" />
                 </div>
-
                 <div>
-                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                    Delete Entry
-                  </p>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">Delete Entry</p>
                   <h2 className="text-xl font-black">Delete raffle entry?</h2>
                 </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <p className="font-black text-white">{deleteModal.full_name}</p>
-                <p className="mt-1 text-sm text-white/60">
-                  {deleteModal.email}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Phone: {deleteModal.phone || "—"}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  DOB: {formatDob(deleteModal.date_of_birth)}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Age: {getAge(deleteModal.date_of_birth) || "—"}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Tickets: {ticketCount(deleteModal.ticket_amount)}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Raffle numbers: {formatTicketNumbers(deleteModal)}
-                </p>
-                <p className="mt-1 text-sm text-white/60">
-                  Payment: {deleteModal.payment_status || "not_paid"}
-                </p>
-
+                <p className="mt-1 text-sm text-white/60">{deleteModal.email}</p>
+                <p className="mt-1 text-sm text-white/60">Phone: {deleteModal.phone || "—"}</p>
+                <p className="mt-1 text-sm text-white/60">DOB: {formatDob(deleteModal.date_of_birth)}</p>
+                <p className="mt-1 text-sm text-white/60">Age: {getAge(deleteModal.date_of_birth) || "—"}</p>
+                <p className="mt-1 text-sm text-white/60">Tickets: {ticketCount(deleteModal.ticket_amount)}</p>
+                <p className="mt-1 text-sm text-white/60">Raffle numbers: {formatTicketNumbers(deleteModal)}</p>
+                <p className="mt-1 text-sm text-white/60">Payment: {deleteModal.payment_status || "not_paid"}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <YesNoBadge
-                    value={deleteModal.age_confirmed}
-                    yesText="18+ confirmed"
-                    noText="Age not confirmed"
-                  />
-                  <YesNoBadge
-                    value={deleteModal.terms_accepted}
-                    yesText="Terms accepted"
-                    noText="Terms missing"
-                  />
-                  <YesNoBadge
-                    value={deleteModal.eligibility_confirmed}
-                    yesText="Eligible"
-                    noText="Eligibility missing"
-                  />
+                  <YesNoBadge value={deleteModal.age_confirmed} yesText="18+ confirmed" noText="Age not confirmed" />
+                  <YesNoBadge value={deleteModal.terms_accepted} yesText="Terms accepted" noText="Terms missing" />
+                  <YesNoBadge value={deleteModal.eligibility_confirmed} yesText="Eligible" noText="Eligibility missing" />
                 </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-                This will permanently delete this raffle entry from Supabase. This
-                cannot be undone.
+                This will permanently delete this raffle entry from Supabase. This cannot be undone.
               </div>
 
               <div className="mt-6 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDeleteModal(null)}
-                  disabled={deleting}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => setDeleteModal(null)} disabled={deleting} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60">
                   Cancel
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => deleteEntry(deleteModal)}
-                  disabled={deleting}
-                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => deleteEntry(deleteModal)} disabled={deleting} className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60">
                   {deleting ? "Deleting..." : "Yes, Delete Entry"}
                 </button>
               </div>
@@ -1633,43 +1620,22 @@ export default function AdminRafflePage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
                   <Bug className="h-6 w-6" />
                 </div>
-
                 <div>
-                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                    Delete Test Entries
-                  </p>
-                  <h2 className="text-xl font-black">
-                    Delete all test entries?
-                  </h2>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">Delete Test Entries</p>
+                  <h2 className="text-xl font-black">Delete all test entries?</h2>
                 </div>
               </div>
-
               <p className="mt-4 text-sm leading-6 text-white/70">
-                This will delete all fake test raffle entries created by the{" "}
-                <strong>Create 10 Test Entries</strong> button.
+                This will delete all fake test raffle entries created by the <strong>Create 10 Test Entries</strong> button.
               </p>
-
               <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-                Real raffle entries will not be deleted. Only entries with test
-                email/session details will be removed.
+                Real raffle entries will not be deleted. Only entries with test email/session details will be removed.
               </div>
-
               <div className="mt-6 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDeleteAllModal(false)}
-                  disabled={deleting}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => setDeleteAllModal(false)} disabled={deleting} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60">
                   Cancel
                 </button>
-
-                <button
-                  type="button"
-                  onClick={deleteAllTestEntries}
-                  disabled={deleting}
-                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-                >
+                <button type="button" onClick={deleteAllTestEntries} disabled={deleting} className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60">
                   {deleting ? "Deleting..." : "Yes, Delete Test Entries"}
                 </button>
               </div>
@@ -1684,44 +1650,22 @@ export default function AdminRafflePage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-100">
                   <RefreshCcw className="h-6 w-6" />
                 </div>
-
                 <div>
-                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">
-                    Redo Draw
-                  </p>
-                  <h2 className="text-xl font-black">
-                    Redo {prizeLabel(redoModal)}?
-                  </h2>
+                  <p className="text-xs font-black uppercase tracking-widest text-red-200/70">Redo Draw</p>
+                  <h2 className="text-xl font-black">Redo {prizeLabel(redoModal)}?</h2>
                 </div>
               </div>
-
               <p className="mt-4 text-sm leading-6 text-white/70">
-                This will remove the current saved winner for{" "}
-                <strong>{prizeLabel(redoModal)}</strong>. After this, you can draw
-                that prize again.
+                This will remove the current saved winner for <strong>{prizeLabel(redoModal)}</strong>. After this, you can draw that prize again.
               </p>
-
               <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
-                This does not delete the raffle entry. It only clears the winner
-                fields for this prize.
+                This does not delete the raffle entry. It only clears the winner fields for this prize.
               </div>
-
               <div className="mt-6 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setRedoModal(null)}
-                  disabled={drawing !== null}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => setRedoModal(null)} disabled={drawing !== null} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60">
                   Cancel
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => redoDraw(redoModal)}
-                  disabled={drawing !== null}
-                  className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => redoDraw(redoModal)} disabled={drawing !== null} className="rounded-xl bg-red-500 px-4 py-2 text-sm font-black text-white hover:bg-red-400 disabled:opacity-60">
                   {drawing ? "Resetting..." : `Yes, Redo ${prizeLabel(redoModal)}`}
                 </button>
               </div>
@@ -1732,42 +1676,21 @@ export default function AdminRafflePage() {
         {drawModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-              <h2 className="text-xl font-bold">
-                Draw {prizeLabel(drawModal)}?
-              </h2>
-
+              <h2 className="text-xl font-bold">Draw {prizeLabel(drawModal)}?</h2>
               <p className="mt-3 text-sm text-white/70">
-                This will randomly choose one winning ticket from all paid tickets.
-                If someone bought 5 tickets, they have 5 chances. Once a person
-                wins, they cannot win another prize.
+                This will randomly choose one winning ticket from all paid tickets. If someone bought 5 tickets, they have 5 chances. Once a person wins, they cannot win another prize.
               </p>
-
               <div className="mt-4 rounded-2xl border border-yellow-300/20 bg-yellow-400/10 p-4 text-sm text-yellow-100">
-                This action saves the winner in Supabase. Only click this when you
-                are ready to do the official draw.
+                This action saves the winner in Supabase. Only click this when you are ready to do the official draw.
               </div>
-
               <div className="mt-4 rounded-2xl border border-blue-300/20 bg-blue-400/10 p-4 text-sm text-blue-100">
-                Before releasing a prize, you may ask the winner for proof of age,
-                identity, or eligibility if required.
+                Before releasing a prize, you may ask the winner for proof of age, identity, or eligibility if required.
               </div>
-
               <div className="mt-6 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDrawModal(null)}
-                  disabled={drawing !== null}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => setDrawModal(null)} disabled={drawing !== null} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60">
                   Cancel
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => drawWinner(drawModal)}
-                  disabled={drawing !== null}
-                  className="rounded-xl bg-pink-500 px-4 py-2 text-sm font-bold text-white hover:bg-pink-400 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => drawWinner(drawModal)} disabled={drawing !== null} className="rounded-xl bg-pink-500 px-4 py-2 text-sm font-bold text-white hover:bg-pink-400 disabled:opacity-60">
                   {drawing ? "Drawing..." : "Draw Winner"}
                 </button>
               </div>
@@ -1781,7 +1704,7 @@ export default function AdminRafflePage() {
           <div className="raffle-print-top">
             <div>
               <p className="raffle-print-eyebrow">Burton Pride C.I.C.</p>
-              <h1>Raffle Ticket List</h1>
+              <h1>Printed Raffle Tickets</h1>
             </div>
 
             <div className="raffle-print-summary">
@@ -1791,21 +1714,11 @@ export default function AdminRafflePage() {
           </div>
 
           {entriesForPrint.length > 0 ? (
-            <table className="raffle-print-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Tickets Bought</th>
-                  <th>Raffle Numbers</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {entriesForPrint.map((entry) => (
-                  <PrintTicketCard key={entry.id} entry={entry} />
-                ))}
-              </tbody>
-            </table>
+            <div className="raffle-ticket-print-grid">
+              {entriesForPrint.map((entry) => (
+                <PrintTicketCard key={entry.id} entry={entry} />
+              ))}
+            </div>
           ) : (
             <div className="raffle-print-empty-page">
               No raffle entries found to print.
@@ -1822,7 +1735,7 @@ export default function AdminRafflePage() {
             <div>
               Printed: {formatDate(new Date().toISOString())}
               <br />
-              Ctrl+P prints this list.
+              Ctrl+P prints this ticket sheet.
             </div>
           </div>
         </div>
@@ -1835,8 +1748,8 @@ export default function AdminRafflePage() {
 
         @media print {
           @page {
-            size: A4;
-            margin: 10mm;
+            size: A4 landscape;
+            margin: 7mm;
           }
 
           html,
@@ -1879,23 +1792,23 @@ export default function AdminRafflePage() {
             align-items: flex-start !important;
             justify-content: space-between !important;
             gap: 20px !important;
-            margin-bottom: 14px !important;
-            padding-bottom: 12px !important;
+            margin-bottom: 6px !important;
+            padding-bottom: 6px !important;
             border-bottom: 2px solid #111827 !important;
           }
 
           .raffle-print-eyebrow {
-            margin: 0 0 4px !important;
-            font-size: 11px !important;
+            margin: 0 0 3px !important;
+            font-size: 9px !important;
             letter-spacing: 2px !important;
             text-transform: uppercase !important;
             font-weight: 900 !important;
-            color: #4c1d95 !important;
+            color: #7e22ce !important;
           }
 
           .raffle-print-top h1 {
             margin: 0 !important;
-            font-size: 26px !important;
+            font-size: 18px !important;
             line-height: 1.1 !important;
             font-weight: 900 !important;
             color: #111827 !important;
@@ -1903,97 +1816,464 @@ export default function AdminRafflePage() {
 
           .raffle-print-summary {
             border: 1px solid #111827 !important;
-            border-radius: 10px !important;
-            padding: 8px 12px !important;
-            font-size: 12px !important;
+            border-radius: 8px !important;
+            padding: 6px 9px !important;
+            font-size: 10px !important;
             font-weight: 800 !important;
             white-space: nowrap !important;
           }
 
-          .raffle-print-table {
+          .raffle-ticket-print-grid {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+            gap: 5mm !important;
             width: 100% !important;
-            border-collapse: collapse !important;
-            table-layout: fixed !important;
-            font-size: 13px !important;
           }
 
-          .raffle-print-table th {
-            border: 1px solid #111827 !important;
-            background: #eeeeee !important;
+          .raffle-ticket-print-card {
+            display: grid !important;
+            grid-template-columns: 78mm 1fr !important;
+            width: 100% !important;
+            height: 70mm !important;
+            overflow: hidden !important;
+            border: 2px solid #7e22ce !important;
+            border-radius: 3mm !important;
+            background: white !important;
             color: #111827 !important;
-            padding: 8px !important;
-            text-align: left !important;
-            font-size: 11px !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.8px !important;
-            font-weight: 900 !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
             print-color-adjust: exact !important;
             -webkit-print-color-adjust: exact !important;
           }
 
-          .raffle-print-table th:nth-child(1) {
-            width: 30% !important;
+          .raffle-ticket-stub {
+            display: grid !important;
+            grid-template-columns: 9mm 1fr !important;
+            height: 100% !important;
+            border-right: 2px dashed #111827 !important;
+            background: #f8fafc !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
 
-          .raffle-print-table th:nth-child(2) {
-            width: 16% !important;
-            text-align: center !important;
+          .raffle-stub-rainbow {
+            height: 100% !important;
+            background: linear-gradient(
+              180deg,
+              #ef4444 0%,
+              #f97316 16%,
+              #facc15 32%,
+              #22c55e 48%,
+              #3b82f6 64%,
+              #6366f1 80%,
+              #a855f7 100%
+            ) !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
 
-          .raffle-print-table th:nth-child(3) {
-            width: 54% !important;
-          }
-
-          .raffle-print-cell {
-            border: 1px solid #111827 !important;
-            padding: 9px 8px !important;
-            vertical-align: top !important;
+          .raffle-stub-content {
+            display: grid !important;
+            grid-template-columns: 14mm 1fr !important;
+            height: 100% !important;
+            background: #f8fafc !important;
             color: #111827 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
 
-          .raffle-print-name-cell {
-            font-size: 15px !important;
-            font-weight: 900 !important;
-            word-break: break-word !important;
+          .raffle-stub-side-title {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border-right: 1px solid #cbd5e1 !important;
+            background: #f1f5f9 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
 
-          .raffle-print-count-cell {
-            text-align: center !important;
-            font-size: 18px !important;
-            font-weight: 900 !important;
-          }
-
-          .raffle-print-numbers-cell {
-            line-height: 2.1 !important;
-          }
-
-          .raffle-print-number {
-            display: inline-block !important;
-            margin: 0 5px 5px 0 !important;
-            border: 1px solid #111827 !important;
-            border-radius: 8px !important;
-            padding: 4px 8px !important;
-            background: white !important;
-            color: #111827 !important;
-            font-size: 13px !important;
-            font-weight: 900 !important;
+          .raffle-stub-side-title span {
+            display: block !important;
+            writing-mode: vertical-rl !important;
+            transform: rotate(180deg) !important;
             white-space: nowrap !important;
+            font-size: 10px !important;
+            font-weight: 1000 !important;
+            letter-spacing: 1.4px !important;
+            color: #111827 !important;
           }
 
-          .raffle-print-empty {
-            color: #555555 !important;
+          .raffle-stub-main {
+            position: relative !important;
+            display: flex !important;
+            min-width: 0 !important;
+            flex-direction: column !important;
+            padding: 4mm 4mm 4.8mm !important;
+            color: #111827 !important;
+          }
+
+          .raffle-stub-org {
+            margin: 0 0 2.4mm !important;
+            font-size: 10px !important;
+            font-weight: 1000 !important;
+            letter-spacing: 0.7px !important;
+            text-transform: uppercase !important;
+            color: #111827 !important;
+          }
+
+          .raffle-stub-field {
+            margin-bottom: 1.8mm !important;
+            border-bottom: 1px solid #111827 !important;
+            padding-bottom: 1mm !important;
+          }
+
+          .raffle-stub-field span {
+            display: block !important;
+            margin-bottom: 0.5mm !important;
+            font-size: 7px !important;
+            font-weight: 1000 !important;
+            letter-spacing: 0.8px !important;
+            text-transform: uppercase !important;
+            color: #111827 !important;
+          }
+
+          .raffle-stub-field strong {
+            display: block !important;
+            max-width: 100% !important;
+            overflow-wrap: anywhere !important;
+            word-break: break-word !important;
+            font-size: 8.4px !important;
+            line-height: 1.1 !important;
+            font-weight: 900 !important;
+            color: #111827 !important;
+          }
+
+          .raffle-stub-bottom {
+            margin-top: auto !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 3mm !important;
+            min-height: 9mm !important;
+            padding-top: 1mm !important;
+            transform: translateY(-2.2mm) !important;
+          }
+
+          .raffle-stub-bottom strong {
+            display: block !important;
+            font-family: "Courier New", monospace !important;
+            font-size: 17px !important;
+            line-height: 1 !important;
+            font-weight: 1000 !important;
+            letter-spacing: 0.7px !important;
+            color: #111827 !important;
+          }
+
+          .raffle-stub-bottom span {
+            display: block !important;
+            text-align: right !important;
+            white-space: nowrap !important;
+            font-size: 6.8px !important;
+            line-height: 1.1 !important;
+            font-weight: 1000 !important;
+            color: #111827 !important;
+          }
+
+          .raffle-ticket-main {
+            height: 100% !important;
+            background: linear-gradient(
+              90deg,
+              #dc2626 0%,
+              #f97316 17%,
+              #eab308 34%,
+              #16a34a 50%,
+              #2563eb 67%,
+              #7c3aed 84%,
+              #db2777 100%
+            ) !important;
+            padding: 2.5mm !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+          }
+
+          .raffle-ticket-main-inner {
+            position: relative !important;
+            height: 100% !important;
+            overflow: hidden !important;
+            border: 1px solid #cbd5e1 !important;
+            background: #ffffff !important;
+            padding: 4mm !important;
+            color: #111827 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+          }
+
+          .raffle-ticket-confetti {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            right: 0 !important;
+            height: 16mm !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-around !important;
+            font-size: 10px !important;
+            color: #ef4444 !important;
+            opacity: 0.45 !important;
+            transform: rotate(-2deg) !important;
+            z-index: 1 !important;
+          }
+
+          .raffle-ticket-confetti span:nth-child(2n) {
+            color: #2563eb !important;
+          }
+
+          .raffle-ticket-confetti span:nth-child(3n) {
+            color: #16a34a !important;
+          }
+
+          .raffle-ticket-confetti span:nth-child(4n) {
+            color: #eab308 !important;
+          }
+
+          .raffle-ticket-header,
+          .raffle-prize-row,
+          .raffle-ticket-info-grid,
+          .raffle-ticket-bottom {
+            position: relative !important;
+            z-index: 5 !important;
+          }
+
+          .raffle-ticket-header {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 5mm !important;
+            text-align: center !important;
+          }
+
+          .raffle-logo-circle {
+            display: flex !important;
+            height: 16mm !important;
+            width: 16mm !important;
+            flex: 0 0 auto !important;
+            align-items: center !important;
+            justify-content: center !important;
+            border: 1.5px solid #111827 !important;
+            border-radius: 999px !important;
+            background: white !important;
+            font-size: 10px !important;
+            font-weight: 1000 !important;
+            color: #7e22ce !important;
+          }
+
+          .raffle-ticket-header h2 {
+            margin: 0 !important;
+            font-size: 29px !important;
+            line-height: 0.9 !important;
+            font-weight: 1000 !important;
+            letter-spacing: -1px !important;
+            text-transform: uppercase !important;
+            color: #7e22ce !important;
+          }
+
+          .raffle-ticket-header p {
+            margin: 2mm 0 0 !important;
+            font-size: 15px !important;
+            font-weight: 1000 !important;
+            letter-spacing: 1px !important;
+            color: #374151 !important;
+          }
+
+          .raffle-prize-row {
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 4mm !important;
+            margin-top: 4mm !important;
+          }
+
+          .raffle-prize {
+            position: relative !important;
+            border: 1.5px solid #111827 !important;
+            border-radius: 1mm !important;
+            padding: 2mm 3mm !important;
+            text-align: center !important;
+            color: #111827 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
+          }
+
+          .raffle-prize p {
+            margin: 0 !important;
+            font-size: 9px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-prize strong {
+            display: block !important;
+            margin-top: 1mm !important;
+            font-size: 22px !important;
+            line-height: 1 !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-prize-gold {
+            background: linear-gradient(135deg, #fde68a, #d97706) !important;
+          }
+
+          .raffle-prize-silver {
+            background: linear-gradient(135deg, #f8fafc, #94a3b8) !important;
+          }
+
+          .raffle-prize-bronze {
+            background: linear-gradient(135deg, #fed7aa, #b45309) !important;
+          }
+
+          .raffle-ticket-info-grid {
+            display: grid !important;
+            grid-template-columns: 34mm 1fr !important;
+            gap: 5mm !important;
+            margin-top: 4mm !important;
+            align-items: start !important;
+          }
+
+          .raffle-ticket-price-box {
+            text-align: center !important;
+            color: #111827 !important;
+            background: rgba(255, 255, 255, 0.96) !important;
+            border: 1px solid #e5e7eb !important;
+            border-radius: 2mm !important;
+            padding: 2mm !important;
+          }
+
+          .raffle-ticket-price-box p {
+            margin: 0 !important;
+            font-size: 8px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-price-box strong {
+            display: block !important;
+            margin-top: 1mm !important;
+            font-size: 10px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-price-box span {
+            display: block !important;
+            font-size: 10px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-draw-box {
+            text-align: center !important;
+            color: #111827 !important;
+            background: rgba(255, 255, 255, 0.96) !important;
+            border-radius: 2mm !important;
+            padding: 1.5mm !important;
+          }
+
+          .raffle-ticket-draw-box p {
+            margin: 0 !important;
+            font-size: 11px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-draw-box h3 {
+            margin: 1mm 0 0 !important;
+            font-size: 17px !important;
+            line-height: 1.1 !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-draw-box strong {
+            display: block !important;
+            margin-top: 1mm !important;
+            font-size: 9px !important;
+            font-weight: 1000 !important;
+          }
+
+          .raffle-ticket-draw-box span {
+            display: block !important;
+            margin-top: 1mm !important;
+            font-size: 7px !important;
             font-weight: 800 !important;
+          }
+
+          .raffle-ticket-draw-box em {
+            display: block !important;
+            margin-top: 1mm !important;
+            font-size: 6.5px !important;
+            line-height: 1.1 !important;
+            font-style: normal !important;
+            font-weight: 1000 !important;
+            color: #111827 !important;
+          }
+
+          .raffle-ticket-bottom {
+            position: absolute !important;
+            right: 4mm !important;
+            bottom: 3mm !important;
+            display: flex !important;
+            align-items: flex-end !important;
+            justify-content: flex-end !important;
+            color: #111827 !important;
+          }
+
+          .raffle-ticket-bottom-number-only {
+            left: auto !important;
+          }
+
+          .raffle-bottom-text-box {
+            display: none !important;
+          }
+
+          .raffle-main-number {
+            min-width: 26mm !important;
+            border: 1px solid #cbd5e1 !important;
+            background: #ffffff !important;
+            padding: 1.5mm 3mm !important;
+            text-align: center !important;
+            font-family: "Courier New", monospace !important;
+            font-size: 16px !important;
+            font-weight: 1000 !important;
+            letter-spacing: 1px !important;
+            color: #111827 !important;
+            position: relative !important;
+            z-index: 6 !important;
+          }
+
+          .raffle-ticket-rainbow-corner {
+            position: absolute !important;
+            left: -16mm !important;
+            bottom: -22mm !important;
+            width: 40mm !important;
+            height: 40mm !important;
+            border-radius: 999px !important;
+            background: conic-gradient(
+              #ef4444,
+              #f97316,
+              #facc15,
+              #22c55e,
+              #3b82f6,
+              #7c3aed,
+              #ef4444
+            ) !important;
+            opacity: 0.26 !important;
+            z-index: 0 !important;
+            print-color-adjust: exact !important;
+            -webkit-print-color-adjust: exact !important;
           }
 
           .raffle-print-footer {
             display: flex !important;
             justify-content: space-between !important;
             gap: 20px !important;
-            margin-top: 14px !important;
-            padding-top: 10px !important;
+            margin-top: 8px !important;
+            padding-top: 8px !important;
             border-top: 1px solid #111827 !important;
             color: #4b5563 !important;
-            font-size: 11px !important;
+            font-size: 10px !important;
             line-height: 1.4 !important;
           }
 

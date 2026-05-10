@@ -45,6 +45,7 @@ function driveDownloadUrl(url: string) {
 function parseEmailList(value: string | undefined) {
   const raw = (value || "").trim();
   if (!raw) return [];
+
   return raw
     .split(",")
     .map((s) => s.trim())
@@ -55,6 +56,316 @@ function safeTicketCount(value: string | number | null | undefined) {
   const n = Number(value || 1);
   if (!Number.isFinite(n) || n < 1) return 1;
   return Math.floor(n);
+}
+
+function raffleTicketEmailHtml({
+  fullName,
+  email,
+  phone,
+  ticketNumbers,
+  ticketCount,
+}: {
+  fullName: string;
+  email: string;
+  phone: string;
+  ticketNumbers: number[];
+  ticketCount: number;
+}) {
+  if (!ticketNumbers.length) {
+    return `
+      <div style="margin:24px 0;padding:20px;border-radius:18px;background:#fff7ed;border:1px solid #fed7aa;text-align:center;">
+        <p style="margin:0;font-weight:900;color:#9a3412;">
+          Your raffle ticket numbers are being confirmed.
+        </p>
+      </div>
+    `;
+  }
+
+  const count = safeTicketCount(ticketCount);
+  const ticketLabel = count === 5 ? "BOOK OF 5" : `${count} TICKET${count === 1 ? "" : "S"}`;
+  const priceLabel = count === 5 ? "FOR £5.00" : `FOR £${count}.00`;
+  const stubPriceLabel = count === 5 ? "BOOK OF 5<br />£5.00" : `${count} TICKET${count === 1 ? "" : "S"}<br />£${count}.00`;
+
+  return ticketNumbers
+    .map((number) => {
+      const safeNumber = escapeHtml(String(number).padStart(4, "0"));
+      const safeName = escapeHtml(fullName || "Supporter");
+      const safeEmail = escapeHtml(email || "No email provided");
+      const safePhone = escapeHtml(phone || "No phone provided");
+
+      return `
+        <div style="
+          margin:24px 0;
+          border:3px solid #7e22ce;
+          border-radius:18px;
+          overflow:hidden;
+          background:#ffffff;
+          color:#111827;
+          font-family:Arial, Helvetica, sans-serif;
+        ">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
+            <tr>
+              <td width="34%" style="
+                vertical-align:top;
+                border-right:2px dashed #111827;
+                background:#f8fafc;
+              ">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;height:100%;">
+                  <tr>
+                    <td width="24" style="
+                      background:linear-gradient(180deg,#ef4444,#f97316,#facc15,#22c55e,#3b82f6,#7c3aed,#db2777);
+                    ">&nbsp;</td>
+
+                    <td style="padding:16px;vertical-align:top;">
+                      <p style="
+                        margin:0 0 12px;
+                        font-size:12px;
+                        font-weight:900;
+                        letter-spacing:0.12em;
+                        color:#111827;
+                      ">
+                        RAFFLE TICKET STUB
+                      </p>
+
+                      <p style="
+                        margin:0 0 14px;
+                        font-size:11px;
+                        font-weight:900;
+                        color:#4c1d95;
+                      ">
+                        BURTON PRIDE C.I.C
+                      </p>
+
+                      <div style="border-bottom:1px solid #111827;padding-bottom:8px;margin-bottom:10px;">
+                        <p style="margin:0;font-size:10px;font-weight:900;text-transform:uppercase;">Name</p>
+                        <p style="margin:2px 0 0;font-size:13px;font-weight:800;word-break:break-word;">${safeName}</p>
+                      </div>
+
+                      <div style="border-bottom:1px solid #111827;padding-bottom:8px;margin-bottom:10px;">
+                        <p style="margin:0;font-size:10px;font-weight:900;text-transform:uppercase;">Phone</p>
+                        <p style="margin:2px 0 0;font-size:13px;font-weight:800;word-break:break-word;">${safePhone}</p>
+                      </div>
+
+                      <div style="border-bottom:1px solid #111827;padding-bottom:8px;margin-bottom:14px;">
+                        <p style="margin:0;font-size:10px;font-weight:900;text-transform:uppercase;">Email</p>
+                        <p style="margin:2px 0 0;font-size:12px;font-weight:800;word-break:break-word;">${safeEmail}</p>
+                      </div>
+
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
+                        <tr>
+                          <td style="vertical-align:bottom;">
+                            <p style="
+                              margin:0;
+                              font-family:'Courier New', monospace;
+                              font-size:24px;
+                              line-height:1;
+                              font-weight:900;
+                              letter-spacing:1px;
+                              color:#111827;
+                            ">
+                              ${safeNumber}
+                            </p>
+                          </td>
+
+                          <td style="vertical-align:bottom;text-align:right;">
+                            <p style="
+                              margin:0;
+                              font-size:10px;
+                              line-height:1.2;
+                              font-weight:900;
+                              text-align:right;
+                              color:#111827;
+                            ">
+                              ${stubPriceLabel}
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+
+              <td width="66%" style="
+                vertical-align:top;
+                background:linear-gradient(90deg,#dc2626,#f97316,#eab308,#16a34a,#2563eb,#7c3aed,#db2777);
+                padding:8px;
+              ">
+                <div style="
+                  background:#ffffff;
+                  border:1px solid #e5e7eb;
+                  padding:18px;
+                  min-height:250px;
+                ">
+                  <div style="text-align:center;">
+                    <div style="
+                      display:inline-block;
+                      width:46px;
+                      height:46px;
+                      line-height:46px;
+                      border-radius:999px;
+                      border:2px solid #111827;
+                      font-weight:900;
+                      color:#7e22ce;
+                      margin-bottom:8px;
+                    ">
+                      BP
+                    </div>
+
+                    <h2 style="
+                      margin:0;
+                      font-size:34px;
+                      line-height:1;
+                      font-weight:900;
+                      letter-spacing:-1px;
+                      color:#7e22ce;
+                      text-transform:uppercase;
+                    ">
+                      RAFFLE TICKET
+                    </h2>
+
+                    <p style="
+                      margin:8px 0 0;
+                      font-size:18px;
+                      font-weight:900;
+                      color:#374151;
+                      letter-spacing:1px;
+                    ">
+                      BURTON PRIDE 2026 RAFFLE
+                    </p>
+                  </div>
+
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;border-spacing:8px;margin-top:14px;">
+                    <tr>
+                      <td style="
+                        width:33.33%;
+                        text-align:center;
+                        border:1px solid #111827;
+                        background:#f59e0b;
+                        padding:10px;
+                        color:#111827;
+                        border-radius:6px;
+                      ">
+                        <p style="margin:0;font-size:11px;font-weight:900;">1st PRIZE:</p>
+                        <strong style="font-size:30px;">£100</strong>
+                      </td>
+
+                      <td style="
+                        width:33.33%;
+                        text-align:center;
+                        border:1px solid #111827;
+                        background:#cbd5e1;
+                        padding:10px;
+                        color:#111827;
+                        border-radius:6px;
+                      ">
+                        <p style="margin:0;font-size:11px;font-weight:900;">2nd PRIZE:</p>
+                        <strong style="font-size:30px;">£60</strong>
+                      </td>
+
+                      <td style="
+                        width:33.33%;
+                        text-align:center;
+                        border:1px solid #111827;
+                        background:#c08457;
+                        padding:10px;
+                        color:#111827;
+                        border-radius:6px;
+                      ">
+                        <p style="margin:0;font-size:11px;font-weight:900;">3rd PRIZE:</p>
+                        <strong style="font-size:30px;">£30</strong>
+                      </td>
+                    </tr>
+                  </table>
+
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:16px;">
+                    <tr>
+                      <td width="26%" style="
+                        vertical-align:top;
+                        text-align:center;
+                        border:1px solid #e5e7eb;
+                        border-radius:10px;
+                        background:#ffffff;
+                        padding:10px;
+                      ">
+                        <p style="margin:0;font-size:10px;font-weight:900;">TICKET PRICE:</p>
+                        <p style="margin:6px 0 0;font-size:13px;font-weight:900;">${ticketLabel}</p>
+                        <p style="margin:2px 0 0;font-size:12px;font-weight:900;">${priceLabel}</p>
+                      </td>
+
+                      <td width="52%" style="
+                        vertical-align:top;
+                        text-align:center;
+                        color:#111827;
+                        padding:0 12px;
+                      ">
+                        <p style="margin:0;font-size:13px;font-weight:900;">
+                          THE DRAW DATE & LOCATION:
+                        </p>
+
+                        <h3 style="
+                          margin:4px 0 0;
+                          font-size:22px;
+                          line-height:1.1;
+                          font-weight:900;
+                        ">
+                          SATURDAY 27th JUNE 2026
+                        </h3>
+
+                        <p style="margin:5px 0 0;font-size:12px;font-weight:900;">
+                          AT BURTON PRIDE, SHOBNALL LEISURE COMPLEX
+                        </p>
+
+                        <p style="
+                          margin:4px 0 0;
+                          font-size:9px;
+                          font-weight:800;
+                          color:#374151;
+                        ">
+                          DRAW AT 4:00 PM | SHOBNALL ROAD, BURTON UPON TRENT, DE14 2BB
+                        </p>
+
+                        <p style="
+                          margin:6px 0 0;
+                          font-size:10px;
+                          line-height:1.3;
+                          font-weight:900;
+                          color:#111827;
+                        ">
+                          Licensed by East Staffordshire Council under registration number SL0507.
+                        </p>
+                      </td>
+
+                      <td width="22%" style="
+                        vertical-align:bottom;
+                        text-align:right;
+                      ">
+                        <div style="
+                          display:inline-block;
+                          min-width:88px;
+                          border:1px solid #cbd5e1;
+                          background:#f8fafc;
+                          padding:8px 12px;
+                          text-align:center;
+                          font-family:'Courier New', monospace;
+                          font-size:22px;
+                          font-weight:900;
+                          letter-spacing:1px;
+                          color:#111827;
+                        ">
+                          ${safeNumber}
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 /**
@@ -181,6 +492,14 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
     const safePaymentIntentId = escapeHtml(paymentIntentId || "Not available");
     const safeTicketNumbersText = escapeHtml(ticketNumbersText);
 
+    const digitalTicketHtml = raffleTicketEmailHtml({
+      fullName,
+      email,
+      phone,
+      ticketNumbers,
+      ticketCount: tickets,
+    });
+
     const FROM =
       process.env.EMAIL_FROM?.trim() ||
       "Burton Pride <noreply@burtonpride.co.uk>";
@@ -209,7 +528,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
         subject: "Your Burton Pride raffle ticket numbers",
         headers: emailHeaders,
         html: `
-          <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 640px; margin: 0 auto;">
+          <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.7; color: #111827; max-width: 760px; margin: 0 auto;">
             <div style="padding: 32px 24px; background: linear-gradient(135deg, #db2777, #a21caf, #2563eb); color: white; border-radius: 20px 20px 0 0; text-align: center;">
               <h1 style="margin: 0; font-size: 28px;">You Are In The Raffle</h1>
               <p style="margin: 12px 0 0; font-size: 16px; opacity: 0.95;">
@@ -239,6 +558,17 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                   } safe for the raffle draw.
                 </p>
               </div>
+
+              <div style="margin: 26px 0 10px;">
+                <p style="margin: 0 0 10px; font-size: 18px; font-weight: 900; color: #111827;">
+                  Your digital raffle ticket
+                </p>
+                <p style="margin: 0 0 16px; color: #4b5563; font-size: 14px;">
+                  This is a digital copy for you to view. You do not need to print it.
+                </p>
+              </div>
+
+              ${digitalTicketHtml}
 
               <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; margin: 22px 0;">
                 <p style="margin: 0 0 8px;"><strong>Name:</strong> ${safeFullName}</p>
@@ -400,9 +730,7 @@ async function addDonationSessionToMoneyTracker(
     const amountPence = session.amount_total || 0;
 
     if (!stripeSessionId || amountPence <= 0) {
-      console.log(
-        "Skipped checkout money tracker insert: missing amount/session"
-      );
+      console.log("Skipped checkout money tracker insert: missing amount/session");
       return;
     }
 
@@ -490,9 +818,7 @@ async function addPaidInvoiceToMoneyTracker(invoice: Stripe.Invoice) {
     const invoiceAny = invoice as any;
 
     if (invoice.billing_reason === "subscription_create") {
-      console.log(
-        "Skipped invoice.paid because checkout session records first subscription payment"
-      );
+      console.log("Skipped invoice.paid because checkout session records first subscription payment");
       return;
     }
 
@@ -567,13 +893,10 @@ async function addPaymentIntentToMoneyTracker(
 ) {
   try {
     const stripePaymentIntentId = paymentIntent.id;
-    const amountPence =
-      paymentIntent.amount_received || paymentIntent.amount || 0;
+    const amountPence = paymentIntent.amount_received || paymentIntent.amount || 0;
 
     if (!stripePaymentIntentId || amountPence <= 0) {
-      console.log(
-        "Skipped payment intent money tracker insert: missing amount/payment intent"
-      );
+      console.log("Skipped payment intent money tracker insert: missing amount/payment intent");
       return;
     }
 
@@ -592,9 +915,7 @@ async function addPaymentIntentToMoneyTracker(
       donorEmail ? `Email: ${donorEmail}` : "",
       donorMessage ? `Message: ${donorMessage}` : "",
       paymentIntent.status ? `Payment status: ${paymentIntent.status}` : "",
-      stripePaymentIntentId
-        ? `Stripe payment intent: ${stripePaymentIntentId}`
-        : "",
+      stripePaymentIntentId ? `Stripe payment intent: ${stripePaymentIntentId}` : "",
     ].filter(Boolean);
 
     const transactionDate = paymentIntent.created

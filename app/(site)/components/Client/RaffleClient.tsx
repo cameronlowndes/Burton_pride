@@ -43,20 +43,6 @@ export default function RaffleContent() {
     }, 50);
   };
 
-  const fillTestForm = () => {
-    setFormError(null);
-    setConsent(true);
-    setAgeConsent(true);
-    setFormData({
-      fullName: "Burton Pride Test",
-      email: "burtonpridetest@gmail.com",
-      phone: "01283 000000",
-      dateOfBirth: "1990-01-01",
-      ticketAmount: "5",
-      message: "This is a test raffle ticket purchase.",
-    });
-  };
-
   function ticketTotal() {
     const tickets = Number(formData.ticketAmount || 1);
     return tickets * 1;
@@ -66,9 +52,13 @@ export default function RaffleContent() {
     if (!dateOfBirth) return false;
 
     const dob = new Date(dateOfBirth);
-    if (Number.isNaN(dob.getTime())) return false;
+
+    if (Number.isNaN(dob.getTime())) {
+      return false;
+    }
 
     const today = new Date();
+
     const eighteenthBirthday = new Date(
       dob.getFullYear() + 18,
       dob.getMonth(),
@@ -78,6 +68,24 @@ export default function RaffleContent() {
     return today >= eighteenthBirthday;
   }
 
+  function isValidDateOfBirth(dateOfBirth: string) {
+    if (!dateOfBirth) return false;
+
+    const dob = new Date(dateOfBirth);
+
+    if (Number.isNaN(dob.getTime())) {
+      return false;
+    }
+
+    const today = new Date();
+
+    if (dob > today) {
+      return false;
+    }
+
+    return true;
+  }
+
   function scrollToError() {
     formTopRef.current?.scrollIntoView({
       behavior: "smooth",
@@ -85,17 +93,64 @@ export default function RaffleContent() {
     });
   }
 
+  function getPublicErrorMessage(errorMessage: string) {
+    const message = String(errorMessage || "").toLowerCase();
+
+    if (
+      message.includes("raffle_tickets_ticket_number_check") ||
+      message.includes("violates check constraint") ||
+      message.includes("ticket_number_check") ||
+      message.includes("raffle_tickets_ticket_number_range")
+    ) {
+      return "Raffle tickets are being updated. Please try again in a moment. If this keeps happening, please contact Burton Pride.";
+    }
+
+    if (
+      message.includes("duplicate key") ||
+      message.includes("23505") ||
+      message.includes("raffle_tickets_ticket_number_unique")
+    ) {
+      return "That raffle ticket number has just been taken. Please try again.";
+    }
+
+    if (message.includes("not enough raffle ticket")) {
+      return "There are not enough raffle tickets left for this purchase.";
+    }
+
+    if (message.includes("already entered")) {
+      return "You have already entered the raffle with this email address. Only one raffle entry is allowed per person.";
+    }
+
+    if (message.includes("missing app url")) {
+      return "The raffle payment system is not fully set up yet. Please contact Burton Pride.";
+    }
+
+    if (message.includes("no stripe checkout url")) {
+      return "Stripe did not return a checkout link. Please try again.";
+    }
+
+    return (
+      errorMessage ||
+      "Something went wrong creating your raffle payment. Please try again."
+    );
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
 
-    if (!formData.fullName || !formData.email || !formData.phone) {
+    const fullName = formData.fullName.trim();
+    const email = formData.email.trim();
+    const phone = formData.phone.trim();
+    const dateOfBirth = formData.dateOfBirth.trim();
+
+    if (!fullName || !email || !phone) {
       setFormError("Please fill out your name, email and phone number.");
       scrollToError();
       return;
     }
 
-    if (!formData.dateOfBirth) {
+    if (!dateOfBirth) {
       setFormError(
         "Please enter your date of birth before buying raffle tickets."
       );
@@ -103,7 +158,13 @@ export default function RaffleContent() {
       return;
     }
 
-    if (!isOver18(formData.dateOfBirth)) {
+    if (!isValidDateOfBirth(dateOfBirth)) {
+      setFormError("Please enter a valid date of birth.");
+      scrollToError();
+      return;
+    }
+
+    if (!isOver18(dateOfBirth)) {
       setFormError(
         "You must be aged 18 or over to buy Burton Pride raffle tickets."
       );
@@ -135,6 +196,10 @@ export default function RaffleContent() {
         },
         body: JSON.stringify({
           ...formData,
+          fullName,
+          email,
+          phone,
+          dateOfBirth,
           ageConfirmed: ageConsent,
           termsAccepted: consent,
         }),
@@ -143,6 +208,7 @@ export default function RaffleContent() {
       const text = await res.text();
 
       let data: any = {};
+
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
@@ -150,7 +216,14 @@ export default function RaffleContent() {
       }
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to create raffle payment");
+        const apiError =
+          data?.error ||
+          data?.details?.message ||
+          data?.details?.details ||
+          data?.rawResponse ||
+          "Failed to create raffle payment";
+
+        throw new Error(getPublicErrorMessage(apiError));
       }
 
       if (data.url) {
@@ -158,9 +231,13 @@ export default function RaffleContent() {
         return;
       }
 
-      throw new Error("No Stripe checkout URL returned");
+      throw new Error(getPublicErrorMessage("No Stripe checkout URL returned"));
     } catch (err: any) {
-      setFormError(err?.message || "Something went wrong. Please try again.");
+      setFormError(
+        getPublicErrorMessage(
+          err?.message || "Something went wrong. Please try again."
+        )
+      );
       scrollToError();
     } finally {
       setLoading(false);
@@ -243,6 +320,7 @@ export default function RaffleContent() {
               <p className="font-extrabold text-lg mb-1">
                 ⚠️ We couldn’t continue
               </p>
+
               <p className="text-white/90 text-sm mb-4">{formError}</p>
 
               <div className="flex flex-col sm:flex-row gap-3">
@@ -270,22 +348,15 @@ export default function RaffleContent() {
             onSubmit={handleSubmit}
             className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 flex flex-col gap-4 shadow-2xl border border-white/20"
           >
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-extrabold">Buy Raffle Tickets</h2>
-                <p className="mt-1 text-sm text-white/80">
-                  Tickets are £1 each, or £5 for a book of 5 tickets.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={fillTestForm}
-                disabled={loading}
-                className="cursor-pointer rounded-xl bg-white/15 px-4 py-2 text-sm font-extrabold text-white border border-white/20 hover:bg-white/25 active:scale-[0.98] transition disabled:opacity-50"
-              >
-                Test
-              </button>
+            <div className="mb-2">
+              <h2 className="text-2xl font-extrabold">Buy Raffle Tickets</h2>
+              <p className="mt-1 text-sm text-white/80">
+                Tickets are £1 each, or £5 for a book of 5 tickets.
+              </p>
+              <p className="mt-1 text-xs font-semibold text-white/65">
+                Your ticket number will be safely generated after checkout is
+                created.
+              </p>
             </div>
 
             <div className="rounded-2xl border border-white/20 bg-black/20 p-4 text-sm font-semibold text-white/90">
@@ -308,6 +379,7 @@ export default function RaffleContent() {
               }
               className="p-3 rounded-lg border border-white/30 text-black"
               required
+              disabled={loading}
             />
 
             <input
@@ -321,6 +393,7 @@ export default function RaffleContent() {
                 formError ? "border-red-300" : "border-white/30"
               }`}
               required
+              disabled={loading}
             />
 
             <input
@@ -332,12 +405,14 @@ export default function RaffleContent() {
               }
               className="p-3 rounded-lg border border-white/30 text-black"
               required
+              disabled={loading}
             />
 
             <div>
               <label className="mb-2 block text-sm font-bold text-white">
                 Date of birth
               </label>
+
               <input
                 type="date"
                 value={formData.dateOfBirth}
@@ -346,7 +421,9 @@ export default function RaffleContent() {
                 }
                 className="w-full p-3 rounded-lg border border-white/30 text-black"
                 required
+                disabled={loading}
               />
+
               <p className="mt-2 text-xs text-white/75">
                 This is used to help confirm you are aged 18 or over. We do not
                 normally ask everyone to upload ID before buying a ticket, but
@@ -361,6 +438,7 @@ export default function RaffleContent() {
                 setFormData({ ...formData, ticketAmount: e.target.value })
               }
               className="p-3 rounded-lg border border-white/30 text-black"
+              disabled={loading}
             >
               <option value="1">1 ticket - £1</option>
               <option value="2">2 tickets - £2</option>
@@ -380,6 +458,7 @@ export default function RaffleContent() {
               }
               rows={5}
               className="p-3 rounded-lg border border-white/30 text-black"
+              disabled={loading}
             />
 
             <div className="flex justify-center mt-2">
@@ -397,7 +476,9 @@ export default function RaffleContent() {
                 checked={ageConsent}
                 onChange={(e) => setAgeConsent(e.target.checked)}
                 className="w-5 h-5 cursor-pointer mt-1"
+                disabled={loading}
               />
+
               <span className="font-medium">
                 I confirm that I am aged 18 or over, I am a resident of Great
                 Britain, and I am buying these raffle tickets for myself. I
@@ -413,7 +494,9 @@ export default function RaffleContent() {
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
                 className="w-5 h-5 cursor-pointer mt-1"
+                disabled={loading}
               />
+
               <span className="font-medium">
                 I understand I am buying raffle tickets and agree to the Burton
                 Pride C.I.C. Raffle Terms and Conditions. Ticket details will be
@@ -429,7 +512,7 @@ export default function RaffleContent() {
               className="mt-2 cursor-pointer bg-gradient-to-r from-pink-400 via-purple-500 to-blue-500 text-white font-bold text-xl py-4 rounded-full shadow-lg hover:scale-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading
-                ? "Going to Stripe..."
+                ? "Creating secure checkout..."
                 : `Pay £${ticketTotal()} with Stripe`}
             </button>
           </motion.form>
@@ -465,6 +548,7 @@ export default function RaffleContent() {
 
           <div className="bg-white/10 border border-white/20 rounded-3xl p-6 shadow-xl">
             <p className="font-semibold text-xl">What happens next?</p>
+
             <ol className="list-decimal list-inside text-white/85 mt-3 space-y-2">
               <li>Choose how many raffle tickets you want.</li>
               <li>Confirm you are aged 18 or over and eligible to enter.</li>
@@ -479,12 +563,14 @@ export default function RaffleContent() {
 
           <div className="bg-white/10 border border-white/20 rounded-3xl p-6 shadow-xl">
             <p className="font-semibold text-xl">Age and eligibility checks</p>
+
             <p className="text-white/85 mt-3">
               Burton Pride C.I.C. will not normally ask every person buying a
               ticket to upload ID before purchasing. However, we may request
               proof of age, identity, or eligibility before confirming a winner
               or releasing a prize.
             </p>
+
             <p className="text-white/85 mt-3">
               Any proof of age or identity provided will only be used for raffle
               verification purposes and will be handled in line with UK data
@@ -494,6 +580,7 @@ export default function RaffleContent() {
 
           <div className="bg-white/10 border border-white/20 rounded-3xl p-6 shadow-xl">
             <p className="font-semibold text-xl">Why support the raffle?</p>
+
             <ul className="list-disc list-inside text-white/85 mt-3 space-y-2">
               <li>Supports local LGBTQIA+ community work</li>
               <li>Helps keep Burton Pride grassroots</li>
@@ -535,6 +622,7 @@ export default function RaffleContent() {
                 <p className="text-xs sm:text-sm font-black uppercase tracking-[0.2em]">
                   Cash Prize
                 </p>
+
                 <p className="mt-2 text-6xl sm:text-7xl font-black leading-none">
                   £100
                 </p>
@@ -552,6 +640,7 @@ export default function RaffleContent() {
                 <p className="text-xs sm:text-sm font-black uppercase tracking-[0.2em]">
                   Cash Prize
                 </p>
+
                 <p className="mt-2 text-6xl sm:text-7xl font-black leading-none">
                   £60
                 </p>
@@ -569,6 +658,7 @@ export default function RaffleContent() {
                 <p className="text-xs sm:text-sm font-black uppercase tracking-[0.2em]">
                   Cash Prize
                 </p>
+
                 <p className="mt-2 text-6xl sm:text-7xl font-black leading-none">
                   £30
                 </p>

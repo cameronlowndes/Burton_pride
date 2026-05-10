@@ -8,6 +8,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
+const FIRST_TICKET_NUMBER = 1001;
+const LAST_TICKET_NUMBER = 9999;
+
 function isOver18(dateOfBirth: string) {
   if (!dateOfBirth) return false;
 
@@ -46,10 +49,28 @@ function isValidDateOfBirth(dateOfBirth: string) {
   return true;
 }
 
-async function generateRandomTicketNumbers(quantity: number) {
+function getCleanAppUrl() {
+  const appUrl =
+    process.env.NEXT_PUBLIC_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL;
+
+  if (!appUrl) {
+    throw new Error(
+      "Missing app URL. Add NEXT_PUBLIC_URL or NEXT_PUBLIC_APP_URL to your environment variables."
+    );
+  }
+
+  return appUrl.replace(/\/$/, "");
+}
+
+async function getNextTicketNumbers(quantity: number) {
   const { data: usedTickets, error } = await supabaseAdmin
     .from("raffle_tickets")
-    .select("ticket_number");
+    .select("ticket_number")
+    .gte("ticket_number", FIRST_TICKET_NUMBER)
+    .lte("ticket_number", LAST_TICKET_NUMBER)
+    .order("ticket_number", { ascending: true });
 
   if (error) {
     throw new Error(error.message || "Could not check raffle ticket numbers.");
@@ -61,21 +82,27 @@ async function generateRandomTicketNumbers(quantity: number) {
       .filter((number) => Number.isInteger(number))
   );
 
-  if (used.size + quantity > 1000) {
-    throw new Error("There are not enough raffle ticket numbers left.");
-  }
+  const ticketNumbers: number[] = [];
 
-  const numbers: number[] = [];
+  for (
+    let ticketNumber = FIRST_TICKET_NUMBER;
+    ticketNumber <= LAST_TICKET_NUMBER;
+    ticketNumber += 1
+  ) {
+    if (!used.has(ticketNumber)) {
+      ticketNumbers.push(ticketNumber);
+    }
 
-  while (numbers.length < quantity) {
-    const number = Math.floor(Math.random() * 1000) + 1;
-
-    if (!used.has(number) && !numbers.includes(number)) {
-      numbers.push(number);
+    if (ticketNumbers.length === quantity) {
+      break;
     }
   }
 
-  return numbers;
+  if (ticketNumbers.length < quantity) {
+    throw new Error("There are not enough raffle ticket numbers left.");
+  }
+
+  return ticketNumbers;
 }
 
 async function createTicketNumbersForEntry(
@@ -87,7 +114,7 @@ async function createTicketNumbersForEntry(
   while (attempt < 5) {
     attempt += 1;
 
-    const ticketNumbers = await generateRandomTicketNumbers(quantity);
+    const ticketNumbers = await getNextTicketNumbers(quantity);
 
     const { error } = await supabaseAdmin.from("raffle_tickets").insert(
       ticketNumbers.map((ticketNumber) => ({
@@ -102,8 +129,8 @@ async function createTicketNumbersForEntry(
 
     /**
      * 23505 = duplicate key.
-     * If two people buy at the same time and randomly hit the same number,
-     * try again with new numbers.
+     * If two people buy at the same time and hit the same next number,
+     * try again and fetch the next available numbers.
      */
     if (error.code !== "23505") {
       throw new Error(error.message);
@@ -245,22 +272,7 @@ export async function POST(req: Request) {
     }
 
     const amountPence = ticketAmount * 100;
-
-    const appUrl =
-      process.env.NEXT_PUBLIC_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.APP_URL;
-
-    if (!appUrl) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Missing app URL. Add NEXT_PUBLIC_URL or NEXT_PUBLIC_APP_URL to your environment variables.",
-        },
-        { status: 500 }
-      );
-    }
+    const appUrl = getCleanAppUrl();
 
     const metadata = {
       fullName,
@@ -277,35 +289,11 @@ export async function POST(req: Request) {
       licenceNumber: "SL0507",
     };
 
-    const checkoutSession = await stripe.checkout.sessions.create({
-      mode: "payment",
-      customer_email: email,
-      success_url: `${appUrl}/Raffle/Success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appUrl}/Raffle`,
-      metadata,
-      payment_intent_data: {
-        metadata,
-      },
-      line_items: [
-        {
-          quantity: ticketAmount,
-          price_data: {
-            currency: "gbp",
-            unit_amount: 100,
-            product_data: {
-              name:
-                ticketAmount === 1
-                  ? "Burton Pride Raffle Ticket"
-                  : "Burton Pride Raffle Tickets",
-              description:
-                "£1 raffle ticket supporting Burton Pride C.I.C. Licensed by East Staffordshire Council under registration number SL0507.",
-              metadata,
-            },
-          },
-        },
-      ],
-    });
-
+    /**
+     * Save raffle entry first.
+     * Then create ticket numbers.
+     * Then create Stripe checkout.
+     */
     const { data: raffleEntry, error: insertError } = await supabaseAdmin
       .from("raffle_entries")
       .insert({
@@ -326,7 +314,6 @@ export async function POST(req: Request) {
         amount_pence: amountPence,
         currency: "gbp",
 
-        stripe_checkout_session_id: checkoutSession.id,
         source: "website_raffle",
       })
       .select("id")
@@ -351,10 +338,6 @@ export async function POST(req: Request) {
         ticketAmount
       );
     } catch (ticketError) {
-      /**
-       * If ticket number creation fails, remove the raffle entry.
-       * This stops broken checkout_started records being left behind.
-       */
       await supabaseAdmin
         .from("raffle_entries")
         .delete()
@@ -370,6 +353,62 @@ export async function POST(req: Request) {
         },
         { status: 500 }
       );
+    }
+
+    const ticketNumbersText = ticketNumbers.join(", ");
+
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: email,
+      success_url: `${appUrl}/Raffle/Success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/Raffle`,
+      metadata: {
+        ...metadata,
+        raffleEntryId: raffleEntry.id,
+        ticketNumbers: ticketNumbers.join(","),
+      },
+      payment_intent_data: {
+        metadata: {
+          ...metadata,
+          raffleEntryId: raffleEntry.id,
+          ticketNumbers: ticketNumbers.join(","),
+        },
+      },
+      line_items: [
+        {
+          quantity: ticketAmount,
+          price_data: {
+            currency: "gbp",
+            unit_amount: 100,
+            product_data: {
+              name:
+                ticketAmount === 1
+                  ? "Burton Pride Raffle Ticket"
+                  : "Burton Pride Raffle Tickets",
+              description: `£1 raffle ticket supporting Burton Pride C.I.C. Ticket number${
+                ticketAmount > 1 ? "s" : ""
+              }: ${ticketNumbersText}. Licensed by East Staffordshire Council under registration number SL0507.`,
+              metadata: {
+                ...metadata,
+                raffleEntryId: raffleEntry.id,
+                ticketNumbers: ticketNumbers.join(","),
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const { error: updateError } = await supabaseAdmin
+      .from("raffle_entries")
+      .update({
+        stripe_checkout_session_id: checkoutSession.id,
+        raffle_ticket_numbers: ticketNumbers,
+      })
+      .eq("id", raffleEntry.id);
+
+    if (updateError) {
+      console.error("Could not update raffle entry with Stripe session:", updateError);
     }
 
     return NextResponse.json({

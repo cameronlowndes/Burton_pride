@@ -4,6 +4,9 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
+const FIRST_TICKET_NUMBER = 1001;
+const LAST_TICKET_NUMBER = 9999;
+
 type RaffleTicket = {
   id: string;
   raffle_entry_id: string;
@@ -64,6 +67,16 @@ function prizeLabel(position: number) {
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as any).message === "string"
+  ) {
+    return (error as any).message;
+  }
+
   return "Something went wrong";
 }
 
@@ -84,10 +97,52 @@ function formatEntryTicketNumbers(entry: RaffleEntry) {
   return numbers.map((number) => `#${number}`).join(", ");
 }
 
-async function generateRandomTicketNumbers(quantity: number) {
+function buildStats(safeEntries: RaffleEntry[]) {
+  const paidEntries = safeEntries.filter(
+    (entry) => entry.payment_status === "paid"
+  );
+
+  const checkoutStartedEntries = safeEntries.filter(
+    (entry) => entry.payment_status === "checkout_started"
+  );
+
+  const winners = safeEntries
+    .filter((entry) => entry.raffle_winner_position)
+    .sort(
+      (a, b) =>
+        Number(a.raffle_winner_position || 0) -
+        Number(b.raffle_winner_position || 0)
+    );
+
+  const totalTickets = paidEntries
+    .filter((entry) => !entry.raffle_winner_position)
+    .reduce((total, entry) => {
+      const realTicketCount = getEntryTicketNumbers(entry).length;
+      return total + (realTicketCount || ticketCount(entry.ticket_amount));
+    }, 0);
+
+  const totalRaisedPence = paidEntries.reduce(
+    (total, entry) => total + Number(entry.amount_pence || 0),
+    0
+  );
+
+  return {
+    totalEntries: safeEntries.length,
+    paidEntries: paidEntries.length,
+    checkoutStartedEntries: checkoutStartedEntries.length,
+    totalTickets,
+    totalRaisedPence,
+    winners,
+  };
+}
+
+async function getNextRaffleTicketNumbers(quantity: number) {
   const { data: usedTickets, error } = await supabaseAdmin
     .from("raffle_tickets")
-    .select("ticket_number");
+    .select("ticket_number")
+    .gte("ticket_number", FIRST_TICKET_NUMBER)
+    .lte("ticket_number", LAST_TICKET_NUMBER)
+    .order("ticket_number", { ascending: true });
 
   if (error) {
     throw new Error(error.message || "Could not check raffle ticket numbers.");
@@ -99,18 +154,24 @@ async function generateRandomTicketNumbers(quantity: number) {
       .filter((number) => Number.isInteger(number))
   );
 
-  if (used.size + quantity > 1000) {
-    throw new Error("There are not enough raffle ticket numbers left.");
-  }
-
   const numbers: number[] = [];
 
-  while (numbers.length < quantity) {
-    const number = randomInt(1, 1001);
-
-    if (!used.has(number) && !numbers.includes(number)) {
+  for (
+    let number = FIRST_TICKET_NUMBER;
+    number <= LAST_TICKET_NUMBER;
+    number += 1
+  ) {
+    if (!used.has(number)) {
       numbers.push(number);
     }
+
+    if (numbers.length === quantity) {
+      break;
+    }
+  }
+
+  if (numbers.length < quantity) {
+    throw new Error("There are not enough raffle ticket numbers left.");
   }
 
   return numbers;
@@ -125,7 +186,7 @@ async function createTicketNumbersForEntry(
   while (attempt < 5) {
     attempt += 1;
 
-    const ticketNumbers = await generateRandomTicketNumbers(quantity);
+    const ticketNumbers = await getNextRaffleTicketNumbers(quantity);
 
     const { data, error } = await supabaseAdmin
       .from("raffle_tickets")
@@ -146,8 +207,8 @@ async function createTicketNumbersForEntry(
 
     /**
      * 23505 = duplicate key.
-     * If two actions happen at the same time and hit the same number,
-     * try again with new numbers.
+     * If two actions happen at the same time and hit the same next number,
+     * try again and fetch the next available numbers.
      */
     if (error.code !== "23505") {
       throw new Error(error.message);
@@ -186,45 +247,10 @@ export async function GET() {
   try {
     const safeEntries = await loadEntries();
 
-    const paidEntries = safeEntries.filter(
-      (entry) => entry.payment_status === "paid"
-    );
-
-    const checkoutStartedEntries = safeEntries.filter(
-      (entry) => entry.payment_status === "checkout_started"
-    );
-
-    const winners = safeEntries
-      .filter((entry) => entry.raffle_winner_position)
-      .sort(
-        (a, b) =>
-          Number(a.raffle_winner_position || 0) -
-          Number(b.raffle_winner_position || 0)
-      );
-
-    const totalTickets = paidEntries
-      .filter((entry) => !entry.raffle_winner_position)
-      .reduce((total, entry) => {
-        const realTicketCount = getEntryTicketNumbers(entry).length;
-        return total + (realTicketCount || ticketCount(entry.ticket_amount));
-      }, 0);
-
-    const totalRaisedPence = paidEntries.reduce(
-      (total, entry) => total + Number(entry.amount_pence || 0),
-      0
-    );
-
     return NextResponse.json({
       ok: true,
       entries: safeEntries,
-      stats: {
-        totalEntries: safeEntries.length,
-        paidEntries: paidEntries.length,
-        checkoutStartedEntries: checkoutStartedEntries.length,
-        totalTickets,
-        totalRaisedPence,
-        winners,
-      },
+      stats: buildStats(safeEntries),
     });
   } catch (error) {
     return NextResponse.json(
@@ -264,7 +290,7 @@ export async function POST(req: Request) {
           terms_accepted: true,
           eligibility_confirmed: true,
 
-          status: "active",
+          status: "test_entry",
           payment_status: "paid",
           amount_pence: amountPence,
           currency: "gbp",
@@ -274,6 +300,7 @@ export async function POST(req: Request) {
           raffle_won_at: null,
           raffle_draw_notes: null,
           created_at: now,
+          source: "admin_test_raffle",
         };
       });
 
@@ -311,7 +338,15 @@ export async function POST(req: Request) {
         const createdIds = created.map((entry) => entry.id);
 
         if (createdIds.length > 0) {
-          await supabaseAdmin.from("raffle_entries").delete().in("id", createdIds);
+          await supabaseAdmin
+            .from("raffle_tickets")
+            .delete()
+            .in("raffle_entry_id", createdIds);
+
+          await supabaseAdmin
+            .from("raffle_entries")
+            .delete()
+            .in("id", createdIds);
         }
 
         return NextResponse.json(
@@ -352,6 +387,11 @@ export async function POST(req: Request) {
         );
       }
 
+      await supabaseAdmin
+        .from("raffle_tickets")
+        .delete()
+        .eq("raffle_entry_id", entryId);
+
       const { data, error } = await supabaseAdmin
         .from("raffle_entries")
         .delete()
@@ -377,12 +417,43 @@ export async function POST(req: Request) {
     }
 
     if (body.action === "delete_all_test_entries") {
+      const { data: testEntries, error: findError } = await supabaseAdmin
+        .from("raffle_entries")
+        .select("id")
+        .or(
+          "email.like.test-raffle-%,stripe_checkout_session_id.like.test_session_%,stripe_payment_intent_id.like.test_payment_%,source.eq.admin_test_raffle,status.eq.test_entry"
+        );
+
+      if (findError) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: findError.message,
+            details: findError,
+          },
+          { status: 500 }
+        );
+      }
+
+      const ids = (testEntries || []).map((entry) => entry.id);
+
+      if (ids.length === 0) {
+        return NextResponse.json({
+          ok: true,
+          deleted: 0,
+          deletedEntries: [],
+        });
+      }
+
+      await supabaseAdmin
+        .from("raffle_tickets")
+        .delete()
+        .in("raffle_entry_id", ids);
+
       const { data, error } = await supabaseAdmin
         .from("raffle_entries")
         .delete()
-        .or(
-          "email.like.test-raffle-%,stripe_checkout_session_id.like.test_session_%,stripe_payment_intent_id.like.test_payment_%"
-        )
+        .in("id", ids)
         .select("*");
 
       if (error) {
@@ -489,7 +560,9 @@ export async function POST(req: Request) {
         ok: true,
         resetWinner: data,
         prizePosition,
-        message: `${prizeLabel(prizePosition)} has been reset and can be drawn again.`,
+        message: `${prizeLabel(
+          prizePosition
+        )} has been reset and can be drawn again.`,
       });
     }
 
@@ -547,7 +620,9 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: `${prizeLabel(prizePosition)} has already been drawn. Use Redo ${prizeLabel(
+          error: `${prizeLabel(
+            prizePosition
+          )} has already been drawn. Use Redo ${prizeLabel(
             prizePosition
           )} first if you need to draw again.`,
           existingWinner: existingPrizeWinner,
@@ -571,6 +646,9 @@ export async function POST(req: Request) {
       )
       .eq("payment_status", "paid")
       .is("raffle_winner_position", null)
+      .eq("age_confirmed", true)
+      .eq("terms_accepted", true)
+      .eq("eligibility_confirmed", true)
       .order("created_at", { ascending: true });
 
     if (paidError) {
@@ -591,7 +669,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error:
-            "No paid raffle entries are available to draw. Previous winners are excluded.",
+            "No paid eligible raffle entries are available to draw. Previous winners are excluded.",
         },
         { status: 400 }
       );
@@ -605,7 +683,11 @@ export async function POST(req: Request) {
       for (const ticket of raffleTickets) {
         const ticketNumber = Number(ticket.ticket_number);
 
-        if (Number.isFinite(ticketNumber)) {
+        if (
+          Number.isFinite(ticketNumber) &&
+          ticketNumber >= FIRST_TICKET_NUMBER &&
+          ticketNumber <= LAST_TICKET_NUMBER
+        ) {
           ticketPool.push({
             entry,
             ticketNumber,
@@ -620,7 +702,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error:
-            "No raffle ticket numbers found in the paid draw pool. Make sure paid entries have rows in raffle_tickets.",
+            "No raffle ticket numbers found in the paid draw pool. Make sure paid entries have rows in raffle_tickets from 1001 upwards.",
         },
         { status: 400 }
       );
@@ -631,12 +713,11 @@ export async function POST(req: Request) {
     const winner = winningTicket.entry;
 
     const drawnAt = new Date().toISOString();
-
     const winnerAllNumbers = formatEntryTicketNumbers(winner);
 
     const notes = `${prizeLabel(
       prizePosition
-    )} drawn from ${entries.length} paid people and ${
+    )} drawn from ${entries.length} paid eligible people and ${
       ticketPool.length
     } paid ticket numbers. Winning raffle ticket number was #${
       winningTicket.ticketNumber
