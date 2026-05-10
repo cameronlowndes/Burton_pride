@@ -2,7 +2,6 @@ import Stripe from "stripe";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
-import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -888,7 +887,7 @@ function rafflePrintableAttachmentSvg({
 </svg>`;
 }
 
-async function buildPrintableTicketAttachments({
+function buildPrintableTicketAttachments({
   fullName,
   email,
   phone,
@@ -902,9 +901,8 @@ async function buildPrintableTicketAttachments({
   ticketsBought: number;
 }) {
   const numbers = ticketNumbers.length ? ticketNumbers : [0];
-  const attachments = [];
 
-  for (const ticketNumber of numbers) {
+  return numbers.map((ticketNumber) => {
     const svg = rafflePrintableAttachmentSvg({
       fullName,
       email,
@@ -913,20 +911,14 @@ async function buildPrintableTicketAttachments({
       ticketsBought,
     });
 
-    const pngBuffer = await sharp(Buffer.from(svg, "utf8"))
-      .png()
-      .toBuffer();
-
-    attachments.push({
+    return {
       filename: ticketNumber
-        ? `burton-pride-raffle-ticket-${String(ticketNumber).padStart(4, "0")}.png`
-        : "burton-pride-raffle-ticket.png",
-      content: pngBuffer.toString("base64"),
-      contentType: "image/png",
-    });
-  }
-
-  return attachments;
+        ? `burton-pride-raffle-ticket-${String(ticketNumber).padStart(4, "0")}.svg`
+        : "burton-pride-raffle-ticket.svg",
+      content: Buffer.from(svg, "utf8").toString("base64"),
+      contentType: "image/svg+xml",
+    };
+  });
 }
 
 /**
@@ -1061,7 +1053,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
       ticketCount: tickets,
     });
 
-    const printableTicketAttachments = await buildPrintableTicketAttachments({
+    const printableTicketAttachments = buildPrintableTicketAttachments({
       fullName,
       email,
       phone,
@@ -1134,7 +1126,7 @@ async function handleRaffleSession(session: Stripe.Checkout.Session) {
                   Your printable raffle ticket is attached
                 </p>
                 <p style="margin: 0; color: #4b5563; font-size: 14px;">
-                  We have attached your raffle ticket as a PNG image file so you can save it or print it if you want to. Your raffle numbers are also shown above.
+                  We have attached your raffle ticket as an SVG image file so you can save it or print it if you want to. Your raffle numbers are also shown above.
                 </p>
               </div>
 
