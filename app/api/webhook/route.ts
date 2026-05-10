@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -885,6 +886,47 @@ function rafflePrintableAttachmentSvg({
   <text x="1460" y="452" text-anchor="middle" font-family="Courier New" font-size="28" font-weight="900" letter-spacing="2">${safeNumber}</text>
   <circle cx="430" cy="560" r="130" fill="url(#stubRainbow)" opacity="0.20"/>
 </svg>`;
+}
+
+async function buildPrintableTicketAttachments({
+  fullName,
+  email,
+  phone,
+  ticketNumbers,
+  ticketsBought,
+}: {
+  fullName: string;
+  email: string;
+  phone: string;
+  ticketNumbers: number[];
+  ticketsBought: number;
+}) {
+  const numbers = ticketNumbers.length ? ticketNumbers : [0];
+  const attachments = [];
+
+  for (const ticketNumber of numbers) {
+    const svg = rafflePrintableAttachmentSvg({
+      fullName,
+      email,
+      phone,
+      ticketNumber,
+      ticketsBought,
+    });
+
+    const pngBuffer = await sharp(Buffer.from(svg, "utf8"))
+      .png()
+      .toBuffer();
+
+    attachments.push({
+      filename: ticketNumber
+        ? `burton-pride-raffle-ticket-${String(ticketNumber).padStart(4, "0")}.png`
+        : "burton-pride-raffle-ticket.png",
+      content: pngBuffer.toString("base64"),
+      contentType: "image/png",
+    });
+  }
+
+  return attachments;
 }
 
 /**
