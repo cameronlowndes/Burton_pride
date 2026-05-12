@@ -96,6 +96,13 @@ export default function HomeClient() {
             >
               🎟️ Buy Raffle Tickets
             </Link>
+
+            <Link
+              href="/BurtonPride2026"
+              className="rounded-full bg-green-500 px-5 py-2.5 text-base font-extrabold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400 sm:px-6 sm:py-3 sm:text-lg"
+            >
+              🌈 Burton Pride 2026
+            </Link>
           </motion.div>
         </motion.section>
 
@@ -119,6 +126,50 @@ export default function HomeClient() {
             >
               <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md sm:p-6">
                 <EventCard />
+              </div>
+            </motion.section>
+
+            {/* Burton Pride 2026 CTA */}
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.155, duration: 0.6 }}
+            >
+              <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 p-8 text-center shadow-2xl shadow-green-400/30 sm:p-12">
+                <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-white/25 blur-3xl animate-pulse mix-blend-overlay" />
+                <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-teal-300/40 blur-3xl animate-pulse mix-blend-overlay" />
+
+                <div className="relative mx-auto max-w-4xl">
+                  <p className="mb-3 inline-flex rounded-full bg-black/20 px-5 py-2 text-sm font-black uppercase tracking-wide text-white shadow-lg backdrop-blur-md">
+                    Main Event Page
+                  </p>
+
+                  <h2 className="mb-4 text-4xl font-extrabold drop-shadow-lg sm:text-6xl">
+                    🌈 Burton Pride 2026
+                  </h2>
+
+                  <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/95 sm:text-xl">
+                    Burton Pride 2026 is back on{" "}
+                    <strong>Saturday 27th June 2026</strong>. Visit the main
+                    event page for information about the event, travel, terms
+                    and conditions, volunteering, donations, and the after party.
+                  </p>
+
+                  <div className="flex flex-wrap justify-center gap-4">
+                    <Link
+                      href="/BurtonPride2026/MainEvent"
+                      className="inline-flex items-center justify-center rounded-full bg-white px-9 py-3.5 text-lg font-extrabold text-green-700 shadow-xl transition-transform hover:scale-105 hover:bg-green-50 sm:px-12 sm:py-4 sm:text-xl"
+                    >
+                      View Burton Pride 2026
+                    </Link>
+
+                    <Link
+                      href="/BurtonPride2026/PlanYourJourney"
+                      className="inline-flex items-center justify-center rounded-full bg-yellow-400 px-9 py-3.5 text-lg font-extrabold text-black shadow-xl transition-transform hover:scale-105 hover:bg-yellow-300 sm:px-12 sm:py-4 sm:text-xl"
+                    >
+                      Plan Your Journey
+                    </Link>
+                  </div>
+                </div>
               </div>
             </motion.section>
 
@@ -237,7 +288,8 @@ export default function HomeClient() {
                   <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/95 sm:text-xl">
                     Burton Pride is created by the community, for the community.
                     A monthly donation helps us plan safer events, support local
-                    LGBTQIA+ people, and keep Pride growing in Burton upon Trent.
+                    LGBTQIA+ people, and keep Pride growing in Burton upon
+                    Trent.
                   </p>
 
                   <div className="mb-7 grid gap-4 sm:grid-cols-3">
@@ -305,6 +357,7 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
+            {/* Application Forms and Collaborate */}
             <motion.section
               variants={fadeUp}
               transition={{ delay: 0.25, duration: 0.6 }}
@@ -314,13 +367,16 @@ export default function HomeClient() {
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Burton Pride 2026 Application Forms
                   </h2>
+
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                    We are looking for local companies and charities to take
-                    part in Burton Pride 2026.
+                    We are looking for local companies, charities, performers,
+                    volunteers, stallholders, and community groups to take part
+                    in Burton Pride 2026.
                   </p>
+
                   <div className="mt-auto">
                     <Link
-                      href="/BurtronPride2026"
+                      href="/BurtonPride2026"
                       className="inline-flex rounded-full bg-green-500 px-7 py-3 text-base font-bold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400 sm:text-lg"
                     >
                       Learn More
@@ -332,11 +388,13 @@ export default function HomeClient() {
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Collaborate with Us
                   </h2>
+
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
                     We’re always looking for like-minded businesses,
                     organisations, and individuals who want to support our
                     mission of inclusivity and equality.
                   </p>
+
                   <div className="mt-auto">
                     <Link
                       href="/Collaborate"
@@ -349,6 +407,7 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
+            {/* Feedback */}
             <motion.section
               variants={fadeUp}
               transition={{ delay: 0.3, duration: 0.6 }}
@@ -361,6 +420,7 @@ export default function HomeClient() {
                   <h2 className="mb-3 text-3xl font-extrabold drop-shadow-lg sm:text-5xl">
                     Give Your Feedback To Burton Pride 💖
                   </h2>
+
                   <p className="mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-xl">
                     We would love your help in making next year’s event even
                     better. Every comment, suggestion, or idea helps us improve
@@ -377,6 +437,7 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
+            {/* Donate and Social */}
             <motion.section
               variants={fadeUp}
               transition={{ delay: 0.35, duration: 0.6 }}
@@ -386,6 +447,7 @@ export default function HomeClient() {
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Support Burton Pride 💖
                   </h2>
+
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
                     Help us bring the best Pride events to Burton. Your donation
                     supports community initiatives, parade organisation, and
@@ -406,6 +468,7 @@ export default function HomeClient() {
                   <h2 className="mb-3 text-2xl font-extrabold sm:text-3xl">
                     Follow Burton Pride
                   </h2>
+
                   <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
                     Keep up to date with announcements, events, and community
                     updates.
@@ -416,6 +479,7 @@ export default function HomeClient() {
                       <Link
                         href="https://www.facebook.com/profile.php?id=61556621159422"
                         target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex rounded-full bg-blue-600 px-7 py-3 text-base font-semibold text-white shadow-md transition-transform hover:scale-105 hover:bg-blue-500"
                       >
                         Facebook
@@ -424,6 +488,7 @@ export default function HomeClient() {
                       <Link
                         href="https://www.instagram.com/prideburton/"
                         target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex rounded-full bg-gradient-to-r from-pink-500 via-red-500 to-yellow-500 px-7 py-3 text-base font-semibold text-white shadow-md transition-transform hover:scale-105 hover:opacity-90"
                       >
                         Instagram
