@@ -29,6 +29,18 @@ import {
 
 import { printMoneyReport } from "@/lib/money/print";
 
+type YearLock = {
+  id?: string;
+  year: string;
+  is_locked: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
+  unlocked_at?: string | null;
+  unlocked_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 const initialForm: FormState = {
   title: "",
   description: "",
@@ -67,12 +79,38 @@ async function readJsonResponse(res: Response) {
   }
 }
 
+function makeAmountSearchValues(amountPence: number | null | undefined) {
+  const pence = Number(amountPence || 0);
+  const pounds = pence / 100;
+
+  const poundsFixed = pounds.toFixed(2);
+  const poundsNoTrailingZeros = pounds.toString();
+  const poundsWithComma = pounds.toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return [
+    String(pence),
+    poundsNoTrailingZeros,
+    poundsFixed,
+    poundsWithComma,
+    `£${poundsNoTrailingZeros}`,
+    `£${poundsFixed}`,
+    `£${poundsWithComma}`,
+  ].map((value) => value.toLowerCase());
+}
+
 export function useMoneyTransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorBreakdown, setSponsorBreakdown] = useState<SponsorBreakdown[]>(
     []
   );
+
+  const [yearLocks, setYearLocks] = useState<YearLock[]>([]);
+  const [yearLockPassword, setYearLockPassword] = useState("");
+  const [lockingYear, setLockingYear] = useState(false);
 
   const [form, setForm] = useState<FormState>(initialForm);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
@@ -84,6 +122,8 @@ export function useMoneyTransactionsPage() {
   >("all");
 
   const [selectedSponsorId, setSelectedSponsorId] = useState<string>("all");
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<string>("all");
 
   const [selectedYear, setSelectedYear] = useState<string>(
     new Date().getFullYear().toString()
@@ -198,9 +238,36 @@ export function useMoneyTransactionsPage() {
     }
   }
 
+  async function loadYearLocks() {
+    try {
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(`/api/admin/money/year-locks?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to load year locks",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setYearLocks(data.locks || []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load year locks");
+      setErrorDetails(err);
+    }
+  }
+
   useEffect(() => {
     loadTransactions();
     loadSponsors();
+    loadYearLocks();
   }, []);
 
   const selectedSponsor = useMemo(() => {
@@ -233,8 +300,20 @@ export function useMoneyTransactionsPage() {
       }
     });
 
+    yearLocks.forEach((lock) => {
+      if (lock.year) {
+        years.add(String(lock.year));
+      }
+    });
+
     return Array.from(years).sort((a, b) => Number(b) - Number(a));
-  }, [transactions, displaySponsors]);
+  }, [transactions, displaySponsors, yearLocks]);
+
+  const selectedYearLock = useMemo(() => {
+    return yearLocks.find((item) => String(item.year) === selectedYear) || null;
+  }, [yearLocks, selectedYear]);
+
+  const selectedYearLocked = Boolean(selectedYearLock?.is_locked);
 
   const yearTransactions = useMemo(() => {
     return transactions.filter((item) => {
@@ -444,17 +523,37 @@ export function useMoneyTransactionsPage() {
       });
     }
 
+    if (selectedPaymentMethod !== "all") {
+      rows = rows.filter((item) => {
+        if (selectedPaymentMethod === "Personal Funds") {
+          return (
+            item.payment_method === "Personal Funds" ||
+            isPersonalFundsTransaction(item)
+          );
+        }
+
+        return item.payment_method === selectedPaymentMethod;
+      });
+    }
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase().trim();
 
       rows = rows.filter((item) => {
+        const amountSearchValues = makeAmountSearchValues(item.amount_pence);
+
+        const matchesAmount = amountSearchValues.some((value) =>
+          value.includes(q)
+        );
+
         return (
           item.title?.toLowerCase().includes(q) ||
           item.description?.toLowerCase().includes(q) ||
           item.payment_method?.toLowerCase().includes(q) ||
           item.sponsor_name?.toLowerCase().includes(q) ||
           item.sponsorship_note?.toLowerCase().includes(q) ||
-          item.personal_funds_name?.toLowerCase().includes(q)
+          item.personal_funds_name?.toLowerCase().includes(q) ||
+          matchesAmount
         );
       });
     }
@@ -464,6 +563,7 @@ export function useMoneyTransactionsPage() {
     monthViewTransactions,
     filter,
     selectedSponsorId,
+    selectedPaymentMethod,
     displaySponsors,
     searchTerm,
   ]);
@@ -578,6 +678,12 @@ export function useMoneyTransactionsPage() {
     };
   }, [printTransactionsList, totals.openingBalance]);
 
+  function isYearLocked(year: string) {
+    return yearLocks.some(
+      (item) => String(item.year) === String(year) && item.is_locked === true
+    );
+  }
+
   function openNewSponsorForm() {
     setEditingSponsor(null);
     setSponsorForm(initialSponsorForm);
@@ -585,6 +691,13 @@ export function useMoneyTransactionsPage() {
   }
 
   function startEditSponsor(sponsorId: string) {
+    if (selectedYearLocked) {
+      setError(
+        `${selectedYear} is locked. Unlock this year with the main admin password before editing sponsor records.`
+      );
+      return;
+    }
+
     const sponsor = displaySponsors.find((item) => item.id === sponsorId);
 
     if (!sponsor) {
@@ -616,6 +729,14 @@ export function useMoneyTransactionsPage() {
       setSavingSponsor(true);
       setError("");
       setErrorDetails(null);
+
+      if (selectedYearLocked) {
+        setError(
+          `${selectedYear} is locked. Unlock this year with the main admin password before saving sponsor records.`
+        );
+        setSavingSponsor(false);
+        return;
+      }
 
       if (!sponsorForm.sponsorName.trim()) {
         setError("Please enter a sponsor name.");
@@ -664,6 +785,14 @@ export function useMoneyTransactionsPage() {
       setDeletingSponsor(true);
       setError("");
       setErrorDetails(null);
+
+      if (selectedYearLocked) {
+        setError(
+          `${selectedYear} is locked. Unlock this year with the main admin password before deleting sponsor records.`
+        );
+        setDeletingSponsor(false);
+        return;
+      }
 
       const res = await fetch(`/api/admin/money/sponsors/${deleteSponsorId}`, {
         method: "DELETE",
@@ -733,6 +862,17 @@ export function useMoneyTransactionsPage() {
   }
 
   function startEditTransaction(item: Transaction) {
+    const editYear = getTransactionYear(
+      item.transaction_date || item.created_at
+    );
+
+    if (isYearLocked(editYear)) {
+      setError(
+        `${editYear} is locked. Unlock this year with the main admin password before editing this transaction.`
+      );
+      return;
+    }
+
     const isPersonal = isPersonalFundsTransaction(item);
 
     const matchingSponsor = displaySponsors.find((sponsor) => {
@@ -803,6 +943,16 @@ export function useMoneyTransactionsPage() {
 
       if (!form.amount || Number(form.amount) <= 0) {
         setError("Please enter an amount above £0.");
+        setSaving(false);
+        return;
+      }
+
+      const saveYear = getTransactionYear(form.transactionDate);
+
+      if (isYearLocked(saveYear)) {
+        setError(
+          `${saveYear} is locked. Unlock this year with the main admin password before adding or editing transactions.`
+        );
         setSaving(false);
         return;
       }
@@ -880,6 +1030,18 @@ export function useMoneyTransactionsPage() {
 
       for (let index = 0; index < datesToCreate.length; index += 1) {
         const transactionDate = datesToCreate[index];
+        const transactionYear = getTransactionYear(transactionDate);
+
+        if (isYearLocked(transactionYear)) {
+          throw {
+            message: `${transactionYear} is locked. Unlock this year before creating this repeating payment.`,
+            details: {
+              transactionDate,
+              transactionYear,
+            },
+          };
+        }
+
         const uploadData = new FormData();
 
         uploadData.append(
@@ -958,6 +1120,7 @@ export function useMoneyTransactionsPage() {
       setEditingTransaction(null);
       await loadTransactions();
       await loadSponsors();
+      await loadYearLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -968,6 +1131,22 @@ export function useMoneyTransactionsPage() {
 
   async function deleteTransaction() {
     if (!deleteId) return;
+
+    const transactionToDelete = transactions.find((item) => item.id === deleteId);
+
+    if (transactionToDelete) {
+      const deleteYear = getTransactionYear(
+        transactionToDelete.transaction_date || transactionToDelete.created_at
+      );
+
+      if (isYearLocked(deleteYear)) {
+        setError(
+          `${deleteYear} is locked. Unlock this year with the main admin password before hiding this transaction.`
+        );
+        setDeleteId(null);
+        return;
+      }
+    }
 
     try {
       setDeleting(true);
@@ -1001,6 +1180,7 @@ export function useMoneyTransactionsPage() {
       setTransactions((prev) => prev.filter((item) => item.id !== deleteId));
       setDeleteId(null);
       await loadSponsors();
+      await loadYearLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1033,11 +1213,78 @@ export function useMoneyTransactionsPage() {
     return true;
   }
 
+  async function updateYearLock(action: "lock" | "unlock") {
+    try {
+      setLockingYear(true);
+      setError("");
+      setErrorDetails(null);
+
+      const cleanPassword = yearLockPassword.trim();
+
+      if (!cleanPassword) {
+        setError("Please enter the main admin password.");
+        setLockingYear(false);
+        return;
+      }
+
+      await verifyMainAdminDeletePassword(cleanPassword);
+
+      const res = await fetch("/api/admin/money/year-locks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          year: selectedYear,
+          action,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message:
+            data.error ||
+            (action === "lock"
+              ? `Failed to lock ${selectedYear}.`
+              : `Failed to unlock ${selectedYear}.`),
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setYearLockPassword("");
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setLockingYear(false);
+    }
+  }
+
+  async function lockSelectedYear() {
+    await updateYearLock("lock");
+  }
+
+  async function unlockSelectedYear() {
+    await updateYearLock("unlock");
+  }
+
   async function deleteSelectedYearTransactions() {
     try {
       setDeletingYear(true);
       setError("");
       setErrorDetails(null);
+
+      if (selectedYearLocked) {
+        setError(
+          `${selectedYear} is locked. Unlock this year before deleting its transactions.`
+        );
+        setDeletingYear(false);
+        return;
+      }
 
       const cleanPassword = deleteYearPassword.trim();
 
@@ -1078,6 +1325,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadYearLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1091,6 +1339,18 @@ export function useMoneyTransactionsPage() {
       setDeletingAll(true);
       setError("");
       setErrorDetails(null);
+
+      const lockedYears = yearLocks.filter((item) => item.is_locked === true);
+
+      if (lockedYears.length > 0) {
+        setError(
+          `Cannot delete everything while locked years exist. Unlock these years first: ${lockedYears
+            .map((item) => item.year)
+            .join(", ")}.`
+        );
+        setDeletingAll(false);
+        return;
+      }
 
       const cleanPassword = deleteAllPassword.trim();
 
@@ -1128,6 +1388,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadYearLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1137,6 +1398,15 @@ export function useMoneyTransactionsPage() {
   }
 
   async function togglePersonalFundsRepaid(item: Transaction) {
+    const repayYear = getTransactionYear(item.transaction_date || item.created_at);
+
+    if (isYearLocked(repayYear)) {
+      setError(
+        `${repayYear} is locked. Unlock this year with the main admin password before changing repayments.`
+      );
+      return;
+    }
+
     try {
       setRepayingId(item.id);
       setError("");
@@ -1266,15 +1536,18 @@ export function useMoneyTransactionsPage() {
   function handleYearChange(year: string) {
     setSelectedYear(year);
     setSelectedSponsorId("all");
+    setSelectedPaymentMethod("all");
     setFilter("all");
     setSearchTerm("");
     setSelectedPrintMonth("all");
     setSelectedViewMonth("all");
+    setYearLockPassword("");
   }
 
   function refreshAll() {
     loadTransactions();
     loadSponsors();
+    loadYearLocks();
   }
 
   function closeDeleteYear() {
@@ -1298,6 +1571,8 @@ export function useMoneyTransactionsPage() {
     setFilter,
     selectedSponsorId,
     setSelectedSponsorId,
+    selectedPaymentMethod,
+    setSelectedPaymentMethod,
     selectedSponsor,
     selectedYear,
     selectedViewMonth,
@@ -1333,6 +1608,13 @@ export function useMoneyTransactionsPage() {
     error,
     errorDetails,
 
+    yearLocks,
+    selectedYearLock,
+    selectedYearLocked,
+    yearLockPassword,
+    setYearLockPassword,
+    lockingYear,
+
     displaySponsors,
     yearOptions,
     yearTransactions,
@@ -1359,6 +1641,8 @@ export function useMoneyTransactionsPage() {
     handleSubmit,
     deleteTransaction,
 
+    lockSelectedYear,
+    unlockSelectedYear,
     deleteSelectedYearTransactions,
     deleteAllTransactions,
     togglePersonalFundsRepaid,

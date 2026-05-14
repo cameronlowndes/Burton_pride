@@ -5,12 +5,14 @@ import MoneyStatsCards from "../../components/money/MoneySummaryCards";
 import MoneyPageStatus from "../../components/money/MoneyPageStatus";
 import MoneyMainGrid from "../../components/money/MoneyMainGrid";
 import MoneySponsorSection from "../../components/money/MoneySponsorSection";
+import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown";
+import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
-  
+
   return (
     <main className="min-h-screen w-full max-w-full overflow-x-auto bg-[#070716] px-3 py-5 text-white sm:px-5 lg:px-6">
       <div className="mx-auto w-full max-w-[1600px] min-w-0 space-y-6">
@@ -30,6 +32,16 @@ export default function MoneyTransactionsPage() {
           yearTransactionsLength={money.yearTransactions.length}
         />
 
+        <MoneyYearLockPanel
+          selectedYear={money.selectedYear}
+          selectedYearLocked={money.selectedYearLocked}
+          yearLockPassword={money.yearLockPassword}
+          setYearLockPassword={money.setYearLockPassword}
+          lockingYear={money.lockingYear}
+          onLockYear={money.lockSelectedYear}
+          onUnlockYear={money.unlockSelectedYear}
+        />
+
         <MoneyStatsCards totals={money.totals} />
 
         <MoneySponsorSection
@@ -40,6 +52,11 @@ export default function MoneyTransactionsPage() {
           setDeleteSponsorId={money.setDeleteSponsorId}
         />
 
+        <MoneyMonthlyBreakdown
+          selectedYear={money.selectedYear}
+          transactions={money.transactions}
+        />
+
         <MoneyMainGrid
           form={money.form}
           setForm={money.setForm}
@@ -47,6 +64,7 @@ export default function MoneyTransactionsPage() {
           setInvoiceFile={money.setInvoiceFile}
           editingTransaction={money.editingTransaction}
           displaySponsors={money.displaySponsors}
+          yearlySponsorBreakdown={money.yearlySponsorBreakdown}
           saving={money.saving}
           handleSubmit={money.handleSubmit}
           cancelEditTransaction={money.cancelEditTransaction}
@@ -70,6 +88,8 @@ export default function MoneyTransactionsPage() {
           selectedSponsorId={money.selectedSponsorId}
           setSelectedSponsorId={money.setSelectedSponsorId}
           selectedSponsor={money.selectedSponsor}
+          selectedPaymentMethod={money.selectedPaymentMethod}
+          setSelectedPaymentMethod={money.setSelectedPaymentMethod}
           deletingYear={money.deletingYear}
           deletingAll={money.deletingAll}
           repayingId={money.repayingId}

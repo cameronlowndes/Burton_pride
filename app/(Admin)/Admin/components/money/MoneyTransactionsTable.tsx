@@ -1,3 +1,6 @@
+"use client";
+
+import type { Dispatch, SetStateAction } from "react";
 import {
   Download,
   FileText,
@@ -5,7 +8,9 @@ import {
   Printer,
   Trash2,
 } from "lucide-react";
+
 import type { Sponsor, Transaction } from "@/lib/money/types";
+
 import {
   formatDate,
   isPersonalFundsTransaction,
@@ -21,6 +26,17 @@ type MonthOption = {
   count: number;
 };
 
+type PaymentMethodFilter =
+  | "all"
+  | "Stripe"
+  | "Cash"
+  | "Bank Transfer"
+  | "PayPal"
+  | "Card Machine"
+  | "Personal Funds"
+  | "Item Donation"
+  | string;
+
 type MoneyTransactionsTableProps = {
   loading: boolean;
 
@@ -31,28 +47,29 @@ type MoneyTransactionsTableProps = {
 
   selectedYear: string;
   selectedViewMonth: string;
-  setSelectedViewMonth: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedViewMonth: Dispatch<SetStateAction<string>>;
 
   selectedPrintMonth: string;
-  setSelectedPrintMonth: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedPrintMonth: Dispatch<SetStateAction<string>>;
 
   printMonthOptions: MonthOption[];
 
   searchTerm: string;
-  setSearchTerm: React.Dispatch<React.SetStateAction<string>>;
+  setSearchTerm: Dispatch<SetStateAction<string>>;
 
   filter: "all" | "income" | "expense" | "sponsorship" | "personal";
-  setFilter: React.Dispatch<
-    React.SetStateAction<
-      "all" | "income" | "expense" | "sponsorship" | "personal"
-    >
+  setFilter: Dispatch<
+    SetStateAction<"all" | "income" | "expense" | "sponsorship" | "personal">
   >;
 
   selectedSponsorId: string;
-  setSelectedSponsorId: React.Dispatch<React.SetStateAction<string>>;
+  setSelectedSponsorId: Dispatch<SetStateAction<string>>;
 
   selectedSponsor: Sponsor | null;
   displaySponsors: Sponsor[];
+
+  selectedPaymentMethod: PaymentMethodFilter;
+  setSelectedPaymentMethod: Dispatch<SetStateAction<string>>;
 
   deletingYear: boolean;
   deletingAll: boolean;
@@ -60,14 +77,25 @@ type MoneyTransactionsTableProps = {
   repayingId: string | null;
 
   onPrint: () => void;
-  onExportExcel: () => void;
-  onExportYearlyReport: () => void;
+  onExportExcel: () => void | Promise<void>;
+  onExportYearlyReport: () => void | Promise<void>;
   onOpenDeleteYear: () => void;
   onOpenDeleteAll: () => void;
   onEditTransaction: (item: Transaction) => void;
   onHideTransaction: (id: string) => void;
-  onTogglePersonalFundsRepaid: (item: Transaction) => void;
+  onTogglePersonalFundsRepaid: (item: Transaction) => void | Promise<void>;
 };
+
+const paymentMethodFilterOptions = [
+  "all",
+  "Stripe",
+  "Cash",
+  "Bank Transfer",
+  "PayPal",
+  "Card Machine",
+  "Personal Funds",
+  "Item Donation",
+];
 
 export default function MoneyTransactionsTable({
   loading,
@@ -75,24 +103,36 @@ export default function MoneyTransactionsTable({
   filteredTransactions,
   printTransactionsList,
   yearTransactions,
+
   selectedYear,
   selectedViewMonth,
   setSelectedViewMonth,
+
   selectedPrintMonth,
   setSelectedPrintMonth,
+
   printMonthOptions,
+
   searchTerm,
   setSearchTerm,
+
   filter,
   setFilter,
+
   selectedSponsorId,
   setSelectedSponsorId,
+
   selectedSponsor,
   displaySponsors,
+
+  selectedPaymentMethod,
+  setSelectedPaymentMethod,
+
   deletingYear,
   deletingAll,
   deleting,
   repayingId,
+
   onPrint,
   onExportExcel,
   onExportYearlyReport,
@@ -250,7 +290,7 @@ export default function MoneyTransactionsTable({
             selectedViewMonth === "all"
               ? selectedYear
               : monthNameFromKey(selectedViewMonth)
-          } transactions...`}
+          } transactions by title, sponsor, note, payment method, or amount...`}
           className="w-full rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
         />
 
@@ -278,6 +318,58 @@ export default function MoneyTransactionsTable({
                   : "Sponsorship"}
               </button>
             )
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-emerald-100">
+                Filter by payment method
+              </p>
+
+              <p className="text-xs text-emerald-100/70">
+                Show only transactions paid by Stripe, Cash, Bank Transfer,
+                PayPal, Card Machine, Personal Funds, or Item Donation.
+              </p>
+            </div>
+
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
+              <select
+                value={selectedPaymentMethod}
+                onChange={(event) =>
+                  setSelectedPaymentMethod(event.target.value)
+                }
+                className="w-full min-w-0 rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-emerald-300/20 focus:ring-emerald-300/50 sm:min-w-[240px]"
+              >
+                {paymentMethodFilterOptions.map((method) => (
+                  <option
+                    key={method}
+                    value={method}
+                    className="bg-[#11111f] text-white"
+                  >
+                    {method === "all" ? "All payment methods" : method}
+                  </option>
+                ))}
+              </select>
+
+              {selectedPaymentMethod !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaymentMethod("all")}
+                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20"
+                >
+                  Clear payment
+                </button>
+              )}
+            </div>
+          </div>
+
+          {selectedPaymentMethod !== "all" && (
+            <div className="mt-3 rounded-xl bg-black/20 px-4 py-3 text-sm text-emerald-100">
+              Showing payment method:{" "}
+              <strong>{selectedPaymentMethod}</strong>
+            </div>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, FormEvent, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
 import { Banknote, FileText, Repeat, X } from "lucide-react";
 
 import type {
@@ -16,6 +16,21 @@ import {
   repeatFrequencyLabel,
 } from "@/lib/money/utils";
 
+import { money } from "@/lib/money/helpers";
+
+type YearlySponsorBreakdown = {
+  sponsor_id: string;
+  sponsor_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  agreed_amount_pence: number;
+  received_pence: number;
+  spent_pence: number;
+  remaining_pence: number;
+  notes?: string | null;
+};
+
 type MoneyTransactionFormProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -24,8 +39,9 @@ type MoneyTransactionFormProps = {
   editingTransaction: Transaction | null;
   saving: boolean;
   displaySponsors: Sponsor[];
+  yearlySponsorBreakdown: YearlySponsorBreakdown[];
 
-  handleSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
   fillTestTransaction: () => void;
   openNewSponsorForm: () => void;
@@ -42,6 +58,16 @@ const paymentMethods = [
   "Item Donation",
 ];
 
+function amountToPence(amount: string) {
+  const cleanAmount = Number(amount || 0);
+
+  if (!Number.isFinite(cleanAmount)) {
+    return 0;
+  }
+
+  return Math.round(cleanAmount * 100);
+}
+
 export default function MoneyTransactionForm({
   form,
   setForm,
@@ -50,11 +76,25 @@ export default function MoneyTransactionForm({
   editingTransaction,
   saving,
   displaySponsors,
+  yearlySponsorBreakdown,
   handleSubmit,
   cancelEditTransaction,
   fillTestTransaction,
   openNewSponsorForm,
 }: MoneyTransactionFormProps) {
+  const selectedSponsorBreakdown = form.sponsorId
+    ? yearlySponsorBreakdown.find(
+        (sponsor) => sponsor.sponsor_id === form.sponsorId
+      )
+    : null;
+
+  const currentAmountPence = amountToPence(form.amount);
+  const remainingPence = selectedSponsorBreakdown?.remaining_pence ?? 0;
+  const overSpendPence =
+    form.sponsorId && currentAmountPence > remainingPence
+      ? currentAmountPence - remainingPence
+      : 0;
+
   return (
     <form
       onSubmit={handleSubmit}
@@ -209,6 +249,34 @@ export default function MoneyTransactionForm({
               </option>
             ))}
           </select>
+
+          {form.sponsorId && selectedSponsorBreakdown && (
+            <div className="mt-3 rounded-xl border border-amber-300/20 bg-black/20 p-3 text-xs text-amber-100">
+              <div className="flex justify-between gap-3">
+                <span>Remaining sponsor balance</span>
+                <strong>{money(remainingPence)}</strong>
+              </div>
+
+              {currentAmountPence > 0 && (
+                <div className="mt-1 flex justify-between gap-3">
+                  <span>This spend</span>
+                  <strong>{money(currentAmountPence)}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {overSpendPence > 0 && (
+            <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-sm text-red-100">
+              <p className="font-black text-white">
+                Sponsor balance warning
+              </p>
+              <p className="mt-1">
+                This spend is {money(overSpendPence)} over the remaining sponsor
+                balance.
+              </p>
+            </div>
+          )}
 
           <label className="mt-3 block text-sm font-bold text-amber-100">
             Sponsorship spending note{" "}

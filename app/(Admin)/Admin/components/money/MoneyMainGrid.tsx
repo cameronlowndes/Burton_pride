@@ -2,14 +2,23 @@
 
 import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
 
-import type {
-  FormState,
-  Sponsor,
-  Transaction,
-} from "@/lib/money/types";
+import type { FormState, Sponsor, Transaction } from "@/lib/money/types";
 
 import MoneyTransactionForm from "./MoneyTransactionForm";
 import MoneyTransactionsTable from "./MoneyTransactionsTable";
+
+type YearlySponsorBreakdown = {
+  sponsor_id: string;
+  sponsor_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  agreed_amount_pence: number;
+  received_pence: number;
+  spent_pence: number;
+  remaining_pence: number;
+  notes?: string | null;
+};
 
 type MoneyMainGridProps = {
   form: FormState;
@@ -18,8 +27,9 @@ type MoneyMainGridProps = {
   setInvoiceFile: Dispatch<SetStateAction<File | null>>;
   editingTransaction: Transaction | null;
   displaySponsors: Sponsor[];
+  yearlySponsorBreakdown: YearlySponsorBreakdown[];
   saving: boolean;
-  handleSubmit: (e: SyntheticEvent<HTMLFormElement>) => Promise<void>;
+  handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
   fillTestTransaction: () => void;
   openNewSponsorForm: () => void;
@@ -53,6 +63,9 @@ type MoneyMainGridProps = {
   setSelectedSponsorId: Dispatch<SetStateAction<string>>;
   selectedSponsor: Sponsor | null;
 
+  selectedPaymentMethod: string;
+  setSelectedPaymentMethod: Dispatch<SetStateAction<string>>;
+
   deletingYear: boolean;
   deletingAll: boolean;
   repayingId: string | null;
@@ -75,6 +88,7 @@ export default function MoneyMainGrid({
   setInvoiceFile,
   editingTransaction,
   displaySponsors,
+  yearlySponsorBreakdown,
   saving,
   handleSubmit,
   cancelEditTransaction,
@@ -104,6 +118,9 @@ export default function MoneyMainGrid({
   setSelectedSponsorId,
   selectedSponsor,
 
+  selectedPaymentMethod,
+  setSelectedPaymentMethod,
+
   deletingYear,
   deletingAll,
   repayingId,
@@ -127,6 +144,7 @@ export default function MoneyMainGrid({
         setInvoiceFile={setInvoiceFile}
         editingTransaction={editingTransaction}
         displaySponsors={displaySponsors}
+        yearlySponsorBreakdown={yearlySponsorBreakdown}
         saving={saving}
         handleSubmit={handleSubmit}
         cancelEditTransaction={cancelEditTransaction}
@@ -138,14 +156,14 @@ export default function MoneyMainGrid({
         loading={loading}
         transactions={transactions}
         filteredTransactions={filteredTransactions}
-        yearTransactions={yearTransactions}
         printTransactionsList={printTransactionsList}
-        printMonthOptions={printMonthOptions}
+        yearTransactions={yearTransactions}
         selectedYear={selectedYear}
         selectedViewMonth={selectedViewMonth}
         setSelectedViewMonth={setSelectedViewMonth}
         selectedPrintMonth={selectedPrintMonth}
         setSelectedPrintMonth={setSelectedPrintMonth}
+        printMonthOptions={printMonthOptions}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         filter={filter}
@@ -154,10 +172,12 @@ export default function MoneyMainGrid({
         setSelectedSponsorId={setSelectedSponsorId}
         selectedSponsor={selectedSponsor}
         displaySponsors={displaySponsors}
+        selectedPaymentMethod={selectedPaymentMethod}
+        setSelectedPaymentMethod={setSelectedPaymentMethod}
         deletingYear={deletingYear}
         deletingAll={deletingAll}
-        repayingId={repayingId}
         deleting={deleting}
+        repayingId={repayingId}
         onPrint={onPrint}
         onExportExcel={onExportExcel}
         onExportYearlyReport={onExportYearlyReport}
