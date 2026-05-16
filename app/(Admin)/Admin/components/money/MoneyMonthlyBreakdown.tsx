@@ -22,6 +22,10 @@ type MonthlyRow = {
   income: number;
   donations: number;
   expenses: number;
+  normalExpenses: number;
+  personalFundsPaidBack: number;
+  personalFundsOutstanding: number;
+  personalFundsTotal: number;
   moneyOut: number;
   balance: number;
   runningBalance: number;
@@ -83,6 +87,16 @@ function isDonationTransaction(transaction: Transaction) {
   );
 }
 
+function isPersonalFunds(transaction: Transaction) {
+  const paymentMethod = String(transaction.payment_method || "").toLowerCase();
+
+  return Boolean(
+    transaction.is_personal_funds === true ||
+      paymentMethod === "personal funds" ||
+      transaction.personal_funds_name
+  );
+}
+
 function isHiddenTransaction(transaction: Transaction) {
   return Boolean(
     "deleted_at" in transaction &&
@@ -123,14 +137,50 @@ export default function MoneyMonthlyBreakdown({
         0
       );
 
-    const expenses = monthTransactions
-      .filter((transaction) => transaction.type === "expense")
+    const normalExpenses = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" && !isPersonalFunds(transaction)
+      )
       .reduce(
         (total, transaction) => total + Number(transaction.amount_pence || 0),
         0
       );
 
-    const moneyOut = expenses;
+    const personalFundsPaidBack = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" &&
+          isPersonalFunds(transaction) &&
+          transaction.personal_funds_repaid === true
+      )
+      .reduce(
+        (total, transaction) => total + Number(transaction.amount_pence || 0),
+        0
+      );
+
+    const personalFundsOutstanding = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" &&
+          isPersonalFunds(transaction) &&
+          transaction.personal_funds_repaid !== true
+      )
+      .reduce(
+        (total, transaction) => total + Number(transaction.amount_pence || 0),
+        0
+      );
+
+    const personalFundsTotal =
+      personalFundsPaidBack + personalFundsOutstanding;
+
+    /*
+      Important:
+      Personal funds are not Burton Pride money until the person has been paid back.
+      So unpaid personal funds show separately, but they do not reduce Money Out or Balance.
+    */
+    const expenses = normalExpenses;
+    const moneyOut = normalExpenses + personalFundsPaidBack;
     const balance = income - moneyOut;
 
     runningBalance += balance;
@@ -141,6 +191,10 @@ export default function MoneyMonthlyBreakdown({
       income,
       donations,
       expenses,
+      normalExpenses,
+      personalFundsPaidBack,
+      personalFundsOutstanding,
+      personalFundsTotal,
       moneyOut,
       balance,
       runningBalance,
@@ -152,6 +206,12 @@ export default function MoneyMonthlyBreakdown({
       income: acc.income + row.income,
       donations: acc.donations + row.donations,
       expenses: acc.expenses + row.expenses,
+      normalExpenses: acc.normalExpenses + row.normalExpenses,
+      personalFundsPaidBack:
+        acc.personalFundsPaidBack + row.personalFundsPaidBack,
+      personalFundsOutstanding:
+        acc.personalFundsOutstanding + row.personalFundsOutstanding,
+      personalFundsTotal: acc.personalFundsTotal + row.personalFundsTotal,
       moneyOut: acc.moneyOut + row.moneyOut,
       balance: acc.balance + row.balance,
     }),
@@ -159,6 +219,10 @@ export default function MoneyMonthlyBreakdown({
       income: 0,
       donations: 0,
       expenses: 0,
+      normalExpenses: 0,
+      personalFundsPaidBack: 0,
+      personalFundsOutstanding: 0,
+      personalFundsTotal: 0,
       moneyOut: 0,
       balance: 0,
     }
@@ -167,7 +231,7 @@ export default function MoneyMonthlyBreakdown({
   const bestMonth = [...monthlyRows].sort((a, b) => b.balance - a.balance)[0];
 
   const highestExpenseMonth = [...monthlyRows].sort(
-    (a, b) => b.expenses - a.expenses
+    (a, b) => b.moneyOut - a.moneyOut
   )[0];
 
   return (
@@ -199,8 +263,9 @@ export default function MoneyMonthlyBreakdown({
           </div>
 
           <p className="mt-1 text-sm text-white/50">
-            Jan to Dec view for {selectedYear}. Shows money in, money out,
-            donations, expenses, monthly balance, and running balance.
+            Jan to Dec view for {selectedYear}. Unpaid personal funds are shown
+            separately and only count as Burton Pride money out after they are
+            marked paid back.
           </p>
         </div>
 
@@ -225,6 +290,13 @@ export default function MoneyMonthlyBreakdown({
             <p className="mt-1 text-lg font-black text-red-200">
               {money(totals.moneyOut)}
             </p>
+
+            {totals.personalFundsOutstanding > 0 && (
+              <p className="mt-1 text-[11px] font-bold text-orange-200">
+                {money(totals.personalFundsOutstanding)} personal funds not
+                counted yet
+              </p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
@@ -246,7 +318,7 @@ export default function MoneyMonthlyBreakdown({
 
       {!minimised && (
         <>
-          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-white/40">
                 Best month
@@ -269,7 +341,7 @@ export default function MoneyMonthlyBreakdown({
 
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Highest expense month
+                Highest money out month
               </p>
 
               <p className="mt-1 text-sm font-bold text-white">
@@ -277,20 +349,42 @@ export default function MoneyMonthlyBreakdown({
               </p>
 
               <p className="mt-1 text-lg font-black text-red-200">
-                {money(highestExpenseMonth?.expenses || 0)}
+                {money(highestExpenseMonth?.moneyOut || 0)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-orange-100/70">
+                Personal funds outstanding
+              </p>
+
+              <p className="mt-1 text-sm font-bold text-white">
+                Not counted as Burton Pride money out yet
+              </p>
+
+              <p className="mt-1 text-lg font-black text-orange-200">
+                {money(totals.personalFundsOutstanding)}
               </p>
             </div>
           </div>
 
+          <div className="mb-4 rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3 text-sm text-orange-100/80">
+            <strong className="text-orange-100">Personal funds rule:</strong>{" "}
+            unpaid personal funds are tracked as money owed, but they do not
+            reduce Burton Pride balance until marked paid back.
+          </div>
+
           <div className="w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead className="bg-white/10 text-white/60">
                 <tr>
                   <th className="p-3 text-left">Month</th>
                   <th className="p-3 text-right">Money In</th>
                   <th className="p-3 text-right">Donations</th>
                   <th className="p-3 text-right">Money Out</th>
-                  <th className="p-3 text-right">Expenses</th>
+                  <th className="p-3 text-right">Normal Expenses</th>
+                  <th className="p-3 text-right">Personal Paid Back</th>
+                  <th className="p-3 text-right">Personal Outstanding</th>
                   <th className="p-3 text-right">Month Balance</th>
                   <th className="p-3 text-right">Running Balance</th>
                 </tr>
@@ -316,7 +410,15 @@ export default function MoneyMonthlyBreakdown({
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-orange-200">
-                      {money(row.expenses)}
+                      {money(row.normalExpenses)}
+                    </td>
+
+                    <td className="whitespace-nowrap p-3 text-right font-bold text-emerald-200">
+                      {money(row.personalFundsPaidBack)}
+                    </td>
+
+                    <td className="whitespace-nowrap p-3 text-right font-bold text-orange-200">
+                      {money(row.personalFundsOutstanding)}
                     </td>
 
                     <td
@@ -357,7 +459,15 @@ export default function MoneyMonthlyBreakdown({
                   </td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-orange-200">
-                    {money(totals.expenses)}
+                    {money(totals.normalExpenses)}
+                  </td>
+
+                  <td className="whitespace-nowrap p-3 text-right font-black text-emerald-200">
+                    {money(totals.personalFundsPaidBack)}
+                  </td>
+
+                  <td className="whitespace-nowrap p-3 text-right font-black text-orange-200">
+                    {money(totals.personalFundsOutstanding)}
                   </td>
 
                   <td

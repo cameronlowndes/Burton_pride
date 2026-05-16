@@ -1,5 +1,10 @@
 import ExcelJS from "exceljs";
-import type { Transaction, SponsorBreakdown } from "@/lib/money/types";
+import type {
+  FundingType,
+  SponsorBreakdown,
+  Transaction,
+  TransactionAttachment,
+} from "@/lib/money/types";
 import {
   formatDate,
   isPersonalFundsTransaction,
@@ -167,6 +172,72 @@ function addMergedSection(
   };
 }
 
+function fundingTypeLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "Grant Money";
+  if (type === "loan") return "Loan";
+  if (type === "other") return "Other Funding";
+  return "Sponsor";
+}
+
+function fundingSourceLabel(item: Transaction) {
+  if (!isSponsorshipTransaction(item)) {
+    return sourceLabel(item.source);
+  }
+
+  return "Funding";
+}
+
+function getTransactionFiles(item: Transaction): TransactionAttachment[] {
+  const attachments = item.attachments || [];
+
+  if (attachments.length > 0) {
+    return attachments;
+  }
+
+  if (item.invoice_image_url) {
+    return [
+      {
+        id: `${item.id}-old-invoice`,
+        transaction_id: item.id,
+        file_name: "Old invoice / receipt",
+        file_url: item.invoice_image_url,
+        file_type: null,
+        file_size: null,
+        created_at: item.created_at,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function filesSummary(item: Transaction) {
+  const files = getTransactionFiles(item);
+
+  if (files.length === 0) {
+    return "None";
+  }
+
+  return files
+    .map((file, index) => {
+      const name = file.file_name || `Attachment ${index + 1}`;
+      return `${index + 1}. ${name}: ${file.file_url}`;
+    })
+    .join("\n");
+}
+
+function checkedStatus(item: Transaction) {
+  return item.checked_at ? "Checked" : "Not checked";
+}
+
+function checkedBy(item: Transaction) {
+  return item.checked_by || "None";
+}
+
+function checkedAt(item: Transaction) {
+  return item.checked_at ? formatDate(item.checked_at) : "None";
+}
+
 type ExportTransactionsArgs = {
   selectedYear: string;
   selectedViewMonth: string;
@@ -196,27 +267,31 @@ export async function exportTransactionsToExcelFile({
   });
 
   sheet.columns = [
+    { key: "reference", width: 18 },
     { key: "year", width: 14 },
     { key: "date", width: 16 },
     { key: "title", width: 30 },
     { key: "description", width: 36 },
     { key: "type", width: 16 },
+    { key: "amount", width: 16 },
     { key: "payment", width: 20 },
     { key: "source", width: 22 },
-    { key: "sponsor", width: 24 },
-    { key: "sponsorshipNote", width: 36 },
+    { key: "funding", width: 28 },
+    { key: "fundingNote", width: 36 },
     { key: "personalFunds", width: 16 },
     { key: "paidBy", width: 22 },
     { key: "repaymentStatus", width: 20 },
-    { key: "invoice", width: 30 },
-    { key: "amount", width: 16 },
+    { key: "checkedStatus", width: 18 },
+    { key: "checkedBy", width: 28 },
+    { key: "checkedAt", width: 20 },
+    { key: "files", width: 55 },
   ];
 
   addMergedTitle(
     sheet,
     "Burton Pride C.I.C - Money Transactions Export",
     "A1",
-    "N1"
+    "R1"
   );
 
   addMergedSubtitle(
@@ -229,44 +304,50 @@ export async function exportTransactionsToExcelFile({
       filteredTransactions.length
     }`,
     "A2",
-    "N2"
+    "R2"
   );
 
   sheet.addRow([]);
 
   sheet.addRow([
+    "Reference",
     "Year",
     "Date",
     "Title",
     "Description",
     "Type",
+    "Amount",
     "Payment Method",
     "Source",
-    "Sponsor",
-    "Sponsorship Note",
+    "Funding Record",
+    "Funding Note",
     "Personal Funds",
     "Paid By",
     "Repayment Status",
-    "Invoice / Receipt",
-    "Amount",
+    "Checked Status",
+    "Checked By",
+    "Checked At",
+    "Files / Attachments",
   ]);
 
   styleHeaderRow(sheet.getRow(4), "FF047857");
 
   filteredTransactions.forEach((item) => {
     const isPersonal = isPersonalFundsTransaction(item);
-    const hasSponsor = isSponsorshipTransaction(item);
+    const hasFunding = isSponsorshipTransaction(item);
 
     const row = sheet.addRow({
+      reference: item.transaction_reference || "Pending",
       year: selectedYear,
       date: formatDate(item.transaction_date || item.created_at),
       title: item.title,
       description: item.description || "None",
       type: item.type === "income" ? "Money In" : "Money Out",
-      payment: item.payment_method || "None",
-      source: sourceLabel(item.source),
-      sponsor: item.sponsor_name || "None",
-      sponsorshipNote: item.sponsorship_note || "None",
+      amount: pounds(item.amount_pence),
+      payment: hasFunding ? "Funding Money" : item.payment_method || "None",
+      source: fundingSourceLabel(item),
+      funding: item.sponsor_name || "None",
+      fundingNote: item.sponsorship_note || "None",
       personalFunds: isPersonal ? "Yes" : "No",
       paidBy: item.personal_funds_name || "None",
       repaymentStatus: isPersonal
@@ -274,12 +355,53 @@ export async function exportTransactionsToExcelFile({
           ? "Paid back"
           : "Not paid back"
         : "None",
-      invoice: item.invoice_image_url || "None",
-      amount: pounds(item.amount_pence),
+      checkedStatus: checkedStatus(item),
+      checkedBy: checkedBy(item),
+      checkedAt: checkedAt(item),
+      files: filesSummary(item),
     });
 
     styleBodyRow(row);
     styleCurrencyCell(row.getCell("amount"), true);
+
+    row.getCell("reference").font = {
+      bold: true,
+      color: { argb: "FF111827" },
+    };
+
+    row.getCell("files").alignment = {
+      vertical: "top",
+      wrapText: true,
+    };
+
+    if (item.checked_at) {
+      row.getCell("checkedStatus").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFDCFCE7" },
+      };
+
+      row.getCell("checkedStatus").font = {
+        bold: true,
+        color: { argb: "FF166534" },
+      };
+
+      row.getCell("checkedBy").font = {
+        bold: true,
+        color: { argb: "FF166534" },
+      };
+    } else {
+      row.getCell("checkedStatus").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF3F4F6" },
+      };
+
+      row.getCell("checkedStatus").font = {
+        bold: true,
+        color: { argb: "FF6B7280" },
+      };
+    }
 
     if (item.type === "income") {
       row.getCell("type").fill = {
@@ -320,14 +442,14 @@ export async function exportTransactionsToExcelFile({
       };
     }
 
-    if (hasSponsor) {
-      row.getCell("sponsor").fill = {
+    if (hasFunding) {
+      row.getCell("funding").fill = {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: "FFFEF3C7" },
       };
 
-      row.getCell("sponsor").font = {
+      row.getCell("funding").font = {
         bold: true,
         color: { argb: "FF92400E" },
       };
@@ -336,7 +458,7 @@ export async function exportTransactionsToExcelFile({
 
   sheet.autoFilter = {
     from: "A4",
-    to: "N4",
+    to: "R4",
   };
 
   await downloadWorkbook(
@@ -444,19 +566,19 @@ export async function exportFullYearlyReportFile({
       "Personal funds not yet paid back.",
     ],
     [
-      "Sponsorship Money Received",
+      "Funding Money Received",
       pounds(totals.sponsorshipIncome),
-      "Sponsor money received or carried forward.",
+      "Sponsor, grant, loan or other restricted funding received or carried forward.",
     ],
     [
-      "Sponsorship Money Spent",
+      "Funding Money Spent",
       pounds(totals.sponsorshipSpent),
-      "Spending linked to sponsors.",
+      "Spending linked to sponsors, grants, loans or other funding records.",
     ],
     [
-      "Sponsorship Money Left",
+      "Funding Money Left",
       pounds(totals.sponsorshipRemaining),
-      "Sponsor money remaining after sponsor spending.",
+      "Restricted funding remaining after linked spending.",
     ],
     [
       "Closing Balance",
@@ -472,7 +594,7 @@ export async function exportFullYearlyReportFile({
     styleCurrencyCell(row.getCell(2), true);
   });
 
-  const sponsorSheet = workbook.addWorksheet("Sponsorship Breakdown", {
+  const sponsorSheet = workbook.addWorksheet("Funding Breakdown", {
     views: [{ state: "frozen", ySplit: 4 }],
     pageSetup: {
       paperSize: 9,
@@ -484,7 +606,8 @@ export async function exportFullYearlyReportFile({
   });
 
   sponsorSheet.columns = [
-    { key: "sponsor", width: 30 },
+    { key: "fundingType", width: 20 },
+    { key: "funding", width: 30 },
     { key: "contact", width: 24 },
     { key: "email", width: 30 },
     { key: "phone", width: 18 },
@@ -498,21 +621,22 @@ export async function exportFullYearlyReportFile({
 
   addMergedTitle(
     sponsorSheet,
-    "Burton Pride C.I.C - Sponsorship Breakdown",
+    "Burton Pride C.I.C - Funding Breakdown",
     "A1",
-    "J1"
+    "K1"
   );
 
-  addMergedSubtitle(sponsorSheet, `Year: Jan to Dec ${selectedYear}`, "A2", "J2");
+  addMergedSubtitle(sponsorSheet, `Year: Jan to Dec ${selectedYear}`, "A2", "K2");
 
   sponsorSheet.addRow([]);
 
   const sponsorHeader = sponsorSheet.addRow([
-    "Sponsor",
+    "Funding Type",
+    "Funding Record",
     "Contact",
     "Email",
     "Phone",
-    "Agreed",
+    "Agreed / Awarded",
     "Received",
     "Spent",
     "Remaining",
@@ -523,12 +647,15 @@ export async function exportFullYearlyReportFile({
   styleHeaderRow(sponsorHeader, "FF92400E");
 
   if (yearlySponsorBreakdown.length === 0) {
-    const row = sponsorSheet.addRow([`No sponsors added for ${selectedYear}`]);
+    const row = sponsorSheet.addRow([
+      `No sponsors, grants, loans or other funding added for ${selectedYear}`,
+    ]);
     styleBodyRow(row);
   } else {
     yearlySponsorBreakdown.forEach((sponsor) => {
       const row = sponsorSheet.addRow({
-        sponsor: sponsor.sponsor_name,
+        fundingType: fundingTypeLabel(sponsor.funding_type),
+        funding: sponsor.sponsor_name,
         contact: sponsor.contact_name || "None",
         email: sponsor.email || "None",
         phone: sponsor.phone || "None",
@@ -547,6 +674,11 @@ export async function exportFullYearlyReportFile({
       styleCurrencyCell(row.getCell("spent"), true);
       styleCurrencyCell(row.getCell("remaining"), true);
       styleCurrencyCell(row.getCell("carriedForward"), true);
+
+      row.getCell("fundingType").font = {
+        bold: true,
+        color: { argb: "FF92400E" },
+      };
 
       row.getCell("received").font = {
         bold: true,
@@ -567,7 +699,7 @@ export async function exportFullYearlyReportFile({
 
   sponsorSheet.autoFilter = {
     from: "A4",
-    to: "J4",
+    to: "K4",
   };
 
   const transactionSheet = workbook.addWorksheet("All Transactions", {
@@ -582,53 +714,61 @@ export async function exportFullYearlyReportFile({
   });
 
   transactionSheet.columns = [
+    { key: "reference", width: 18 },
     { key: "year", width: 14 },
     { key: "date", width: 16 },
     { key: "title", width: 30 },
     { key: "description", width: 36 },
     { key: "type", width: 16 },
+    { key: "amount", width: 16 },
     { key: "payment", width: 20 },
     { key: "source", width: 22 },
-    { key: "sponsor", width: 24 },
-    { key: "sponsorshipNote", width: 36 },
+    { key: "funding", width: 24 },
+    { key: "fundingNote", width: 36 },
     { key: "personalFunds", width: 16 },
     { key: "paidBy", width: 22 },
     { key: "repaymentStatus", width: 20 },
-    { key: "invoice", width: 30 },
-    { key: "amount", width: 16 },
+    { key: "checkedStatus", width: 18 },
+    { key: "checkedBy", width: 28 },
+    { key: "checkedAt", width: 20 },
+    { key: "files", width: 55 },
   ];
 
   addMergedTitle(
     transactionSheet,
     "Burton Pride C.I.C - All Transactions",
     "A1",
-    "N1"
+    "R1"
   );
 
   addMergedSubtitle(
     transactionSheet,
     `Year: Jan to Dec ${selectedYear} | Rows: ${yearTransactions.length}`,
     "A2",
-    "N2"
+    "R2"
   );
 
   transactionSheet.addRow([]);
 
   const transactionHeader = transactionSheet.addRow([
+    "Reference",
     "Year",
     "Date",
     "Title",
     "Description",
     "Type",
+    "Amount",
     "Payment Method",
     "Source",
-    "Sponsor",
-    "Sponsorship Note",
+    "Funding Record",
+    "Funding Note",
     "Personal Funds",
     "Paid By",
     "Repayment Status",
-    "Invoice / Receipt",
-    "Amount",
+    "Checked Status",
+    "Checked By",
+    "Checked At",
+    "Files / Attachments",
   ]);
 
   styleHeaderRow(transactionHeader, "FF047857");
@@ -641,18 +781,20 @@ export async function exportFullYearlyReportFile({
   } else {
     yearTransactions.forEach((item) => {
       const isPersonal = isPersonalFundsTransaction(item);
-      const hasSponsor = isSponsorshipTransaction(item);
+      const hasFunding = isSponsorshipTransaction(item);
 
       const row = transactionSheet.addRow({
+        reference: item.transaction_reference || "Pending",
         year: selectedYear,
         date: formatDate(item.transaction_date || item.created_at),
         title: item.title,
         description: item.description || "None",
         type: item.type === "income" ? "Money In" : "Money Out",
-        payment: item.payment_method || "None",
-        source: sourceLabel(item.source),
-        sponsor: item.sponsor_name || "None",
-        sponsorshipNote: item.sponsorship_note || "None",
+        amount: pounds(item.amount_pence),
+        payment: hasFunding ? "Funding Money" : item.payment_method || "None",
+        source: fundingSourceLabel(item),
+        funding: item.sponsor_name || "None",
+        fundingNote: item.sponsorship_note || "None",
         personalFunds: isPersonal ? "Yes" : "No",
         paidBy: item.personal_funds_name || "None",
         repaymentStatus: isPersonal
@@ -660,12 +802,53 @@ export async function exportFullYearlyReportFile({
             ? "Paid back"
             : "Not paid back"
           : "None",
-        invoice: item.invoice_image_url || "None",
-        amount: pounds(item.amount_pence),
+        checkedStatus: checkedStatus(item),
+        checkedBy: checkedBy(item),
+        checkedAt: checkedAt(item),
+        files: filesSummary(item),
       });
 
       styleBodyRow(row);
       styleCurrencyCell(row.getCell("amount"), true);
+
+      row.getCell("reference").font = {
+        bold: true,
+        color: { argb: "FF111827" },
+      };
+
+      row.getCell("files").alignment = {
+        vertical: "top",
+        wrapText: true,
+      };
+
+      if (item.checked_at) {
+        row.getCell("checkedStatus").fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFDCFCE7" },
+        };
+
+        row.getCell("checkedStatus").font = {
+          bold: true,
+          color: { argb: "FF166534" },
+        };
+
+        row.getCell("checkedBy").font = {
+          bold: true,
+          color: { argb: "FF166534" },
+        };
+      } else {
+        row.getCell("checkedStatus").fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF3F4F6" },
+        };
+
+        row.getCell("checkedStatus").font = {
+          bold: true,
+          color: { argb: "FF6B7280" },
+        };
+      }
 
       if (item.type === "income") {
         row.getCell("type").fill = {
@@ -693,14 +876,14 @@ export async function exportFullYearlyReportFile({
         };
       }
 
-      if (hasSponsor) {
-        row.getCell("sponsor").fill = {
+      if (hasFunding) {
+        row.getCell("funding").fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFEF3C7" },
         };
 
-        row.getCell("sponsor").font = {
+        row.getCell("funding").font = {
           bold: true,
           color: { argb: "FF92400E" },
         };
@@ -723,7 +906,7 @@ export async function exportFullYearlyReportFile({
 
   transactionSheet.autoFilter = {
     from: "A4",
-    to: "N4",
+    to: "R4",
   };
 
   await downloadWorkbook(

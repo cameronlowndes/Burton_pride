@@ -60,6 +60,7 @@ const initialForm: FormState = {
 };
 
 const initialSponsorForm: SponsorFormState = {
+  fundingType: "sponsor",
   sponsorName: "",
   contactName: "",
   email: "",
@@ -101,6 +102,35 @@ function makeAmountSearchValues(amountPence: number | null | undefined) {
   ].map((value) => value.toLowerCase());
 }
 
+function getFundingTypeLabel(type?: string | null) {
+  if (type === "grant") return "grant";
+  if (type === "loan") return "loan";
+  if (type === "other") return "funding";
+  return "sponsor";
+}
+
+function isNormalMoneyOutTransaction(item: Transaction) {
+  return item.type === "expense" && !isPersonalFundsTransaction(item);
+}
+
+function isPersonalFundsExpenseTransaction(item: Transaction) {
+  return item.type === "expense" && isPersonalFundsTransaction(item);
+}
+
+function isPaidBackPersonalFundsExpense(item: Transaction) {
+  return (
+    isPersonalFundsExpenseTransaction(item) &&
+    item.personal_funds_repaid === true
+  );
+}
+
+function isUnpaidPersonalFundsExpense(item: Transaction) {
+  return (
+    isPersonalFundsExpenseTransaction(item) &&
+    item.personal_funds_repaid !== true
+  );
+}
+
 export function useMoneyTransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
@@ -113,7 +143,7 @@ export function useMoneyTransactionsPage() {
   const [lockingYear, setLockingYear] = useState(false);
 
   const [form, setForm] = useState<FormState>(initialForm);
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [invoiceFiles, setInvoiceFiles] = useState<File[]>([]);
   const [editingTransaction, setEditingTransaction] =
     useState<Transaction | null>(null);
 
@@ -148,6 +178,7 @@ export function useMoneyTransactionsPage() {
   const [deleteAllPassword, setDeleteAllPassword] = useState("");
 
   const [repayingId, setRepayingId] = useState<string | null>(null);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
 
   const [sponsorFormOpen, setSponsorFormOpen] = useState(false);
   const [editingSponsor, setEditingSponsor] = useState<Sponsor | null>(null);
@@ -175,6 +206,7 @@ export function useMoneyTransactionsPage() {
       notes: item.notes || null,
       is_active: true,
       created_at: "",
+      funding_type: item.funding_type || "sponsor",
     }));
   }, [sponsors, sponsorBreakdown]);
 
@@ -224,7 +256,7 @@ export function useMoneyTransactionsPage() {
 
       if (!res.ok || !data.ok) {
         throw {
-          message: data.error || "Failed to load sponsors",
+          message: data.error || "Failed to load funding records",
           details: data,
           status: res.status,
         };
@@ -233,7 +265,7 @@ export function useMoneyTransactionsPage() {
       setSponsors(data.sponsors || []);
       setSponsorBreakdown(data.breakdown || []);
     } catch (err: any) {
-      setError(err?.message || "Failed to load sponsors");
+      setError(err?.message || "Failed to load funding records");
       setErrorDetails(err);
     }
   }
@@ -381,16 +413,11 @@ export function useMoneyTransactionsPage() {
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const previousNormalExpense = previousYearTransactions
-      .filter(
-        (item) => item.type === "expense" && !isPersonalFundsTransaction(item)
-      )
+      .filter(isNormalMoneyOutTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const previousPersonalFundsRepaid = previousYearTransactions
-      .filter(
-        (item) =>
-          isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
-      )
+      .filter(isPaidBackPersonalFundsExpense)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     return previousIncome - previousNormalExpense - previousPersonalFundsRepaid;
@@ -480,6 +507,7 @@ export function useMoneyTransactionsPage() {
           remaining_pence: receivedPence - spentPence,
           carried_forward_pence: safeCarryForward,
           notes: sponsor.notes,
+          funding_type: sponsor.funding_type || "sponsor",
         };
       })
       .filter(
@@ -546,13 +574,24 @@ export function useMoneyTransactionsPage() {
           value.includes(q)
         );
 
+        const matchesAttachment = (item.attachments || []).some((file) => {
+          return (
+            file.file_name?.toLowerCase().includes(q) ||
+            file.file_url?.toLowerCase().includes(q) ||
+            file.file_type?.toLowerCase().includes(q)
+          );
+        });
+
         return (
+          item.transaction_reference?.toLowerCase().includes(q) ||
           item.title?.toLowerCase().includes(q) ||
           item.description?.toLowerCase().includes(q) ||
           item.payment_method?.toLowerCase().includes(q) ||
           item.sponsor_name?.toLowerCase().includes(q) ||
           item.sponsorship_note?.toLowerCase().includes(q) ||
           item.personal_funds_name?.toLowerCase().includes(q) ||
+          item.checked_by?.toLowerCase().includes(q) ||
+          matchesAttachment ||
           matchesAmount
         );
       });
@@ -585,20 +624,15 @@ export function useMoneyTransactionsPage() {
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const normalExpense = yearTransactions
-      .filter(
-        (item) => item.type === "expense" && !isPersonalFundsTransaction(item)
-      )
+      .filter(isNormalMoneyOutTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const personalFunds = yearTransactions
-      .filter((item) => isPersonalFundsTransaction(item))
+      .filter(isPersonalFundsExpenseTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const personalFundsRepaid = yearTransactions
-      .filter(
-        (item) =>
-          isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
-      )
+      .filter(isPaidBackPersonalFundsExpense)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const sponsorshipIncome = yearlySponsorBreakdown.reduce(
@@ -635,20 +669,15 @@ export function useMoneyTransactionsPage() {
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const normalExpense = printTransactionsList
-      .filter(
-        (item) => item.type === "expense" && !isPersonalFundsTransaction(item)
-      )
+      .filter(isNormalMoneyOutTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const personalFunds = printTransactionsList
-      .filter((item) => isPersonalFundsTransaction(item))
+      .filter(isPersonalFundsExpenseTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const personalFundsRepaid = printTransactionsList
-      .filter(
-        (item) =>
-          isPersonalFundsTransaction(item) && item.personal_funds_repaid === true
-      )
+      .filter(isPaidBackPersonalFundsExpense)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const sponsorshipIncome = printTransactionsList
@@ -693,7 +722,7 @@ export function useMoneyTransactionsPage() {
   function startEditSponsor(sponsorId: string) {
     if (selectedYearLocked) {
       setError(
-        `${selectedYear} is locked. Unlock this year with the main admin password before editing sponsor records.`
+        `${selectedYear} is locked. Unlock this year with the main admin password before editing funding records.`
       );
       return;
     }
@@ -701,12 +730,13 @@ export function useMoneyTransactionsPage() {
     const sponsor = displaySponsors.find((item) => item.id === sponsorId);
 
     if (!sponsor) {
-      setError("Could not find sponsor to edit.");
+      setError("Could not find funding record to edit.");
       return;
     }
 
     setEditingSponsor(sponsor);
     setSponsorForm({
+      fundingType: sponsor.funding_type || "sponsor",
       sponsorName: sponsor.sponsor_name || "",
       contactName: sponsor.contact_name || "",
       email: sponsor.email || "",
@@ -732,14 +762,15 @@ export function useMoneyTransactionsPage() {
 
       if (selectedYearLocked) {
         setError(
-          `${selectedYear} is locked. Unlock this year with the main admin password before saving sponsor records.`
+          `${selectedYear} is locked. Unlock this year with the main admin password before saving funding records.`
         );
         setSavingSponsor(false);
         return;
       }
 
       if (!sponsorForm.sponsorName.trim()) {
-        setError("Please enter a sponsor name.");
+        const label = getFundingTypeLabel(sponsorForm.fundingType);
+        setError(`Please enter a ${label} name.`);
         setSavingSponsor(false);
         return;
       }
@@ -761,7 +792,7 @@ export function useMoneyTransactionsPage() {
 
       if (!res.ok || !data.ok) {
         throw {
-          message: data.error || "Failed to save sponsor",
+          message: data.error || "Failed to save funding record",
           details: data,
           status: res.status,
         };
@@ -788,7 +819,7 @@ export function useMoneyTransactionsPage() {
 
       if (selectedYearLocked) {
         setError(
-          `${selectedYear} is locked. Unlock this year with the main admin password before deleting sponsor records.`
+          `${selectedYear} is locked. Unlock this year with the main admin password before deleting funding records.`
         );
         setDeletingSponsor(false);
         return;
@@ -802,7 +833,7 @@ export function useMoneyTransactionsPage() {
 
       if (!res.ok || !data.ok) {
         throw {
-          message: data.error || "Failed to delete sponsor",
+          message: data.error || "Failed to delete funding record",
           details: data,
           status: res.status,
         };
@@ -858,7 +889,7 @@ export function useMoneyTransactionsPage() {
       repeatCount: "12",
     });
 
-    setInvoiceFile(null);
+    setInvoiceFiles([]);
   }
 
   function startEditTransaction(item: Transaction) {
@@ -909,7 +940,7 @@ export function useMoneyTransactionsPage() {
       repeatCount: "12",
     });
 
-    setInvoiceFile(null);
+    setInvoiceFiles([]);
     setError("");
     setErrorDetails(null);
 
@@ -922,7 +953,7 @@ export function useMoneyTransactionsPage() {
   function cancelEditTransaction() {
     setEditingTransaction(null);
     setForm(initialForm);
-    setInvoiceFile(null);
+    setInvoiceFiles([]);
     setError("");
     setErrorDetails(null);
   }
@@ -1010,7 +1041,7 @@ export function useMoneyTransactionsPage() {
 
       if (looksLikeSponsorship && !isSponsorLinked) {
         setError(
-          "Please choose the correct sponsor before saving this sponsorship transaction."
+          "Please choose the correct sponsor, grant, loan, or funding record before saving this transaction."
         );
         setSaving(false);
         return;
@@ -1018,7 +1049,7 @@ export function useMoneyTransactionsPage() {
 
       if (isSponsorLinked && !form.sponsorshipNote.trim()) {
         setError(
-          "Please add a sponsorship note explaining what this sponsor money was spent on."
+          "Please add a funding note explaining what this restricted money was used for."
         );
         setSaving(false);
         return;
@@ -1087,9 +1118,9 @@ export function useMoneyTransactionsPage() {
         uploadData.append("repeatCount", String(repeatCount));
         uploadData.append("repeatIndex", String(index + 1));
 
-        if (invoiceFile) {
-          uploadData.append("invoiceFile", invoiceFile);
-        }
+        invoiceFiles.forEach((file) => {
+          uploadData.append("invoiceFiles", file);
+        });
 
         const res = await fetch(
           editingTransaction
@@ -1116,7 +1147,7 @@ export function useMoneyTransactionsPage() {
       }
 
       setForm(initialForm);
-      setInvoiceFile(null);
+      setInvoiceFiles([]);
       setEditingTransaction(null);
       await loadTransactions();
       await loadSponsors();
@@ -1126,6 +1157,70 @@ export function useMoneyTransactionsPage() {
       setErrorDetails(err);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function markTransactionChecked(item: Transaction) {
+    const checkYear = getTransactionYear(item.transaction_date || item.created_at);
+
+    if (isYearLocked(checkYear)) {
+      setError(
+        `${checkYear} is locked. Unlock this year with the main admin password before changing the checked status.`
+      );
+      return;
+    }
+
+    try {
+      setCheckingId(item.id);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/transactions/${item.id}/checked`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message:
+            data.error ||
+            (item.checked_at
+              ? "Failed to undo checked status"
+              : "Failed to mark transaction as checked"),
+          details: data,
+          status: res.status,
+        };
+      }
+
+      if (data.transaction) {
+        setTransactions((prev) =>
+          prev.map((transaction) =>
+            transaction.id === item.id
+              ? {
+                  ...transaction,
+                  ...data.transaction,
+                }
+              : transaction
+          )
+        );
+      } else {
+        await loadTransactions();
+      }
+
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setCheckingId(null);
     }
   }
 
@@ -1397,7 +1492,10 @@ export function useMoneyTransactionsPage() {
     }
   }
 
-  async function togglePersonalFundsRepaid(item: Transaction) {
+  async function togglePersonalFundsRepaid(
+    item: Transaction,
+    proofFiles: File[] = []
+  ) {
     const repayYear = getTransactionYear(item.transaction_date || item.created_at);
 
     if (isYearLocked(repayYear)) {
@@ -1414,16 +1512,25 @@ export function useMoneyTransactionsPage() {
 
       const nextRepaid = !item.personal_funds_repaid;
 
+      if (nextRepaid && proofFiles.length === 0) {
+        setError(
+          "Please upload proof before marking this personal funds payment as paid back. Upload a receipt, bank screenshot, or payment confirmation."
+        );
+        return;
+      }
+
+      const uploadData = new FormData();
+      uploadData.append("repaid", String(nextRepaid));
+
+      proofFiles.forEach((file) => {
+        uploadData.append("repaymentProofFiles", file);
+      });
+
       const res = await fetch(
         `/api/admin/money/transactions/${item.id}/repayment`,
         {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            repaid: nextRepaid,
-          }),
+          body: uploadData,
         }
       );
 
@@ -1453,8 +1560,8 @@ export function useMoneyTransactionsPage() {
 
       await exportTransactionsToExcelFile({
         selectedYear,
-        selectedViewMonth,
-        filteredTransactions,
+        selectedViewMonth: selectedPrintMonth,
+        filteredTransactions: printTransactionsList,
       });
     } catch (err: any) {
       setError(err?.message || "Failed to export Excel file");
@@ -1564,8 +1671,8 @@ export function useMoneyTransactionsPage() {
     transactions,
     form,
     setForm,
-    invoiceFile,
-    setInvoiceFile,
+    invoiceFiles,
+    setInvoiceFiles,
     editingTransaction,
     filter,
     setFilter,
@@ -1597,6 +1704,7 @@ export function useMoneyTransactionsPage() {
     deleteAllPassword,
     setDeleteAllPassword,
     repayingId,
+    checkingId,
     sponsorFormOpen,
     editingSponsor,
     savingSponsor,
@@ -1623,6 +1731,7 @@ export function useMoneyTransactionsPage() {
     filteredTransactions,
     printTransactionsList,
     totals,
+    filteredTotals,
 
     monthNameFromKey,
 
@@ -1640,6 +1749,8 @@ export function useMoneyTransactionsPage() {
     cancelEditTransaction,
     handleSubmit,
     deleteTransaction,
+
+    markTransactionChecked,
 
     lockSelectedYear,
     unlockSelectedYear,

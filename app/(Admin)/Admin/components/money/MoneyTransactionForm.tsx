@@ -5,6 +5,7 @@ import { Banknote, FileText, Repeat, X } from "lucide-react";
 
 import type {
   FormState,
+  FundingType,
   RepeatFrequency,
   Sponsor,
   Transaction,
@@ -28,14 +29,18 @@ type YearlySponsorBreakdown = {
   received_pence: number;
   spent_pence: number;
   remaining_pence: number;
+  carried_forward_pence?: number;
   notes?: string | null;
+  funding_type?: FundingType | null;
 };
 
 type MoneyTransactionFormProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
-  invoiceFile: File | null;
-  setInvoiceFile: Dispatch<SetStateAction<File | null>>;
+
+  invoiceFiles: File[];
+  setInvoiceFiles: Dispatch<SetStateAction<File[]>>;
+
   editingTransaction: Transaction | null;
   saving: boolean;
   displaySponsors: Sponsor[];
@@ -68,11 +73,34 @@ function amountToPence(amount: string) {
   return Math.round(cleanAmount * 100);
 }
 
+function fundingTypeLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "Grant Money";
+  if (type === "loan") return "Loan";
+  if (type === "other") return "Other Funding";
+  return "Sponsor";
+}
+
+function fundingTypeShortLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "grant";
+  if (type === "loan") return "loan";
+  if (type === "other") return "funding";
+  return "sponsor";
+}
+
+function formatFileSize(size?: number | null) {
+  if (!size || size <= 0) return "";
+
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export default function MoneyTransactionForm({
   form,
   setForm,
-  invoiceFile,
-  setInvoiceFile,
+  invoiceFiles,
+  setInvoiceFiles,
   editingTransaction,
   saving,
   displaySponsors,
@@ -88,12 +116,26 @@ export default function MoneyTransactionForm({
       )
     : null;
 
+  const selectedFunding = form.sponsorId
+    ? displaySponsors.find((sponsor) => sponsor.id === form.sponsorId) || null
+    : null;
+
+  const selectedFundingType =
+    selectedSponsorBreakdown?.funding_type ||
+    selectedFunding?.funding_type ||
+    "sponsor";
+
+  const selectedFundingLabel = fundingTypeLabel(selectedFundingType);
+  const selectedFundingShortLabel = fundingTypeShortLabel(selectedFundingType);
+
   const currentAmountPence = amountToPence(form.amount);
   const remainingPence = selectedSponsorBreakdown?.remaining_pence ?? 0;
   const overSpendPence =
     form.sponsorId && currentAmountPence > remainingPence
       ? currentAmountPence - remainingPence
       : 0;
+
+  const existingAttachments = editingTransaction?.attachments || [];
 
   return (
     <form
@@ -155,8 +197,8 @@ export default function MoneyTransactionForm({
             <p className="font-bold">Transaction type</p>
             <p className="mt-1 text-lg font-black text-white">Money Out</p>
             <p className="mt-1 text-xs text-red-100/70">
-              This is locked because sponsor transactions are spending from
-              sponsor money.
+              This is locked because this transaction is spending from a linked{" "}
+              {selectedFundingShortLabel} record.
             </p>
           </div>
         ) : (
@@ -203,12 +245,12 @@ export default function MoneyTransactionForm({
 
         <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
           <label className="mb-1 block text-sm font-bold text-amber-100">
-            Use sponsor money for this spending
+            Use restricted funding for this spending
           </label>
 
           <p className="mb-2 text-xs text-amber-100/70">
-            Choose a sponsor only when this payment is being paid from
-            sponsorship money.
+            Choose a sponsor, grant, loan or other funding record when this
+            payment is being paid from restricted funding.
           </p>
 
           <select
@@ -227,8 +269,8 @@ export default function MoneyTransactionForm({
                 paymentMethod: selected
                   ? "Sponsorship Money"
                   : prev.paymentMethod === "Sponsorship Money"
-                  ? ""
-                  : prev.paymentMethod,
+                    ? ""
+                    : prev.paymentMethod,
                 isPersonalFunds: selected ? false : prev.isPersonalFunds,
                 personalFundsName: selected ? "" : prev.personalFundsName,
               }));
@@ -236,7 +278,7 @@ export default function MoneyTransactionForm({
             className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
           >
             <option className="bg-[#11111f] text-white" value="">
-              Choose sponsor...
+              Choose funding record...
             </option>
 
             {displaySponsors.map((sponsor) => (
@@ -245,6 +287,7 @@ export default function MoneyTransactionForm({
                 value={sponsor.id}
                 className="bg-[#11111f] text-white"
               >
+                {fundingTypeLabel(sponsor.funding_type)} —{" "}
                 {sponsor.sponsor_name}
               </option>
             ))}
@@ -253,7 +296,12 @@ export default function MoneyTransactionForm({
           {form.sponsorId && selectedSponsorBreakdown && (
             <div className="mt-3 rounded-xl border border-amber-300/20 bg-black/20 p-3 text-xs text-amber-100">
               <div className="flex justify-between gap-3">
-                <span>Remaining sponsor balance</span>
+                <span>Funding type</span>
+                <strong>{selectedFundingLabel}</strong>
+              </div>
+
+              <div className="mt-1 flex justify-between gap-3">
+                <span>Remaining funding balance</span>
                 <strong>{money(remainingPence)}</strong>
               </div>
 
@@ -269,17 +317,17 @@ export default function MoneyTransactionForm({
           {overSpendPence > 0 && (
             <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-sm text-red-100">
               <p className="font-black text-white">
-                Sponsor balance warning
+                Funding balance warning
               </p>
               <p className="mt-1">
-                This spend is {money(overSpendPence)} over the remaining sponsor
-                balance.
+                This spend is {money(overSpendPence)} over the remaining{" "}
+                {selectedFundingShortLabel} balance.
               </p>
             </div>
           )}
 
           <label className="mt-3 block text-sm font-bold text-amber-100">
-            Sponsorship spending note{" "}
+            Funding spending note{" "}
             {form.sponsorId && <span className="text-red-200">*</span>}
           </label>
 
@@ -293,8 +341,8 @@ export default function MoneyTransactionForm({
             }
             placeholder={
               form.sponsorId
-                ? "Required: explain what this sponsor money was spent on"
-                : "Example: Paid from sponsor money for event supplies"
+                ? `Required: explain what this ${selectedFundingShortLabel} money was spent on`
+                : "Example: Paid from grant money for event supplies"
             }
             required={Boolean(form.sponsorId)}
             className={`mt-2 min-h-20 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/40 ${
@@ -306,8 +354,8 @@ export default function MoneyTransactionForm({
 
           {form.sponsorId && (
             <p className="mt-2 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
-              Required: add a clear note so Burton Pride can prove why sponsor
-              money was used.
+              Required: add a clear note so Burton Pride can prove why this{" "}
+              {selectedFundingShortLabel} money was used.
             </p>
           )}
 
@@ -316,7 +364,7 @@ export default function MoneyTransactionForm({
             onClick={openNewSponsorForm}
             className="mt-3 rounded-xl bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/30"
           >
-            Add New Sponsor
+            Add New Funding
           </button>
         </div>
 
@@ -324,11 +372,11 @@ export default function MoneyTransactionForm({
           <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
             <p className="font-bold">Payment method</p>
             <p className="mt-1 text-lg font-black text-white">
-              Sponsorship Money
+              Funding Money
             </p>
             <p className="mt-1 text-xs text-amber-100/70">
-              This is locked because a sponsor is linked. Remove the sponsor if
-              this was paid another way.
+              This is locked because a funding record is linked. Remove the
+              funding record if this was paid another way.
             </p>
           </div>
         ) : (
@@ -501,8 +549,8 @@ export default function MoneyTransactionForm({
                   paymentMethod: event.target.checked
                     ? "Personal Funds"
                     : prev.paymentMethod === "Personal Funds"
-                    ? ""
-                    : prev.paymentMethod,
+                      ? ""
+                      : prev.paymentMethod,
                   personalFundsName: event.target.checked
                     ? prev.personalFundsName
                     : "",
@@ -572,40 +620,107 @@ export default function MoneyTransactionForm({
         <div className="rounded-xl border border-white/10 bg-black/20 p-3">
           <label className="mb-2 flex items-center gap-2 text-sm font-bold text-white/70">
             <FileText className="h-4 w-4" />
-            Upload invoice / receipt
+            Upload files / receipts / invoices
           </label>
+
+          <p className="mb-3 text-xs text-white/45">
+            You can upload more than one file. Useful for receipts, invoices,
+            bank screenshots, emails or supporting documents.
+          </p>
 
           <input
             type="file"
-            accept="image/*,.pdf"
-            onChange={(event) =>
-              setInvoiceFile(event.target.files?.[0] || null)
-            }
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
+            onChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              setInvoiceFiles(files);
+            }}
             className="w-full text-sm text-white/70 file:mr-4 file:rounded-xl file:border-0 file:bg-pink-500 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:file:bg-pink-400"
           />
 
-          {invoiceFile && form.isRepeating && (
+          {invoiceFiles.length > 0 && form.isRepeating && (
             <p className="mt-2 rounded-xl bg-purple-500/10 px-3 py-2 text-xs text-purple-100">
-              This same file will be attached to each repeating payment.
+              These same {invoiceFiles.length} file
+              {invoiceFiles.length === 1 ? "" : "s"} will be attached to each
+              repeating payment.
             </p>
           )}
 
-          {invoiceFile && (
-            <p className="mt-2 break-words text-xs text-white/50">
-              Selected: {invoiceFile.name}
-            </p>
+          {invoiceFiles.length > 0 && (
+            <div className="mt-3 rounded-xl bg-white/5 p-3">
+              <p className="mb-2 text-xs font-bold text-white/70">
+                New selected files ({invoiceFiles.length})
+              </p>
+
+              <div className="space-y-2">
+                {invoiceFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}-${file.size}-${index}`}
+                    className="flex items-start justify-between gap-3 rounded-lg bg-black/20 px-3 py-2 text-xs text-white/60"
+                  >
+                    <span className="min-w-0 break-all">
+                      {index + 1}. {file.name}
+                    </span>
+
+                    <span className="shrink-0 text-white/40">
+                      {formatFileSize(file.size)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setInvoiceFiles([])}
+                className="mt-3 rounded-lg bg-red-500/15 px-3 py-2 text-xs font-bold text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25"
+              >
+                Clear selected files
+              </button>
+            </div>
           )}
 
-          {editingTransaction?.invoice_image_url && !invoiceFile && (
-            <a
-              href={editingTransaction.invoice_image_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-flex break-all text-xs font-bold text-sky-200 hover:text-sky-100"
-            >
-              View current invoice / receipt
-            </a>
+          {existingAttachments.length > 0 && (
+            <div className="mt-3 rounded-xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20">
+              <p className="mb-2 text-xs font-bold text-sky-100">
+                Existing attachments ({existingAttachments.length})
+              </p>
+
+              <div className="space-y-2">
+                {existingAttachments.map((attachment, index) => (
+                  <a
+                    key={attachment.id || `${attachment.file_url}-${index}`}
+                    href={attachment.file_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start justify-between gap-3 rounded-lg bg-black/20 px-3 py-2 text-xs text-sky-100 hover:bg-black/30"
+                  >
+                    <span className="min-w-0 break-all">
+                      {index + 1}.{" "}
+                      {attachment.file_name || `Attachment ${index + 1}`}
+                    </span>
+
+                    <span className="shrink-0 text-sky-100/50">
+                      {formatFileSize(attachment.file_size)}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
           )}
+
+          {editingTransaction?.invoice_image_url &&
+            existingAttachments.length === 0 &&
+            invoiceFiles.length === 0 && (
+              <a
+                href={editingTransaction.invoice_image_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex break-all text-xs font-bold text-sky-200 hover:text-sky-100"
+              >
+                View current invoice / receipt
+              </a>
+            )}
         </div>
 
         <button
@@ -619,13 +734,13 @@ export default function MoneyTransactionForm({
             ? editingTransaction
               ? "Updating..."
               : form.isRepeating
-              ? "Creating repeating payments..."
-              : "Saving..."
+                ? "Creating repeating payments..."
+                : "Saving..."
             : editingTransaction
-            ? "Update Transaction"
-            : form.isRepeating
-            ? "Create Repeating Payments"
-            : "Save Transaction"}
+              ? "Update Transaction"
+              : form.isRepeating
+                ? "Create Repeating Payments"
+                : "Save Transaction"}
         </button>
       </div>
     </form>

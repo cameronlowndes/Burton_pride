@@ -5,7 +5,7 @@ import { requireMainAdmin } from "@/lib/isMainAdmin";
 import {
   createMoneyAuditLog,
   createBulkMoneyAuditLogs,
-} from "@/lib/adminMoneyAudit";
+} from "@/lib/money/adminMoneyAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -2,7 +2,8 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { X } from "lucide-react";
-import type { Sponsor, SponsorFormState } from "@/lib/money/types";
+
+import type { FundingType, Sponsor, SponsorFormState } from "@/lib/money/types";
 
 type MoneyModalsProps = {
   sponsorFormOpen: boolean;
@@ -41,6 +42,41 @@ type MoneyModalsProps = {
   onDeleteAll: () => void | Promise<void>;
 };
 
+function fundingTypeLabel(type: FundingType) {
+  if (type === "grant") return "Grant Money";
+  if (type === "loan") return "Loan";
+  if (type === "other") return "Other Funding";
+  return "Sponsor";
+}
+
+function fundingNamePlaceholder(type: FundingType) {
+  if (type === "grant") return "Grant / funder name";
+  if (type === "loan") return "Loan provider name";
+  if (type === "other") return "Funding name";
+  return "Sponsor name";
+}
+
+function agreedAmountPlaceholder(type: FundingType) {
+  if (type === "grant") return "Awarded grant amount, e.g. 1300";
+  if (type === "loan") return "Loan amount, e.g. 1300";
+  if (type === "other") return "Agreed funding amount, e.g. 1300";
+  return "Agreed sponsorship amount, e.g. 1300";
+}
+
+function receivedAmountPlaceholder(type: FundingType) {
+  if (type === "grant") return "Received grant money, e.g. 1300";
+  if (type === "loan") return "Received loan money, e.g. 1300";
+  if (type === "other") return "Received funding money, e.g. 1300";
+  return "Received sponsorship money, e.g. 1300";
+}
+
+function notesPlaceholder(type: FundingType) {
+  if (type === "grant") return "Grant notes / agreed use / restrictions";
+  if (type === "loan") return "Loan notes / repayment terms / restrictions";
+  if (type === "other") return "Funding notes / agreed use / restrictions";
+  return "Notes / agreed use / restrictions";
+}
+
 export default function MoneyModals({
   sponsorFormOpen,
   editingSponsor,
@@ -77,6 +113,9 @@ export default function MoneyModals({
   onCloseDeleteAll,
   onDeleteAll,
 }: MoneyModalsProps) {
+  const activeFundingType = sponsorForm.fundingType || "sponsor";
+  const activeFundingLabel = fundingTypeLabel(activeFundingType);
+
   return (
     <>
       {sponsorFormOpen && (
@@ -85,13 +124,13 @@ export default function MoneyModals({
             <div className="mb-5 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="break-words text-xl font-bold">
-                  {editingSponsor ? "Edit Sponsor" : "Add Sponsor"}
+                  {editingSponsor ? "Edit Funding" : "Add Funding"}
                 </h2>
 
                 <p className="text-sm text-white/60">
                   {editingSponsor
-                    ? "Update this sponsor’s details, agreed amount, and received money."
-                    : "Add sponsor details so income and spending can be tracked clearly."}
+                    ? "Update this funding record, agreed amount, and received money."
+                    : "Add sponsor, grant money, loan, or other funding so income and spending can be tracked clearly."}
                 </p>
               </div>
 
@@ -99,12 +138,46 @@ export default function MoneyModals({
                 type="button"
                 onClick={onCloseSponsorForm}
                 className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20"
+                aria-label="Close funding form"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Funding type
+                </label>
+
+                <select
+                  value={activeFundingType}
+                  onChange={(event) =>
+                    setSponsorForm((prev) => ({
+                      ...prev,
+                      fundingType: event.target.value as FundingType,
+                    }))
+                  }
+                  className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/40"
+                >
+                  <option className="bg-[#070716] text-white" value="sponsor">
+                    Sponsor
+                  </option>
+
+                  <option className="bg-[#070716] text-white" value="grant">
+                    Grant Money
+                  </option>
+
+                  <option className="bg-[#070716] text-white" value="loan">
+                    Loan
+                  </option>
+
+                  <option className="bg-[#070716] text-white" value="other">
+                    Other
+                  </option>
+                </select>
+              </div>
+
               <input
                 value={sponsorForm.sponsorName}
                 onChange={(event) =>
@@ -113,7 +186,7 @@ export default function MoneyModals({
                     sponsorName: event.target.value,
                   }))
                 }
-                placeholder="Sponsor name"
+                placeholder={fundingNamePlaceholder(activeFundingType)}
                 className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
               />
 
@@ -161,7 +234,7 @@ export default function MoneyModals({
                     agreedAmount: event.target.value,
                   }))
                 }
-                placeholder="Agreed sponsorship amount, e.g. 1300"
+                placeholder={agreedAmountPlaceholder(activeFundingType)}
                 type="number"
                 step="0.01"
                 className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
@@ -175,7 +248,7 @@ export default function MoneyModals({
                     receivedAmount: event.target.value,
                   }))
                 }
-                placeholder="Received sponsorship money, e.g. 1300"
+                placeholder={receivedAmountPlaceholder(activeFundingType)}
                 type="number"
                 step="0.01"
                 className="w-full rounded-xl bg-emerald-500/10 p-3 outline-none ring-1 ring-emerald-300/20 focus:ring-emerald-300/40"
@@ -189,9 +262,16 @@ export default function MoneyModals({
                     notes: event.target.value,
                   }))
                 }
-                placeholder="Notes / agreed use / restrictions"
+                placeholder={notesPlaceholder(activeFundingType)}
                 className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
               />
+
+              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+                This will be saved as{" "}
+                <strong>{activeFundingLabel}</strong>. You can track money
+                received, money spent, and remaining balance in the funding
+                breakdown.
+              </div>
 
               <button
                 type="button"
@@ -204,8 +284,8 @@ export default function MoneyModals({
                     ? "Updating..."
                     : "Saving..."
                   : editingSponsor
-                  ? "Update Sponsor"
-                  : "Save Sponsor"}
+                    ? "Update Funding"
+                    : "Save Funding"}
               </button>
             </div>
           </div>
@@ -269,16 +349,16 @@ export default function MoneyModals({
       {deleteSponsorId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Delete sponsor?</h2>
+            <h2 className="text-xl font-bold">Delete funding record?</h2>
 
             <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to delete this sponsor? Existing
-              transactions will stay in your money tracker, but the sponsor link
+              Are you sure you want to delete this funding record? Existing
+              transactions will stay in your money tracker, but the funding link
               will be removed from those transactions.
             </p>
 
             <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-              Export your Excel report first if you need to keep a full sponsor
+              Export your Excel report first if you need to keep a full funding
               breakdown before deleting.
             </div>
 
@@ -298,7 +378,7 @@ export default function MoneyModals({
                 disabled={deletingSponsor}
                 className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
               >
-                {deletingSponsor ? "Deleting..." : "Delete Sponsor"}
+                {deletingSponsor ? "Deleting..." : "Delete Funding"}
               </button>
             </div>
           </div>
@@ -352,7 +432,7 @@ export default function MoneyModals({
             <p className="mt-3 text-sm text-white/70">
               Are you sure you want to delete every transaction? This will delete
               all money in, money out, manual transactions, synced donation
-              entries, and sponsor-linked transactions. This cannot be undone.
+              entries, and funding-linked transactions. This cannot be undone.
             </p>
 
             <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">

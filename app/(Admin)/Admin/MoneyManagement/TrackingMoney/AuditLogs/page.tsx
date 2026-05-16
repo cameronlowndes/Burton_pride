@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ExcelJS from "exceljs";
 import {
   Activity,
@@ -11,7 +11,6 @@ import {
   ChevronDown,
   Clipboard,
   Clock3,
-  Download,
   Eye,
   FileSpreadsheet,
   FileText,
@@ -47,6 +46,8 @@ const actionOptions = [
   { value: "all", label: "All actions" },
   { value: "create", label: "Created" },
   { value: "edit", label: "Edited" },
+  { value: "checked", label: "Checked" },
+  { value: "unchecked", label: "Unchecked" },
   { value: "delete", label: "Hidden" },
   { value: "delete_year", label: "Deleted year" },
   { value: "delete_all", label: "Deleted all" },
@@ -89,7 +90,9 @@ function formatDateOnly(value: string | null | undefined) {
 }
 
 function isHiddenAuditLog(log: MoneyAuditLog) {
-  const action = String(log.action || "").toLowerCase().trim();
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
 
   if (action !== "delete") return false;
 
@@ -116,14 +119,97 @@ function isHiddenAuditLog(log: MoneyAuditLog) {
   if (isPermanentDelete) return false;
 
   return (
-    source === "money_tracker" ||
-    isMoneyTransactionRoute ||
-    hasSoftDeleteFlag
+    source === "money_tracker" || isMoneyTransactionRoute || hasSoftDeleteFlag
   );
+}
+
+function isUncheckedAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
+
+  if (action !== "edit") return false;
+
+  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const changedFields = log.changed_fields || {};
+
+  const checkedAtChange = changedFields.checked_at;
+  const checkedByChange = changedFields.checked_by;
+  const afterCheckedAt = checkedAtChange?.after;
+  const beforeCheckedAt = checkedAtChange?.before;
+
+  const hasCheckedRoute =
+    route.includes("/checked") ||
+    route.includes("/check") ||
+    route.includes("checked");
+
+  const hasUncheckedMetadata =
+    auditEvent === "unchecked" ||
+    auditEvent === "uncheck" ||
+    log.metadata?.unchecked === true ||
+    Boolean(log.metadata?.unchecked_at);
+
+  const hasUncheckedFields =
+    Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
+    Boolean(beforeCheckedAt) &&
+    (afterCheckedAt === null || afterCheckedAt === undefined || afterCheckedAt === "");
+
+  const hasClearedCheckedBy =
+    Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
+    Boolean(checkedByChange?.before) &&
+    (checkedByChange?.after === null ||
+      checkedByChange?.after === undefined ||
+      checkedByChange?.after === "");
+
+  return hasUncheckedMetadata || (hasCheckedRoute && (hasUncheckedFields || hasClearedCheckedBy));
+}
+
+function isCheckedAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
+
+  if (action !== "edit") return false;
+  if (isUncheckedAuditLog(log)) return false;
+
+  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
+  const metadataAction = String(log.metadata?.action || "").toLowerCase();
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const changedFields = log.changed_fields || {};
+
+  const checkedAtChange = changedFields.checked_at;
+  const afterCheckedAt = checkedAtChange?.after;
+
+  const hasCheckedRoute =
+    route.includes("/checked") ||
+    route.includes("/check") ||
+    route.includes("checked");
+
+  const hasCheckedMetadata =
+    auditEvent === "checked" ||
+    metadataAction.includes("checked") ||
+    log.metadata?.checked === true ||
+    log.metadata?.mark_checked === true ||
+    Boolean(log.metadata?.checked_at);
+
+  const hasCheckedFields =
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
+      Boolean(afterCheckedAt)) ||
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
+      Boolean(changedFields.checked_by?.after)) ||
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked") &&
+      Boolean(changedFields.checked?.after)) ||
+    Boolean(log.after_data?.checked_at) ||
+    Boolean(log.after_data?.checked_by);
+
+  return hasCheckedMetadata || (hasCheckedRoute && hasCheckedFields);
 }
 
 function actionLabel(action: string, log?: MoneyAuditLog) {
   if (log && isHiddenAuditLog(log)) return "Hidden";
+  if (log && isUncheckedAuditLog(log)) return "Unchecked";
+  if (log && isCheckedAuditLog(log)) return "Checked";
 
   if (action === "create") return "Created";
   if (action === "edit") return "Edited";
@@ -142,6 +228,14 @@ function actionClass(action: string, log?: MoneyAuditLog) {
     return "bg-orange-500/15 text-orange-200 ring-orange-300/20";
   }
 
+  if (log && isUncheckedAuditLog(log)) {
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  }
+
+  if (log && isCheckedAuditLog(log)) {
+    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
+  }
+
   if (action === "create") {
     return "bg-emerald-500/15 text-emerald-200 ring-emerald-300/20";
   }
@@ -150,7 +244,11 @@ function actionClass(action: string, log?: MoneyAuditLog) {
     return "bg-sky-500/15 text-sky-200 ring-sky-300/20";
   }
 
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return "bg-red-500/15 text-red-200 ring-red-300/20";
   }
 
@@ -171,10 +269,16 @@ function actionClass(action: string, log?: MoneyAuditLog) {
 
 function actionExcelColour(action: string, log?: MoneyAuditLog) {
   if (log && isHiddenAuditLog(log)) return "FFEA580C";
+  if (log && isUncheckedAuditLog(log)) return "FFD97706";
+  if (log && isCheckedAuditLog(log)) return "FF0891B2";
 
   if (action === "create") return "FF047857";
   if (action === "edit") return "FF0284C7";
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return "FFB91C1C";
   }
   if (action === "restore") return "FF7C3AED";
@@ -185,10 +289,16 @@ function actionExcelColour(action: string, log?: MoneyAuditLog) {
 
 function actionIcon(action: string, log?: MoneyAuditLog) {
   if (log && isHiddenAuditLog(log)) return Eye;
+  if (log && isUncheckedAuditLog(log)) return RotateCcw;
+  if (log && isCheckedAuditLog(log)) return ShieldCheck;
 
   if (action === "create") return CheckCircle2;
   if (action === "edit") return FileText;
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return Trash2;
   }
   if (action === "restore") return RotateCcw;
@@ -334,7 +444,7 @@ function styleSubtitleCell(cell: ExcelJS.Cell) {
   };
 }
 
-function styleSectionCell(cell: ExcelJS.Cell, colour = "FF7C3AED") {
+function styleSectionCell(cell: ExcelJS.Cell, colour = "FF334155") {
   cell.font = {
     bold: true,
     size: 13,
@@ -393,7 +503,7 @@ function addMergedTitle(
   worksheet: ExcelJS.Worksheet,
   text: string,
   fromCell: string,
-  toCell: string
+  toCell: string,
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -405,7 +515,7 @@ function addMergedSubtitle(
   worksheet: ExcelJS.Worksheet,
   text: string,
   fromCell: string,
-  toCell: string
+  toCell: string,
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -418,7 +528,7 @@ function addMergedSection(
   text: string,
   fromCell: string,
   toCell: string,
-  colour = "FF7C3AED"
+  colour = "FF7C3AED",
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -426,7 +536,11 @@ function addMergedSection(
   styleSectionCell(cell, colour);
 }
 
-function styleActionCell(cell: ExcelJS.Cell, action: string, log?: MoneyAuditLog) {
+function styleActionCell(
+  cell: ExcelJS.Cell,
+  action: string,
+  log?: MoneyAuditLog,
+) {
   cell.font = {
     bold: true,
     color: { argb: "FFFFFFFF" },
@@ -484,7 +598,7 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       !isHiddenAuditLog(log) &&
       (log.action === "delete" ||
         log.action === "delete_year" ||
-        log.action === "delete_all")
+        log.action === "delete_all"),
   ).length;
 
   return [
@@ -500,8 +614,23 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
     },
     {
       label: "Edited",
-      value: logs.filter((log) => log.action === "edit").length,
+      value: logs.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      ).length,
       notes: "Transactions or records edited.",
+    },
+    {
+      label: "Checked",
+      value: logs.filter((log) => isCheckedAuditLog(log)).length,
+      notes: "Transactions marked as checked.",
+    },
+    {
+      label: "Unchecked",
+      value: logs.filter((log) => isUncheckedAuditLog(log)).length,
+      notes: "Transactions where checked status was undone.",
     },
     {
       label: "Hidden",
@@ -523,7 +652,7 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       value: logs.filter(
         (log) =>
           log.action === "mark_paid_back" ||
-          log.action === "mark_not_paid_back"
+          log.action === "mark_not_paid_back",
       ).length,
       notes: "Personal funds repayment status changes.",
     },
@@ -531,8 +660,11 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       label: "Unique users",
       value: new Set(
         logs
-          .map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log))
-          .filter(Boolean)
+          .map(
+            (log) =>
+              log.actor_email || log.actor_user_id || getActorDisplayName(log),
+          )
+          .filter(Boolean),
       ).size,
       notes: "Unique actors based on email, user ID, or display name.",
     },
@@ -551,6 +683,7 @@ export default function MoneyAuditLogsPage() {
   const [copied, setCopied] = useState(false);
   const [showRawData, setShowRawData] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
 
@@ -564,12 +697,18 @@ export default function MoneyAuditLogsPage() {
       params.set("limit", "500");
 
       if (selectedAction !== "all") {
-        params.set("action", selectedAction);
+        params.set(
+          "action",
+          (selectedAction === "checked" || selectedAction === "unchecked") ? "edit" : selectedAction,
+        );
       }
 
-      const res = await fetch(`/api/admin/money/audit-logs?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/admin/money/audit-logs?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
 
       const text = await res.text();
 
@@ -588,7 +727,8 @@ export default function MoneyAuditLogsPage() {
         };
       }
 
-      setLogs(data.logs || []);
+      setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setLastRefreshed(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -605,6 +745,23 @@ export default function MoneyAuditLogsPage() {
   const filteredLogs = useMemo(() => {
     let rows = [...logs];
 
+    if (selectedAction === "checked") {
+      rows = rows.filter((log) => isCheckedAuditLog(log));
+    }
+
+    if (selectedAction === "unchecked") {
+      rows = rows.filter((log) => isUncheckedAuditLog(log));
+    }
+
+    if (selectedAction === "edit") {
+      rows = rows.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      );
+    }
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase().trim();
 
@@ -616,10 +773,18 @@ export default function MoneyAuditLogsPage() {
           log.transaction_id?.toLowerCase().includes(q) ||
           getActorDisplayName(log).toLowerCase().includes(q) ||
           log.actor_email?.toLowerCase().includes(q) ||
-          JSON.stringify(log.changed_fields || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.metadata || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.before_data || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.after_data || {}).toLowerCase().includes(q)
+          JSON.stringify(log.changed_fields || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.metadata || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.before_data || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.after_data || {})
+            .toLowerCase()
+            .includes(q)
         );
       });
     }
@@ -640,11 +805,15 @@ export default function MoneyAuditLogsPage() {
 
     rows.sort((a, b) => {
       if (sortMode === "newest") {
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
       }
 
       if (sortMode === "oldest") {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
       }
 
       if (sortMode === "action") {
@@ -659,7 +828,7 @@ export default function MoneyAuditLogsPage() {
     });
 
     return rows;
-  }, [logs, searchTerm, dateFrom, dateTo, sortMode]);
+  }, [logs, selectedAction, searchTerm, dateFrom, dateTo, sortMode]);
 
   const stats = useMemo(() => {
     const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
@@ -669,26 +838,36 @@ export default function MoneyAuditLogsPage() {
         !isHiddenAuditLog(log) &&
         (log.action === "delete" ||
           log.action === "delete_year" ||
-          log.action === "delete_all")
+          log.action === "delete_all"),
     ).length;
 
     return {
       total: logs.length,
       visible: filteredLogs.length,
       created: logs.filter((log) => log.action === "create").length,
-      edited: logs.filter((log) => log.action === "edit").length,
+      edited: logs.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      ).length,
+      checked: logs.filter((log) => isCheckedAuditLog(log)).length,
+      unchecked: logs.filter((log) => isUncheckedAuditLog(log)).length,
       hidden,
       deleted,
       restored: logs.filter((log) => log.action === "restore").length,
       paidBack: logs.filter(
         (log) =>
           log.action === "mark_paid_back" ||
-          log.action === "mark_not_paid_back"
+          log.action === "mark_not_paid_back",
       ).length,
       uniqueUsers: new Set(
         logs
-          .map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log))
-          .filter(Boolean)
+          .map(
+            (log) =>
+              log.actor_email || log.actor_user_id || getActorDisplayName(log),
+          )
+          .filter(Boolean),
       ).size,
     };
   }, [logs, filteredLogs.length]);
@@ -720,129 +899,320 @@ export default function MoneyAuditLogsPage() {
       workbook.title = "Burton Pride Money Audit Logs";
       workbook.company = "Burton Pride C.I.C";
 
-      const summarySheet = workbook.addWorksheet("Summary", {
-        views: [{ state: "frozen", ySplit: 6 }],
+      const summarySheet = workbook.addWorksheet("Print Report", {
+        views: [{ showGridLines: false }],
         pageSetup: {
           paperSize: 9,
           orientation: "landscape",
           fitToPage: true,
           fitToWidth: 1,
           fitToHeight: 0,
+          horizontalCentered: true,
+          margins: {
+            left: 0.25,
+            right: 0.25,
+            top: 0.35,
+            bottom: 0.35,
+            header: 0.15,
+            footer: 0.15,
+          },
         },
       });
 
-      summarySheet.properties.defaultRowHeight = 22;
+      summarySheet.properties.defaultRowHeight = 21;
       summarySheet.columns = [
-        { key: "label", width: 32 },
-        { key: "value", width: 18 },
-        { key: "notes", width: 78 },
+        { key: "a", width: 22 },
+        { key: "b", width: 14 },
+        { key: "c", width: 22 },
+        { key: "d", width: 14 },
+        { key: "e", width: 22 },
+        { key: "f", width: 14 },
+        { key: "g", width: 22 },
+        { key: "h", width: 14 },
       ];
 
-      addMergedTitle(summarySheet, "Burton Pride C.I.C - Money Audit Logs", "A1", "C1");
-      addMergedSubtitle(
-        summarySheet,
-        `Formatted Excel report generated ${now.toLocaleString("en-GB")} | Showing ${filteredLogs.length} of ${logs.length} loaded logs`,
-        "A2",
-        "C2"
-      );
+      for (let rowNumber = 1; rowNumber <= 44; rowNumber += 1) {
+        const row = summarySheet.getRow(rowNumber);
+        row.height = 21;
+        for (let colNumber = 1; colNumber <= 8; colNumber += 1) {
+          const cell = row.getCell(colNumber);
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFFFFFFF" },
+          };
+        }
+      }
 
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Export Summary", "A4", "C4", "FF7C3AED");
+      summarySheet.mergeCells("A1:H1");
+      summarySheet.getCell("A1").value = "Burton Pride C.I.C - Money Audit Report";
+      summarySheet.getCell("A1").font = {
+        bold: true,
+        size: 24,
+        color: { argb: "FFFFFFFF" },
+      };
+      summarySheet.getCell("A1").fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF111827" },
+      };
+      summarySheet.getCell("A1").alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
+      summarySheet.getRow(1).height = 34;
 
-      const summaryHeader = summarySheet.addRow(["Item", "Value", "Notes"]);
-      styleHeaderRow(summaryHeader, "FF111827");
+      summarySheet.mergeCells("A2:H2");
+      summarySheet.getCell("A2").value = `Printed report version | Generated ${now.toLocaleString("en-GB")} | Showing ${filteredLogs.length} of ${logs.length} loaded logs`;
+      summarySheet.getCell("A2").font = {
+        bold: true,
+        size: 11,
+        color: { argb: "FF374151" },
+      };
+      summarySheet.getCell("A2").alignment = {
+        horizontal: "center",
+        vertical: "middle",
+        wrapText: true,
+      };
+      summarySheet.getRow(2).height = 26;
 
-      makeSummaryRows(filteredLogs).forEach((item) => {
-        const row = summarySheet.addRow([item.label, item.value, item.notes]);
-        styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
-        row.getCell(2).font = { bold: true, color: { argb: "FF111827" } };
-        row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-      });
+      function styleCard(
+        labelRange: string,
+        valueRange: string,
+        label: string,
+        value: number,
+        fillColour: string,
+      ) {
+        summarySheet.mergeCells(labelRange);
+        summarySheet.mergeCells(valueRange);
 
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Filters Used", "A15", "C15", "FF4F46E5");
+        const labelCell = summarySheet.getCell(labelRange.split(":")[0]);
+        const valueCell = summarySheet.getCell(valueRange.split(":")[0]);
 
-      const filterHeader = summarySheet.addRow(["Filter", "Value", "Notes"]);
+        labelCell.value = label;
+        labelCell.font = {
+          bold: true,
+          size: 10,
+          color: { argb: "FF374151" },
+        };
+        labelCell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+        };
+
+        valueCell.value = value;
+        valueCell.font = {
+          bold: true,
+          size: 22,
+          color: { argb: "FF111827" },
+        };
+        valueCell.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+        };
+
+        [labelCell, valueCell].forEach((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: fillColour },
+          };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFCBD5E1" } },
+            left: { style: "thin", color: { argb: "FFCBD5E1" } },
+            bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+            right: { style: "thin", color: { argb: "FFCBD5E1" } },
+          };
+        });
+      }
+
+      styleCard("A4:B4", "A5:B6", "Total Logs", filteredLogs.length, "FFF8FAFC");
+      styleCard("C4:D4", "C5:D6", "Created", filteredLogs.filter((log) => log.action === "create").length, "FFECFDF5");
+      styleCard("E4:F4", "E5:F6", "Checked", filteredLogs.filter((log) => isCheckedAuditLog(log)).length, "FFEFF6FF");
+      styleCard("G4:H4", "G5:H6", "Unchecked", filteredLogs.filter((log) => isUncheckedAuditLog(log)).length, "FFFFFBEB");
+      styleCard("A8:B8", "A9:B10", "Edited", filteredLogs.filter((log) => log.action === "edit" && !isCheckedAuditLog(log) && !isUncheckedAuditLog(log)).length, "FFF0F9FF");
+      styleCard("C8:D8", "C9:D10", "Hidden", filteredLogs.filter((log) => isHiddenAuditLog(log)).length, "FFFFF7ED");
+      styleCard("E8:F8", "E9:F10", "Deleted", filteredLogs.filter((log) => !isHiddenAuditLog(log) && (log.action === "delete" || log.action === "delete_year" || log.action === "delete_all")).length, "FFFEF2F2");
+      styleCard("G8:H8", "G9:H10", "Users", new Set(filteredLogs.map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log)).filter(Boolean)).size, "FFF8FAFC");
+      styleCard("A11:B11", "A12:B13", "Paid Back", filteredLogs.filter((log) => log.action === "mark_paid_back" || log.action === "mark_not_paid_back").length, "FFFDF2F8");
+
+      addMergedSection(summarySheet, "Report Filters", "A15", "H15", "FF334155");
+      const filterHeader = summarySheet.addRow([
+        "Action",
+        "Search",
+        "Date From",
+        "Date To",
+        "Sort",
+        "Loaded Logs",
+        "Visible Logs",
+        "Generated By",
+      ]);
       styleHeaderRow(filterHeader, "FF111827");
 
-      const filterRows = [
-        ["Action", selectedAction === "all" ? "All actions" : actionOptions.find((item) => item.value === selectedAction)?.label || actionLabel(selectedAction), "Action filter selected on page."],
-        ["Search", searchTerm || "No search", "Text search applied before export."],
-        ["Date from", dateFrom || "No start date", "Start date filter."],
-        ["Date to", dateTo || "No end date", "End date filter."],
-        ["Sort", sortMode, "Sort mode applied before export."],
-      ];
-
-      filterRows.forEach((item) => {
-        const row = summarySheet.addRow(item);
-        styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
+      const filterValueRow = summarySheet.addRow([
+        selectedAction === "all"
+          ? "All actions"
+          : actionOptions.find((item) => item.value === selectedAction)?.label ||
+            actionLabel(selectedAction),
+        searchTerm || "No search",
+        dateFrom || "No start date",
+        dateTo || "No end date",
+        sortMode,
+        logs.length,
+        filteredLogs.length,
+        "Burton Pride C.I.C",
+      ]);
+      styleBodyRow(filterValueRow);
+      filterValueRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: "FF111827" } };
+        cell.alignment = {
+          horizontal: "center",
+          vertical: "middle",
+          wrapText: true,
+        };
       });
 
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Action Breakdown", "A23", "C23", "FF9333EA");
-
-      const actionBreakdownHeader = summarySheet.addRow(["Action", "Count", "Notes"]);
+      addMergedSection(summarySheet, "Action Breakdown", "A20", "H20", "FF334155");
+      const actionBreakdownHeader = summarySheet.addRow([
+        "Action",
+        "Count",
+        "Notes",
+        "Action",
+        "Count",
+        "Notes",
+        "Action",
+        "Count",
+      ]);
       styleHeaderRow(actionBreakdownHeader, "FF111827");
 
       const actionBreakdownRows = [
         {
           label: "Created",
           count: filteredLogs.filter((log) => log.action === "create").length,
-          notes: "Count of created audit logs.",
+          notes: "Created records.",
         },
         {
           label: "Edited",
-          count: filteredLogs.filter((log) => log.action === "edit").length,
-          notes: "Count of edited audit logs.",
+          count: filteredLogs.filter(
+            (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+          ).length,
+          notes: "Edited records.",
+        },
+        {
+          label: "Checked",
+          count: filteredLogs.filter((log) => isCheckedAuditLog(log)).length,
+          notes: "Marked as checked.",
+        },
+        {
+          label: "Unchecked",
+          count: filteredLogs.filter((log) => isUncheckedAuditLog(log)).length,
+          notes: "Checked status undone.",
         },
         {
           label: "Hidden",
           count: filteredLogs.filter((log) => isHiddenAuditLog(log)).length,
-          notes: "Count of hidden soft-delete audit logs.",
+          notes: "Soft-deleted/hidden.",
         },
         {
           label: "Deleted Year",
-          count: filteredLogs.filter((log) => log.action === "delete_year").length,
-          notes: "Count of selected-year delete audit logs.",
+          count: filteredLogs.filter((log) => log.action === "delete_year")
+            .length,
+          notes: "Year delete actions.",
         },
         {
           label: "Deleted All",
-          count: filteredLogs.filter((log) => log.action === "delete_all").length,
-          notes: "Count of delete-all audit logs.",
+          count: filteredLogs.filter((log) => log.action === "delete_all")
+            .length,
+          notes: "Delete-all actions.",
         },
         {
           label: "Restored",
           count: filteredLogs.filter((log) => log.action === "restore").length,
-          notes: "Count of restored audit logs.",
+          notes: "Restored records.",
         },
         {
-          label: "Marked Paid Back",
-          count: filteredLogs.filter((log) => log.action === "mark_paid_back").length,
-          notes: "Count of marked paid back logs.",
-        },
-        {
-          label: "Marked Not Paid Back",
-          count: filteredLogs.filter((log) => log.action === "mark_not_paid_back").length,
-          notes: "Count of marked not paid back logs.",
+          label: "Paid Back",
+          count: filteredLogs.filter(
+            (log) =>
+              log.action === "mark_paid_back" ||
+              log.action === "mark_not_paid_back",
+          ).length,
+          notes: "Repayment changes.",
         },
       ];
 
-      actionBreakdownRows.forEach((item) => {
+      for (let index = 0; index < actionBreakdownRows.length; index += 3) {
+        const first = actionBreakdownRows[index];
+        const second = actionBreakdownRows[index + 1];
+        const third = actionBreakdownRows[index + 2];
+
         const row = summarySheet.addRow([
-          item.label,
-          item.count,
-          item.notes,
+          first?.label || "",
+          first?.count ?? "",
+          first?.notes || "",
+          second?.label || "",
+          second?.count ?? "",
+          second?.notes || "",
+          third?.label || "",
+          third?.count ?? "",
         ]);
+
         styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
-        row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-        row.getCell(2).font = { bold: true };
+
+        [1, 4, 7].forEach((cellNumber) => {
+          row.getCell(cellNumber).font = { bold: true, color: { argb: "FF111827" } };
+        });
+
+        [2, 5, 8].forEach((cellNumber) => {
+          row.getCell(cellNumber).font = { bold: true, color: { argb: "FF111827" } };
+          row.getCell(cellNumber).alignment = {
+            horizontal: "center",
+            vertical: "middle",
+          };
+        });
+      }
+
+      addMergedSection(summarySheet, "Latest Audit Logs", "A27", "H27", "FF334155");
+      const latestHeader = summarySheet.addRow([
+        "When",
+        "Action",
+        "Transaction",
+        "Who",
+        "Changed Fields",
+        "Source",
+        "Route",
+        "Log ID",
+      ]);
+      styleHeaderRow(latestHeader, "FF111827");
+
+      filteredLogs.slice(0, 12).forEach((log) => {
+        const changedNames = getChangedFieldNames(log.changed_fields);
+        const row = summarySheet.addRow([
+          formatExcelDate(log.created_at),
+          actionLabel(log.action, log),
+          getTransactionTitle(log),
+          getActorDisplayName(log),
+          changedNames.map(cleanFieldName).join(", ") || "—",
+          getSourceLabel(log),
+          log.metadata?.route || "",
+          log.id,
+        ]);
+
+        styleBodyRow(row);
+        row.getCell(1).numFmt = "dd mmm yyyy, hh:mm";
+        styleActionCell(row.getCell(2), log.action, log);
+        row.getCell(3).font = { bold: true, color: { argb: "FF111827" } };
+        row.getCell(4).font = { bold: true, color: { argb: "FF111827" } };
       });
 
+      summarySheet.pageSetup.printArea = "A1:H44";
+      summarySheet.headerFooter.oddFooter = "&LPrinted by Burton Pride C.I.C&RPage &P of &N";
+
       const logsSheet = workbook.addWorksheet("Audit Logs", {
-        views: [{ state: "frozen", ySplit: 5 }],
+        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
         pageSetup: {
           paperSize: 9,
           orientation: "landscape",
@@ -874,7 +1244,7 @@ export default function MoneyAuditLogsPage() {
         logsSheet,
         `Formatted export | Generated ${now.toLocaleString("en-GB")} | Rows: ${filteredLogs.length}`,
         "A2",
-        "L2"
+        "L2",
       );
 
       logsSheet.addRow([]);
@@ -897,7 +1267,9 @@ export default function MoneyAuditLogsPage() {
       styleHeaderRow(auditHeader, "FF111827");
 
       if (filteredLogs.length === 0) {
-        const emptyRow = logsSheet.addRow(["No audit logs found for the current filters."]);
+        const emptyRow = logsSheet.addRow([
+          "No audit logs found for the current filters.",
+        ]);
         styleBodyRow(emptyRow);
       } else {
         filteredLogs.forEach((log) => {
@@ -932,7 +1304,8 @@ export default function MoneyAuditLogsPage() {
 
           if (!log.actor_email) styleMutedCell(row.getCell("actorEmail"));
           if (!log.actor_user_id) styleMutedCell(row.getCell("actorUserId"));
-          if (changedNames.length === 0) styleMutedCell(row.getCell("changedFields"));
+          if (changedNames.length === 0)
+            styleMutedCell(row.getCell("changedFields"));
         });
       }
 
@@ -942,7 +1315,7 @@ export default function MoneyAuditLogsPage() {
       };
 
       const changedSheet = workbook.addWorksheet("Changed Fields", {
-        views: [{ state: "frozen", ySplit: 5 }],
+        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
         pageSetup: {
           paperSize: 9,
           orientation: "landscape",
@@ -965,12 +1338,17 @@ export default function MoneyAuditLogsPage() {
         { key: "logId", width: 38 },
       ];
 
-      addMergedTitle(changedSheet, "Burton Pride C.I.C - Changed Fields", "A1", "H1");
+      addMergedTitle(
+        changedSheet,
+        "Burton Pride C.I.C - Changed Fields",
+        "A1",
+        "H1",
+      );
       addMergedSubtitle(
         changedSheet,
         "One row per changed field, with before and after values.",
         "A2",
-        "H2"
+        "H2",
       );
 
       changedSheet.addRow([]);
@@ -1020,7 +1398,9 @@ export default function MoneyAuditLogsPage() {
       });
 
       if (changedFieldRowCount === 0) {
-        const emptyRow = changedSheet.addRow(["No changed field rows found for the current filters."]);
+        const emptyRow = changedSheet.addRow([
+          "No changed field rows found for the current filters.",
+        ]);
         styleBodyRow(emptyRow);
       }
 
@@ -1030,7 +1410,7 @@ export default function MoneyAuditLogsPage() {
       };
 
       const usersSheet = workbook.addWorksheet("Users", {
-        views: [{ state: "frozen", ySplit: 5 }],
+        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
         pageSetup: {
           paperSize: 9,
           orientation: "landscape",
@@ -1055,13 +1435,13 @@ export default function MoneyAuditLogsPage() {
         { key: "latest", width: 24 },
       ];
 
-      addMergedTitle(usersSheet, "Burton Pride C.I.C - Audit Users", "A1", "J1");
-      addMergedSubtitle(
+      addMergedTitle(
         usersSheet,
-        "Summary by user / actor.",
-        "A2",
-        "J2"
+        "Burton Pride C.I.C - Audit Users",
+        "A1",
+        "J1",
       );
+      addMergedSubtitle(usersSheet, "Summary by user / actor.", "A2", "J2");
 
       usersSheet.addRow([]);
 
@@ -1117,7 +1497,8 @@ export default function MoneyAuditLogsPage() {
           const userLogs = user.logs;
           const latest = [...userLogs].sort(
             (a, b) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+              new Date(b.created_at).getTime() -
+              new Date(a.created_at).getTime(),
           )[0];
 
           const row = usersSheet.addRow({
@@ -1126,19 +1507,24 @@ export default function MoneyAuditLogsPage() {
             userId: user.userId,
             total: userLogs.length,
             created: userLogs.filter((log) => log.action === "create").length,
-            edited: userLogs.filter((log) => log.action === "edit").length,
+            edited: userLogs.filter(
+              (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+            ).length,
             hidden: userLogs.filter((log) => isHiddenAuditLog(log)).length,
             deleted: userLogs.filter(
               (log) =>
                 !isHiddenAuditLog(log) &&
                 (log.action === "delete" ||
                   log.action === "delete_year" ||
-                  log.action === "delete_all")
+                  log.action === "delete_all"),
             ).length,
             paidBack: userLogs.filter(
               (log) =>
                 log.action === "mark_paid_back" ||
-                log.action === "mark_not_paid_back"
+                log.action === "mark_not_paid_back",
             ).length,
             latest: formatExcelDate(latest?.created_at),
           });
@@ -1147,7 +1533,14 @@ export default function MoneyAuditLogsPage() {
           row.getCell("name").font = { bold: true };
           row.getCell("latest").numFmt = "dd mmm yyyy, hh:mm";
 
-          ["total", "created", "edited", "hidden", "deleted", "paidBack"].forEach((key) => {
+          [
+            "total",
+            "created",
+            "edited",
+            "hidden",
+            "deleted",
+            "paidBack",
+          ].forEach((key) => {
             row.getCell(key).alignment = {
               horizontal: "center",
               vertical: "middle",
@@ -1162,7 +1555,7 @@ export default function MoneyAuditLogsPage() {
       };
 
       const rawSheet = workbook.addWorksheet("Raw JSON", {
-        views: [{ state: "frozen", ySplit: 5 }],
+        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
         pageSetup: {
           paperSize: 9,
           orientation: "landscape",
@@ -1186,12 +1579,17 @@ export default function MoneyAuditLogsPage() {
         { key: "logId", width: 38 },
       ];
 
-      addMergedTitle(rawSheet, "Burton Pride C.I.C - Audit Raw JSON", "A1", "I1");
+      addMergedTitle(
+        rawSheet,
+        "Burton Pride C.I.C - Audit Raw JSON",
+        "A1",
+        "I1",
+      );
       addMergedSubtitle(
         rawSheet,
         "Full raw audit log data for checking details.",
         "A2",
-        "I2"
+        "I2",
       );
 
       rawSheet.addRow([]);
@@ -1235,21 +1633,23 @@ export default function MoneyAuditLogsPage() {
         to: "I4",
       };
 
-      [summarySheet, logsSheet, changedSheet, usersSheet, rawSheet].forEach((sheet) => {
-        sheet.eachRow((row) => {
-          row.eachCell((cell) => {
-            cell.alignment = {
-              ...cell.alignment,
-              vertical: cell.alignment?.vertical || "top",
-              wrapText: true,
-            };
+      [summarySheet, logsSheet, changedSheet, usersSheet, rawSheet].forEach(
+        (sheet) => {
+          sheet.eachRow((row) => {
+            row.eachCell((cell) => {
+              cell.alignment = {
+                ...cell.alignment,
+                vertical: cell.alignment?.vertical || "top",
+                wrapText: true,
+              };
+            });
           });
-        });
-      });
+        },
+      );
 
       await downloadWorkbook(
         workbook,
-        `burton-pride-money-audit-logs-${fileDate}.xlsx`
+        `burton-pride-money-audit-logs-${fileDate}.xlsx`,
       );
     } catch (err: any) {
       setError(err?.message || "Failed to export formatted Excel file");
@@ -1257,6 +1657,10 @@ export default function MoneyAuditLogsPage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  function printAuditReport() {
+    window.print();
   }
 
   async function copySelectedLog() {
@@ -1291,24 +1695,46 @@ export default function MoneyAuditLogsPage() {
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   View every money tracker action, including creates, edits,
-                  hidden soft-deleted transactions, selected-year deletes, delete
-                  all actions, and personal funds paid-back changes.
+                  hidden soft-deleted transactions, selected-year deletes,
+                  delete all actions, and personal funds paid-back changes.
                 </p>
 
-                {latestLog && (
-                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
-                    <Clock3 className="h-4 w-4" />
-                    Latest visible log:{" "}
-                    <span className="font-bold text-white">
-                      {formatDateTime(latestLog.created_at)}
-                    </span>
-                    <span className="text-white/30">•</span>
-                    <span>{actionLabel(latestLog.action, latestLog)}</span>
-                  </div>
-                )}
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
+                  <Clock3 className="h-4 w-4" />
+                  {latestLog ? (
+                    <>
+                      Latest visible log:{" "}
+                      <span className="font-bold text-white">
+                        {formatDateTime(latestLog.created_at)}
+                      </span>
+                      <span className="text-white/30">•</span>
+                      <span>{actionLabel(latestLog.action, latestLog)}</span>
+                    </>
+                  ) : (
+                    <span>No visible logs loaded yet</span>
+                  )}
+                  {lastRefreshed && (
+                    <>
+                      <span className="text-white/30">•</span>
+                      <span>
+                        Last refreshed {formatDateTime(lastRefreshed)}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={printAuditReport}
+                  disabled={filteredLogs.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-bold text-sky-200 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  Print Report
+                </button>
+
                 <button
                   type="button"
                   onClick={exportFormattedExcel}
@@ -1352,11 +1778,13 @@ export default function MoneyAuditLogsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-10">
           <StatCard label="Total Logs" value={stats.total} tone="white" />
           <StatCard label="Showing" value={stats.visible} tone="purple" />
           <StatCard label="Created" value={stats.created} tone="emerald" />
           <StatCard label="Edited" value={stats.edited} tone="sky" />
+          <StatCard label="Checked" value={stats.checked} tone="cyan" />
+          <StatCard label="Unchecked" value={stats.unchecked} tone="amber" />
           <StatCard label="Hidden" value={stats.hidden} tone="orange" />
           <StatCard label="Deleted" value={stats.deleted} tone="red" />
           <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
@@ -1460,8 +1888,9 @@ export default function MoneyAuditLogsPage() {
           </div>
 
           <div className="mb-4 rounded-2xl bg-black/20 px-4 py-3 text-sm text-white/60">
-            Showing <strong className="text-white">{filteredLogs.length}</strong>{" "}
-            audit log{filteredLogs.length === 1 ? "" : "s"} from{" "}
+            Showing{" "}
+            <strong className="text-white">{filteredLogs.length}</strong> audit
+            log{filteredLogs.length === 1 ? "" : "s"} from{" "}
             <strong className="text-white">{logs.length}</strong> loaded.
           </div>
 
@@ -1494,7 +1923,9 @@ export default function MoneyAuditLogsPage() {
 
                   <tbody>
                     {filteredLogs.map((log) => {
-                      const changedNames = getChangedFieldNames(log.changed_fields);
+                      const changedNames = getChangedFieldNames(
+                        log.changed_fields,
+                      );
                       const source = getSourceLabel(log);
                       const ActionIcon = actionIcon(log.action, log);
 
@@ -1511,7 +1942,7 @@ export default function MoneyAuditLogsPage() {
                             <span
                               className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold capitalize ring-1 ${actionClass(
                                 log.action,
-                                log
+                                log,
                               )}`}
                             >
                               <ActionIcon className="h-3.5 w-3.5" />
@@ -1610,7 +2041,7 @@ export default function MoneyAuditLogsPage() {
                         <span
                           className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
                             log.action,
-                            log
+                            log,
                           )}`}
                         >
                           <ActionIcon className="h-3.5 w-3.5" />
@@ -1664,6 +2095,391 @@ export default function MoneyAuditLogsPage() {
         </section>
       </div>
 
+      <section className="audit-print-report hidden">
+        <div className="audit-print-header">
+          <div>
+            <p className="audit-print-kicker">Burton Pride C.I.C</p>
+            <h1>Money Tracker Audit Logs</h1>
+            <p className="audit-print-subtitle">
+              Printed {new Date().toLocaleString("en-GB")} • Showing{" "}
+              {filteredLogs.length} of {logs.length} loaded audit logs
+            </p>
+          </div>
+          <div className="audit-print-badge">Audit Report</div>
+        </div>
+
+        <div className="audit-print-filters">
+          <span>
+            <strong>Action:</strong>{" "}
+            {selectedAction === "all"
+              ? "All actions"
+              : actionOptions.find((item) => item.value === selectedAction)
+                  ?.label || actionLabel(selectedAction)}
+          </span>
+          <span>
+            <strong>Search:</strong> {searchTerm || "No search"}
+          </span>
+          <span>
+            <strong>Date from:</strong> {dateFrom || "No start date"}
+          </span>
+          <span>
+            <strong>Date to:</strong> {dateTo || "No end date"}
+          </span>
+          <span>
+            <strong>Sort:</strong> {sortMode}
+          </span>
+        </div>
+
+        <div className="audit-print-stats">
+          <div>
+            <span>Total</span>
+            <strong>{stats.total}</strong>
+          </div>
+          <div>
+            <span>Showing</span>
+            <strong>{stats.visible}</strong>
+          </div>
+          <div>
+            <span>Created</span>
+            <strong>{stats.created}</strong>
+          </div>
+          <div>
+            <span>Checked</span>
+            <strong>{stats.checked}</strong>
+          </div>
+          <div>
+            <span>Unchecked</span>
+            <strong>{stats.unchecked}</strong>
+          </div>
+          <div>
+            <span>Edited</span>
+            <strong>{stats.edited}</strong>
+          </div>
+          <div>
+            <span>Hidden</span>
+            <strong>{stats.hidden}</strong>
+          </div>
+          <div>
+            <span>Deleted</span>
+            <strong>{stats.deleted}</strong>
+          </div>
+          <div>
+            <span>Paid Back</span>
+            <strong>{stats.paidBack}</strong>
+          </div>
+          <div>
+            <span>Users</span>
+            <strong>{stats.uniqueUsers}</strong>
+          </div>
+        </div>
+
+        <table className="audit-print-table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Transaction</th>
+              <th>Who</th>
+              <th>Changed Fields</th>
+              <th>Source / Route</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredLogs.length === 0 ? (
+              <tr>
+                <td colSpan={6}>
+                  No audit logs found for the current filters.
+                </td>
+              </tr>
+            ) : (
+              filteredLogs.map((log) => {
+                const changedNames = getChangedFieldNames(log.changed_fields);
+
+                return (
+                  <tr key={`print-${log.id}`}>
+                    <td>{formatDateTime(log.created_at)}</td>
+                    <td>
+                      <span className="audit-print-action">
+                        {actionLabel(log.action, log)}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{getTransactionTitle(log)}</strong>
+                      {log.transaction_id && (
+                        <small>{log.transaction_id}</small>
+                      )}
+                    </td>
+                    <td>
+                      <strong>{getActorDisplayName(log)}</strong>
+                      {log.actor_email && <small>{log.actor_email}</small>}
+                    </td>
+                    <td>
+                      {changedNames.length > 0
+                        ? changedNames.map(cleanFieldName).join(", ")
+                        : "—"}
+                    </td>
+                    <td>
+                      <strong>{getSourceLabel(log)}</strong>
+                      {log.metadata?.route && (
+                        <small>{log.metadata.route}</small>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        <div className="audit-print-footer">
+          This report is generated from the Burton Pride C.I.C money tracker
+          audit logs.
+        </div>
+      </section>
+
+      <style jsx global>{`
+        @media screen {
+          .audit-print-report {
+            display: none !important;
+          }
+        }
+
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+
+          html,
+          body {
+            background: #ffffff !important;
+            color: #111827 !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .audit-print-report,
+          .audit-print-report * {
+            visibility: visible !important;
+          }
+
+          .audit-print-report {
+            display: block !important;
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 100% !important;
+            min-height: auto !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #111827 !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+          }
+
+          .audit-print-header {
+            display: flex !important;
+            align-items: flex-start !important;
+            justify-content: space-between !important;
+            gap: 16px !important;
+            border-bottom: 3px solid #7c3aed !important;
+            padding-bottom: 12px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .audit-print-kicker {
+            margin: 0 0 3px !important;
+            color: #7c3aed !important;
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
+          }
+
+          .audit-print-header h1 {
+            margin: 0 !important;
+            color: #111827 !important;
+            font-size: 24px !important;
+            line-height: 1.1 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-subtitle {
+            margin: 6px 0 0 !important;
+            color: #4b5563 !important;
+            font-size: 10px !important;
+          }
+
+          .audit-print-badge {
+            border: 1px solid #c4b5fd !important;
+            border-radius: 999px !important;
+            background: #f5f3ff !important;
+            color: #5b21b6 !important;
+            padding: 7px 12px !important;
+            font-size: 10px !important;
+            font-weight: 900 !important;
+            white-space: nowrap !important;
+          }
+
+          .audit-print-filters {
+            display: grid !important;
+            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 10px !important;
+          }
+
+          .audit-print-filters span {
+            border: 1px solid #e5e7eb !important;
+            border-radius: 8px !important;
+            background: #f9fafb !important;
+            padding: 6px 8px !important;
+            color: #374151 !important;
+            font-size: 9px !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .audit-print-stats {
+            display: grid !important;
+            grid-template-columns: repeat(10, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .audit-print-stats div {
+            border: 1px solid #e5e7eb !important;
+            border-radius: 10px !important;
+            background: #ffffff !important;
+            padding: 7px 8px !important;
+            break-inside: avoid !important;
+          }
+
+          .audit-print-stats span {
+            display: block !important;
+            color: #6b7280 !important;
+            font-size: 8px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.04em !important;
+          }
+
+          .audit-print-stats strong {
+            display: block !important;
+            margin-top: 2px !important;
+            color: #111827 !important;
+            font-size: 18px !important;
+            line-height: 1 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            color: #111827 !important;
+            font-size: 9px !important;
+          }
+
+          .audit-print-table thead {
+            display: table-header-group !important;
+          }
+
+          .audit-print-table tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          .audit-print-table th {
+            border: 1px solid #d1d5db !important;
+            background: #111827 !important;
+            color: #ffffff !important;
+            padding: 7px 6px !important;
+            text-align: left !important;
+            font-size: 9px !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table td {
+            border: 1px solid #e5e7eb !important;
+            padding: 6px !important;
+            vertical-align: top !important;
+            color: #111827 !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .audit-print-table tbody tr:nth-child(even) td {
+            background: #f9fafb !important;
+          }
+
+          .audit-print-table th:nth-child(1),
+          .audit-print-table td:nth-child(1) {
+            width: 13% !important;
+          }
+
+          .audit-print-table th:nth-child(2),
+          .audit-print-table td:nth-child(2) {
+            width: 12% !important;
+          }
+
+          .audit-print-table th:nth-child(3),
+          .audit-print-table td:nth-child(3) {
+            width: 20% !important;
+          }
+
+          .audit-print-table th:nth-child(4),
+          .audit-print-table td:nth-child(4) {
+            width: 18% !important;
+          }
+
+          .audit-print-table th:nth-child(5),
+          .audit-print-table td:nth-child(5) {
+            width: 18% !important;
+          }
+
+          .audit-print-table th:nth-child(6),
+          .audit-print-table td:nth-child(6) {
+            width: 19% !important;
+          }
+
+          .audit-print-table strong {
+            display: block !important;
+            color: #111827 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table small {
+            display: block !important;
+            margin-top: 2px !important;
+            color: #6b7280 !important;
+            font-size: 8px !important;
+            line-height: 1.25 !important;
+          }
+
+          .audit-print-action {
+            display: inline-block !important;
+            border: 1px solid #c4b5fd !important;
+            border-radius: 999px !important;
+            background: #f5f3ff !important;
+            color: #4c1d95 !important;
+            padding: 3px 7px !important;
+            font-size: 8px !important;
+            font-weight: 900 !important;
+            white-space: nowrap !important;
+          }
+
+          .audit-print-footer {
+            margin-top: 10px !important;
+            border-top: 1px solid #e5e7eb !important;
+            padding-top: 7px !important;
+            color: #6b7280 !important;
+            font-size: 9px !important;
+          }
+
+          .fixed {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       {selectedLog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-3xl border border-white/10 bg-[#070716] text-white shadow-2xl">
@@ -1673,7 +2489,7 @@ export default function MoneyAuditLogsPage() {
                   <div
                     className={`mb-3 inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
                       selectedLog.action,
-                      selectedLog
+                      selectedLog,
                     )}`}
                   >
                     {(() => {
@@ -1770,7 +2586,10 @@ export default function MoneyAuditLogsPage() {
                       <tbody>
                         {Object.entries(selectedLog.changed_fields).map(
                           ([field, value]: [string, any]) => (
-                            <tr key={field} className="border-t border-white/10">
+                            <tr
+                              key={field}
+                              className="border-t border-white/10"
+                            >
                               <td className="p-3 font-bold text-white">
                                 {cleanFieldName(field)}
                               </td>
@@ -1787,7 +2606,7 @@ export default function MoneyAuditLogsPage() {
                                 </pre>
                               </td>
                             </tr>
-                          )
+                          ),
                         )}
                       </tbody>
                     </table>
@@ -1802,8 +2621,14 @@ export default function MoneyAuditLogsPage() {
               {showRawData && (
                 <>
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <RawDataCard title="Before Data" data={selectedLog.before_data} />
-                    <RawDataCard title="After Data" data={selectedLog.after_data} />
+                    <RawDataCard
+                      title="Before Data"
+                      data={selectedLog.before_data}
+                    />
+                    <RawDataCard
+                      title="After Data"
+                      data={selectedLog.after_data}
+                    />
                   </div>
 
                   <RawDataCard
@@ -1828,13 +2653,24 @@ function StatCard({
 }: {
   label: string;
   value: number;
-  tone: "white" | "purple" | "emerald" | "sky" | "red" | "orange" | "pink";
+  tone:
+    | "white"
+    | "purple"
+    | "emerald"
+    | "sky"
+    | "cyan"
+    | "amber"
+    | "red"
+    | "orange"
+    | "pink";
 }) {
   const classes = {
     white: "bg-white/[0.04] ring-white/10 text-white",
     purple: "bg-purple-500/10 ring-purple-300/10 text-purple-100",
     emerald: "bg-emerald-500/10 ring-emerald-300/10 text-emerald-100",
     sky: "bg-sky-500/10 ring-sky-300/10 text-sky-100",
+    cyan: "bg-cyan-500/10 ring-cyan-300/10 text-cyan-100",
+    amber: "bg-amber-500/10 ring-amber-300/10 text-amber-100",
     red: "bg-red-500/10 ring-red-300/10 text-red-100",
     orange: "bg-orange-500/10 ring-orange-300/10 text-orange-100",
     pink: "bg-pink-500/10 ring-pink-300/10 text-pink-100",
@@ -1859,7 +2695,7 @@ function InfoCard({
   title: string;
   subtitle?: string;
   extra?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -1889,7 +2725,9 @@ function RawDataCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${className}`}>
+    <div
+      className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${className}`}
+    >
       <h3 className="mb-3 font-bold">{title}</h3>
 
       <pre className="max-h-96 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-white/70">

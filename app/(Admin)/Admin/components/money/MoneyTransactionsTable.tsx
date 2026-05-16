@@ -1,15 +1,15 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-import {
-  Download,
-  FileText,
-  Pencil,
-  Printer,
-  Trash2,
-} from "lucide-react";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { useUser } from "@clerk/nextjs";
+import { Download, FileText, Pencil, Printer, Trash2 } from "lucide-react";
 
-import type { Sponsor, Transaction } from "@/lib/money/types";
+import type {
+  FundingType,
+  Sponsor,
+  Transaction,
+  TransactionAttachment,
+} from "@/lib/money/types";
 
 import {
   formatDate,
@@ -75,6 +75,7 @@ type MoneyTransactionsTableProps = {
   deletingAll: boolean;
   deleting: boolean;
   repayingId: string | null;
+  checkingId: string | null;
 
   onPrint: () => void;
   onExportExcel: () => void | Promise<void>;
@@ -83,7 +84,11 @@ type MoneyTransactionsTableProps = {
   onOpenDeleteAll: () => void;
   onEditTransaction: (item: Transaction) => void;
   onHideTransaction: (id: string) => void;
-  onTogglePersonalFundsRepaid: (item: Transaction) => void | Promise<void>;
+  onTogglePersonalFundsRepaid: (
+    item: Transaction,
+    proofFiles?: File[]
+  ) => void | Promise<void>;
+  onMarkTransactionChecked: (item: Transaction) => void | Promise<void>;
 };
 
 const paymentMethodFilterOptions = [
@@ -96,6 +101,154 @@ const paymentMethodFilterOptions = [
   "Personal Funds",
   "Item Donation",
 ];
+
+function fundingTypeLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "Grant Money";
+  if (type === "loan") return "Loan";
+  if (type === "other") return "Other Funding";
+  return "Sponsor";
+}
+
+function fundingShortLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "grant";
+  if (type === "loan") return "loan";
+  if (type === "other") return "funding";
+  return "sponsor";
+}
+
+function fundingBadgeClass(type?: FundingType | string | null) {
+  if (type === "grant") {
+    return "bg-emerald-500/20 text-emerald-100 ring-emerald-300/20";
+  }
+
+  if (type === "loan") {
+    return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
+  }
+
+  if (type === "other") {
+    return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
+  }
+
+  return "bg-amber-500/20 text-amber-100 ring-amber-300/20";
+}
+
+function formatFileSize(size?: number | null) {
+  if (!size || size <= 0) return "";
+
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getTransactionFiles(item: Transaction): TransactionAttachment[] {
+  const attachments = item.attachments || [];
+
+  if (attachments.length > 0) {
+    return attachments;
+  }
+
+  if (item.invoice_image_url) {
+    return [
+      {
+        id: `${item.id}-old-invoice`,
+        transaction_id: item.id,
+        file_name: "Old invoice / receipt",
+        file_url: item.invoice_image_url,
+        file_type: null,
+        file_size: null,
+        created_at: item.created_at,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function normaliseText(value?: string | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = String(email || "").trim();
+
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return "";
+  }
+
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+function getCheckedByDisplayName(item: Transaction) {
+  const row = item as Transaction & {
+    checked_by_name?: string | null;
+    checked_by_email?: string | null;
+    checked_by_user_id?: string | null;
+  };
+
+  return (
+    row.checked_by_name ||
+    row.checked_by ||
+    nameFromEmail(row.checked_by_email) ||
+    "Unknown admin"
+  );
+}
+
+function getCheckedByEmail(item: Transaction) {
+  const row = item as Transaction & {
+    checked_by_email?: string | null;
+  };
+
+  return row.checked_by_email || null;
+}
+
+function getCheckedByUserId(item: Transaction) {
+  const row = item as Transaction & {
+    checked_by_user_id?: string | null;
+  };
+
+  return row.checked_by_user_id || null;
+}
+
+function canCurrentAdminUncheckTransaction({
+  item,
+  currentUserId,
+  currentUserEmail,
+  currentUserName,
+}: {
+  item: Transaction;
+  currentUserId?: string | null;
+  currentUserEmail?: string | null;
+  currentUserName?: string | null;
+}) {
+  if (!item.checked_at) return false;
+
+  const checkedByUserId = getCheckedByUserId(item);
+  const checkedByEmail = getCheckedByEmail(item);
+  const checkedByName = getCheckedByDisplayName(item);
+
+  if (checkedByUserId && currentUserId) {
+    return checkedByUserId === currentUserId;
+  }
+
+  if (checkedByEmail && currentUserEmail) {
+    return normaliseText(checkedByEmail) === normaliseText(currentUserEmail);
+  }
+
+  /*
+    Legacy fallback for older checked records that only saved checked_by.
+    New records should use checked_by_user_id / checked_by_email from the API.
+  */
+  if (checkedByName && currentUserName) {
+    return normaliseText(checkedByName) === normaliseText(currentUserName);
+  }
+
+  return false;
+}
 
 export default function MoneyTransactionsTable({
   loading,
@@ -132,6 +285,7 @@ export default function MoneyTransactionsTable({
   deletingAll,
   deleting,
   repayingId,
+  checkingId,
 
   onPrint,
   onExportExcel,
@@ -141,9 +295,50 @@ export default function MoneyTransactionsTable({
   onEditTransaction,
   onHideTransaction,
   onTogglePersonalFundsRepaid,
+  onMarkTransactionChecked,
 }: MoneyTransactionsTableProps) {
+  const { user } = useUser();
+
+  const currentUserId = user?.id || null;
+  const currentUserEmail =
+    user?.primaryEmailAddress?.emailAddress ||
+    user?.emailAddresses?.[0]?.emailAddress ||
+    null;
+  const currentUserName =
+    user?.fullName ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    nameFromEmail(currentUserEmail) ||
+    null;
+
+  const [repaymentProofFiles, setRepaymentProofFiles] = useState<
+    Record<string, File[]>
+  >({});
+
   const topActionButtonBase =
     "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none";
+
+  function getFundingForTransaction(item: Transaction) {
+    if (!isSponsorshipTransaction(item)) return null;
+
+    return (
+      displaySponsors.find((sponsor) => {
+        const sponsorName = String(sponsor.sponsor_name || "")
+          .trim()
+          .toLowerCase();
+
+        const itemSponsorName = String(item.sponsor_name || "")
+          .trim()
+          .toLowerCase();
+
+        return (
+          sponsor.id === item.sponsor_id ||
+          Boolean(
+            sponsorName && itemSponsorName && sponsorName === itemSponsorName
+          )
+        );
+      }) || null
+    );
+  }
 
   return (
     <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
@@ -158,6 +353,15 @@ export default function MoneyTransactionsTable({
               ? selectedYear
               : monthNameFromKey(selectedViewMonth)}
           </p>
+
+          {selectedPrintMonth !== "all" && (
+            <p className="mt-1 text-xs text-emerald-200/80">
+              Export and print selected for{" "}
+              <strong>{monthNameFromKey(selectedPrintMonth)}</strong> —{" "}
+              {printTransactionsList.length} transaction
+              {printTransactionsList.length === 1 ? "" : "s"}.
+            </p>
+          )}
         </div>
 
         <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-3 2xl:flex 2xl:flex-wrap 2xl:justify-end">
@@ -165,7 +369,7 @@ export default function MoneyTransactionsTable({
             value={selectedPrintMonth}
             onChange={(event) => setSelectedPrintMonth(event.target.value)}
             className="min-w-0 rounded-xl bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20 focus:ring-sky-300/50"
-            title="Choose print month"
+            title="Choose print/export month"
           >
             {printMonthOptions.map((month) => (
               <option
@@ -173,7 +377,7 @@ export default function MoneyTransactionsTable({
                 value={month.key}
                 className="bg-[#11111f] text-white"
               >
-                Print {month.label} ({month.count})
+                Print / Export {month.label} ({month.count})
               </option>
             ))}
           </select>
@@ -193,11 +397,14 @@ export default function MoneyTransactionsTable({
           <button
             type="button"
             onClick={onExportExcel}
-            disabled={filteredTransactions.length === 0}
+            disabled={printTransactionsList.length === 0}
             className={`${topActionButtonBase} bg-emerald-500/15 text-emerald-200 ring-emerald-300/20 hover:bg-emerald-500/25`}
           >
             <Download className="h-4 w-4" />
-            Export Excel
+
+            {selectedPrintMonth === "all"
+              ? "Export Excel"
+              : `Export ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
           </button>
 
           <button
@@ -241,9 +448,9 @@ export default function MoneyTransactionsTable({
               </p>
 
               <p className="text-xs text-sky-100/70">
-                Choose a month to only show that month on screen. Export Excel
-                uses this current view. Yearly Report still exports the full
-                year.
+                Choose a month to only show that month on screen. The
+                Print/Export dropdown above controls what gets printed or
+                exported.
               </p>
             </div>
 
@@ -290,7 +497,7 @@ export default function MoneyTransactionsTable({
             selectedViewMonth === "all"
               ? selectedYear
               : monthNameFromKey(selectedViewMonth)
-          } transactions by title, sponsor, note, payment method, or amount...`}
+          } transactions by reference, title, funding name, note, payment method, or amount...`}
           className="w-full rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
         />
 
@@ -310,12 +517,12 @@ export default function MoneyTransactionsTable({
                 {item === "all"
                   ? "All"
                   : item === "income"
-                  ? "Money In"
-                  : item === "expense"
-                  ? "Money Out"
-                  : item === "personal"
-                  ? "Personal Funds"
-                  : "Sponsorship"}
+                    ? "Money In"
+                    : item === "expense"
+                      ? "Money Out"
+                      : item === "personal"
+                        ? "Personal Funds"
+                        : "Funding"}
               </button>
             )
           )}
@@ -377,12 +584,12 @@ export default function MoneyTransactionsTable({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <p className="text-sm font-bold text-amber-100">
-                Organise by sponsor
+                Organise by funding record
               </p>
 
               <p className="text-xs text-amber-100/70">
-                Choose one sponsor to only show money in and spending linked to
-                them.
+                Choose one sponsor, grant, loan or other funding record to only
+                show money in and spending linked to it.
               </p>
             </div>
 
@@ -400,7 +607,7 @@ export default function MoneyTransactionsTable({
                 className="w-full min-w-0 rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/50 sm:min-w-[240px]"
               >
                 <option className="bg-[#11111f] text-white" value="all">
-                  All sponsors
+                  All funding records
                 </option>
 
                 {displaySponsors.map((sponsor) => (
@@ -409,6 +616,7 @@ export default function MoneyTransactionsTable({
                     key={sponsor.id}
                     value={sponsor.id}
                   >
+                    {fundingTypeLabel(sponsor.funding_type)} —{" "}
                     {sponsor.sponsor_name}
                   </option>
                 ))}
@@ -423,7 +631,7 @@ export default function MoneyTransactionsTable({
                   }}
                   className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20"
                 >
-                  Clear sponsor
+                  Clear funding
                 </button>
               )}
             </div>
@@ -432,7 +640,11 @@ export default function MoneyTransactionsTable({
           {selectedSponsor && (
             <div className="mt-3 rounded-xl bg-black/20 px-4 py-3 text-sm text-amber-100">
               Showing transactions for{" "}
-              <strong>{selectedSponsor.sponsor_name}</strong>.
+              <strong>
+                {fundingTypeLabel(selectedSponsor.funding_type)} —{" "}
+                {selectedSponsor.sponsor_name}
+              </strong>
+              .
             </div>
           )}
         </div>
@@ -449,20 +661,22 @@ export default function MoneyTransactionsTable({
         </div>
       ) : (
         <div className="w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full">
-          <table className="w-full min-w-[1100px] text-sm">
+          <table className="w-full min-w-[1450px] text-sm">
             <thead className="bg-white/10 text-white/60">
               <tr>
+                <th className="p-3 text-left">Reference</th>
                 <th className="p-3 text-left">Date</th>
                 <th className="p-3 text-left">Title</th>
                 <th className="p-3 text-left">Type</th>
-                <th className="p-3 text-left">Sponsor</th>
-                <th className="p-3 text-left">Sponsorship Note</th>
+                <th className="p-3 text-right">Amount</th>
+                <th className="p-3 text-left">Funding</th>
+                <th className="p-3 text-left">Funding Note</th>
                 <th className="p-3 text-left">Personal</th>
                 <th className="p-3 text-left">Paid By</th>
                 <th className="p-3 text-left">Repayment</th>
                 <th className="p-3 text-left">Payment</th>
-                <th className="p-3 text-left">Invoice</th>
-                <th className="p-3 text-right">Amount</th>
+                <th className="p-3 text-left">Files</th>
+                <th className="p-3 text-left">Checked</th>
                 <th className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">
                   Action
                 </th>
@@ -472,10 +686,26 @@ export default function MoneyTransactionsTable({
             <tbody>
               {filteredTransactions.map((item) => {
                 const isPersonal = isPersonalFundsTransaction(item);
-                const hasSponsor = isSponsorshipTransaction(item);
+                const hasFunding = isSponsorshipTransaction(item);
+                const fundingRecord = getFundingForTransaction(item);
+                const fundingType = fundingRecord?.funding_type || "sponsor";
+                const fundingLabel = fundingTypeLabel(fundingType);
+                const shortLabel = fundingShortLabel(fundingType);
+                const files = getTransactionFiles(item);
+                const proofFiles = repaymentProofFiles[item.id] || [];
 
                 return (
                   <tr key={item.id} className="border-t border-white/10">
+                    <td className="whitespace-nowrap p-3">
+                      {item.transaction_reference ? (
+                        <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">
+                          {item.transaction_reference}
+                        </span>
+                      ) : (
+                        <span className="text-white/40">Pending</span>
+                      )}
+                    </td>
+
                     <td className="whitespace-nowrap p-3">
                       {none(item.transaction_date)}
                     </td>
@@ -494,11 +724,47 @@ export default function MoneyTransactionsTable({
                       {item.type === "income" ? "Money In" : "Money Out"}
                     </td>
 
-                    <td className="max-w-[160px] p-3">
-                      {hasSponsor ? (
-                        <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
-                          {item.sponsor_name || "Sponsor"}
-                        </span>
+                    <td className="whitespace-nowrap p-3 text-right font-bold">
+                      <div>{money(item.amount_pence)}</div>
+
+                      {hasFunding && (
+                        <div className="mt-1 text-xs font-semibold text-amber-300">
+                          {item.type === "income"
+                            ? `${fundingLabel} in`
+                            : `${shortLabel}-funded spend`}
+                        </div>
+                      )}
+
+                      {isPersonal && item.personal_funds_repaid && (
+                        <div className="mt-1 text-xs font-semibold text-emerald-300">
+                          Taken from balance
+                        </div>
+                      )}
+
+                      {isPersonal && !item.personal_funds_repaid && (
+                        <div className="mt-1 text-xs font-semibold text-orange-300">
+                          Not taken yet
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="max-w-[180px] p-3">
+                      {hasFunding ? (
+                        <div className="space-y-2">
+                          <span
+                            className={`inline-flex rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${fundingBadgeClass(
+                              fundingType
+                            )}`}
+                          >
+                            {fundingLabel}
+                          </span>
+
+                          <p className="break-words text-xs font-semibold text-white/80">
+                            {item.sponsor_name ||
+                              fundingRecord?.sponsor_name ||
+                              "Funding record"}
+                          </p>
+                        </div>
                       ) : (
                         <span className="text-white/40">None</span>
                       )}
@@ -534,7 +800,7 @@ export default function MoneyTransactionsTable({
                       )}
                     </td>
 
-                    <td className="p-3">
+                    <td className="min-w-[190px] p-3">
                       {isPersonal ? (
                         <div className="space-y-2">
                           {item.personal_funds_repaid ? (
@@ -553,10 +819,52 @@ export default function MoneyTransactionsTable({
                             </div>
                           )}
 
+                          {!item.personal_funds_repaid && (
+                            <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                              <label className="mb-1 block text-[11px] font-bold text-white/60">
+                                Upload proof before payback
+                              </label>
+
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
+                                onChange={(event) => {
+                                  const selectedFiles = Array.from(
+                                    event.target.files || []
+                                  );
+
+                                  setRepaymentProofFiles((prev) => ({
+                                    ...prev,
+                                    [item.id]: selectedFiles,
+                                  }));
+                                }}
+                                className="w-full text-[11px] text-white/60 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-2 file:py-1 file:text-[11px] file:font-bold file:text-white hover:file:bg-emerald-400"
+                              />
+
+                              {proofFiles.length > 0 && (
+                                <p className="mt-2 text-[11px] font-semibold text-emerald-200">
+                                  {proofFiles.length} proof file
+                                  {proofFiles.length === 1 ? "" : "s"} selected
+                                </p>
+                              )}
+                            </div>
+                          )}
+
                           <button
                             type="button"
                             disabled={repayingId === item.id}
-                            onClick={() => onTogglePersonalFundsRepaid(item)}
+                            onClick={async () => {
+                              await onTogglePersonalFundsRepaid(
+                                item,
+                                proofFiles
+                              );
+
+                              setRepaymentProofFiles((prev) => ({
+                                ...prev,
+                                [item.id]: [],
+                              }));
+                            }}
                             className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:opacity-60 ${
                               item.personal_funds_repaid
                                 ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25"
@@ -566,8 +874,8 @@ export default function MoneyTransactionsTable({
                             {repayingId === item.id
                               ? "Updating..."
                               : item.personal_funds_repaid
-                              ? "Mark not paid back"
-                              : "Mark paid back"}
+                                ? "Mark not paid back"
+                                : "Mark paid back"}
                           </button>
                         </div>
                       ) : (
@@ -576,45 +884,114 @@ export default function MoneyTransactionsTable({
                     </td>
 
                     <td className="whitespace-nowrap p-3">
-                      {item.payment_method || "None"}
+                      {hasFunding
+                        ? "Funding Money"
+                        : item.payment_method || "None"}
                     </td>
 
-                    <td className="p-3">
-                      {item.invoice_image_url ? (
-                        <a
-                          href={item.invoice_image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
-                        >
-                          <FileText className="h-4 w-4" />
-                          View
-                        </a>
+                    <td className="min-w-[170px] p-3">
+                      {files.length > 0 ? (
+                        <div className="space-y-2">
+                          <span className="inline-flex rounded-2xl bg-sky-500/15 px-3 py-1 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20">
+                            {files.length} file{files.length === 1 ? "" : "s"}
+                          </span>
+
+                          <div className="space-y-1">
+                            {files.slice(0, 3).map((file, index) => (
+                              <a
+                                key={file.id || `${file.file_url}-${index}`}
+                                href={file.file_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block max-w-[210px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
+                                title={
+                                  file.file_name || `Attachment ${index + 1}`
+                                }
+                              >
+                                <FileText className="mr-1 inline h-3 w-3" />
+                                {file.file_name || `Attachment ${index + 1}`}
+                                {file.file_size
+                                  ? ` (${formatFileSize(file.file_size)})`
+                                  : ""}
+                              </a>
+                            ))}
+
+                            {files.length > 3 && (
+                              <p className="text-xs text-white/40">
+                                +{files.length - 3} more file
+                                {files.length - 3 === 1 ? "" : "s"}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         <span className="text-white/40">None</span>
                       )}
                     </td>
 
-                    <td className="whitespace-nowrap p-3 text-right font-bold">
-                      <div>{money(item.amount_pence)}</div>
+                    <td className="min-w-[210px] p-3">
+                      {item.checked_at ? (
+                        (() => {
+                          const checkedByName = getCheckedByDisplayName(item);
+                          const canUncheck = canCurrentAdminUncheckTransaction({
+                            item,
+                            currentUserId,
+                            currentUserEmail,
+                            currentUserName,
+                          });
 
-                      {hasSponsor && (
-                        <div className="mt-1 text-xs font-semibold text-amber-300">
-                          {item.type === "income"
-                            ? "Sponsor money in"
-                            : "Sponsor-funded spend"}
-                        </div>
-                      )}
+                          return (
+                            <div className="space-y-2">
+                              <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
+                                <div>Checked</div>
 
-                      {isPersonal && item.personal_funds_repaid && (
-                        <div className="mt-1 text-xs font-semibold text-emerald-300">
-                          Taken from balance
-                        </div>
-                      )}
+                                <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+                                  By {checkedByName}
+                                </div>
 
-                      {isPersonal && !item.personal_funds_repaid && (
-                        <div className="mt-1 text-xs font-semibold text-orange-300">
-                          Not taken yet
+                                <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+                                  {formatDate(item.checked_at)}
+                                </div>
+                              </div>
+
+                              {canUncheck ? (
+                                <button
+                                  type="button"
+                                  disabled={checkingId === item.id}
+                                  onClick={() => onMarkTransactionChecked(item)}
+                                  className="w-full rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:opacity-60"
+                                >
+                                  {checkingId === item.id
+                                    ? "Undoing..."
+                                    : "Undo checked"}
+                                </button>
+                              ) : (
+                                <div
+                                  className="rounded-xl bg-white/10 px-3 py-2 text-[11px] font-bold text-white/50 ring-1 ring-white/10"
+                                  title="Only the admin who marked this transaction as checked can undo it."
+                                >
+                                  Only {checkedByName} can uncheck
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-bold text-white/60 ring-1 ring-white/10">
+                            Not checked
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={checkingId === item.id}
+                            onClick={() => onMarkTransactionChecked(item)}
+                            className="w-full rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-60"
+                          >
+                            {checkingId === item.id
+                              ? "Checking..."
+                              : "Mark checked"}
+                          </button>
                         </div>
                       )}
                     </td>

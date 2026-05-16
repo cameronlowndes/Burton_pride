@@ -6,7 +6,7 @@ import { requireMainAdmin } from "@/lib/isMainAdmin";
 import {
   createMoneyAuditLog,
   createBulkMoneyAuditLogs,
-} from "@/lib/adminMoneyAudit";
+} from "@/lib/money/adminMoneyAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +41,197 @@ function cleanOrNull(value: string) {
 
 function toBoolean(value: string) {
   return value === "true" || value === "1" || value === "yes";
+}
+
+function getTransactionYearFromDate(dateValue: string | null | undefined) {
+  if (!dateValue) {
+    return new Date().getFullYear().toString();
+  }
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return new Date().getFullYear().toString();
+  }
+
+  return date.getFullYear().toString();
+}
+
+function safeFileName(name: string) {
+  return String(name || "attachment")
+    .trim()
+    .replace(/[^a-zA-Z0-9.\-_ ]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 120);
+}
+
+async function createTransactionReference(year: string) {
+  const cleanYear = String(year || new Date().getFullYear()).trim();
+  const prefix = `BP-${cleanYear}-`;
+
+  const { data, error } = await supabaseAdmin
+    .from("money_transactions")
+    .select("transaction_reference")
+    .like("transaction_reference", `${prefix}%`)
+    .order("transaction_reference", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const latestReference = data?.[0]?.transaction_reference || "";
+  const latestNumber = Number(latestReference.replace(prefix, "")) || 0;
+  const nextNumber = latestNumber + 1;
+
+  return `${prefix}${String(nextNumber).padStart(3, "0")}`;
+}
+
+async function insertTransactionWithReference(insertData: Record<string, any>) {
+  const transactionDate =
+    insertData.transaction_date || new Date().toISOString().slice(0, 10);
+
+  const transactionYear = getTransactionYearFromDate(transactionDate);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const transactionReference =
+      insertData.transaction_reference ||
+      (await createTransactionReference(transactionYear));
+
+    const dataWithReference = {
+      ...insertData,
+      transaction_reference: transactionReference,
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from("money_transactions")
+      .insert(dataWithReference)
+      .select("*")
+      .single();
+
+    if (!error) {
+      return {
+        data,
+        error: null,
+        sent: dataWithReference,
+      };
+    }
+
+    const errorMessage = String(error.message || "").toLowerCase();
+    const isDuplicateReference =
+      error.code === "23505" ||
+      errorMessage.includes("duplicate") ||
+      errorMessage.includes("transaction_reference");
+
+    if (!isDuplicateReference || attempt === 4) {
+      return {
+        data: null,
+        error,
+        sent: dataWithReference,
+      };
+    }
+
+    insertData.transaction_reference = null;
+  }
+
+  return {
+    data: null,
+    error: {
+      message: "Failed to create a unique transaction reference.",
+    },
+    sent: insertData,
+  };
+}
+
+async function uploadTransactionAttachments({
+  transactionId,
+  files,
+}: {
+  transactionId: string;
+  files: File[];
+}) {
+  const uploadedAttachments: any[] = [];
+
+  for (const file of files) {
+    if (!file || file.size <= 0) continue;
+
+    const fileExt = file.name.split(".").pop() || "file";
+    const cleanName = safeFileName(file.name);
+    const fileName = `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}-${cleanName || `attachment.${fileExt}`}`;
+
+    const filePath = `transactions/${transactionId}/${fileName}`;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("money-invoices")
+      .upload(filePath, buffer, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabaseAdmin.storage
+      .from("money-invoices")
+      .getPublicUrl(filePath);
+
+    const attachmentInsert = {
+      transaction_id: transactionId,
+      file_name: file.name || fileName,
+      file_url: publicUrlData.publicUrl,
+      file_type: file.type || null,
+      file_size: file.size || null,
+    };
+
+    const { data: attachment, error: attachmentError } = await supabaseAdmin
+      .from("money_transaction_attachments")
+      .insert(attachmentInsert)
+      .select("*")
+      .single();
+
+    if (attachmentError) {
+      throw attachmentError;
+    }
+
+    uploadedAttachments.push(attachment);
+  }
+
+  return uploadedAttachments;
+}
+
+async function loadAttachmentsForTransactions(transactionIds: string[]) {
+  if (transactionIds.length === 0) return new Map<string, any[]>();
+
+  const { data, error } = await supabaseAdmin
+    .from("money_transaction_attachments")
+    .select("*")
+    .in("transaction_id", transactionIds)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to load money transaction attachments:", error);
+    return new Map<string, any[]>();
+  }
+
+  const map = new Map<string, any[]>();
+
+  for (const attachment of data || []) {
+    const transactionId = attachment.transaction_id;
+
+    if (!map.has(transactionId)) {
+      map.set(transactionId, []);
+    }
+
+    map.get(transactionId)?.push(attachment);
+  }
+
+  return map;
 }
 
 async function getActorLabel() {
@@ -248,17 +439,18 @@ async function syncPaidDonationsToMoneyTracker() {
         deleted_by: null,
       };
 
-      const { data: inserted, error: insertError } = await supabaseAdmin
-        .from("money_transactions")
-        .insert(insertData)
-        .select("*")
-        .single();
+      const {
+        data: inserted,
+        error: insertError,
+        sent,
+      } = await insertTransactionWithReference(insertData);
 
       if (insertError) {
         console.error("Failed to sync donation into money tracker:", {
           error: insertError,
           sessionId,
           donationId: donation.id,
+          sent,
         });
         continue;
       }
@@ -274,6 +466,8 @@ async function syncPaidDonationsToMoneyTracker() {
           route: "/api/admin/money/transactions",
           stripe_session_id: sessionId,
           donation_id: donation.id,
+          transaction_reference:
+            inserted?.transaction_reference || sent?.transaction_reference,
         },
       });
     }
@@ -304,10 +498,20 @@ export async function GET() {
       );
     }
 
+    const rows = data || [];
+    const attachmentMap = await loadAttachmentsForTransactions(
+      rows.map((item) => item.id)
+    );
+
+    const transactionsWithAttachments = rows.map((item) => ({
+      ...item,
+      attachments: attachmentMap.get(item.id) || [],
+    }));
+
     return NextResponse.json(
       {
         ok: true,
-        transactions: data || [],
+        transactions: transactionsWithAttachments,
       },
       {
         headers: {
@@ -348,9 +552,21 @@ export async function POST(req: NextRequest) {
     const sponsorName = clean(formData.get("sponsorName"));
     const sponsorshipNote = clean(formData.get("sponsorshipNote"));
 
-    const invoiceFile = formData.get("invoiceFile") as File | null;
-    const amountPounds = Number(amount || 0);
+    const invoiceFiles = formData
+      .getAll("invoiceFiles")
+      .filter((file): file is File => file instanceof File && file.size > 0);
 
+    const oldSingleInvoiceFile = formData.get("invoiceFile");
+
+    if (
+      oldSingleInvoiceFile instanceof File &&
+      oldSingleInvoiceFile.size > 0 &&
+      invoiceFiles.length === 0
+    ) {
+      invoiceFiles.push(oldSingleInvoiceFile);
+    }
+
+    const amountPounds = Number(amount || 0);
     const isSponsorLinked = Boolean(sponsorId || sponsorName);
 
     if (!title || !type || amountPounds <= 0) {
@@ -406,43 +622,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let invoiceImageUrl: string | null = null;
-
-    if (invoiceFile && invoiceFile.size > 0) {
-      const fileExt = invoiceFile.name.split(".").pop() || "jpg";
-      const fileName = `${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}.${fileExt}`;
-
-      const filePath = `transactions/${fileName}`;
-
-      const arrayBuffer = await invoiceFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("money-invoices")
-        .upload(filePath, buffer, {
-          contentType: invoiceFile.type || "image/jpeg",
-          upsert: false,
-        });
-
-      if (uploadError) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: uploadError.message,
-            details: uploadError,
-          },
-          { status: 500 }
-        );
-      }
-
-      const { data: publicUrlData } = supabaseAdmin.storage
-        .from("money-invoices")
-        .getPublicUrl(filePath);
-
-      invoiceImageUrl = publicUrlData.publicUrl;
-    }
+    const finalTransactionDate =
+      transactionDate || new Date().toISOString().slice(0, 10);
 
     const insertData = {
       title,
@@ -453,10 +634,9 @@ export async function POST(req: NextRequest) {
       payment_method: isSponsorLinked
         ? "Sponsorship Money"
         : cleanOrNull(paymentMethod),
-      transaction_date:
-        transactionDate || new Date().toISOString().slice(0, 10),
+      transaction_date: finalTransactionDate,
 
-      invoice_image_url: invoiceImageUrl,
+      invoice_image_url: null,
 
       is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
       personal_funds_name:
@@ -481,39 +661,79 @@ export async function POST(req: NextRequest) {
       deleted_by: null,
     };
 
-    const { data, error } = await supabaseAdmin
-      .from("money_transactions")
-      .insert(insertData)
-      .select("*")
-      .single();
+    const { data, error, sent } = await insertTransactionWithReference(
+      insertData
+    );
 
-    if (error) {
+    if (error || !data?.id) {
       return NextResponse.json(
         {
           ok: false,
-          error: error.message,
+          error: error?.message || "Failed to create transaction.",
           details: error,
-          sent: insertData,
+          sent,
         },
         { status: 500 }
       );
     }
+
+    let attachments: any[] = [];
+
+    if (invoiceFiles.length > 0) {
+      try {
+        attachments = await uploadTransactionAttachments({
+          transactionId: data.id,
+          files: invoiceFiles,
+        });
+
+        if (attachments[0]?.file_url) {
+          await supabaseAdmin
+            .from("money_transactions")
+            .update({
+              invoice_image_url: attachments[0].file_url,
+            })
+            .eq("id", data.id);
+
+          data.invoice_image_url = attachments[0].file_url;
+        }
+      } catch (attachmentError: any) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              attachmentError?.message ||
+              "Transaction was created but one or more attachments failed to upload.",
+            details: attachmentError,
+            transaction: data,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
+    const transactionWithAttachments = {
+      ...data,
+      attachments,
+    };
 
     await createMoneyAuditLog({
       action: "create",
       transactionId: data?.id || null,
       transactionTitle: data?.title || title,
       beforeData: null,
-      afterData: data,
+      afterData: transactionWithAttachments,
       metadata: {
         source: "money_tracker",
         route: "/api/admin/money/transactions",
+        transaction_reference:
+          data?.transaction_reference || sent?.transaction_reference,
+        attachment_count: attachments.length,
       },
     });
 
     return NextResponse.json({
       ok: true,
-      transaction: data,
+      transaction: transactionWithAttachments,
     });
   } catch (err) {
     console.error("Money transactions POST error:", err);

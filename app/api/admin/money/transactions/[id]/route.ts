@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { createMoneyAuditLog } from "@/lib/adminMoneyAudit";
+import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +36,14 @@ function toPence(amount: string) {
   return Math.round(value * 100);
 }
 
+function safeFileName(name: string) {
+  return String(name || "attachment")
+    .trim()
+    .replace(/[^a-zA-Z0-9.\-_ ]/g, "")
+    .replace(/\s+/g, "-")
+    .slice(0, 120);
+}
+
 async function getActorLabel() {
   try {
     const user = await currentUser();
@@ -58,6 +66,83 @@ async function getActorLabel() {
   } catch {
     return "Unknown admin";
   }
+}
+
+async function uploadTransactionAttachments({
+  transactionId,
+  files,
+}: {
+  transactionId: string;
+  files: File[];
+}) {
+  const uploadedAttachments: any[] = [];
+
+  for (const file of files) {
+    if (!file || file.size <= 0) continue;
+
+    const fileExt = file.name.split(".").pop() || "file";
+    const cleanName = safeFileName(file.name);
+    const fileName = `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}-${cleanName || `attachment.${fileExt}`}`;
+
+    const filePath = `transactions/${transactionId}/${fileName}`;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("money-invoices")
+      .upload(filePath, buffer, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data: publicUrlData } = supabaseAdmin.storage
+      .from("money-invoices")
+      .getPublicUrl(filePath);
+
+    const attachmentInsert = {
+      transaction_id: transactionId,
+      file_name: file.name || fileName,
+      file_url: publicUrlData.publicUrl,
+      file_type: file.type || null,
+      file_size: file.size || null,
+    };
+
+    const { data: attachment, error: attachmentError } = await supabaseAdmin
+      .from("money_transaction_attachments")
+      .insert(attachmentInsert)
+      .select("*")
+      .single();
+
+    if (attachmentError) {
+      throw attachmentError;
+    }
+
+    uploadedAttachments.push(attachment);
+  }
+
+  return uploadedAttachments;
+}
+
+async function loadAttachmentsForTransaction(transactionId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("money_transaction_attachments")
+    .select("*")
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to load transaction attachments:", error);
+    return [];
+  }
+
+  return data || [];
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
@@ -102,6 +187,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
+    const beforeAttachments = await loadAttachmentsForTransaction(id);
+
     const formData = await req.formData();
 
     const title = clean(formData.get("title"));
@@ -120,9 +207,21 @@ export async function PATCH(req: Request, context: RouteContext) {
     const sponsorName = clean(formData.get("sponsorName"));
     const sponsorshipNote = clean(formData.get("sponsorshipNote"));
 
-    const invoiceFile = formData.get("invoiceFile") as File | null;
-    const amountPence = toPence(amount);
+    const invoiceFiles = formData
+      .getAll("invoiceFiles")
+      .filter((file): file is File => file instanceof File && file.size > 0);
 
+    const oldSingleInvoiceFile = formData.get("invoiceFile");
+
+    if (
+      oldSingleInvoiceFile instanceof File &&
+      oldSingleInvoiceFile.size > 0 &&
+      invoiceFiles.length === 0
+    ) {
+      invoiceFiles.push(oldSingleInvoiceFile);
+    }
+
+    const amountPence = toPence(amount);
     const isSponsorLinked = Boolean(sponsorId || sponsorName);
 
     if (!title || !type || !amountPence) {
@@ -180,44 +279,6 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
-    let invoiceImageUrl: string | undefined;
-
-    if (invoiceFile && invoiceFile.size > 0) {
-      const fileExt = invoiceFile.name.split(".").pop() || "jpg";
-      const fileName = `${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}.${fileExt}`;
-
-      const filePath = `transactions/${fileName}`;
-
-      const arrayBuffer = await invoiceFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("money-invoices")
-        .upload(filePath, buffer, {
-          contentType: invoiceFile.type || "image/jpeg",
-          upsert: false,
-        });
-
-      if (uploadError) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: uploadError.message,
-            details: uploadError,
-          },
-          { status: 500 }
-        );
-      }
-
-      const { data: publicUrlData } = supabaseAdmin.storage
-        .from("money-invoices")
-        .getPublicUrl(filePath);
-
-      invoiceImageUrl = publicUrlData.publicUrl;
-    }
-
     const updatedAt = new Date().toISOString();
 
     const updatePayload: Record<string, any> = {
@@ -247,9 +308,12 @@ export async function PATCH(req: Request, context: RouteContext) {
       updated_at: updatedAt,
     };
 
-    if (invoiceImageUrl) {
-      updatePayload.invoice_image_url = invoiceImageUrl;
-    }
+    /*
+      Important:
+      Do not update transaction_reference here.
+      The reference is created once in the main transactions POST route.
+      Editing a transaction should keep the original reference, for example BP-2026-001.
+    */
 
     const { data, error } = await supabaseAdmin
       .from("money_transactions")
@@ -271,21 +335,78 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
+    let newAttachments: any[] = [];
+
+    if (invoiceFiles.length > 0) {
+      try {
+        newAttachments = await uploadTransactionAttachments({
+          transactionId: id,
+          files: invoiceFiles,
+        });
+
+        const firstAttachmentUrl =
+          beforeData?.invoice_image_url ||
+          beforeAttachments?.[0]?.file_url ||
+          newAttachments?.[0]?.file_url ||
+          null;
+
+        if (firstAttachmentUrl && firstAttachmentUrl !== data.invoice_image_url) {
+          await supabaseAdmin
+            .from("money_transactions")
+            .update({
+              invoice_image_url: firstAttachmentUrl,
+              updated_at: updatedAt,
+            })
+            .eq("id", id);
+
+          data.invoice_image_url = firstAttachmentUrl;
+        }
+      } catch (attachmentError: any) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              attachmentError?.message ||
+              "Transaction was updated but one or more attachments failed to upload.",
+            details: attachmentError,
+            transaction: data,
+          },
+          { status: 500 }
+        );
+      }
+    }
+
+    const allAttachments = await loadAttachmentsForTransaction(id);
+
+    const transactionWithAttachments = {
+      ...data,
+      attachments: allAttachments,
+    };
+
     await createMoneyAuditLog({
       action: "edit",
       transactionId: id,
       transactionTitle: data?.title || beforeData?.title || null,
-      beforeData,
-      afterData: data,
+      beforeData: {
+        ...beforeData,
+        attachments: beforeAttachments,
+      },
+      afterData: transactionWithAttachments,
       metadata: {
         source: "money_tracker",
         route: "/api/admin/money/transactions/[id]",
+        transaction_reference:
+          data?.transaction_reference ||
+          beforeData?.transaction_reference ||
+          null,
+        attachment_count: allAttachments.length,
+        new_attachment_count: newAttachments.length,
       },
     });
 
     return NextResponse.json({
       ok: true,
-      transaction: data,
+      transaction: transactionWithAttachments,
       message: "Transaction updated successfully",
     });
   } catch (err) {
@@ -340,6 +461,8 @@ export async function DELETE(req: Request, context: RouteContext) {
       });
     }
 
+    const beforeAttachments = await loadAttachmentsForTransaction(id);
+
     const deletedAt = new Date().toISOString();
     const deletedBy = await getActorLabel();
 
@@ -366,24 +489,37 @@ export async function DELETE(req: Request, context: RouteContext) {
       );
     }
 
+    const transactionWithAttachments = {
+      ...data,
+      attachments: beforeAttachments,
+    };
+
     await createMoneyAuditLog({
       action: "delete",
       transactionId: id,
       transactionTitle: beforeData?.title || data?.title || null,
-      beforeData,
-      afterData: data,
+      beforeData: {
+        ...beforeData,
+        attachments: beforeAttachments,
+      },
+      afterData: transactionWithAttachments,
       metadata: {
         source: "money_tracker",
         route: "/api/admin/money/transactions/[id]",
         delete_type: "soft_delete",
         deleted_at: deletedAt,
         deleted_by: deletedBy,
+        transaction_reference:
+          beforeData?.transaction_reference ||
+          data?.transaction_reference ||
+          null,
+        attachment_count: beforeAttachments.length,
       },
     });
 
     return NextResponse.json({
       ok: true,
-      transaction: data,
+      transaction: transactionWithAttachments,
       message: "Transaction moved to deleted area successfully",
     });
   } catch (err) {

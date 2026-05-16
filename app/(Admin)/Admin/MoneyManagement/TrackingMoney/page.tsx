@@ -8,6 +8,7 @@ import MoneySponsorSection from "../../components/money/MoneySponsorSection";
 import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown";
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
+
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 export default function MoneyTransactionsPage() {
@@ -60,8 +61,8 @@ export default function MoneyTransactionsPage() {
         <MoneyMainGrid
           form={money.form}
           setForm={money.setForm}
-          invoiceFile={money.invoiceFile}
-          setInvoiceFile={money.setInvoiceFile}
+          invoiceFiles={money.invoiceFiles}
+          setInvoiceFiles={money.setInvoiceFiles}
           editingTransaction={money.editingTransaction}
           displaySponsors={money.displaySponsors}
           yearlySponsorBreakdown={money.yearlySponsorBreakdown}
@@ -93,6 +94,7 @@ export default function MoneyTransactionsPage() {
           deletingYear={money.deletingYear}
           deletingAll={money.deletingAll}
           repayingId={money.repayingId}
+          checkingId={money.checkingId}
           deleting={money.deleting}
           onPrint={money.printTransactions}
           onExportExcel={money.exportTransactionsToExcel}
@@ -102,6 +104,7 @@ export default function MoneyTransactionsPage() {
           onEditTransaction={money.startEditTransaction}
           onHideTransaction={money.setDeleteId}
           onTogglePersonalFundsRepaid={money.togglePersonalFundsRepaid}
+          onMarkTransactionChecked={money.markTransactionChecked}
         />
       </div>
 

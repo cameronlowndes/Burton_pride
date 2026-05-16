@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 
+type FundingType = "sponsor" | "grant" | "loan" | "other";
+
 type RouteContext = {
   params: Promise<{
     id: string;
@@ -24,6 +26,28 @@ function clean(value: unknown) {
   return text.length > 0 ? text : null;
 }
 
+function cleanFundingType(value: unknown): FundingType {
+  const fundingType = String(value || "sponsor").trim().toLowerCase();
+
+  if (
+    fundingType === "sponsor" ||
+    fundingType === "grant" ||
+    fundingType === "loan" ||
+    fundingType === "other"
+  ) {
+    return fundingType;
+  }
+
+  return "sponsor";
+}
+
+function fundingTypeLabel(type: FundingType) {
+  if (type === "grant") return "grant / funder";
+  if (type === "loan") return "loan provider";
+  if (type === "other") return "funding";
+  return "sponsor";
+}
+
 export async function PATCH(req: Request, context: RouteContext) {
   try {
     const { id: sponsorId } = await context.params;
@@ -32,7 +56,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Missing sponsor ID.",
+          error: "Missing funding record ID.",
         },
         { status: 400 }
       );
@@ -40,25 +64,34 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     const body = await req.json();
 
-    const sponsorName = clean(body.sponsorName);
-    const contactName = clean(body.contactName);
+    const fundingType = cleanFundingType(
+      body.fundingType || body.funding_type
+    );
+
+    const sponsorName = clean(body.sponsorName || body.sponsor_name);
+    const contactName = clean(body.contactName || body.contact_name);
     const email = clean(body.email);
     const phone = clean(body.phone);
-    const agreedAmountPence = toPence(body.agreedAmount);
-    const receivedAmountPence = toPence(body.receivedAmount);
+    const agreedAmountPence = toPence(
+      body.agreedAmount ?? body.agreed_amount
+    );
+    const receivedAmountPence = toPence(
+      body.receivedAmount ?? body.received_amount
+    );
     const notes = clean(body.notes);
 
     if (!sponsorName) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Please enter a sponsor name.",
+          error: `Please enter a ${fundingTypeLabel(fundingType)} name.`,
         },
         { status: 400 }
       );
     }
 
     const updateData = {
+      funding_type: fundingType,
       sponsor_name: sponsorName,
       contact_name: contactName,
       email,
@@ -97,13 +130,16 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     return NextResponse.json({
       ok: true,
-      sponsor: data,
+      sponsor: {
+        ...data,
+        funding_type: cleanFundingType(data?.funding_type),
+      },
     });
   } catch (err: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: err?.message || "Failed to update sponsor.",
+        error: err?.message || "Failed to update funding record.",
       },
       { status: 500 }
     );
@@ -118,7 +154,7 @@ export async function DELETE(req: Request, context: RouteContext) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Missing sponsor ID.",
+          error: "Missing funding record ID.",
         },
         { status: 400 }
       );
@@ -168,7 +204,7 @@ export async function DELETE(req: Request, context: RouteContext) {
     return NextResponse.json(
       {
         ok: false,
-        error: err?.message || "Failed to delete sponsor.",
+        error: err?.message || "Failed to delete funding record.",
       },
       { status: 500 }
     );

@@ -871,6 +871,7 @@ export default function MoneyDashboardPage() {
               deletingYear={moneyPage.deletingYear}
               deletingAll={moneyPage.deletingAll}
               repayingId={moneyPage.repayingId}
+              checkingId={moneyPage.checkingId}
               deleting={moneyPage.deleting}
               onPrint={moneyPage.printTransactions}
               onExportExcel={moneyPage.exportTransactionsToExcel}
@@ -884,6 +885,7 @@ export default function MoneyDashboardPage() {
               }}
               onHideTransaction={moneyPage.setDeleteId}
               onTogglePersonalFundsRepaid={moneyPage.togglePersonalFundsRepaid}
+              onMarkTransactionChecked={moneyPage.markTransactionChecked}
             />
           </div>
         </div>
@@ -915,8 +917,8 @@ export default function MoneyDashboardPage() {
             <MoneyTransactionForm
               form={moneyPage.form}
               setForm={moneyPage.setForm}
-              invoiceFile={moneyPage.invoiceFile}
-              setInvoiceFile={moneyPage.setInvoiceFile}
+              invoiceFiles={moneyPage.invoiceFiles}
+              setInvoiceFiles={moneyPage.setInvoiceFiles}
               editingTransaction={moneyPage.editingTransaction}
               displaySponsors={moneyPage.displaySponsors}
               yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}

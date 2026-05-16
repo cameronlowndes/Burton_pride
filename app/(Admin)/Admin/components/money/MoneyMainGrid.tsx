@@ -2,7 +2,12 @@
 
 import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
 
-import type { FormState, Sponsor, Transaction } from "@/lib/money/types";
+import type {
+  FormState,
+  FundingType,
+  Sponsor,
+  Transaction,
+} from "@/lib/money/types";
 
 import MoneyTransactionForm from "./MoneyTransactionForm";
 import MoneyTransactionsTable from "./MoneyTransactionsTable";
@@ -17,14 +22,18 @@ type YearlySponsorBreakdown = {
   received_pence: number;
   spent_pence: number;
   remaining_pence: number;
+  carried_forward_pence?: number;
   notes?: string | null;
+  funding_type?: FundingType | null;
 };
 
 type MoneyMainGridProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
-  invoiceFile: File | null;
-  setInvoiceFile: Dispatch<SetStateAction<File | null>>;
+
+  invoiceFiles: File[];
+  setInvoiceFiles: Dispatch<SetStateAction<File[]>>;
+
   editingTransaction: Transaction | null;
   displaySponsors: Sponsor[];
   yearlySponsorBreakdown: YearlySponsorBreakdown[];
@@ -69,6 +78,7 @@ type MoneyMainGridProps = {
   deletingYear: boolean;
   deletingAll: boolean;
   repayingId: string | null;
+  checkingId: string | null;
   deleting: boolean;
 
   onPrint: () => void;
@@ -78,14 +88,20 @@ type MoneyMainGridProps = {
   onOpenDeleteAll: () => void;
   onEditTransaction: (item: Transaction) => void;
   onHideTransaction: Dispatch<SetStateAction<string | null>>;
-  onTogglePersonalFundsRepaid: (item: Transaction) => Promise<void>;
+  onTogglePersonalFundsRepaid: (
+    item: Transaction,
+    proofFiles?: File[]
+  ) => Promise<void>;
+  onMarkTransactionChecked: (item: Transaction) => Promise<void>;
 };
 
 export default function MoneyMainGrid({
   form,
   setForm,
-  invoiceFile,
-  setInvoiceFile,
+
+  invoiceFiles,
+  setInvoiceFiles,
+
   editingTransaction,
   displaySponsors,
   yearlySponsorBreakdown,
@@ -124,6 +140,7 @@ export default function MoneyMainGrid({
   deletingYear,
   deletingAll,
   repayingId,
+  checkingId,
   deleting,
 
   onPrint,
@@ -134,14 +151,15 @@ export default function MoneyMainGrid({
   onEditTransaction,
   onHideTransaction,
   onTogglePersonalFundsRepaid,
+  onMarkTransactionChecked,
 }: MoneyMainGridProps) {
   return (
     <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
       <MoneyTransactionForm
         form={form}
         setForm={setForm}
-        invoiceFile={invoiceFile}
-        setInvoiceFile={setInvoiceFile}
+        invoiceFiles={invoiceFiles}
+        setInvoiceFiles={setInvoiceFiles}
         editingTransaction={editingTransaction}
         displaySponsors={displaySponsors}
         yearlySponsorBreakdown={yearlySponsorBreakdown}
@@ -178,6 +196,7 @@ export default function MoneyMainGrid({
         deletingAll={deletingAll}
         deleting={deleting}
         repayingId={repayingId}
+        checkingId={checkingId}
         onPrint={onPrint}
         onExportExcel={onExportExcel}
         onExportYearlyReport={onExportYearlyReport}
@@ -186,6 +205,7 @@ export default function MoneyMainGrid({
         onEditTransaction={onEditTransaction}
         onHideTransaction={onHideTransaction}
         onTogglePersonalFundsRepaid={onTogglePersonalFundsRepaid}
+        onMarkTransactionChecked={onMarkTransactionChecked}
       />
     </section>
   );

@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 export type MoneyAuditAction =
   | "create"
   | "edit"
+  | "checked"
   | "delete"
   | "delete_year"
   | "delete_all"

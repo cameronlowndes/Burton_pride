@@ -2,10 +2,7 @@
 
 import type { Dispatch, SetStateAction } from "react";
 
-import type {
-  Sponsor,
-  SponsorFormState,
-} from "@/lib/money/types";
+import type { Sponsor, SponsorFormState } from "@/lib/money/types";
 
 import MoneyModals from "./MoneyModals";
 

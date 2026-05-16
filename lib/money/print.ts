@@ -1,4 +1,9 @@
-import type { Transaction, SponsorBreakdown } from "@/lib/money/types";
+import type {
+  FundingType,
+  SponsorBreakdown,
+  Transaction,
+  TransactionAttachment,
+} from "@/lib/money/types";
 import {
   escapeHtml,
   formatDate,
@@ -31,6 +36,84 @@ type PrintMoneyReportArgs = {
   onPopupBlocked: () => void;
 };
 
+function fundingTypeLabel(type?: FundingType | string | null) {
+  if (type === "grant") return "Grant Money";
+  if (type === "loan") return "Loan";
+  if (type === "other") return "Other Funding";
+  return "Sponsor";
+}
+
+function fundingBadgeClass(type?: FundingType | string | null) {
+  if (type === "grant") return "grant";
+  if (type === "loan") return "loan";
+  if (type === "other") return "other";
+  return "sponsor";
+}
+
+function getTransactionFiles(item: Transaction): TransactionAttachment[] {
+  const attachments = item.attachments || [];
+
+  if (attachments.length > 0) {
+    return attachments;
+  }
+
+  if (item.invoice_image_url) {
+    return [
+      {
+        id: `${item.id}-old-invoice`,
+        transaction_id: item.id,
+        file_name: "Old invoice / receipt",
+        file_url: item.invoice_image_url,
+        file_type: null,
+        file_size: null,
+        created_at: item.created_at,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function filesPrintHtml(item: Transaction) {
+  const files = getTransactionFiles(item);
+
+  if (files.length === 0) {
+    return "None";
+  }
+
+  return `
+    <div class="files-list">
+      ${files
+        .map((file, index) => {
+          const fileName = file.file_name || `Attachment ${index + 1}`;
+
+          return `
+            <div class="file-item">
+              <strong>${escapeHtml(String(index + 1))}. ${escapeHtml(
+                fileName
+              )}</strong>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function checkedPrintHtml(item: Transaction) {
+  if (!item.checked_at) {
+    return `<span class="checked-status not-checked">Not checked</span>`;
+  }
+
+  return `
+    <div class="checked-box">
+      <span class="checked-status checked">Checked</span>
+      <div class="muted">By: ${escapeHtml(item.checked_by || "Unknown admin")}</div>
+      <div class="muted">At: ${escapeHtml(formatDate(item.checked_at))}</div>
+    </div>
+  `;
+}
+
 export function printMoneyReport({
   selectedYear,
   selectedPrintMonth,
@@ -49,13 +132,21 @@ export function printMoneyReport({
 
   const sponsorRows =
     yearlySponsorBreakdown.length === 0
-      ? `<tr><td colspan="7" class="empty">No sponsors added for ${escapeHtml(
+      ? `<tr><td colspan="8" class="empty">No sponsors, grants, loans or other funding added for ${escapeHtml(
           selectedYear
         )}.</td></tr>`
       : yearlySponsorBreakdown
-          .map(
-            (sponsor) => `
+          .map((sponsor) => {
+            const fundingType = sponsor.funding_type || "sponsor";
+
+            return `
               <tr>
+                <td>
+                  <span class="badge ${fundingBadgeClass(fundingType)}">
+                    ${escapeHtml(fundingTypeLabel(fundingType))}
+                  </span>
+                </td>
+
                 <td>
                   <strong>${escapeHtml(sponsor.sponsor_name)}</strong>
                   ${
@@ -71,39 +162,52 @@ export function printMoneyReport({
                       : ""
                   }
                 </td>
+
                 <td>${escapeHtml(sponsor.contact_name || "None")}</td>
+
                 <td>${escapeHtml(sponsor.email || "None")}</td>
+
                 <td class="amount">${escapeHtml(
                   money(sponsor.agreed_amount_pence)
                 )}</td>
+
                 <td class="amount green">${escapeHtml(
                   money(sponsor.received_pence)
                 )}</td>
+
                 <td class="amount red">${escapeHtml(
                   money(sponsor.spent_pence)
                 )}</td>
+
                 <td class="amount amber">${escapeHtml(
                   money(sponsor.remaining_pence)
                 )}</td>
               </tr>
-            `
-          )
+            `;
+          })
           .join("");
 
   const transactionRows =
     printTransactionsList.length === 0
-      ? `<tr><td colspan="11" class="empty">No transactions to print for ${escapeHtml(
+      ? `<tr><td colspan="13" class="empty">No transactions to print for ${escapeHtml(
           printScopeLabel
         )}.</td></tr>`
       : printTransactionsList
           .map((item) => {
             const isIncome = item.type === "income";
             const isPersonal = isPersonalFundsTransaction(item);
-            const hasSponsor = isSponsorshipTransaction(item);
+            const hasFunding = isSponsorshipTransaction(item);
 
             return `
               <tr>
+                <td>
+                  <span class="reference">
+                    ${escapeHtml(item.transaction_reference || "Pending")}
+                  </span>
+                </td>
+
                 <td>${escapeHtml(formatDate(item.transaction_date))}</td>
+
                 <td>
                   <strong>${escapeHtml(item.title)}</strong>
                   ${
@@ -114,23 +218,35 @@ export function printMoneyReport({
                       : ""
                   }
                 </td>
+
                 <td>
                   <span class="badge ${isIncome ? "income" : "expense"}">
                     ${escapeHtml(isIncome ? "Money In" : "Money Out")}
                   </span>
                 </td>
+
+                <td>
+                  <strong class="amount">${escapeHtml(
+                    money(item.amount_pence)
+                  )}</strong>
+                </td>
+
                 <td>
                   ${
-                    hasSponsor
+                    hasFunding
                       ? `<span class="badge sponsor">${escapeHtml(
-                          item.sponsor_name || "Sponsor"
+                          item.sponsor_name || "Funding record"
                         )}</span>`
                       : "None"
                   }
                 </td>
+
                 <td>${escapeHtml(item.sponsorship_note || "None")}</td>
+
                 <td>${isPersonal ? "Personal funds" : "None"}</td>
+
                 <td>${escapeHtml(item.personal_funds_name || "None")}</td>
+
                 <td>${
                   isPersonal
                     ? item.personal_funds_repaid
@@ -138,9 +254,14 @@ export function printMoneyReport({
                       : "Not paid back"
                     : "None"
                 }</td>
-                <td>${escapeHtml(item.payment_method || "None")}</td>
-                <td>${escapeHtml(item.invoice_image_url ? "Yes" : "None")}</td>
-                <td class="amount">${escapeHtml(money(item.amount_pence))}</td>
+
+                <td>${escapeHtml(
+                  hasFunding ? "Funding Money" : item.payment_method || "None"
+                )}</td>
+
+                <td>${checkedPrintHtml(item)}</td>
+
+                <td>${filesPrintHtml(item)}</td>
               </tr>
             `;
           })
@@ -242,7 +363,7 @@ export function printMoneyReport({
             color: #9a3412;
           }
 
-          .sponsor-card {
+          .funding-card {
             background: #fef3c7;
             color: #92400e;
           }
@@ -301,6 +422,17 @@ export function printMoneyReport({
             color: #92400e;
           }
 
+          .reference {
+            display: inline-block;
+            border-radius: 8px;
+            background: #eef2ff;
+            color: #3730a3;
+            padding: 4px 7px;
+            font-size: 9.5px;
+            font-weight: 900;
+            white-space: nowrap;
+          }
+
           .badge {
             display: inline-block;
             border-radius: 999px;
@@ -325,11 +457,64 @@ export function printMoneyReport({
             color: #92400e;
           }
 
+          .badge.grant {
+            background: #dcfce7;
+            color: #166534;
+          }
+
+          .badge.loan {
+            background: #dbeafe;
+            color: #1e40af;
+          }
+
+          .badge.other {
+            background: #f3e8ff;
+            color: #6b21a8;
+          }
+
+          .checked-box {
+            display: grid;
+            gap: 3px;
+          }
+
+          .checked-status {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 4px 8px;
+            font-size: 9.5px;
+            font-weight: 900;
+            white-space: nowrap;
+          }
+
+          .checked-status.checked {
+            background: #dcfce7;
+            color: #166534;
+          }
+
+          .checked-status.not-checked {
+            background: #f3f4f6;
+            color: #6b7280;
+          }
+
           .muted {
             margin-top: 4px;
             color: #6b7280;
             font-size: 9.5px;
             white-space: pre-wrap;
+          }
+
+          .files-list {
+            display: grid;
+            gap: 6px;
+          }
+
+          .file-item {
+            border-radius: 8px;
+            background: #eff6ff;
+            color: #1e3a8a;
+            padding: 6px;
+            border: 1px solid #bfdbfe;
+            word-break: break-word;
           }
 
           .empty {
@@ -412,8 +597,8 @@ export function printMoneyReport({
             )}</strong>
           </div>
 
-          <div class="card sponsor-card">
-            <span>Sponsorship Left</span>
+          <div class="card funding-card">
+            <span>Funding Left</span>
             <strong>${escapeHtml(money(totals.sponsorshipRemaining))}</strong>
           </div>
 
@@ -423,20 +608,22 @@ export function printMoneyReport({
           </div>
         </div>
 
-        <h2>Sponsorship Breakdown — ${escapeHtml(selectedYear)}</h2>
+        <h2>Funding Breakdown — ${escapeHtml(selectedYear)}</h2>
 
         <table>
           <thead>
             <tr>
-              <th>Sponsor</th>
+              <th>Funding Type</th>
+              <th>Funding Record</th>
               <th>Contact</th>
               <th>Email</th>
-              <th>Agreed</th>
+              <th>Agreed / Awarded</th>
               <th>Received</th>
               <th>Spent</th>
               <th>Remaining</th>
             </tr>
           </thead>
+
           <tbody>${sponsorRows}</tbody>
         </table>
 
@@ -445,19 +632,22 @@ export function printMoneyReport({
         <table>
           <thead>
             <tr>
+              <th>Reference</th>
               <th>Date</th>
               <th>Title / Notes</th>
               <th>Type</th>
-              <th>Sponsor</th>
-              <th>Sponsorship Note</th>
+              <th>Amount</th>
+              <th>Funding</th>
+              <th>Funding Note</th>
               <th>Personal</th>
               <th>Paid By</th>
               <th>Repayment</th>
               <th>Payment</th>
-              <th>Invoice</th>
-              <th>Amount</th>
+              <th>Checked</th>
+              <th>Files</th>
             </tr>
           </thead>
+
           <tbody>${transactionRows}</tbody>
         </table>
 
