@@ -1,5 +1,18 @@
 export type FundingType = "sponsor" | "grant" | "loan" | "other";
 
+export type BankReconciliationStatus =
+  | "unmatched"
+  | "matched"
+  | "needs_review"
+  | "ignored";
+
+export type FinanceNoteStatus =
+  | "none"
+  | "waiting_for_receipt"
+  | "ask_sponsor"
+  | "bank_query"
+  | "resolved";
+
 export type TransactionAttachment = {
   id: string;
   transaction_id: string;
@@ -29,6 +42,24 @@ export type Transaction = {
   transaction_date: string | null;
 
   /**
+   * Bank reconciliation fields.
+   * Used to show whether this transaction has been matched to a bank statement.
+   */
+  bank_reconciliation_status: BankReconciliationStatus | null;
+  bank_reconciled_at: string | null;
+  bank_reconciled_by: string | null;
+  bank_reconciliation_note: string | null;
+
+  /**
+   * Finance notes / queries.
+   * Used for admin notes such as waiting for receipt, ask sponsor, bank query, or resolved.
+   */
+  finance_note_status: FinanceNoteStatus | null;
+  finance_note: string | null;
+  finance_note_updated_at: string | null;
+  finance_note_updated_by: string | null;
+
+  /**
    * Old single-file field.
    * Keep this for backwards compatibility with old receipts/invoices.
    */
@@ -54,6 +85,13 @@ export type Transaction = {
   stripe_invoice_id: string | null;
   stripe_customer_id: string | null;
   stripe_payment_intent_id: string | null;
+
+  /**
+   * Stripe mode fields.
+   * Test payments should not be counted as real Burton Pride money.
+   */
+  stripe_livemode?: boolean | null;
+  is_test_payment?: boolean | null;
 
   /**
    * Soft delete fields.
@@ -110,6 +148,44 @@ export type SponsorBreakdown = {
   funding_type: FundingType | null;
 };
 
+export type CarryForwardNote = {
+  /**
+   * All previous years' general income.
+   * Does not include restricted sponsor/grant/loan funding.
+   */
+  previousIncome: number;
+
+  /**
+   * All previous years' general Burton Pride spending.
+   * Does not include sponsor/grant restricted spending.
+   */
+  previousNormalExpense: number;
+
+  /**
+   * Previous personal funds that have been paid back.
+   * These reduce the carried-forward general balance.
+   */
+  previousPersonalFundsRepaid: number;
+
+  /**
+   * Final opening balance for the selected year.
+   */
+  openingBalance: number;
+
+  /**
+   * Counts shown in the carry-forward note UI.
+   */
+  previousTransactionCount: number;
+  previousIncomeCount: number;
+  previousNormalExpenseCount: number;
+  previousPersonalFundsRepaidCount: number;
+
+  /**
+   * Plain-English formula for accounts.
+   */
+  formula: string;
+};
+
 export type RepeatFrequency = "weekly" | "monthly" | "yearly";
 
 export type FormState = {
@@ -125,6 +201,18 @@ export type FormState = {
   sponsorId: string;
   sponsorName: string;
   sponsorshipNote: string;
+
+  /**
+   * Bank reconciliation fields.
+   */
+  bankReconciliationStatus: BankReconciliationStatus;
+  bankReconciliationNote: string;
+
+  /**
+   * Finance notes / queries.
+   */
+  financeNoteStatus: FinanceNoteStatus;
+  financeNote: string;
 
   isRepeating: boolean;
   repeatFrequency: RepeatFrequency;
@@ -169,6 +257,13 @@ export const initialForm: FormState = {
   sponsorId: "",
   sponsorName: "",
   sponsorshipNote: "",
+
+  bankReconciliationStatus: "unmatched",
+  bankReconciliationNote: "",
+
+  financeNoteStatus: "none",
+  financeNote: "",
+
   isRepeating: false,
   repeatFrequency: "monthly",
   repeatCount: "12",
@@ -194,4 +289,31 @@ export const paymentMethods = [
   "Card Machine",
   "Personal Funds",
   "Item Donation",
+  "Other Types",
+];
+
+export const financeNoteStatusOptions: {
+  value: FinanceNoteStatus;
+  label: string;
+}[] = [
+  {
+    value: "none",
+    label: "No query",
+  },
+  {
+    value: "waiting_for_receipt",
+    label: "Waiting for receipt",
+  },
+  {
+    value: "ask_sponsor",
+    label: "Ask sponsor",
+  },
+  {
+    value: "bank_query",
+    label: "Bank query",
+  },
+  {
+    value: "resolved",
+    label: "Resolved",
+  },
 ];

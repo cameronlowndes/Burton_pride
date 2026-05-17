@@ -12,7 +12,22 @@ type RouteContext = {
   }>;
 };
 
-function clean(value: FormDataEntryValue | null) {
+const allowedBankReconciliationStatuses = [
+  "unmatched",
+  "matched",
+  "needs_review",
+  "ignored",
+];
+
+const allowedFinanceNoteStatuses = [
+  "none",
+  "waiting_for_receipt",
+  "ask_sponsor",
+  "bank_query",
+  "resolved",
+];
+
+function clean(value: FormDataEntryValue | string | null | undefined) {
   const text = String(value || "").trim();
   return text.length > 0 ? text : "";
 }
@@ -23,7 +38,9 @@ function cleanOrNull(value: string) {
 }
 
 function toBoolean(value: string) {
-  return value === "true" || value === "1" || value === "yes";
+  const text = String(value || "").toLowerCase().trim();
+
+  return text === "true" || text === "1" || text === "yes";
 }
 
 function toPence(amount: string) {
@@ -42,6 +59,26 @@ function safeFileName(name: string) {
     .replace(/[^a-zA-Z0-9.\-_ ]/g, "")
     .replace(/\s+/g, "-")
     .slice(0, 120);
+}
+
+function cleanBankReconciliationStatus(value: unknown) {
+  const status = String(value || "unmatched").trim();
+
+  if (allowedBankReconciliationStatuses.includes(status)) {
+    return status;
+  }
+
+  return "unmatched";
+}
+
+function cleanFinanceNoteStatus(value: unknown) {
+  const status = String(value || "none").trim();
+
+  if (allowedFinanceNoteStatuses.includes(status)) {
+    return status;
+  }
+
+  return "none";
 }
 
 async function getActorLabel() {
@@ -207,6 +244,28 @@ export async function PATCH(req: Request, context: RouteContext) {
     const sponsorName = clean(formData.get("sponsorName"));
     const sponsorshipNote = clean(formData.get("sponsorshipNote"));
 
+    const bankReconciliationStatus = cleanBankReconciliationStatus(
+      clean(formData.get("bankReconciliationStatus")) ||
+        clean(formData.get("bank_reconciliation_status")) ||
+        beforeData?.bank_reconciliation_status ||
+        "unmatched"
+    );
+
+    const bankReconciliationNote =
+      clean(formData.get("bankReconciliationNote")) ||
+      clean(formData.get("bank_reconciliation_note"));
+
+    const financeNoteStatus = cleanFinanceNoteStatus(
+      clean(formData.get("financeNoteStatus")) ||
+        clean(formData.get("finance_note_status")) ||
+        beforeData?.finance_note_status ||
+        "none"
+    );
+
+    const financeNote =
+      clean(formData.get("financeNote")) ||
+      clean(formData.get("finance_note"));
+
     const invoiceFiles = formData
       .getAll("invoiceFiles")
       .filter((file): file is File => file instanceof File && file.size > 0);
@@ -242,6 +301,10 @@ export async function PATCH(req: Request, context: RouteContext) {
             sponsorId,
             sponsorName,
             sponsorshipNote,
+            bankReconciliationStatus,
+            bankReconciliationNote,
+            financeNoteStatus,
+            financeNote,
           },
         },
         { status: 400 }
@@ -280,6 +343,34 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
 
     const updatedAt = new Date().toISOString();
+    const actorLabel = await getActorLabel();
+
+    const wasBankMatched = beforeData?.bank_reconciliation_status === "matched";
+    const isBankMatched = bankReconciliationStatus === "matched";
+
+    const bankReconciledAt =
+      isBankMatched && !wasBankMatched
+        ? updatedAt
+        : isBankMatched
+          ? beforeData?.bank_reconciled_at || updatedAt
+          : null;
+
+    const bankReconciledBy =
+      isBankMatched && !wasBankMatched
+        ? actorLabel
+        : isBankMatched
+          ? beforeData?.bank_reconciled_by || actorLabel
+          : null;
+
+    const beforeFinanceStatus = beforeData?.finance_note_status || "none";
+    const beforeFinanceNote = beforeData?.finance_note || "";
+
+    const financeNoteChanged =
+      financeNoteStatus !== beforeFinanceStatus ||
+      financeNote !== beforeFinanceNote;
+
+    const hasFinanceQuery =
+      financeNoteStatus !== "none" || financeNote.trim().length > 0;
 
     const updatePayload: Record<string, any> = {
       title,
@@ -294,6 +385,24 @@ export async function PATCH(req: Request, context: RouteContext) {
         transactionDate || new Date().toISOString().slice(0, 10),
 
       source: isSponsorLinked ? "sponsorship" : source || "manual",
+
+      bank_reconciliation_status: bankReconciliationStatus,
+      bank_reconciled_at: bankReconciledAt,
+      bank_reconciled_by: bankReconciledBy,
+      bank_reconciliation_note: cleanOrNull(bankReconciliationNote),
+
+      finance_note_status: financeNoteStatus,
+      finance_note: cleanOrNull(financeNote),
+      finance_note_updated_at: financeNoteChanged
+        ? hasFinanceQuery
+          ? updatedAt
+          : null
+        : beforeData?.finance_note_updated_at || null,
+      finance_note_updated_by: financeNoteChanged
+        ? hasFinanceQuery
+          ? actorLabel
+          : null
+        : beforeData?.finance_note_updated_by || null,
 
       is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
       personal_funds_name:
@@ -392,6 +501,24 @@ export async function PATCH(req: Request, context: RouteContext) {
         attachments: beforeAttachments,
       },
       afterData: transactionWithAttachments,
+      changedFields: {
+        bank_reconciliation_status: {
+          before: beforeData?.bank_reconciliation_status || "unmatched",
+          after: data?.bank_reconciliation_status || "unmatched",
+        },
+        bank_reconciliation_note: {
+          before: beforeData?.bank_reconciliation_note || null,
+          after: data?.bank_reconciliation_note || null,
+        },
+        finance_note_status: {
+          before: beforeData?.finance_note_status || "none",
+          after: data?.finance_note_status || "none",
+        },
+        finance_note: {
+          before: beforeData?.finance_note || null,
+          after: data?.finance_note || null,
+        },
+      },
       metadata: {
         source: "money_tracker",
         route: "/api/admin/money/transactions/[id]",
@@ -401,6 +528,9 @@ export async function PATCH(req: Request, context: RouteContext) {
           null,
         attachment_count: allAttachments.length,
         new_attachment_count: newAttachments.length,
+        bank_reconciliation_status: data?.bank_reconciliation_status || null,
+        finance_note_status: data?.finance_note_status || null,
+        finance_note_changed: financeNoteChanged,
       },
     });
 
@@ -514,6 +644,7 @@ export async function DELETE(req: Request, context: RouteContext) {
           data?.transaction_reference ||
           null,
         attachment_count: beforeAttachments.length,
+        finance_note_status: beforeData?.finance_note_status || "none",
       },
     });
 

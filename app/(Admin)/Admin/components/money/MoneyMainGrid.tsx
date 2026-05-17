@@ -3,6 +3,8 @@
 import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
 
 import type {
+  BankReconciliationStatus,
+  FinanceNoteStatus,
   FormState,
   FundingType,
   Sponsor,
@@ -79,6 +81,8 @@ type MoneyMainGridProps = {
   deletingAll: boolean;
   repayingId: string | null;
   checkingId: string | null;
+  bankReconcilingId: string | null;
+  financeNoteUpdatingId: string | null;
   deleting: boolean;
 
   onPrint: () => void;
@@ -93,6 +97,16 @@ type MoneyMainGridProps = {
     proofFiles?: File[]
   ) => Promise<void>;
   onMarkTransactionChecked: (item: Transaction) => Promise<void>;
+  onUpdateBankReconciliationStatus: (
+    item: Transaction,
+    status: BankReconciliationStatus,
+    note?: string
+  ) => Promise<void>;
+  onUpdateFinanceNote: (
+    item: Transaction,
+    status: FinanceNoteStatus,
+    note?: string
+  ) => Promise<void>;
 };
 
 export default function MoneyMainGrid({
@@ -141,6 +155,8 @@ export default function MoneyMainGrid({
   deletingAll,
   repayingId,
   checkingId,
+  bankReconcilingId,
+  financeNoteUpdatingId,
   deleting,
 
   onPrint,
@@ -152,6 +168,8 @@ export default function MoneyMainGrid({
   onHideTransaction,
   onTogglePersonalFundsRepaid,
   onMarkTransactionChecked,
+  onUpdateBankReconciliationStatus,
+  onUpdateFinanceNote,
 }: MoneyMainGridProps) {
   return (
     <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
@@ -197,6 +215,8 @@ export default function MoneyMainGrid({
         deleting={deleting}
         repayingId={repayingId}
         checkingId={checkingId}
+        bankReconcilingId={bankReconcilingId}
+        financeNoteUpdatingId={financeNoteUpdatingId}
         onPrint={onPrint}
         onExportExcel={onExportExcel}
         onExportYearlyReport={onExportYearlyReport}
@@ -206,6 +226,8 @@ export default function MoneyMainGrid({
         onHideTransaction={onHideTransaction}
         onTogglePersonalFundsRepaid={onTogglePersonalFundsRepaid}
         onMarkTransactionChecked={onMarkTransactionChecked}
+        onUpdateBankReconciliationStatus={onUpdateBankReconciliationStatus}
+        onUpdateFinanceNote={onUpdateFinanceNote}
       />
     </section>
   );

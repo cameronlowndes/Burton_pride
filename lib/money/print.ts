@@ -50,6 +50,36 @@ function fundingBadgeClass(type?: FundingType | string | null) {
   return "sponsor";
 }
 
+function bankStatusLabel(status?: string | null) {
+  if (status === "matched") return "Matched";
+  if (status === "needs_review") return "Needs review";
+  if (status === "ignored") return "Ignored";
+  return "Unmatched";
+}
+
+function bankStatusClass(status?: string | null) {
+  if (status === "matched") return "matched";
+  if (status === "needs_review") return "needs-review";
+  if (status === "ignored") return "ignored";
+  return "unmatched";
+}
+
+function financeStatusLabel(status?: string | null) {
+  if (status === "waiting_for_receipt") return "Waiting for receipt";
+  if (status === "ask_sponsor") return "Ask sponsor";
+  if (status === "bank_query") return "Bank query";
+  if (status === "resolved") return "Resolved";
+  return "No query";
+}
+
+function financeStatusClass(status?: string | null) {
+  if (status === "waiting_for_receipt") return "waiting";
+  if (status === "ask_sponsor") return "ask-sponsor";
+  if (status === "bank_query") return "bank-query";
+  if (status === "resolved") return "resolved";
+  return "no-query";
+}
+
 function getTransactionFiles(item: Transaction): TransactionAttachment[] {
   const attachments = item.attachments || [];
 
@@ -72,6 +102,32 @@ function getTransactionFiles(item: Transaction): TransactionAttachment[] {
   }
 
   return [];
+}
+
+function receiptPrintHtml(item: Transaction) {
+  const files = getTransactionFiles(item);
+
+  if (files.length > 0) {
+    return `
+      <div class="receipt-box attached">
+        <strong>Receipt / proof attached</strong>
+        <div class="muted">${escapeHtml(String(files.length))} file${
+          files.length === 1 ? "" : "s"
+        } attached</div>
+      </div>
+    `;
+  }
+
+  if (item.type === "expense") {
+    return `
+      <div class="receipt-box missing">
+        <strong>Missing receipt / proof</strong>
+        <div class="muted">No receipt, invoice, or proof file attached.</div>
+      </div>
+    `;
+  }
+
+  return `<span class="muted">No file attached</span>`;
 }
 
 function filesPrintHtml(item: Transaction) {
@@ -110,6 +166,72 @@ function checkedPrintHtml(item: Transaction) {
       <span class="checked-status checked">Checked</span>
       <div class="muted">By: ${escapeHtml(item.checked_by || "Unknown admin")}</div>
       <div class="muted">At: ${escapeHtml(formatDate(item.checked_at))}</div>
+    </div>
+  `;
+}
+
+function bankPrintHtml(item: Transaction) {
+  const status = item.bank_reconciliation_status || "unmatched";
+
+  return `
+    <div class="status-box">
+      <span class="bank-status ${bankStatusClass(status)}">${escapeHtml(
+        bankStatusLabel(status)
+      )}</span>
+
+      ${
+        item.bank_reconciliation_note
+          ? `<div class="muted">${escapeHtml(item.bank_reconciliation_note)}</div>`
+          : ""
+      }
+
+      ${
+        item.bank_reconciled_by
+          ? `<div class="muted">By: ${escapeHtml(item.bank_reconciled_by)}</div>`
+          : ""
+      }
+
+      ${
+        item.bank_reconciled_at
+          ? `<div class="muted">At: ${escapeHtml(
+              formatDate(item.bank_reconciled_at)
+            )}</div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function financePrintHtml(item: Transaction) {
+  const status = item.finance_note_status || "none";
+
+  return `
+    <div class="status-box">
+      <span class="finance-status ${financeStatusClass(status)}">${escapeHtml(
+        financeStatusLabel(status)
+      )}</span>
+
+      ${
+        item.finance_note
+          ? `<div class="muted">${escapeHtml(item.finance_note)}</div>`
+          : ""
+      }
+
+      ${
+        item.finance_note_updated_by
+          ? `<div class="muted">By: ${escapeHtml(
+              item.finance_note_updated_by
+            )}</div>`
+          : ""
+      }
+
+      ${
+        item.finance_note_updated_at
+          ? `<div class="muted">At: ${escapeHtml(
+              formatDate(item.finance_note_updated_at)
+            )}</div>`
+          : ""
+      }
     </div>
   `;
 }
@@ -189,7 +311,7 @@ export function printMoneyReport({
 
   const transactionRows =
     printTransactionsList.length === 0
-      ? `<tr><td colspan="13" class="empty">No transactions to print for ${escapeHtml(
+      ? `<tr><td colspan="16" class="empty">No transactions to print for ${escapeHtml(
           printScopeLabel
         )}.</td></tr>`
       : printTransactionsList
@@ -258,6 +380,12 @@ export function printMoneyReport({
                 <td>${escapeHtml(
                   hasFunding ? "Funding Money" : item.payment_method || "None"
                 )}</td>
+
+                <td>${bankPrintHtml(item)}</td>
+
+                <td>${receiptPrintHtml(item)}</td>
+
+                <td>${financePrintHtml(item)}</td>
 
                 <td>${checkedPrintHtml(item)}</td>
 
@@ -382,20 +510,20 @@ export function printMoneyReport({
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 18px;
-            font-size: 10.5px;
+            font-size: 9.2px;
           }
 
           th {
             background: #07111f;
             color: #ffffff;
             text-align: left;
-            padding: 8px;
+            padding: 7px;
             border: 1px solid #07111f;
-            font-size: 9.5px;
+            font-size: 8.8px;
           }
 
           td {
-            padding: 8px;
+            padding: 7px;
             border: 1px solid #d1d5db;
             vertical-align: top;
           }
@@ -428,7 +556,7 @@ export function printMoneyReport({
             background: #eef2ff;
             color: #3730a3;
             padding: 4px 7px;
-            font-size: 9.5px;
+            font-size: 9px;
             font-weight: 900;
             white-space: nowrap;
           }
@@ -437,7 +565,7 @@ export function printMoneyReport({
             display: inline-block;
             border-radius: 999px;
             padding: 4px 8px;
-            font-size: 9.5px;
+            font-size: 9px;
             font-weight: 800;
             white-space: nowrap;
           }
@@ -472,34 +600,76 @@ export function printMoneyReport({
             color: #6b21a8;
           }
 
+          .status-box,
           .checked-box {
             display: grid;
             gap: 3px;
           }
 
-          .checked-status {
+          .checked-status,
+          .bank-status,
+          .finance-status {
             display: inline-block;
             border-radius: 999px;
             padding: 4px 8px;
-            font-size: 9.5px;
+            font-size: 9px;
             font-weight: 900;
             white-space: nowrap;
           }
 
-          .checked-status.checked {
+          .checked-status.checked,
+          .bank-status.matched,
+          .finance-status.resolved {
             background: #dcfce7;
             color: #166534;
           }
 
-          .checked-status.not-checked {
+          .checked-status.not-checked,
+          .bank-status.unmatched,
+          .finance-status.no-query {
             background: #f3f4f6;
             color: #6b7280;
+          }
+
+          .bank-status.needs-review,
+          .finance-status.waiting,
+          .finance-status.ask-sponsor {
+            background: #fef3c7;
+            color: #92400e;
+          }
+
+          .bank-status.ignored {
+            background: #dbeafe;
+            color: #1e40af;
+          }
+
+          .finance-status.bank-query {
+            background: #fee2e2;
+            color: #991b1b;
+          }
+
+          .receipt-box {
+            border-radius: 9px;
+            padding: 6px;
+            border: 1px solid #d1d5db;
+          }
+
+          .receipt-box.attached {
+            background: #dcfce7;
+            color: #166534;
+            border-color: #bbf7d0;
+          }
+
+          .receipt-box.missing {
+            background: #fee2e2;
+            color: #991b1b;
+            border-color: #fecaca;
           }
 
           .muted {
             margin-top: 4px;
             color: #6b7280;
-            font-size: 9.5px;
+            font-size: 8.8px;
             white-space: pre-wrap;
           }
 
@@ -539,7 +709,7 @@ export function printMoneyReport({
 
             @page {
               size: A4 landscape;
-              margin: 10mm;
+              margin: 7mm;
             }
 
             thead {
@@ -565,8 +735,8 @@ export function printMoneyReport({
 
         <div class="meta">
           Report period: ${escapeHtml(printScopeLabel)} • Printed on ${escapeHtml(
-    printedAt
-  )} • Rows: ${printTransactionsList.length}
+            printedAt
+          )} • Rows: ${printTransactionsList.length}
         </div>
 
         <div class="summary">
@@ -643,6 +813,9 @@ export function printMoneyReport({
               <th>Paid By</th>
               <th>Repayment</th>
               <th>Payment</th>
+              <th>Bank Match</th>
+              <th>Receipt</th>
+              <th>Finance Query</th>
               <th>Checked</th>
               <th>Files</th>
             </tr>

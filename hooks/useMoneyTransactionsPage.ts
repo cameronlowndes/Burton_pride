@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SyntheticEvent } from "react";
 
 import type {
+  BankReconciliationStatus,
+  FinanceNoteStatus,
   FormState,
   Sponsor,
   SponsorBreakdown,
@@ -41,6 +43,19 @@ type YearLock = {
   updated_at?: string | null;
 };
 
+type CarryForwardNote = {
+  selectedYear: string;
+  previousIncome: number;
+  previousNormalExpense: number;
+  previousPersonalFundsRepaid: number;
+  openingBalance: number;
+  previousTransactionCount: number;
+  previousIncomeCount: number;
+  previousNormalExpenseCount: number;
+  previousPersonalFundsRepaidCount: number;
+  formula: string;
+};
+
 const initialForm: FormState = {
   title: "",
   description: "",
@@ -54,6 +69,13 @@ const initialForm: FormState = {
   sponsorId: "",
   sponsorName: "",
   sponsorshipNote: "",
+
+  bankReconciliationStatus: "unmatched",
+  bankReconciliationNote: "",
+
+  financeNoteStatus: "none",
+  financeNote: "",
+
   isRepeating: false,
   repeatFrequency: "monthly",
   repeatCount: "12",
@@ -109,8 +131,16 @@ function getFundingTypeLabel(type?: string | null) {
   return "sponsor";
 }
 
+function isNormalMoneyInTransaction(item: Transaction) {
+  return item.type === "income" && !isSponsorshipTransaction(item);
+}
+
 function isNormalMoneyOutTransaction(item: Transaction) {
-  return item.type === "expense" && !isPersonalFundsTransaction(item);
+  return (
+    item.type === "expense" &&
+    !isPersonalFundsTransaction(item) &&
+    !isSponsorshipTransaction(item)
+  );
 }
 
 function isPersonalFundsExpenseTransaction(item: Transaction) {
@@ -121,13 +151,6 @@ function isPaidBackPersonalFundsExpense(item: Transaction) {
   return (
     isPersonalFundsExpenseTransaction(item) &&
     item.personal_funds_repaid === true
-  );
-}
-
-function isUnpaidPersonalFundsExpense(item: Transaction) {
-  return (
-    isPersonalFundsExpenseTransaction(item) &&
-    item.personal_funds_repaid !== true
   );
 }
 
@@ -179,6 +202,12 @@ export function useMoneyTransactionsPage() {
 
   const [repayingId, setRepayingId] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [bankReconcilingId, setBankReconcilingId] = useState<string | null>(
+    null
+  );
+  const [financeNoteUpdatingId, setFinanceNoteUpdatingId] = useState<
+    string | null
+  >(null);
 
   const [sponsorFormOpen, setSponsorFormOpen] = useState(false);
   const [editingSponsor, setEditingSponsor] = useState<Sponsor | null>(null);
@@ -191,6 +220,12 @@ export function useMoneyTransactionsPage() {
 
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
+
+  const [stripeSyncing, setStripeSyncing] = useState(false);
+  const [stripeSyncMessage, setStripeSyncMessage] = useState<string | null>(
+    null
+  );
+  const [stripeSyncError, setStripeSyncError] = useState<string | null>(null);
 
   const displaySponsors = useMemo(() => {
     if (sponsors.length > 0) return sponsors;
@@ -293,6 +328,52 @@ export function useMoneyTransactionsPage() {
     } catch (err: any) {
       setError(err?.message || "Failed to load year locks");
       setErrorDetails(err);
+    }
+  }
+
+  async function syncStripeDonations() {
+    try {
+      setStripeSyncing(true);
+      setStripeSyncMessage(null);
+      setStripeSyncError(null);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(`/api/admin/money/sync-stripe?t=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to sync Stripe donations",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      const created = Number(data.created || 0);
+      const updated = Number(data.updated || 0);
+      const skipped = Number(data.skipped || 0);
+
+      setStripeSyncMessage(
+        `Stripe sync complete. Added ${created}, updated ${updated}, skipped ${skipped}. Manual transactions were not changed.`
+      );
+
+      await loadTransactions();
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      const message =
+        err?.message || "Something went wrong syncing Stripe donations.";
+
+      setStripeSyncError(message);
+      setError(message);
+      setErrorDetails(err);
+    } finally {
+      setStripeSyncing(false);
     }
   }
 
@@ -407,21 +488,54 @@ export function useMoneyTransactionsPage() {
     });
   }, [transactions, selectedYear]);
 
-  const carryForward = useMemo(() => {
-    const previousIncome = previousYearTransactions
-      .filter((item) => item.type === "income")
-      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+  const carryForwardNote = useMemo<CarryForwardNote>(() => {
+    const previousIncomeTransactions = previousYearTransactions.filter(
+      isNormalMoneyInTransaction
+    );
 
-    const previousNormalExpense = previousYearTransactions
-      .filter(isNormalMoneyOutTransaction)
-      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+    const previousNormalExpenseTransactions = previousYearTransactions.filter(
+      isNormalMoneyOutTransaction
+    );
 
-    const previousPersonalFundsRepaid = previousYearTransactions
-      .filter(isPaidBackPersonalFundsExpense)
-      .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+    const previousPersonalFundsRepaidTransactions =
+      previousYearTransactions.filter(isPaidBackPersonalFundsExpense);
 
-    return previousIncome - previousNormalExpense - previousPersonalFundsRepaid;
-  }, [previousYearTransactions]);
+    const previousIncome = previousIncomeTransactions.reduce(
+      (sum, item) => sum + (item.amount_pence || 0),
+      0
+    );
+
+    const previousNormalExpense = previousNormalExpenseTransactions.reduce(
+      (sum, item) => sum + (item.amount_pence || 0),
+      0
+    );
+
+    const previousPersonalFundsRepaid =
+      previousPersonalFundsRepaidTransactions.reduce(
+        (sum, item) => sum + (item.amount_pence || 0),
+        0
+      );
+
+    const openingBalance =
+      previousIncome - previousNormalExpense - previousPersonalFundsRepaid;
+
+    return {
+      selectedYear,
+      previousIncome,
+      previousNormalExpense,
+      previousPersonalFundsRepaid,
+      openingBalance,
+      previousTransactionCount: previousYearTransactions.length,
+      previousIncomeCount: previousIncomeTransactions.length,
+      previousNormalExpenseCount: previousNormalExpenseTransactions.length,
+      previousPersonalFundsRepaidCount:
+        previousPersonalFundsRepaidTransactions.length,
+      formula:
+        "Previous general income - previous general spending - previous personal funds paid back = opening balance",
+    };
+  }, [previousYearTransactions, selectedYear]);
+
+  const carryForward = carryForwardNote.openingBalance;
 
   const yearlySponsorBreakdown = useMemo(() => {
     return displaySponsors
@@ -517,7 +631,12 @@ export function useMoneyTransactionsPage() {
           sponsor.spent_pence > 0 ||
           (sponsor.carried_forward_pence || 0) > 0
       );
-  }, [displaySponsors, yearTransactions, previousYearTransactions, selectedYear]);
+  }, [
+    displaySponsors,
+    yearTransactions,
+    previousYearTransactions,
+    selectedYear,
+  ]);
 
   const filteredTransactions = useMemo(() => {
     let rows = monthViewTransactions;
@@ -591,6 +710,12 @@ export function useMoneyTransactionsPage() {
           item.sponsorship_note?.toLowerCase().includes(q) ||
           item.personal_funds_name?.toLowerCase().includes(q) ||
           item.checked_by?.toLowerCase().includes(q) ||
+          item.bank_reconciliation_status?.toLowerCase().includes(q) ||
+          item.bank_reconciled_by?.toLowerCase().includes(q) ||
+          item.bank_reconciliation_note?.toLowerCase().includes(q) ||
+          item.finance_note_status?.toLowerCase().includes(q) ||
+          item.finance_note?.toLowerCase().includes(q) ||
+          item.finance_note_updated_by?.toLowerCase().includes(q) ||
           matchesAttachment ||
           matchesAmount
         );
@@ -620,7 +745,7 @@ export function useMoneyTransactionsPage() {
 
   const totals = useMemo(() => {
     const income = yearTransactions
-      .filter((item) => item.type === "income")
+      .filter(isNormalMoneyInTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const normalExpense = yearTransactions
@@ -665,7 +790,7 @@ export function useMoneyTransactionsPage() {
 
   const filteredTotals = useMemo(() => {
     const income = printTransactionsList
-      .filter((item) => item.type === "income")
+      .filter(isNormalMoneyInTransaction)
       .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
     const normalExpense = printTransactionsList
@@ -884,6 +1009,13 @@ export function useMoneyTransactionsPage() {
       sponsorId: "",
       sponsorName: "",
       sponsorshipNote: "",
+
+      bankReconciliationStatus: "unmatched",
+      bankReconciliationNote: "",
+
+      financeNoteStatus: "none",
+      financeNote: "",
+
       isRepeating: false,
       repeatFrequency: "monthly",
       repeatCount: "12",
@@ -935,6 +1067,14 @@ export function useMoneyTransactionsPage() {
       sponsorId: matchingSponsor?.id || item.sponsor_id || "",
       sponsorName: matchingSponsor?.sponsor_name || item.sponsor_name || "",
       sponsorshipNote: item.sponsorship_note || "",
+
+      bankReconciliationStatus:
+        item.bank_reconciliation_status || "unmatched",
+      bankReconciliationNote: item.bank_reconciliation_note || "",
+
+      financeNoteStatus: item.finance_note_status || "none",
+      financeNote: item.finance_note || "",
+
       isRepeating: false,
       repeatFrequency: "monthly",
       repeatCount: "12",
@@ -1113,6 +1253,19 @@ export function useMoneyTransactionsPage() {
         uploadData.append("sponsorId", finalSponsorId);
         uploadData.append("sponsorName", finalSponsorName);
         uploadData.append("sponsorshipNote", form.sponsorshipNote);
+
+        uploadData.append(
+          "bankReconciliationStatus",
+          form.bankReconciliationStatus || "unmatched"
+        );
+        uploadData.append(
+          "bankReconciliationNote",
+          form.bankReconciliationNote || ""
+        );
+
+        uploadData.append("financeNoteStatus", form.financeNoteStatus || "none");
+        uploadData.append("financeNote", form.financeNote || "");
+
         uploadData.append("isRepeating", String(form.isRepeating));
         uploadData.append("repeatFrequency", form.repeatFrequency);
         uploadData.append("repeatCount", String(repeatCount));
@@ -1161,7 +1314,9 @@ export function useMoneyTransactionsPage() {
   }
 
   async function markTransactionChecked(item: Transaction) {
-    const checkYear = getTransactionYear(item.transaction_date || item.created_at);
+    const checkYear = getTransactionYear(
+      item.transaction_date || item.created_at
+    );
 
     if (isYearLocked(checkYear)) {
       setError(
@@ -1221,6 +1376,147 @@ export function useMoneyTransactionsPage() {
       setErrorDetails(err);
     } finally {
       setCheckingId(null);
+    }
+  }
+
+  async function updateBankReconciliationStatus(
+    item: Transaction,
+    status: BankReconciliationStatus,
+    note = ""
+  ) {
+    const transactionYear = getTransactionYear(
+      item.transaction_date || item.created_at
+    );
+
+    if (isYearLocked(transactionYear)) {
+      setError(
+        `${transactionYear} is locked. Unlock this year with the main admin password before changing the bank reconciliation status.`
+      );
+      return;
+    }
+
+    try {
+      setBankReconcilingId(item.id);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/transactions/${item.id}/bank-reconciliation`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+            note,
+          }),
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message:
+            data.error || "Failed to update bank reconciliation status.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      if (data.transaction) {
+        setTransactions((prev) =>
+          prev.map((transaction) =>
+            transaction.id === item.id
+              ? {
+                  ...transaction,
+                  ...data.transaction,
+                }
+              : transaction
+          )
+        );
+      } else {
+        await loadTransactions();
+      }
+
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setBankReconcilingId(null);
+    }
+  }
+
+  async function updateFinanceNote(
+    item: Transaction,
+    status: FinanceNoteStatus,
+    note = ""
+  ) {
+    const transactionYear = getTransactionYear(
+      item.transaction_date || item.created_at
+    );
+
+    if (isYearLocked(transactionYear)) {
+      setError(
+        `${transactionYear} is locked. Unlock this year with the main admin password before changing finance notes.`
+      );
+      return;
+    }
+
+    try {
+      setFinanceNoteUpdatingId(item.id);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/transactions/${item.id}/finance-note`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+            note,
+          }),
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to update finance note.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      if (data.transaction) {
+        setTransactions((prev) =>
+          prev.map((transaction) =>
+            transaction.id === item.id
+              ? {
+                  ...transaction,
+                  ...data.transaction,
+                }
+              : transaction
+          )
+        );
+      } else {
+        await loadTransactions();
+      }
+
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setFinanceNoteUpdatingId(null);
     }
   }
 
@@ -1496,7 +1792,9 @@ export function useMoneyTransactionsPage() {
     item: Transaction,
     proofFiles: File[] = []
   ) {
-    const repayYear = getTransactionYear(item.transaction_date || item.created_at);
+    const repayYear = getTransactionYear(
+      item.transaction_date || item.created_at
+    );
 
     if (isYearLocked(repayYear)) {
       setError(
@@ -1705,6 +2003,8 @@ export function useMoneyTransactionsPage() {
     setDeleteAllPassword,
     repayingId,
     checkingId,
+    bankReconcilingId,
+    financeNoteUpdatingId,
     sponsorFormOpen,
     editingSponsor,
     savingSponsor,
@@ -1715,6 +2015,9 @@ export function useMoneyTransactionsPage() {
     deletingSponsor,
     error,
     errorDetails,
+    stripeSyncing,
+    stripeSyncMessage,
+    stripeSyncError,
 
     yearLocks,
     selectedYearLock,
@@ -1732,11 +2035,13 @@ export function useMoneyTransactionsPage() {
     printTransactionsList,
     totals,
     filteredTotals,
+    carryForwardNote,
 
     monthNameFromKey,
 
     handleYearChange,
     refreshAll,
+    syncStripeDonations,
 
     openNewSponsorForm,
     startEditSponsor,
@@ -1751,6 +2056,8 @@ export function useMoneyTransactionsPage() {
     deleteTransaction,
 
     markTransactionChecked,
+    updateBankReconciliationStatus,
+    updateFinanceNote,
 
     lockSelectedYear,
     unlockSelectedYear,

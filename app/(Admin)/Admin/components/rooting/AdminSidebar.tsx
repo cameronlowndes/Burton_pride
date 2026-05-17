@@ -9,8 +9,158 @@ import type {
   AdminSidebarResponse,
 } from "@/types/admin-sidebar";
 
+type AdminRole = "main_admin" | "admin" | "editor";
+
+type AdminSidebarProps = {
+  permissions?: string[];
+  adminRole?: AdminRole | null;
+};
+
 function clsx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function normalise(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function hasPermission(
+  permissions: string[],
+  adminRole: AdminRole | null | undefined,
+  permission: string
+) {
+  if (adminRole === "main_admin") return true;
+  return permissions.includes(permission);
+}
+
+/**
+ * Your sidebar is loaded from the database, so older rows may not have a
+ * permission field. This function protects important links by their href/label.
+ *
+ * If you later add a permission_key / required_permission column to the
+ * sidebar table, this function will use it automatically.
+ */
+function getItemPermission(item: AdminSidebarItem): string | null {
+  const unsafeItem = item as AdminSidebarItem & {
+    permission_key?: string | null;
+    required_permission?: string | null;
+    permission?: string | null;
+  };
+
+  const savedPermission =
+    unsafeItem.permission_key ||
+    unsafeItem.required_permission ||
+    unsafeItem.permission;
+
+  if (savedPermission) return savedPermission;
+
+  const label = normalise(item.label);
+  const href = normalise(item.href);
+
+  /**
+   * High-risk settings.
+   * The delete password controls high-risk delete actions, so do not show it
+   * unless the admin has the delete-all money permission.
+   */
+  if (
+    label.includes("delete all password") ||
+    label.includes("delete password") ||
+    href.includes("delete-password") ||
+    href.includes("deletepassword")
+  ) {
+    return "money:delete_all";
+  }
+
+  /**
+   * Admin users and permissions.
+   */
+  if (
+    label === "users" ||
+    label.includes("admin users") ||
+    label.includes("permissions") ||
+    href.includes("/admin/dashboard/users") ||
+    href.includes("/admin/users")
+  ) {
+    return "admin:users:manage";
+  }
+
+  /**
+   * Money tracker / accounts.
+   */
+  if (
+    label.includes("money") ||
+    label.includes("accounts") ||
+    href.includes("/admin/money") ||
+    href.includes("/admin/dashboard/money")
+  ) {
+    return "money:view";
+  }
+
+  /**
+   * Audit logs.
+   */
+  if (
+    label.includes("audit") ||
+    label.includes("logs") ||
+    href.includes("/logs") ||
+    href.includes("audit")
+  ) {
+    return "audit_logs:view";
+  }
+
+  /**
+   * Donations.
+   */
+  if (label.includes("donation") || href.includes("donation")) {
+    return "donations:view";
+  }
+
+  /**
+   * Raffle.
+   */
+  if (label.includes("raffle") || href.includes("raffle")) {
+    return "raffle:view";
+  }
+
+  /**
+   * Page editor / navbar / sidebar editors.
+   */
+  if (
+    label.includes("page editor") ||
+    label.includes("navbar") ||
+    label.includes("side bar") ||
+    label.includes("sidebar") ||
+    href.includes("/pageeditor")
+  ) {
+    return "site_pages:manage";
+  }
+
+  /**
+   * Dashboard should be available to admins with dashboard permission.
+   */
+  if (label.includes("dashboard") || href.endsWith("/admin/dashboard")) {
+    return "admin:dashboard:view";
+  }
+
+  /**
+   * Everything else remains visible by default so old admin portal links are
+   * not accidentally hidden. Add a permission matcher above for any section
+   * you want to restrict.
+   */
+  return null;
+}
+
+function canViewItem(
+  item: AdminSidebarItem,
+  permissions: string[],
+  adminRole: AdminRole | null | undefined
+) {
+  if (adminRole === "main_admin") return true;
+
+  const permission = getItemPermission(item);
+  if (!permission) return true;
+
+  return hasPermission(permissions, adminRole, permission);
 }
 
 function getActiveHref(pathname: string, items: AdminSidebarItem[]) {
@@ -26,7 +176,54 @@ function getActiveHref(pathname: string, items: AdminSidebarItem[]) {
   return sortedMatches[0]?.href || "";
 }
 
-export default function AdminSidebar() {
+function filterSidebarItemsByPermissions({
+  items,
+  permissions,
+  adminRole,
+}: {
+  items: AdminSidebarItem[];
+  permissions: string[];
+  adminRole: AdminRole | null | undefined;
+}) {
+  const enabledItems = items.filter((item) => item.is_enabled);
+
+  const childrenByParent = new Map<string, AdminSidebarItem[]>();
+
+  for (const item of enabledItems) {
+    if (!item.parent_id) continue;
+
+    const current = childrenByParent.get(item.parent_id) || [];
+    current.push(item);
+    childrenByParent.set(item.parent_id, current);
+  }
+
+  return enabledItems.filter((item) => {
+    const children = childrenByParent.get(item.id) || [];
+    const visibleChildren = children.filter((child) =>
+      canViewItem(child, permissions, adminRole)
+    );
+
+    /**
+     * For groups, keep the group only if:
+     * - the group itself is allowed, and
+     * - it has a visible child, or it links to a real allowed page.
+     */
+    if (item.item_type === "group") {
+      const groupAllowed = canViewItem(item, permissions, adminRole);
+      const hasVisibleChildren = visibleChildren.length > 0;
+      const hasOwnHref = Boolean(item.href && item.href !== "#");
+
+      return groupAllowed && (hasVisibleChildren || hasOwnHref);
+    }
+
+    return canViewItem(item, permissions, adminRole);
+  });
+}
+
+export default function AdminSidebar({
+  permissions = [],
+  adminRole = null,
+}: AdminSidebarProps) {
   const { signOut } = useClerk();
   const pathname = usePathname();
 
@@ -48,15 +245,17 @@ export default function AdminSidebar() {
           throw new Error(data.error || "Failed to load sidebar");
         }
 
-        const enabledItems = (data.items || []).filter(
-          (item) => item.is_enabled
-        );
+        const filteredItems = filterSidebarItemsByPermissions({
+          items: data.items || [],
+          permissions,
+          adminRole,
+        });
 
-        setItems(enabledItems);
+        setItems(filteredItems);
 
         const initialOpen: Record<string, boolean> = {};
 
-        enabledItems
+        filteredItems
           .filter((item) => item.item_type === "group")
           .forEach((item) => {
             initialOpen[item.id] = true;
@@ -71,7 +270,7 @@ export default function AdminSidebar() {
     };
 
     loadItems();
-  }, []);
+  }, [permissions, adminRole]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

@@ -51,6 +51,26 @@ const iconOptions = [
   "Settings",
   "PenSquare",
 ];
+async function readJsonResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+
+  if (!text) {
+    return {
+      ok: false,
+      error: "Server returned an empty response.",
+    } as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {
+      ok: false,
+      error: text || "Server returned an invalid response.",
+    } as T;
+  }
+}
+
 
 export default function EmailSidebarAdminClient() {
   const [items, setItems] = useState<EmailSidebarItem[]>([]);
@@ -75,7 +95,7 @@ export default function EmailSidebarAdminClient() {
         cache: "no-store",
       });
 
-      const data: EmailSidebarResponse = await res.json();
+      const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to load email sidebar items");
@@ -166,7 +186,7 @@ export default function EmailSidebarAdminClient() {
         body: JSON.stringify(payload),
       });
 
-      const data: EmailSidebarResponse = await res.json();
+      const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to save email sidebar item");
@@ -205,7 +225,7 @@ export default function EmailSidebarAdminClient() {
         method: "DELETE",
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to delete item");
@@ -244,7 +264,7 @@ export default function EmailSidebarAdminClient() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to update item");
@@ -274,7 +294,7 @@ export default function EmailSidebarAdminClient() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to duplicate item");
@@ -310,9 +330,9 @@ export default function EmailSidebarAdminClient() {
     ];
 
     try {
-      await Promise.all(
-        reordered.map((x, i) =>
-          fetch(`/api/admin/email-sidebar/${x.id}`, {
+      const responses = await Promise.all(
+        reordered.map(async (x, i) => {
+          const res = await fetch(`/api/admin/email-sidebar/${x.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -322,9 +342,21 @@ export default function EmailSidebarAdminClient() {
               sort_order: i,
               is_enabled: x.is_enabled,
             }),
-          })
-        )
+          });
+
+          const data = await readJsonResponse<EmailSidebarResponse>(res);
+
+          if (!res.ok || !data.ok) {
+            throw new Error(data.error || `Failed to reorder ${x.label}`);
+          }
+
+          return data;
+        })
       );
+
+      if (!responses.length) {
+        throw new Error("No items were reordered.");
+      }
 
       await loadItems();
     } catch (error) {

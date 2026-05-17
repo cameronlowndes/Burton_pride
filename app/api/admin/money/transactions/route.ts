@@ -15,6 +15,21 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-08-16" as any,
 });
 
+const allowedBankReconciliationStatuses = [
+  "unmatched",
+  "matched",
+  "needs_review",
+  "ignored",
+];
+
+const allowedFinanceNoteStatuses = [
+  "none",
+  "waiting_for_receipt",
+  "ask_sponsor",
+  "bank_query",
+  "resolved",
+];
+
 function isStripeKeyLive() {
   return process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") === true;
 }
@@ -29,7 +44,9 @@ function sessionMatchesCurrentStripeMode(sessionId: string) {
   return false;
 }
 
-function clean(value: FormDataEntryValue | null) {
+function clean(
+  value: FormDataEntryValue | string | number | boolean | null | undefined
+) {
   const text = String(value || "").trim();
   return text.length > 0 ? text : "";
 }
@@ -39,8 +56,12 @@ function cleanOrNull(value: string) {
   return text.length > 0 ? text : null;
 }
 
-function toBoolean(value: string) {
-  return value === "true" || value === "1" || value === "yes";
+function toBoolean(value: string | boolean | null | undefined) {
+  if (typeof value === "boolean") return value;
+
+  const text = String(value || "").toLowerCase().trim();
+
+  return text === "true" || text === "1" || text === "yes";
 }
 
 function getTransactionYearFromDate(dateValue: string | null | undefined) {
@@ -63,6 +84,42 @@ function safeFileName(name: string) {
     .replace(/[^a-zA-Z0-9.\-_ ]/g, "")
     .replace(/\s+/g, "-")
     .slice(0, 120);
+}
+
+function cleanBankReconciliationStatus(value: unknown) {
+  const status = String(value || "unmatched").trim();
+
+  if (allowedBankReconciliationStatuses.includes(status)) {
+    return status;
+  }
+
+  return "unmatched";
+}
+
+function cleanFinanceNoteStatus(value: unknown) {
+  const status = String(value || "none").trim();
+
+  if (allowedFinanceNoteStatuses.includes(status)) {
+    return status;
+  }
+
+  return "none";
+}
+
+function numberToPounds(value: unknown) {
+  const amount = Number(value || 0);
+
+  if (!Number.isFinite(amount)) return 0;
+
+  return amount;
+}
+
+function penceToPounds(value: unknown) {
+  const pence = Number(value || 0);
+
+  if (!Number.isFinite(pence)) return 0;
+
+  return pence / 100;
 }
 
 async function createTransactionReference(year: string) {
@@ -414,6 +471,16 @@ async function syncPaidDonationsToMoneyTracker() {
         payment_method: "Stripe",
         transaction_date: transactionDate,
 
+        bank_reconciliation_status: "unmatched",
+        bank_reconciled_at: null,
+        bank_reconciled_by: null,
+        bank_reconciliation_note: null,
+
+        finance_note_status: "none",
+        finance_note: null,
+        finance_note_updated_at: null,
+        finance_note_updated_by: null,
+
         is_personal_funds: false,
         personal_funds_name: null,
         personal_funds_repaid: false,
@@ -476,6 +543,258 @@ async function syncPaidDonationsToMoneyTracker() {
   }
 }
 
+async function createTransactionFromPayload({
+  payload,
+  invoiceFiles,
+}: {
+  payload: Record<string, any>;
+  invoiceFiles: File[];
+}) {
+  const title = clean(payload.title);
+  const description = clean(payload.description);
+  const type = clean(payload.type);
+  const category = clean(payload.category);
+
+  const amountPounds =
+    payload.amount_pence !== undefined
+      ? penceToPounds(payload.amount_pence)
+      : numberToPounds(payload.amount);
+
+  const paymentMethod = clean(
+    payload.paymentMethod || payload.payment_method
+  );
+
+  const transactionDate = clean(
+    payload.transactionDate || payload.transaction_date
+  );
+
+  const source = clean(payload.source) || "manual";
+
+  const isPersonalFunds = toBoolean(
+    payload.isPersonalFunds ?? payload.is_personal_funds
+  );
+
+  const personalFundsName = clean(
+    payload.personalFundsName || payload.personal_funds_name
+  );
+
+  const sponsorId = clean(payload.sponsorId || payload.sponsor_id);
+  const sponsorName = clean(payload.sponsorName || payload.sponsor_name);
+  const sponsorshipNote = clean(
+    payload.sponsorshipNote || payload.sponsorship_note
+  );
+
+  const bankReconciliationStatus = cleanBankReconciliationStatus(
+    payload.bankReconciliationStatus || payload.bank_reconciliation_status
+  );
+
+  const bankReconciliationNote = clean(
+    payload.bankReconciliationNote || payload.bank_reconciliation_note
+  );
+
+  const financeNoteStatus = cleanFinanceNoteStatus(
+    payload.financeNoteStatus || payload.finance_note_status
+  );
+
+  const financeNote = clean(payload.financeNote || payload.finance_note);
+
+  const isSponsorLinked = Boolean(sponsorId || sponsorName);
+
+  if (!title || !type || amountPounds <= 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Title, type and amount are required",
+        received: {
+          title,
+          type,
+          amount: amountPounds,
+          category,
+          paymentMethod,
+          transactionDate,
+          source,
+          sponsorId,
+          sponsorName,
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  if (type !== "income" && type !== "expense") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Type must be income or expense",
+        received: type,
+      },
+      { status: 400 }
+    );
+  }
+
+  if (!paymentMethod && !isSponsorLinked) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Please choose a payment method.",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (isPersonalFunds && !personalFundsName) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Please enter the name of the person who paid with personal funds.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const finalTransactionDate =
+    transactionDate || new Date().toISOString().slice(0, 10);
+
+  const actorLabel = await getActorLabel();
+
+  const matchedAt =
+    bankReconciliationStatus === "matched" ? new Date().toISOString() : null;
+
+  const matchedBy = bankReconciliationStatus === "matched" ? actorLabel : null;
+
+  const hasFinanceQuery =
+    financeNoteStatus !== "none" || financeNote.trim().length > 0;
+
+  const insertData = {
+    title,
+    description: cleanOrNull(description),
+    type,
+    category: isSponsorLinked ? "Sponsorship" : cleanOrNull(category),
+    amount_pence: Math.round(amountPounds * 100),
+    payment_method: isSponsorLinked
+      ? "Sponsorship Money"
+      : cleanOrNull(paymentMethod),
+    transaction_date: finalTransactionDate,
+
+    bank_reconciliation_status: bankReconciliationStatus,
+    bank_reconciled_at: matchedAt,
+    bank_reconciled_by: matchedBy,
+    bank_reconciliation_note: cleanOrNull(bankReconciliationNote),
+
+    finance_note_status: financeNoteStatus,
+    finance_note: cleanOrNull(financeNote),
+    finance_note_updated_at: hasFinanceQuery ? new Date().toISOString() : null,
+    finance_note_updated_by: hasFinanceQuery ? actorLabel : null,
+
+    invoice_image_url: cleanOrNull(payload.invoice_image_url || ""),
+
+    is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
+    personal_funds_name:
+      isSponsorLinked || !isPersonalFunds
+        ? null
+        : cleanOrNull(personalFundsName),
+    personal_funds_repaid: toBoolean(
+      payload.personalFundsRepaid ?? payload.personal_funds_repaid
+    ),
+    personal_funds_repaid_at: cleanOrNull(
+      clean(payload.personalFundsRepaidAt || payload.personal_funds_repaid_at)
+    ),
+
+    sponsor_id: sponsorId || null,
+    sponsor_name: sponsorName || null,
+    sponsorship_note: sponsorshipNote || null,
+
+    source: isSponsorLinked ? "sponsorship" : source || "manual",
+
+    stripe_session_id: cleanOrNull(clean(payload.stripe_session_id)),
+    stripe_invoice_id: cleanOrNull(clean(payload.stripe_invoice_id)),
+    stripe_customer_id: cleanOrNull(clean(payload.stripe_customer_id)),
+    stripe_payment_intent_id: cleanOrNull(
+      clean(payload.stripe_payment_intent_id)
+    ),
+
+    deleted_at: null,
+    deleted_by: null,
+  };
+
+  const { data, error, sent } = await insertTransactionWithReference(insertData);
+
+  if (error || !data?.id) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: error?.message || "Failed to create transaction.",
+        details: error,
+        sent,
+      },
+      { status: 500 }
+    );
+  }
+
+  let attachments: any[] = [];
+
+  if (invoiceFiles.length > 0) {
+    try {
+      attachments = await uploadTransactionAttachments({
+        transactionId: data.id,
+        files: invoiceFiles,
+      });
+
+      if (attachments[0]?.file_url) {
+        await supabaseAdmin
+          .from("money_transactions")
+          .update({
+            invoice_image_url: attachments[0].file_url,
+          })
+          .eq("id", data.id);
+
+        data.invoice_image_url = attachments[0].file_url;
+      }
+    } catch (attachmentError: any) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            attachmentError?.message ||
+            "Transaction was created but one or more attachments failed to upload.",
+          details: attachmentError,
+          transaction: data,
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  const transactionWithAttachments = {
+    ...data,
+    attachments,
+  };
+
+  await createMoneyAuditLog({
+    action: "create",
+    transactionId: data?.id || null,
+    transactionTitle: data?.title || title,
+    beforeData: null,
+    afterData: transactionWithAttachments,
+    metadata: {
+      source: "money_tracker",
+      route: "/api/admin/money/transactions",
+      transaction_reference:
+        data?.transaction_reference || sent?.transaction_reference,
+      attachment_count: attachments.length,
+      bank_reconciliation_status: bankReconciliationStatus,
+      finance_note_status: financeNoteStatus,
+      finance_note: financeNote || null,
+    },
+  });
+
+  return NextResponse.json({
+    ok: true,
+    transaction: transactionWithAttachments,
+  });
+}
+
 export async function GET() {
   try {
     await syncPaidDonationsToMoneyTracker();
@@ -505,6 +824,17 @@ export async function GET() {
 
     const transactionsWithAttachments = rows.map((item) => ({
       ...item,
+      bank_reconciliation_status:
+        item.bank_reconciliation_status || "unmatched",
+      bank_reconciled_at: item.bank_reconciled_at || null,
+      bank_reconciled_by: item.bank_reconciled_by || null,
+      bank_reconciliation_note: item.bank_reconciliation_note || null,
+
+      finance_note_status: item.finance_note_status || "none",
+      finance_note: item.finance_note || null,
+      finance_note_updated_at: item.finance_note_updated_at || null,
+      finance_note_updated_by: item.finance_note_updated_by || null,
+
       attachments: attachmentMap.get(item.id) || [],
     }));
 
@@ -534,23 +864,18 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const payload = await req.json();
+
+      return await createTransactionFromPayload({
+        payload,
+        invoiceFiles: [],
+      });
+    }
+
     const formData = await req.formData();
-
-    const title = clean(formData.get("title"));
-    const description = clean(formData.get("description"));
-    const type = clean(formData.get("type"));
-    const category = clean(formData.get("category"));
-    const amount = clean(formData.get("amount"));
-    const paymentMethod = clean(formData.get("paymentMethod"));
-    const transactionDate = clean(formData.get("transactionDate"));
-    const source = clean(formData.get("source")) || "manual";
-
-    const isPersonalFunds = toBoolean(clean(formData.get("isPersonalFunds")));
-    const personalFundsName = clean(formData.get("personalFundsName"));
-
-    const sponsorId = clean(formData.get("sponsorId"));
-    const sponsorName = clean(formData.get("sponsorName"));
-    const sponsorshipNote = clean(formData.get("sponsorshipNote"));
 
     const invoiceFiles = formData
       .getAll("invoiceFiles")
@@ -566,174 +891,45 @@ export async function POST(req: NextRequest) {
       invoiceFiles.push(oldSingleInvoiceFile);
     }
 
-    const amountPounds = Number(amount || 0);
-    const isSponsorLinked = Boolean(sponsorId || sponsorName);
+    const payload = {
+      title: clean(formData.get("title")),
+      description: clean(formData.get("description")),
+      type: clean(formData.get("type")),
+      category: clean(formData.get("category")),
+      amount: clean(formData.get("amount")),
+      paymentMethod: clean(formData.get("paymentMethod")),
+      transactionDate: clean(formData.get("transactionDate")),
+      source: clean(formData.get("source")) || "manual",
 
-    if (!title || !type || amountPounds <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Title, type and amount are required",
-          received: {
-            title,
-            type,
-            amount,
-            category,
-            paymentMethod,
-            transactionDate,
-            source,
-            sponsorId,
-            sponsorName,
-          },
-        },
-        { status: 400 }
-      );
-    }
+      isPersonalFunds: clean(formData.get("isPersonalFunds")),
+      personalFundsName: clean(formData.get("personalFundsName")),
 
-    if (type !== "income" && type !== "expense") {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Type must be income or expense",
-          received: type,
-        },
-        { status: 400 }
-      );
-    }
+      sponsorId: clean(formData.get("sponsorId")),
+      sponsorName: clean(formData.get("sponsorName")),
+      sponsorshipNote: clean(formData.get("sponsorshipNote")),
 
-    if (!paymentMethod && !isSponsorLinked) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Please choose a payment method.",
-        },
-        { status: 400 }
-      );
-    }
+      bankReconciliationStatus:
+        clean(formData.get("bankReconciliationStatus")) ||
+        clean(formData.get("bank_reconciliation_status")) ||
+        "unmatched",
+      bankReconciliationNote:
+        clean(formData.get("bankReconciliationNote")) ||
+        clean(formData.get("bank_reconciliation_note")) ||
+        "",
 
-    if (isPersonalFunds && !personalFundsName) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Please enter the name of the person who paid with personal funds.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const finalTransactionDate =
-      transactionDate || new Date().toISOString().slice(0, 10);
-
-    const insertData = {
-      title,
-      description: cleanOrNull(description),
-      type,
-      category: isSponsorLinked ? "Sponsorship" : cleanOrNull(category),
-      amount_pence: Math.round(amountPounds * 100),
-      payment_method: isSponsorLinked
-        ? "Sponsorship Money"
-        : cleanOrNull(paymentMethod),
-      transaction_date: finalTransactionDate,
-
-      invoice_image_url: null,
-
-      is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
-      personal_funds_name:
-        isSponsorLinked || !isPersonalFunds
-          ? null
-          : cleanOrNull(personalFundsName),
-      personal_funds_repaid: false,
-      personal_funds_repaid_at: null,
-
-      sponsor_id: sponsorId || null,
-      sponsor_name: sponsorName || null,
-      sponsorship_note: sponsorshipNote || null,
-
-      source: isSponsorLinked ? "sponsorship" : source || "manual",
-
-      stripe_session_id: null,
-      stripe_invoice_id: null,
-      stripe_customer_id: null,
-      stripe_payment_intent_id: null,
-
-      deleted_at: null,
-      deleted_by: null,
+      financeNoteStatus:
+        clean(formData.get("financeNoteStatus")) ||
+        clean(formData.get("finance_note_status")) ||
+        "none",
+      financeNote:
+        clean(formData.get("financeNote")) ||
+        clean(formData.get("finance_note")) ||
+        "",
     };
 
-    const { data, error, sent } = await insertTransactionWithReference(
-      insertData
-    );
-
-    if (error || !data?.id) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: error?.message || "Failed to create transaction.",
-          details: error,
-          sent,
-        },
-        { status: 500 }
-      );
-    }
-
-    let attachments: any[] = [];
-
-    if (invoiceFiles.length > 0) {
-      try {
-        attachments = await uploadTransactionAttachments({
-          transactionId: data.id,
-          files: invoiceFiles,
-        });
-
-        if (attachments[0]?.file_url) {
-          await supabaseAdmin
-            .from("money_transactions")
-            .update({
-              invoice_image_url: attachments[0].file_url,
-            })
-            .eq("id", data.id);
-
-          data.invoice_image_url = attachments[0].file_url;
-        }
-      } catch (attachmentError: any) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              attachmentError?.message ||
-              "Transaction was created but one or more attachments failed to upload.",
-            details: attachmentError,
-            transaction: data,
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    const transactionWithAttachments = {
-      ...data,
-      attachments,
-    };
-
-    await createMoneyAuditLog({
-      action: "create",
-      transactionId: data?.id || null,
-      transactionTitle: data?.title || title,
-      beforeData: null,
-      afterData: transactionWithAttachments,
-      metadata: {
-        source: "money_tracker",
-        route: "/api/admin/money/transactions",
-        transaction_reference:
-          data?.transaction_reference || sent?.transaction_reference,
-        attachment_count: attachments.length,
-      },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      transaction: transactionWithAttachments,
+    return await createTransactionFromPayload({
+      payload,
+      invoiceFiles,
     });
   } catch (err) {
     console.error("Money transactions POST error:", err);

@@ -1,5 +1,7 @@
 "use client";
 
+import { RefreshCcw } from "lucide-react";
+
 import MoneyHeader from "../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../components/money/MoneySummaryCards";
 import MoneyPageStatus from "../../components/money/MoneyPageStatus";
@@ -7,6 +9,7 @@ import MoneyMainGrid from "../../components/money/MoneyMainGrid";
 import MoneySponsorSection from "../../components/money/MoneySponsorSection";
 import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown";
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
+import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
@@ -23,6 +26,53 @@ export default function MoneyTransactionsPage() {
           onYearChange={money.handleYearChange}
           onRefresh={money.refreshAll}
         />
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-white">
+                Website payments sync
+              </h2>
+
+              <p className="max-w-3xl text-sm text-white/65">
+                Website payments are not synced automatically when this page
+                loads. Use this button when you want to pull Stripe website
+                payments into the money tracker, including donations, raffle,
+                Windows of Hope, vendor fees, sponsorship, and future payment
+                types. Manual entries will stay separate.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={money.syncStripeDonations}
+              disabled={money.stripeSyncing}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 shadow-lg shadow-sky-950/20 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              <RefreshCcw
+                className={`h-4 w-4 ${
+                  money.stripeSyncing ? "animate-spin" : ""
+                }`}
+              />
+
+              {money.stripeSyncing
+                ? "Syncing website payments..."
+                : "Sync Website Payments"}
+            </button>
+          </div>
+
+          {money.stripeSyncMessage && (
+            <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
+              {money.stripeSyncMessage}
+            </div>
+          )}
+
+          {money.stripeSyncError && (
+            <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100">
+              {money.stripeSyncError}
+            </div>
+          )}
+        </section>
 
         <MoneyPageStatus
           error={money.error}
@@ -44,6 +94,11 @@ export default function MoneyTransactionsPage() {
         />
 
         <MoneyStatsCards totals={money.totals} />
+
+        <MoneyCarryForwardNote
+          selectedYear={money.selectedYear}
+          carryForwardNote={money.carryForwardNote}
+        />
 
         <MoneySponsorSection
           selectedYear={money.selectedYear}
@@ -95,6 +150,8 @@ export default function MoneyTransactionsPage() {
           deletingAll={money.deletingAll}
           repayingId={money.repayingId}
           checkingId={money.checkingId}
+          bankReconcilingId={money.bankReconcilingId}
+          financeNoteUpdatingId={money.financeNoteUpdatingId}
           deleting={money.deleting}
           onPrint={money.printTransactions}
           onExportExcel={money.exportTransactionsToExcel}
@@ -105,6 +162,10 @@ export default function MoneyTransactionsPage() {
           onHideTransaction={money.setDeleteId}
           onTogglePersonalFundsRepaid={money.togglePersonalFundsRepaid}
           onMarkTransactionChecked={money.markTransactionChecked}
+          onUpdateBankReconciliationStatus={
+            money.updateBankReconciliationStatus
+          }
+          onUpdateFinanceNote={money.updateFinanceNote}
         />
       </div>
 

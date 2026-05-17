@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, FileClock, FileSpreadsheet } from "lucide-react";
 import MoneyCsvImport from "../../../components/money/MoneyCsvImport";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +31,23 @@ export default function MoneyCsvImportPage() {
                 </p>
               </div>
 
-              <Link
-                href="/Admin/MoneyManagement/TrackingMoney"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to Money Tracker
-              </Link>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/ImportHistory"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500/15 px-4 py-3 text-sm font-bold text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"
+                >
+                  <FileClock className="h-4 w-4" />
+                  Import History
+                </Link>
+
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Money Tracker
+                </Link>
+              </div>
             </div>
           </div>
         </section>

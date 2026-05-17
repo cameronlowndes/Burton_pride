@@ -7,7 +7,7 @@ import {
   Trash2,
   Save,
   RefreshCw,
-  Lock,
+  ShieldCheck,
   ChevronRight,
   FolderTree,
   GripVertical,
@@ -387,8 +387,8 @@ export default function NavbarAdminPage() {
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-3xl">
                 <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-violet-400/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-violet-200">
-                  <Lock className="h-3.5 w-3.5" />
-                  Main admin only
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Permission controlled
                 </div>
 
                 <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -396,13 +396,15 @@ export default function NavbarAdminPage() {
                 </h1>
 
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70 sm:text-base">
-                  Add, edit, sort, enable, disable, group navbar items, and drag them into the order you want shown on the website.
+                  Add, edit, sort, enable, disable, group navbar items, and drag
+                  them into the order you want shown on the website. Access is
+                  controlled by the Manage Site Pages permission.
                 </p>
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Link
-                  href="/admin/dashboard"
+                  href="/Admin/Dashboard"
                   className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-medium text-white/85 transition hover:border-white/20 hover:bg-white/10"
                 >
                   Back to dashboard

@@ -2,9 +2,22 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { useUser } from "@clerk/nextjs";
-import { Download, FileText, Pencil, Printer, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  FileText,
+  Loader2,
+  Pencil,
+  Printer,
+  RefreshCcw,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 
 import type {
+  BankReconciliationStatus,
+  FinanceNoteStatus,
   FundingType,
   Sponsor,
   Transaction,
@@ -35,6 +48,7 @@ type PaymentMethodFilter =
   | "Card Machine"
   | "Personal Funds"
   | "Item Donation"
+  | "Other Types"
   | string;
 
 type MoneyTransactionsTableProps = {
@@ -76,6 +90,8 @@ type MoneyTransactionsTableProps = {
   deleting: boolean;
   repayingId: string | null;
   checkingId: string | null;
+  bankReconcilingId: string | null;
+  financeNoteUpdatingId: string | null;
 
   onPrint: () => void;
   onExportExcel: () => void | Promise<void>;
@@ -89,6 +105,16 @@ type MoneyTransactionsTableProps = {
     proofFiles?: File[]
   ) => void | Promise<void>;
   onMarkTransactionChecked: (item: Transaction) => void | Promise<void>;
+  onUpdateBankReconciliationStatus: (
+    item: Transaction,
+    status: BankReconciliationStatus,
+    note?: string
+  ) => void | Promise<void>;
+  onUpdateFinanceNote: (
+    item: Transaction,
+    status: FinanceNoteStatus,
+    note?: string
+  ) => void | Promise<void>;
 };
 
 const paymentMethodFilterOptions = [
@@ -100,6 +126,33 @@ const paymentMethodFilterOptions = [
   "Card Machine",
   "Personal Funds",
   "Item Donation",
+  "Other Types",
+];
+
+const financeNoteOptions: {
+  value: FinanceNoteStatus;
+  label: string;
+}[] = [
+  {
+    value: "none",
+    label: "No query",
+  },
+  {
+    value: "waiting_for_receipt",
+    label: "Waiting for receipt",
+  },
+  {
+    value: "ask_sponsor",
+    label: "Ask sponsor",
+  },
+  {
+    value: "bank_query",
+    label: "Bank query",
+  },
+  {
+    value: "resolved",
+    label: "Resolved",
+  },
 ];
 
 function fundingTypeLabel(type?: FundingType | string | null) {
@@ -130,6 +183,57 @@ function fundingBadgeClass(type?: FundingType | string | null) {
   }
 
   return "bg-amber-500/20 text-amber-100 ring-amber-300/20";
+}
+
+function bankReconciliationLabel(status?: string | null) {
+  if (status === "matched") return "Matched";
+  if (status === "needs_review") return "Needs review";
+  if (status === "ignored") return "Ignored";
+  return "Unmatched";
+}
+
+function bankReconciliationBadgeClass(status?: string | null) {
+  if (status === "matched") {
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  }
+
+  if (status === "needs_review") {
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  }
+
+  if (status === "ignored") {
+    return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
+  }
+
+  return "bg-white/10 text-white/60 ring-white/10";
+}
+
+function financeNoteStatusLabel(status?: string | null) {
+  if (status === "waiting_for_receipt") return "Waiting for receipt";
+  if (status === "ask_sponsor") return "Ask sponsor";
+  if (status === "bank_query") return "Bank query";
+  if (status === "resolved") return "Resolved";
+  return "No query";
+}
+
+function financeNoteBadgeClass(status?: string | null) {
+  if (status === "waiting_for_receipt") {
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  }
+
+  if (status === "ask_sponsor") {
+    return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+  }
+
+  if (status === "bank_query") {
+    return "bg-red-500/15 text-red-100 ring-red-300/20";
+  }
+
+  if (status === "resolved") {
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  }
+
+  return "bg-white/10 text-white/60 ring-white/10";
 }
 
 function formatFileSize(size?: number | null) {
@@ -163,6 +267,12 @@ function getTransactionFiles(item: Transaction): TransactionAttachment[] {
   }
 
   return [];
+}
+
+function hasMissingReceiptWarning(item: Transaction) {
+  const files = getTransactionFiles(item);
+
+  return item.type === "expense" && files.length === 0;
 }
 
 function normaliseText(value?: string | null) {
@@ -239,10 +349,6 @@ function canCurrentAdminUncheckTransaction({
     return normaliseText(checkedByEmail) === normaliseText(currentUserEmail);
   }
 
-  /*
-    Legacy fallback for older checked records that only saved checked_by.
-    New records should use checked_by_user_id / checked_by_email from the API.
-  */
   if (checkedByName && currentUserName) {
     return normaliseText(checkedByName) === normaliseText(currentUserName);
   }
@@ -286,6 +392,8 @@ export default function MoneyTransactionsTable({
   deleting,
   repayingId,
   checkingId,
+  bankReconcilingId,
+  financeNoteUpdatingId,
 
   onPrint,
   onExportExcel,
@@ -296,6 +404,8 @@ export default function MoneyTransactionsTable({
   onHideTransaction,
   onTogglePersonalFundsRepaid,
   onMarkTransactionChecked,
+  onUpdateBankReconciliationStatus,
+  onUpdateFinanceNote,
 }: MoneyTransactionsTableProps) {
   const { user } = useUser();
 
@@ -312,6 +422,16 @@ export default function MoneyTransactionsTable({
 
   const [repaymentProofFiles, setRepaymentProofFiles] = useState<
     Record<string, File[]>
+  >({});
+
+  const [financeNoteDrafts, setFinanceNoteDrafts] = useState<
+    Record<
+      string,
+      {
+        status: FinanceNoteStatus;
+        note: string;
+      }
+    >
   >({});
 
   const topActionButtonBase =
@@ -338,6 +458,51 @@ export default function MoneyTransactionsTable({
         );
       }) || null
     );
+  }
+
+  function getFinanceDraft(item: Transaction) {
+    return (
+      financeNoteDrafts[item.id] || {
+        status: item.finance_note_status || "none",
+        note: item.finance_note || "",
+      }
+    );
+  }
+
+  function setFinanceDraftStatus(item: Transaction, status: FinanceNoteStatus) {
+    const currentDraft = getFinanceDraft(item);
+
+    setFinanceNoteDrafts((prev) => ({
+      ...prev,
+      [item.id]: {
+        ...currentDraft,
+        status,
+      },
+    }));
+  }
+
+  function setFinanceDraftNote(item: Transaction, note: string) {
+    const currentDraft = getFinanceDraft(item);
+
+    setFinanceNoteDrafts((prev) => ({
+      ...prev,
+      [item.id]: {
+        ...currentDraft,
+        note,
+      },
+    }));
+  }
+
+  async function saveFinanceDraft(item: Transaction) {
+    const draft = getFinanceDraft(item);
+
+    await onUpdateFinanceNote(item, draft.status, draft.note);
+
+    setFinanceNoteDrafts((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
   }
 
   return (
@@ -497,7 +662,7 @@ export default function MoneyTransactionsTable({
             selectedViewMonth === "all"
               ? selectedYear
               : monthNameFromKey(selectedViewMonth)
-          } transactions by reference, title, funding name, note, payment method, or amount...`}
+          } transactions by reference, title, funding name, note, payment method, bank match, finance note, receipt status, or amount...`}
           className="w-full rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
         />
 
@@ -537,7 +702,8 @@ export default function MoneyTransactionsTable({
 
               <p className="text-xs text-emerald-100/70">
                 Show only transactions paid by Stripe, Cash, Bank Transfer,
-                PayPal, Card Machine, Personal Funds, or Item Donation.
+                PayPal, Card Machine, Personal Funds, Item Donation, or Other
+                Types.
               </p>
             </div>
 
@@ -661,7 +827,7 @@ export default function MoneyTransactionsTable({
         </div>
       ) : (
         <div className="w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full">
-          <table className="w-full min-w-[1450px] text-sm">
+          <table className="w-full min-w-[1900px] text-sm">
             <thead className="bg-white/10 text-white/60">
               <tr>
                 <th className="p-3 text-left">Reference</th>
@@ -675,7 +841,9 @@ export default function MoneyTransactionsTable({
                 <th className="p-3 text-left">Paid By</th>
                 <th className="p-3 text-left">Repayment</th>
                 <th className="p-3 text-left">Payment</th>
-                <th className="p-3 text-left">Files</th>
+                <th className="p-3 text-left">Bank Match</th>
+                <th className="p-3 text-left">Receipt / Invoice</th>
+                <th className="p-3 text-left">Finance Note</th>
                 <th className="p-3 text-left">Checked</th>
                 <th className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">
                   Action
@@ -692,10 +860,22 @@ export default function MoneyTransactionsTable({
                 const fundingLabel = fundingTypeLabel(fundingType);
                 const shortLabel = fundingShortLabel(fundingType);
                 const files = getTransactionFiles(item);
+                const missingReceipt = hasMissingReceiptWarning(item);
                 const proofFiles = repaymentProofFiles[item.id] || [];
+                const bankStatus = item.bank_reconciliation_status || "unmatched";
+                const financeDraft = getFinanceDraft(item);
+                const financeStatus = item.finance_note_status || "none";
+                const financeNoteChanged =
+                  financeDraft.status !== financeStatus ||
+                  financeDraft.note !== (item.finance_note || "");
 
                 return (
-                  <tr key={item.id} className="border-t border-white/10">
+                  <tr
+                    key={item.id}
+                    className={`border-t border-white/10 ${
+                      missingReceipt ? "bg-red-500/[0.03]" : ""
+                    }`}
+                  >
                     <td className="whitespace-nowrap p-3">
                       {item.transaction_reference ? (
                         <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">
@@ -717,6 +897,13 @@ export default function MoneyTransactionsTable({
                         <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
                           {item.description}
                         </p>
+                      )}
+
+                      {missingReceipt && (
+                        <div className="mt-2 inline-flex items-center gap-1 rounded-xl border border-red-300/20 bg-red-500/10 px-2 py-1 text-[11px] font-black text-red-100">
+                          <AlertTriangle className="h-3 w-3" />
+                          Missing receipt / proof
+                        </div>
                       )}
                     </td>
 
@@ -889,12 +1076,120 @@ export default function MoneyTransactionsTable({
                         : item.payment_method || "None"}
                     </td>
 
-                    <td className="min-w-[170px] p-3">
-                      {files.length > 0 ? (
+                    <td className="min-w-[230px] p-3">
+                      <div className="space-y-2">
+                        <span
+                          className={`inline-flex rounded-2xl px-3 py-1 text-xs font-black ring-1 ${bankReconciliationBadgeClass(
+                            bankStatus
+                          )}`}
+                        >
+                          {bankReconciliationLabel(bankStatus)}
+                        </span>
+
+                        {item.bank_reconciled_by && (
+                          <p className="text-[11px] font-semibold text-white/50">
+                            By {item.bank_reconciled_by}
+                          </p>
+                        )}
+
+                        {item.bank_reconciled_at && (
+                          <p className="text-[11px] font-semibold text-white/50">
+                            {formatDate(item.bank_reconciled_at)}
+                          </p>
+                        )}
+
+                        {item.bank_reconciliation_note && (
+                          <p className="line-clamp-2 text-[11px] text-white/45">
+                            {item.bank_reconciliation_note}
+                          </p>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            disabled={bankReconcilingId === item.id}
+                            onClick={() =>
+                              onUpdateBankReconciliationStatus(item, "matched")
+                            }
+                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-50"
+                          >
+                            {bankReconcilingId === item.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="h-3 w-3" />
+                            )}
+                            Matched
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={bankReconcilingId === item.id}
+                            onClick={() =>
+                              onUpdateBankReconciliationStatus(
+                                item,
+                                "needs_review"
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25 disabled:opacity-50"
+                          >
+                            <ShieldAlert className="h-3 w-3" />
+                            Review
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={bankReconcilingId === item.id}
+                            onClick={() =>
+                              onUpdateBankReconciliationStatus(item, "ignored")
+                            }
+                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1.5 text-[11px] font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:opacity-50"
+                          >
+                            Ignore
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={bankReconcilingId === item.id}
+                            onClick={() =>
+                              onUpdateBankReconciliationStatus(
+                                item,
+                                "unmatched"
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1.5 text-[11px] font-black text-white/70 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-50"
+                          >
+                            <RefreshCcw className="h-3 w-3" />
+                            Unmatched
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="min-w-[230px] p-3">
+                      {missingReceipt ? (
+                        <div className="rounded-2xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                          <div className="flex items-center gap-2 font-black">
+                            <AlertTriangle className="h-4 w-4" />
+                            Missing receipt
+                          </div>
+
+                          <div className="mt-1 text-red-100/70">
+                            This expense has no receipt, invoice, or proof file
+                            attached.
+                          </div>
+                        </div>
+                      ) : files.length > 0 ? (
                         <div className="space-y-2">
-                          <span className="inline-flex rounded-2xl bg-sky-500/15 px-3 py-1 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20">
-                            {files.length} file{files.length === 1 ? "" : "s"}
-                          </span>
+                          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                            <div className="font-black">
+                              Receipt / proof attached
+                            </div>
+
+                            <div className="mt-1 text-emerald-100/70">
+                              {files.length} file
+                              {files.length === 1 ? "" : "s"} attached.
+                            </div>
+                          </div>
 
                           <div className="space-y-1">
                             {files.slice(0, 3).map((file, index) => (
@@ -903,7 +1198,7 @@ export default function MoneyTransactionsTable({
                                 href={file.file_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="block max-w-[210px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
+                                className="block max-w-[220px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
                                 title={
                                   file.file_name || `Attachment ${index + 1}`
                                 }
@@ -925,8 +1220,89 @@ export default function MoneyTransactionsTable({
                           </div>
                         </div>
                       ) : (
-                        <span className="text-white/40">None</span>
+                        <span className="text-white/30">NOT UPLOAD YET</span>
                       )}
+                    </td>
+
+                    <td className="min-w-[260px] p-3">
+                      <div className="space-y-2">
+                        <span
+                          className={`inline-flex rounded-2xl px-3 py-1 text-xs font-black ring-1 ${financeNoteBadgeClass(
+                            financeStatus
+                          )}`}
+                        >
+                          {financeNoteStatusLabel(financeStatus)}
+                        </span>
+
+                        {item.finance_note && (
+                          <p className="line-clamp-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-white/65 ring-1 ring-white/10">
+                            {item.finance_note}
+                          </p>
+                        )}
+
+                        {item.finance_note_updated_by && (
+                          <p className="text-[11px] font-semibold text-white/45">
+                            By {item.finance_note_updated_by}
+                          </p>
+                        )}
+
+                        {item.finance_note_updated_at && (
+                          <p className="text-[11px] font-semibold text-white/45">
+                            {formatDate(item.finance_note_updated_at)}
+                          </p>
+                        )}
+
+                        <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                          <label className="mb-1 block text-[11px] font-bold text-white/50">
+                            Update finance query
+                          </label>
+
+                          <select
+                            value={financeDraft.status}
+                            onChange={(event) =>
+                              setFinanceDraftStatus(
+                                item,
+                                event.target.value as FinanceNoteStatus
+                              )
+                            }
+                            className="w-full rounded-lg bg-black/30 px-2 py-2 text-xs font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
+                          >
+                            {financeNoteOptions.map((option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                className="bg-[#11111f] text-white"
+                              >
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <textarea
+                            value={financeDraft.note}
+                            onChange={(event) =>
+                              setFinanceDraftNote(item, event.target.value)
+                            }
+                            placeholder="Add finance note..."
+                            className="mt-2 min-h-16 w-full rounded-lg bg-black/30 px-2 py-2 text-xs text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                          />
+
+                          <button
+                            type="button"
+                            disabled={
+                              financeNoteUpdatingId === item.id ||
+                              !financeNoteChanged
+                            }
+                            onClick={() => saveFinanceDraft(item)}
+                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {financeNoteUpdatingId === item.id && (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            )}
+                            Save finance note
+                          </button>
+                        </div>
+                      </div>
                     </td>
 
                     <td className="min-w-[210px] p-3">

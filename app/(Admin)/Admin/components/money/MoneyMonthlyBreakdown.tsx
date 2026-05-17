@@ -19,15 +19,17 @@ type MoneyMonthlyBreakdownProps = {
 type MonthlyRow = {
   key: string;
   label: string;
-  income: number;
+  generalIncome: number;
   donations: number;
-  expenses: number;
-  normalExpenses: number;
+  generalExpenses: number;
   personalFundsPaidBack: number;
   personalFundsOutstanding: number;
   personalFundsTotal: number;
-  moneyOut: number;
-  balance: number;
+  generalMoneyOut: number;
+  restrictedFundingIn: number;
+  restrictedFundingSpent: number;
+  restrictedFundingLeft: number;
+  monthBalance: number;
   runningBalance: number;
 };
 
@@ -87,6 +89,28 @@ function isDonationTransaction(transaction: Transaction) {
   );
 }
 
+function isSponsorshipTransaction(transaction: Transaction) {
+  const source = String(transaction.source || "").toLowerCase();
+  const category = String(transaction.category || "").toLowerCase();
+  const paymentMethod = String(transaction.payment_method || "").toLowerCase();
+
+  return Boolean(
+    source === "sponsorship" ||
+      source === "grant" ||
+      source === "loan" ||
+      source === "restricted_funding" ||
+      source === "funding" ||
+      category === "sponsorship" ||
+      category.includes("sponsor") ||
+      category.includes("grant") ||
+      category.includes("restricted") ||
+      paymentMethod === "sponsorship money" ||
+      transaction.sponsor_id ||
+      transaction.sponsor_name ||
+      transaction.sponsorship_note
+  );
+}
+
 function isPersonalFunds(transaction: Transaction) {
   const paymentMethod = String(transaction.payment_method || "").toLowerCase();
 
@@ -104,6 +128,10 @@ function isHiddenTransaction(transaction: Transaction) {
   );
 }
 
+function isTestPayment(transaction: Transaction) {
+  return Boolean(transaction.is_test_payment === true);
+}
+
 export default function MoneyMonthlyBreakdown({
   selectedYear,
   transactions,
@@ -112,35 +140,66 @@ export default function MoneyMonthlyBreakdown({
 
   const yearTransactions = transactions.filter((transaction) => {
     if (isHiddenTransaction(transaction)) return false;
+    if (isTestPayment(transaction)) return false;
     return getTransactionYear(transaction) === selectedYear;
   });
 
   let runningBalance = 0;
+  let runningRestrictedFunding = 0;
 
   const monthlyRows: MonthlyRow[] = months.map((month) => {
     const monthTransactions = yearTransactions.filter(
       (transaction) => getTransactionMonth(transaction) === month.key
     );
 
-    const income = monthTransactions
-      .filter((transaction) => transaction.type === "income")
+    const generalIncome = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "income" && !isSponsorshipTransaction(transaction)
+      )
       .reduce(
         (total, transaction) => total + Number(transaction.amount_pence || 0),
         0
       );
 
     const donations = monthTransactions
-      .filter((transaction) => transaction.type === "income")
+      .filter(
+        (transaction) =>
+          transaction.type === "income" &&
+          !isSponsorshipTransaction(transaction)
+      )
       .filter(isDonationTransaction)
       .reduce(
         (total, transaction) => total + Number(transaction.amount_pence || 0),
         0
       );
 
-    const normalExpenses = monthTransactions
+    const restrictedFundingIn = monthTransactions
       .filter(
         (transaction) =>
-          transaction.type === "expense" && !isPersonalFunds(transaction)
+          transaction.type === "income" && isSponsorshipTransaction(transaction)
+      )
+      .reduce(
+        (total, transaction) => total + Number(transaction.amount_pence || 0),
+        0
+      );
+
+    const restrictedFundingSpent = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" && isSponsorshipTransaction(transaction)
+      )
+      .reduce(
+        (total, transaction) => total + Number(transaction.amount_pence || 0),
+        0
+      );
+
+    const generalExpenses = monthTransactions
+      .filter(
+        (transaction) =>
+          transaction.type === "expense" &&
+          !isPersonalFunds(transaction) &&
+          !isSponsorshipTransaction(transaction)
       )
       .reduce(
         (total, transaction) => total + Number(transaction.amount_pence || 0),
@@ -175,63 +234,77 @@ export default function MoneyMonthlyBreakdown({
       personalFundsPaidBack + personalFundsOutstanding;
 
     /*
-      Important:
-      Personal funds are not Burton Pride money until the person has been paid back.
-      So unpaid personal funds show separately, but they do not reduce Money Out or Balance.
-    */
-    const expenses = normalExpenses;
-    const moneyOut = normalExpenses + personalFundsPaidBack;
-    const balance = income - moneyOut;
+      General balance rule:
+      Restricted sponsor, grant, loan, or funding transactions are kept separate.
+      They do not count as general Burton Pride money in or general money out.
 
-    runningBalance += balance;
+      Personal funds rule:
+      Unpaid personal funds are tracked as money owed, but they do not reduce
+      the general balance until marked paid back.
+    */
+    const generalMoneyOut = generalExpenses + personalFundsPaidBack;
+    const monthBalance = generalIncome - generalMoneyOut;
+
+    runningBalance += monthBalance;
+    runningRestrictedFunding += restrictedFundingIn - restrictedFundingSpent;
 
     return {
       key: month.key,
       label: month.label,
-      income,
+      generalIncome,
       donations,
-      expenses,
-      normalExpenses,
+      generalExpenses,
       personalFundsPaidBack,
       personalFundsOutstanding,
       personalFundsTotal,
-      moneyOut,
-      balance,
+      generalMoneyOut,
+      restrictedFundingIn,
+      restrictedFundingSpent,
+      restrictedFundingLeft: runningRestrictedFunding,
+      monthBalance,
       runningBalance,
     };
   });
 
   const totals = monthlyRows.reduce(
     (acc, row) => ({
-      income: acc.income + row.income,
+      generalIncome: acc.generalIncome + row.generalIncome,
       donations: acc.donations + row.donations,
-      expenses: acc.expenses + row.expenses,
-      normalExpenses: acc.normalExpenses + row.normalExpenses,
+      generalExpenses: acc.generalExpenses + row.generalExpenses,
       personalFundsPaidBack:
         acc.personalFundsPaidBack + row.personalFundsPaidBack,
       personalFundsOutstanding:
         acc.personalFundsOutstanding + row.personalFundsOutstanding,
       personalFundsTotal: acc.personalFundsTotal + row.personalFundsTotal,
-      moneyOut: acc.moneyOut + row.moneyOut,
-      balance: acc.balance + row.balance,
+      generalMoneyOut: acc.generalMoneyOut + row.generalMoneyOut,
+      restrictedFundingIn: acc.restrictedFundingIn + row.restrictedFundingIn,
+      restrictedFundingSpent:
+        acc.restrictedFundingSpent + row.restrictedFundingSpent,
+      monthBalance: acc.monthBalance + row.monthBalance,
     }),
     {
-      income: 0,
+      generalIncome: 0,
       donations: 0,
-      expenses: 0,
-      normalExpenses: 0,
+      generalExpenses: 0,
       personalFundsPaidBack: 0,
       personalFundsOutstanding: 0,
       personalFundsTotal: 0,
-      moneyOut: 0,
-      balance: 0,
+      generalMoneyOut: 0,
+      restrictedFundingIn: 0,
+      restrictedFundingSpent: 0,
+      monthBalance: 0,
     }
   );
 
-  const bestMonth = [...monthlyRows].sort((a, b) => b.balance - a.balance)[0];
+  const restrictedFundingLeft =
+    totals.restrictedFundingIn - totals.restrictedFundingSpent;
+
+  const bestMonth = [...monthlyRows].sort(
+    (a, b) => b.monthBalance - a.monthBalance
+  )[0];
 
   const highestExpenseMonth = [...monthlyRows].sort(
-    (a, b) => b.moneyOut - a.moneyOut
+    (a, b) => b.generalMoneyOut - a.generalMoneyOut
   )[0];
 
   return (
@@ -263,32 +336,33 @@ export default function MoneyMonthlyBreakdown({
           </div>
 
           <p className="mt-1 text-sm text-white/50">
-            Jan to Dec view for {selectedYear}. Unpaid personal funds are shown
-            separately and only count as Burton Pride money out after they are
-            marked paid back.
+            Jan to Dec view for {selectedYear}. Restricted sponsor, grant, loan,
+            or funding money is kept separate from the general Burton Pride
+            balance. Unpaid personal funds only reduce the balance after they
+            are marked paid back.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:min-w-[560px]">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4 lg:min-w-[760px]">
           <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3">
             <div className="flex items-center gap-2 text-xs font-bold text-emerald-100/70">
               <TrendingUp className="h-4 w-4" />
-              Year Money In
+              General Money In
             </div>
 
             <p className="mt-1 text-lg font-black text-emerald-200">
-              {money(totals.income)}
+              {money(totals.generalIncome)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-3">
             <div className="flex items-center gap-2 text-xs font-bold text-red-100/70">
               <TrendingDown className="h-4 w-4" />
-              Year Money Out
+              General Money Out
             </div>
 
             <p className="mt-1 text-lg font-black text-red-200">
-              {money(totals.moneyOut)}
+              {money(totals.generalMoneyOut)}
             </p>
 
             {totals.personalFundsOutstanding > 0 && (
@@ -299,18 +373,33 @@ export default function MoneyMonthlyBreakdown({
             )}
           </div>
 
-          <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-sky-100/70">
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-100/70">
               <Wallet className="h-4 w-4" />
-              Year Balance
+              Restricted Funding Left
             </div>
 
             <p
               className={`mt-1 text-lg font-black ${
-                totals.balance >= 0 ? "text-sky-200" : "text-red-200"
+                restrictedFundingLeft >= 0 ? "text-amber-200" : "text-red-200"
               }`}
             >
-              {money(totals.balance)}
+              {money(restrictedFundingLeft)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-sky-100/70">
+              <Wallet className="h-4 w-4" />
+              General Balance
+            </div>
+
+            <p
+              className={`mt-1 text-lg font-black ${
+                totals.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
+              }`}
+            >
+              {money(totals.monthBalance)}
             </p>
           </div>
         </div>
@@ -318,10 +407,10 @@ export default function MoneyMonthlyBreakdown({
 
       {!minimised && (
         <>
-          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Best month
+                Best general month
               </p>
 
               <p className="mt-1 text-sm font-bold text-white">
@@ -330,18 +419,18 @@ export default function MoneyMonthlyBreakdown({
 
               <p
                 className={`mt-1 text-lg font-black ${
-                  (bestMonth?.balance || 0) >= 0
+                  (bestMonth?.monthBalance || 0) >= 0
                     ? "text-emerald-200"
                     : "text-red-200"
                 }`}
               >
-                {money(bestMonth?.balance || 0)}
+                {money(bestMonth?.monthBalance || 0)}
               </p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Highest money out month
+                Highest general money out month
               </p>
 
               <p className="mt-1 text-sm font-bold text-white">
@@ -349,7 +438,25 @@ export default function MoneyMonthlyBreakdown({
               </p>
 
               <p className="mt-1 text-lg font-black text-red-200">
-                {money(highestExpenseMonth?.moneyOut || 0)}
+                {money(highestExpenseMonth?.generalMoneyOut || 0)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-100/70">
+                Restricted funding left
+              </p>
+
+              <p className="mt-1 text-sm font-bold text-white">
+                Sponsor, grant, loan, or restricted pot
+              </p>
+
+              <p
+                className={`mt-1 text-lg font-black ${
+                  restrictedFundingLeft >= 0 ? "text-amber-200" : "text-red-200"
+                }`}
+              >
+                {money(restrictedFundingLeft)}
               </p>
             </div>
 
@@ -368,25 +475,38 @@ export default function MoneyMonthlyBreakdown({
             </div>
           </div>
 
-          <div className="mb-4 rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3 text-sm text-orange-100/80">
-            <strong className="text-orange-100">Personal funds rule:</strong>{" "}
-            unpaid personal funds are tracked as money owed, but they do not
-            reduce Burton Pride balance until marked paid back.
+          <div className="mb-4 space-y-3">
+            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100/80">
+              <strong className="text-amber-100">
+                Restricted funding rule:
+              </strong>{" "}
+              sponsor, grant, loan, or restricted funding money is shown in its
+              own columns and does not reduce the general Burton Pride balance.
+            </div>
+
+            <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3 text-sm text-orange-100/80">
+              <strong className="text-orange-100">Personal funds rule:</strong>{" "}
+              unpaid personal funds are tracked as money owed, but they do not
+              reduce Burton Pride balance until marked paid back.
+            </div>
           </div>
 
           <div className="w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full">
-            <table className="w-full min-w-[1180px] text-sm">
+            <table className="w-full min-w-[1450px] text-sm">
               <thead className="bg-white/10 text-white/60">
                 <tr>
                   <th className="p-3 text-left">Month</th>
-                  <th className="p-3 text-right">Money In</th>
+                  <th className="p-3 text-right">General In</th>
                   <th className="p-3 text-right">Donations</th>
-                  <th className="p-3 text-right">Money Out</th>
+                  <th className="p-3 text-right">General Out</th>
                   <th className="p-3 text-right">Normal Expenses</th>
+                  <th className="p-3 text-right">Restricted In</th>
+                  <th className="p-3 text-right">Restricted Spent</th>
+                  <th className="p-3 text-right">Restricted Left</th>
                   <th className="p-3 text-right">Personal Paid Back</th>
                   <th className="p-3 text-right">Personal Outstanding</th>
-                  <th className="p-3 text-right">Month Balance</th>
-                  <th className="p-3 text-right">Running Balance</th>
+                  <th className="p-3 text-right">Month General Balance</th>
+                  <th className="p-3 text-right">Running General Balance</th>
                 </tr>
               </thead>
 
@@ -398,7 +518,7 @@ export default function MoneyMonthlyBreakdown({
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-emerald-200">
-                      {money(row.income)}
+                      {money(row.generalIncome)}
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-pink-200">
@@ -406,11 +526,29 @@ export default function MoneyMonthlyBreakdown({
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-red-200">
-                      {money(row.moneyOut)}
+                      {money(row.generalMoneyOut)}
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-orange-200">
-                      {money(row.normalExpenses)}
+                      {money(row.generalExpenses)}
+                    </td>
+
+                    <td className="whitespace-nowrap p-3 text-right font-bold text-amber-200">
+                      {money(row.restrictedFundingIn)}
+                    </td>
+
+                    <td className="whitespace-nowrap p-3 text-right font-bold text-yellow-200">
+                      {money(row.restrictedFundingSpent)}
+                    </td>
+
+                    <td
+                      className={`whitespace-nowrap p-3 text-right font-black ${
+                        row.restrictedFundingLeft >= 0
+                          ? "text-amber-200"
+                          : "text-red-200"
+                      }`}
+                    >
+                      {money(row.restrictedFundingLeft)}
                     </td>
 
                     <td className="whitespace-nowrap p-3 text-right font-bold text-emerald-200">
@@ -423,10 +561,10 @@ export default function MoneyMonthlyBreakdown({
 
                     <td
                       className={`whitespace-nowrap p-3 text-right font-black ${
-                        row.balance >= 0 ? "text-sky-200" : "text-red-200"
+                        row.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
                       }`}
                     >
-                      {money(row.balance)}
+                      {money(row.monthBalance)}
                     </td>
 
                     <td
@@ -447,7 +585,7 @@ export default function MoneyMonthlyBreakdown({
                   <td className="p-3 font-black text-white">Total</td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-emerald-200">
-                    {money(totals.income)}
+                    {money(totals.generalIncome)}
                   </td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-pink-200">
@@ -455,11 +593,29 @@ export default function MoneyMonthlyBreakdown({
                   </td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-red-200">
-                    {money(totals.moneyOut)}
+                    {money(totals.generalMoneyOut)}
                   </td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-orange-200">
-                    {money(totals.normalExpenses)}
+                    {money(totals.generalExpenses)}
+                  </td>
+
+                  <td className="whitespace-nowrap p-3 text-right font-black text-amber-200">
+                    {money(totals.restrictedFundingIn)}
+                  </td>
+
+                  <td className="whitespace-nowrap p-3 text-right font-black text-yellow-200">
+                    {money(totals.restrictedFundingSpent)}
+                  </td>
+
+                  <td
+                    className={`whitespace-nowrap p-3 text-right font-black ${
+                      restrictedFundingLeft >= 0
+                        ? "text-amber-200"
+                        : "text-red-200"
+                    }`}
+                  >
+                    {money(restrictedFundingLeft)}
                   </td>
 
                   <td className="whitespace-nowrap p-3 text-right font-black text-emerald-200">
@@ -472,18 +628,18 @@ export default function MoneyMonthlyBreakdown({
 
                   <td
                     className={`whitespace-nowrap p-3 text-right font-black ${
-                      totals.balance >= 0 ? "text-sky-200" : "text-red-200"
+                      totals.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
                     }`}
                   >
-                    {money(totals.balance)}
+                    {money(totals.monthBalance)}
                   </td>
 
                   <td
                     className={`whitespace-nowrap p-3 text-right font-black ${
-                      totals.balance >= 0 ? "text-white" : "text-red-200"
+                      totals.monthBalance >= 0 ? "text-white" : "text-red-200"
                     }`}
                   >
-                    {money(totals.balance)}
+                    {money(totals.monthBalance)}
                   </td>
                 </tr>
               </tfoot>
