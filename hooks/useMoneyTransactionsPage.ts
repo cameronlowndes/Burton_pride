@@ -7,10 +7,17 @@ import type {
   BankReconciliationStatus,
   FinanceNoteStatus,
   FormState,
+  LoanInterestFormState,
+  LoanRepaymentFormState,
   Sponsor,
   SponsorBreakdown,
   SponsorFormState,
   Transaction,
+} from "@/lib/money/types";
+
+import {
+  initialLoanInterestForm,
+  initialLoanRepaymentForm,
 } from "@/lib/money/types";
 
 import {
@@ -56,6 +63,20 @@ type CarryForwardNote = {
   formula: string;
 };
 
+type LoanActionFunding = SponsorBreakdown & {
+  loan_monthly_payment_pence?: number | null;
+  loan_interest_type?: "none" | "fixed" | "percentage" | string | null;
+  loan_interest_pence?: number | null;
+  loan_interest_percentage?: number | null;
+  loan_repaid_pence?: number | null;
+  loan_remaining_pence?: number | null;
+  loan_total_owed_pence?: number | null;
+  loan_due_date?: string | null;
+  loan_repayment_terms?: string | null;
+  is_loan_paid_off?: boolean | null;
+  loan_paid_off_at?: string | null;
+};
+
 const initialForm: FormState = {
   title: "",
   description: "",
@@ -90,6 +111,12 @@ const initialSponsorForm: SponsorFormState = {
   agreedAmount: "",
   receivedAmount: "",
   notes: "",
+
+  loanMonthlyPayment: "",
+  loanInterestType: "none",
+  loanInterestAmount: "",
+  loanDueDate: "",
+  loanRepaymentTerms: "",
 };
 
 async function readJsonResponse(res: Response) {
@@ -132,14 +159,14 @@ function getFundingTypeLabel(type?: string | null) {
 }
 
 function isNormalMoneyInTransaction(item: Transaction) {
-  return item.type === "income" && !isSponsorshipTransaction(item);
+  return item.type === "income" && !hasFundingLink(item);
 }
 
 function isNormalMoneyOutTransaction(item: Transaction) {
   return (
     item.type === "expense" &&
     !isPersonalFundsTransaction(item) &&
-    !isSponsorshipTransaction(item)
+    !hasFundingLink(item)
   );
 }
 
@@ -152,6 +179,57 @@ function isPaidBackPersonalFundsExpense(item: Transaction) {
     isPersonalFundsExpenseTransaction(item) &&
     item.personal_funds_repaid === true
   );
+}
+
+function hasFundingLink(item: Transaction) {
+  const source = String(item.source || "");
+
+  return (
+    isSponsorshipTransaction(item) ||
+    source === "sponsorship" ||
+    source === "grant" ||
+    source === "loan" ||
+    source === "loan_repayment" ||
+    source === "loan_interest" ||
+    Boolean(item.sponsor_id || item.sponsor_name)
+  );
+}
+
+function isLoanRepaymentTransaction(item: Transaction) {
+  return String(item.source || "") === "loan_repayment";
+}
+
+function isLoanInterestTransaction(item: Transaction) {
+  return String(item.source || "") === "loan_interest";
+}
+
+function getLoanMode(category: string | null | undefined) {
+  return category === "Loan Spending" ? "Loan Spending" : "Loan Repayment";
+}
+
+function isLoanSpendingTransaction(item: Transaction) {
+  return String(item.source || "") === "loan";
+}
+
+function poundsToPence(value: string) {
+  const amount = Number(String(value || "").replace(/,/g, ""));
+
+  if (!Number.isFinite(amount)) return 0;
+
+  return Math.round(amount * 100);
+}
+
+function calculatePercentageInterestPence(
+  principalPence: number,
+  percentage: number | null | undefined
+) {
+  const cleanPercentage = Number(percentage || 0);
+
+  if (!Number.isFinite(cleanPercentage) || cleanPercentage <= 0) {
+    return 0;
+  }
+
+  return Math.round(principalPence * (cleanPercentage / 100));
 }
 
 export function useMoneyTransactionsPage() {
@@ -218,6 +296,19 @@ export function useMoneyTransactionsPage() {
   const [deleteSponsorId, setDeleteSponsorId] = useState<string | null>(null);
   const [deletingSponsor, setDeletingSponsor] = useState(false);
 
+
+  const [loanRepaymentSponsor, setLoanRepaymentSponsor] =
+    useState<LoanActionFunding | null>(null);
+  const [loanRepaymentForm, setLoanRepaymentForm] =
+    useState<LoanRepaymentFormState>(initialLoanRepaymentForm);
+  const [savingLoanRepayment, setSavingLoanRepayment] = useState(false);
+
+  const [loanInterestSponsor, setLoanInterestSponsor] =
+    useState<LoanActionFunding | null>(null);
+  const [loanInterestForm, setLoanInterestForm] =
+    useState<LoanInterestFormState>(initialLoanInterestForm);
+  const [savingLoanInterest, setSavingLoanInterest] = useState(false);
+
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
 
@@ -242,6 +333,14 @@ export function useMoneyTransactionsPage() {
       is_active: true,
       created_at: "",
       funding_type: item.funding_type || "sponsor",
+      loan_monthly_payment_pence: item.loan_monthly_payment_pence || 0,
+      loan_interest_type: item.loan_interest_type || "none",
+      loan_interest_pence: item.loan_interest_pence || 0,
+      loan_interest_percentage: item.loan_interest_percentage || 0,
+      loan_due_date: item.loan_due_date || null,
+      loan_repayment_terms: item.loan_repayment_terms || null,
+      is_loan_paid_off: item.is_loan_paid_off || false,
+      loan_paid_off_at: item.loan_paid_off_at || null,
     }));
   }, [sponsors, sponsorBreakdown]);
 
@@ -539,9 +638,23 @@ export function useMoneyTransactionsPage() {
 
   const yearlySponsorBreakdown = useMemo(() => {
     return displaySponsors
-      .map((sponsor) => {
+      .map((rawSponsor) => {
+        const sponsor = rawSponsor as Sponsor & {
+          loan_monthly_payment_pence?: number | null;
+          loan_interest_pence?: number | null;
+          loan_interest_type?: string | null;
+          loan_interest_percentage?: number | null;
+          loan_repayment_terms?: string | null;
+          loan_due_date?: string | null;
+          is_loan_paid_off?: boolean | null;
+          loan_paid_off_at?: string | null;
+        };
+
+        const fundingType = sponsor.funding_type || "sponsor";
+        const isLoan = fundingType === "loan";
+
         const thisYearSponsorTransactions = yearTransactions.filter((item) => {
-          if (!isSponsorshipTransaction(item)) return false;
+          if (!hasFundingLink(item)) return false;
 
           return (
             item.sponsor_id === sponsor.id ||
@@ -551,7 +664,7 @@ export function useMoneyTransactionsPage() {
 
         const previousSponsorTransactions = previousYearTransactions.filter(
           (item) => {
-            if (!isSponsorshipTransaction(item)) return false;
+            if (!hasFundingLink(item)) return false;
 
             return (
               item.sponsor_id === sponsor.id ||
@@ -566,6 +679,16 @@ export function useMoneyTransactionsPage() {
 
         const previousSpent = previousSponsorTransactions
           .filter((item) => item.type === "expense")
+          .filter((item) => !isLoanInterestTransaction(item))
+          .filter((item) => !isLoanRepaymentTransaction(item))
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const previousLoanInterest = previousSponsorTransactions
+          .filter(isLoanInterestTransaction)
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const previousLoanRepaid = previousSponsorTransactions
+          .filter(isLoanRepaymentTransaction)
           .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
         const sponsorCreatedYear = sponsor.created_at
@@ -583,10 +706,11 @@ export function useMoneyTransactionsPage() {
             ? sponsor.received_amount_pence || 0
             : 0;
 
-        const previousCarryForward =
-          sponsorStartedBeforeThisYear && previousReceived === 0
-            ? manualReceivedFromSponsorRecord - previousSpent
-            : previousReceived - previousSpent;
+        const previousCarryForward = isLoan
+          ? 0
+          : sponsorStartedBeforeThisYear && previousReceived === 0
+          ? manualReceivedFromSponsorRecord - previousSpent
+          : previousReceived - previousSpent;
 
         const safeCarryForward = Math.max(previousCarryForward, 0);
 
@@ -596,11 +720,25 @@ export function useMoneyTransactionsPage() {
 
         const spentPence = thisYearSponsorTransactions
           .filter((item) => item.type === "expense")
+          .filter((item) => !isLoanInterestTransaction(item))
+          .filter((item) => !isLoanRepaymentTransaction(item))
           .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
 
-        const receivedPence =
-          safeCarryForward + receivedFromTransactions ||
-          (sponsorStartedThisYear ? sponsor.received_amount_pence || 0 : 0);
+        const loanInterestThisYear = thisYearSponsorTransactions
+          .filter(isLoanInterestTransaction)
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const loanRepaidThisYear = thisYearSponsorTransactions
+          .filter(isLoanRepaymentTransaction)
+          .reduce((sum, item) => sum + (item.amount_pence || 0), 0);
+
+        const receivedPence = isLoan
+          ? receivedFromTransactions ||
+            (sponsorStartedThisYear || sponsorStartedBeforeThisYear
+              ? sponsor.received_amount_pence || 0
+              : 0)
+          : safeCarryForward + receivedFromTransactions ||
+            (sponsorStartedThisYear ? sponsor.received_amount_pence || 0 : 0);
 
         const agreedPence =
           sponsorStartedThisYear ||
@@ -608,6 +746,40 @@ export function useMoneyTransactionsPage() {
           thisYearSponsorTransactions.length > 0
             ? sponsor.agreed_amount_pence || 0
             : 0;
+
+        const loanInterestType = sponsor.loan_interest_type || "none";
+
+        const fixedLoanInterestPence =
+          isLoan && loanInterestType === "fixed"
+            ? Number(sponsor.loan_interest_pence || 0)
+            : 0;
+
+        const percentageLoanInterestPence =
+          isLoan && loanInterestType === "percentage"
+            ? calculatePercentageInterestPence(
+                receivedPence,
+                sponsor.loan_interest_percentage
+              )
+            : 0;
+
+        const totalLoanInterestPence = isLoan
+          ? fixedLoanInterestPence +
+            percentageLoanInterestPence +
+            previousLoanInterest +
+            loanInterestThisYear
+          : 0;
+
+        const totalLoanRepaidPence = isLoan
+          ? previousLoanRepaid + loanRepaidThisYear
+          : 0;
+
+        const loanTotalOwedPence = isLoan
+          ? receivedPence + totalLoanInterestPence
+          : 0;
+
+        const loanRemainingPence = isLoan
+          ? Math.max(loanTotalOwedPence - totalLoanRepaidPence, 0)
+          : 0;
 
         return {
           sponsor_id: sponsor.id,
@@ -618,10 +790,28 @@ export function useMoneyTransactionsPage() {
           agreed_amount_pence: agreedPence,
           received_pence: receivedPence,
           spent_pence: spentPence,
-          remaining_pence: receivedPence - spentPence,
+          remaining_pence: isLoan ? receivedPence : receivedPence - spentPence,
           carried_forward_pence: safeCarryForward,
           notes: sponsor.notes,
-          funding_type: sponsor.funding_type || "sponsor",
+          funding_type: fundingType,
+
+          loan_monthly_payment_pence: Number(
+            sponsor.loan_monthly_payment_pence || 0
+          ),
+          loan_interest_type: loanInterestType,
+          loan_interest_pence: totalLoanInterestPence,
+          loan_interest_percentage: Number(
+            sponsor.loan_interest_percentage || 0
+          ),
+          loan_repaid_pence: totalLoanRepaidPence,
+          loan_total_owed_pence: loanTotalOwedPence,
+          loan_remaining_pence: loanRemainingPence,
+          loan_due_date: sponsor.loan_due_date || null,
+          loan_repayment_terms: sponsor.loan_repayment_terms || null,
+          is_loan_paid_off:
+            Boolean(sponsor.is_loan_paid_off) ||
+            (isLoan && loanTotalOwedPence > 0 && loanRemainingPence <= 0),
+          loan_paid_off_at: sponsor.loan_paid_off_at || null,
         };
       })
       .filter(
@@ -629,6 +819,8 @@ export function useMoneyTransactionsPage() {
           sponsor.agreed_amount_pence > 0 ||
           sponsor.received_pence > 0 ||
           sponsor.spent_pence > 0 ||
+          sponsor.loan_interest_pence > 0 ||
+          sponsor.loan_repaid_pence > 0 ||
           (sponsor.carried_forward_pence || 0) > 0
       );
   }, [
@@ -654,7 +846,7 @@ export function useMoneyTransactionsPage() {
     }
 
     if (filter === "sponsorship") {
-      rows = rows.filter((item) => isSponsorshipTransaction(item));
+      rows = rows.filter((item) => hasFundingLink(item));
     }
 
     if (selectedSponsorId !== "all") {
@@ -860,15 +1052,46 @@ export function useMoneyTransactionsPage() {
     }
 
     setEditingSponsor(sponsor);
+    const editableSponsor = sponsor as Sponsor & {
+      loan_monthly_payment_pence?: number | null;
+      loan_interest_type?: "none" | "fixed" | "percentage" | string | null;
+      loan_interest_pence?: number | null;
+      loan_interest_percentage?: number | null;
+      loan_due_date?: string | null;
+      loan_repayment_terms?: string | null;
+    };
+
+    const loanInterestType = editableSponsor.loan_interest_type || "none";
+
     setSponsorForm({
-      fundingType: sponsor.funding_type || "sponsor",
-      sponsorName: sponsor.sponsor_name || "",
-      contactName: sponsor.contact_name || "",
-      email: sponsor.email || "",
-      phone: sponsor.phone || "",
-      agreedAmount: ((sponsor.agreed_amount_pence || 0) / 100).toFixed(2),
-      receivedAmount: ((sponsor.received_amount_pence || 0) / 100).toFixed(2),
-      notes: sponsor.notes || "",
+      fundingType: editableSponsor.funding_type || "sponsor",
+      sponsorName: editableSponsor.sponsor_name || "",
+      contactName: editableSponsor.contact_name || "",
+      email: editableSponsor.email || "",
+      phone: editableSponsor.phone || "",
+      agreedAmount: ((editableSponsor.agreed_amount_pence || 0) / 100).toFixed(
+        2
+      ),
+      receivedAmount: (
+        (editableSponsor.received_amount_pence || 0) / 100
+      ).toFixed(2),
+      notes: editableSponsor.notes || "",
+
+      loanMonthlyPayment: editableSponsor.loan_monthly_payment_pence
+        ? (editableSponsor.loan_monthly_payment_pence / 100).toFixed(2)
+        : "",
+      loanInterestType:
+        loanInterestType === "fixed" || loanInterestType === "percentage"
+          ? loanInterestType
+          : "none",
+      loanInterestAmount:
+        loanInterestType === "percentage"
+          ? String(editableSponsor.loan_interest_percentage || "")
+          : editableSponsor.loan_interest_pence
+          ? (editableSponsor.loan_interest_pence / 100).toFixed(2)
+          : "",
+      loanDueDate: editableSponsor.loan_due_date || "",
+      loanRepaymentTerms: editableSponsor.loan_repayment_terms || "",
     });
     setSponsorFormOpen(true);
   }
@@ -1049,17 +1272,46 @@ export function useMoneyTransactionsPage() {
       matchingSponsor?.id || item.sponsor_id || item.sponsor_name
     );
 
+    const linkedFundingType =
+      matchingSponsor?.funding_type ||
+      (String(item.source || "") === "loan" ||
+      String(item.source || "") === "loan_repayment" ||
+      String(item.source || "") === "loan_interest"
+        ? "loan"
+        : String(item.source || "") === "grant"
+          ? "grant"
+          : "sponsor");
+
+    const isLoanLinked = linkedFundingType === "loan";
+
+    const loanCategory =
+      isLoanSpendingTransaction(item) || item.category === "Loan Spending"
+        ? "Loan Spending"
+        : "Loan Repayment";
+
+    const editCategory = hasSponsorLinked
+      ? isLoanLinked
+        ? loanCategory
+        : "Sponsorship"
+      : item.category || "";
+
+    const editPaymentMethod = hasSponsorLinked
+      ? isLoanLinked
+        ? loanCategory === "Loan Spending"
+          ? "Loan Money"
+          : item.payment_method || "Bank Transfer"
+        : "Sponsorship Money"
+      : item.payment_method || "";
+
     setEditingTransaction(item);
 
     setForm({
       title: item.title || "",
       description: item.description || "",
       type: hasSponsorLinked ? "expense" : item.type,
-      category: hasSponsorLinked ? "Sponsorship" : "",
+      category: editCategory,
       amount: ((item.amount_pence || 0) / 100).toFixed(2),
-      paymentMethod: hasSponsorLinked
-        ? "Sponsorship Money"
-        : item.payment_method || "",
+      paymentMethod: editPaymentMethod,
       transactionDate:
         item.transaction_date || new Date().toISOString().slice(0, 10),
       isPersonalFunds: hasSponsorLinked ? false : isPersonal,
@@ -1172,14 +1424,52 @@ export function useMoneyTransactionsPage() {
       const finalSponsorName = selectedSponsorForSave?.sponsor_name || "";
       const isSponsorLinked = Boolean(finalSponsorId || finalSponsorName);
 
-      const looksLikeSponsorship =
+      const isLoanLinked = selectedSponsorForSave?.funding_type === "loan";
+      const loanMode = getLoanMode(form.category);
+      const isLoanRepayment = isLoanLinked && loanMode === "Loan Repayment";
+      const isLoanSpending = isLoanLinked && loanMode === "Loan Spending";
+
+      const fundingSource = isSponsorLinked
+        ? isLoanRepayment
+          ? "loan_repayment"
+          : isLoanSpending
+            ? "loan"
+            : selectedSponsorForSave?.funding_type === "grant"
+              ? "grant"
+              : "sponsorship"
+        : "manual";
+
+      const fundingCategory = isSponsorLinked
+        ? isLoanRepayment
+          ? "Loan Repayment"
+          : isLoanSpending
+            ? "Loan Spending"
+            : "Sponsorship"
+        : form.category;
+
+      const fundingPaymentMethod = isSponsorLinked
+        ? isLoanRepayment
+          ? form.paymentMethod || "Bank Transfer"
+          : isLoanSpending
+            ? "Loan Money"
+            : "Sponsorship Money"
+        : form.paymentMethod;
+
+      const looksLikeFunding =
         form.paymentMethod === "Sponsorship Money" ||
+        form.paymentMethod === "Loan Money" ||
         form.category.toLowerCase().trim() === "sponsorship" ||
+        form.category === "Loan Repayment" ||
+        form.category === "Loan Spending" ||
         Boolean(editingTransaction?.source === "sponsorship") ||
+        Boolean(editingTransaction?.source === "grant") ||
+        Boolean(editingTransaction?.source === "loan") ||
+        Boolean(editingTransaction?.source === "loan_repayment") ||
+        Boolean(editingTransaction?.source === "loan_interest") ||
         Boolean(editingTransaction?.sponsor_id) ||
         Boolean(editingTransaction?.sponsor_name);
 
-      if (looksLikeSponsorship && !isSponsorLinked) {
+      if (looksLikeFunding && !isSponsorLinked) {
         setError(
           "Please choose the correct sponsor, grant, loan, or funding record before saving this transaction."
         );
@@ -1189,7 +1479,11 @@ export function useMoneyTransactionsPage() {
 
       if (isSponsorLinked && !form.sponsorshipNote.trim()) {
         setError(
-          "Please add a funding note explaining what this restricted money was used for."
+          isLoanRepayment
+            ? "Please add a loan repayment note explaining what was paid back."
+            : isLoanSpending
+              ? "Please add a loan spending note explaining what the loan money was used for."
+              : "Please add a funding note explaining what this restricted money was used for."
         );
         setSaving(false);
         return;
@@ -1234,14 +1528,11 @@ export function useMoneyTransactionsPage() {
         );
 
         uploadData.append("type", isSponsorLinked ? "expense" : form.type);
-        uploadData.append("category", isSponsorLinked ? "Sponsorship" : "");
+        uploadData.append("category", fundingCategory);
         uploadData.append("amount", form.amount);
-        uploadData.append(
-          "paymentMethod",
-          isSponsorLinked ? "Sponsorship Money" : form.paymentMethod
-        );
+        uploadData.append("paymentMethod", fundingPaymentMethod);
         uploadData.append("transactionDate", transactionDate);
-        uploadData.append("source", isSponsorLinked ? "sponsorship" : "manual");
+        uploadData.append("source", fundingSource);
         uploadData.append(
           "isPersonalFunds",
           String(isSponsorLinked ? false : form.isPersonalFunds)
@@ -1851,6 +2142,228 @@ export function useMoneyTransactionsPage() {
     }
   }
 
+  function openLoanRepaymentModal(sponsor: SponsorBreakdown) {
+    if (selectedYearLocked) {
+      setError(
+        `${selectedYear} is locked. Unlock this year with the main admin password before recording a loan repayment.`
+      );
+      return;
+    }
+
+    setLoanRepaymentSponsor(sponsor as LoanActionFunding);
+    setLoanRepaymentForm({
+      ...initialLoanRepaymentForm,
+      sponsorId: sponsor.sponsor_id,
+      sponsorName: sponsor.sponsor_name,
+      transactionDate: new Date().toISOString().slice(0, 10),
+    });
+    setError("");
+    setErrorDetails(null);
+  }
+
+  function closeLoanRepaymentModal() {
+    setLoanRepaymentSponsor(null);
+    setLoanRepaymentForm(initialLoanRepaymentForm);
+    setSavingLoanRepayment(false);
+  }
+
+  async function saveLoanRepayment() {
+    if (!loanRepaymentSponsor) return;
+
+    try {
+      setSavingLoanRepayment(true);
+      setError("");
+      setErrorDetails(null);
+
+      const amountPence = poundsToPence(loanRepaymentForm.amount);
+      const transactionYear = getTransactionYear(
+        loanRepaymentForm.transactionDate
+      );
+
+      if (isYearLocked(transactionYear)) {
+        setError(
+          `${transactionYear} is locked. Unlock this year with the main admin password before recording a loan repayment.`
+        );
+        setSavingLoanRepayment(false);
+        return;
+      }
+
+      if (amountPence <= 0) {
+        setError("Please enter a loan repayment amount above £0.");
+        setSavingLoanRepayment(false);
+        return;
+      }
+
+      if (!loanRepaymentForm.paymentMethod.trim()) {
+        setError("Please choose a payment method for this loan repayment.");
+        setSavingLoanRepayment(false);
+        return;
+      }
+
+      const uploadData = new FormData();
+      uploadData.append(
+        "title",
+        `Loan repayment - ${loanRepaymentSponsor.sponsor_name}`
+      );
+      uploadData.append("description", loanRepaymentForm.note || "");
+      uploadData.append("type", "expense");
+      uploadData.append("category", "Loan Repayment");
+      uploadData.append("amount", loanRepaymentForm.amount);
+      uploadData.append("paymentMethod", loanRepaymentForm.paymentMethod);
+      uploadData.append("transactionDate", loanRepaymentForm.transactionDate);
+      uploadData.append("source", "loan_repayment");
+      uploadData.append("isPersonalFunds", "false");
+      uploadData.append("personalFundsName", "");
+      uploadData.append("sponsorId", loanRepaymentForm.sponsorId || loanRepaymentSponsor.sponsor_id);
+      uploadData.append("sponsorName", loanRepaymentForm.sponsorName || loanRepaymentSponsor.sponsor_name);
+      uploadData.append(
+        "sponsorshipNote",
+        loanRepaymentForm.note ||
+          `Loan repayment for ${loanRepaymentSponsor.sponsor_name}`
+      );
+      uploadData.append("bankReconciliationStatus", "unmatched");
+      uploadData.append("bankReconciliationNote", "");
+      uploadData.append("financeNoteStatus", "none");
+      uploadData.append("financeNote", "");
+      uploadData.append("isRepeating", "false");
+      uploadData.append("repeatFrequency", "monthly");
+      uploadData.append("repeatCount", "1");
+      uploadData.append("repeatIndex", "1");
+
+      const res = await fetch("/api/admin/money/transactions", {
+        method: "POST",
+        body: uploadData,
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to record loan repayment.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      closeLoanRepaymentModal();
+      await loadTransactions();
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setSavingLoanRepayment(false);
+    }
+  }
+
+  function openLoanInterestModal(sponsor: SponsorBreakdown) {
+    if (selectedYearLocked) {
+      setError(
+        `${selectedYear} is locked. Unlock this year with the main admin password before adding loan interest.`
+      );
+      return;
+    }
+
+    setLoanInterestSponsor(sponsor as LoanActionFunding);
+    setLoanInterestForm({
+      ...initialLoanInterestForm,
+      sponsorId: sponsor.sponsor_id,
+      sponsorName: sponsor.sponsor_name,
+      transactionDate: new Date().toISOString().slice(0, 10),
+    });
+    setError("");
+    setErrorDetails(null);
+  }
+
+  function closeLoanInterestModal() {
+    setLoanInterestSponsor(null);
+    setLoanInterestForm(initialLoanInterestForm);
+    setSavingLoanInterest(false);
+  }
+
+  async function saveLoanInterest() {
+    if (!loanInterestSponsor) return;
+
+    try {
+      setSavingLoanInterest(true);
+      setError("");
+      setErrorDetails(null);
+
+      const amountPence = poundsToPence(loanInterestForm.amount);
+      const transactionYear = getTransactionYear(loanInterestForm.transactionDate);
+
+      if (isYearLocked(transactionYear)) {
+        setError(
+          `${transactionYear} is locked. Unlock this year with the main admin password before adding loan interest.`
+        );
+        setSavingLoanInterest(false);
+        return;
+      }
+
+      if (amountPence <= 0) {
+        setError("Please enter a loan interest amount above £0.");
+        setSavingLoanInterest(false);
+        return;
+      }
+
+      const uploadData = new FormData();
+      uploadData.append(
+        "title",
+        `Loan interest - ${loanInterestSponsor.sponsor_name}`
+      );
+      uploadData.append("description", loanInterestForm.note || "");
+      uploadData.append("type", "expense");
+      uploadData.append("category", "Loan Interest");
+      uploadData.append("amount", loanInterestForm.amount);
+      uploadData.append("paymentMethod", "Loan Interest");
+      uploadData.append("transactionDate", loanInterestForm.transactionDate);
+      uploadData.append("source", "loan_interest");
+      uploadData.append("isPersonalFunds", "false");
+      uploadData.append("personalFundsName", "");
+      uploadData.append("sponsorId", loanInterestForm.sponsorId || loanInterestSponsor.sponsor_id);
+      uploadData.append("sponsorName", loanInterestForm.sponsorName || loanInterestSponsor.sponsor_name);
+      uploadData.append(
+        "sponsorshipNote",
+        loanInterestForm.note ||
+          `Interest added to loan from ${loanInterestSponsor.sponsor_name}`
+      );
+      uploadData.append("bankReconciliationStatus", "unmatched");
+      uploadData.append("bankReconciliationNote", "");
+      uploadData.append("financeNoteStatus", "none");
+      uploadData.append("financeNote", "");
+      uploadData.append("isRepeating", "false");
+      uploadData.append("repeatFrequency", "monthly");
+      uploadData.append("repeatCount", "1");
+      uploadData.append("repeatIndex", "1");
+
+      const res = await fetch("/api/admin/money/transactions", {
+        method: "POST",
+        body: uploadData,
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to add loan interest.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      closeLoanInterestModal();
+      await loadTransactions();
+      await loadSponsors();
+      await loadYearLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setSavingLoanInterest(false);
+    }
+  }
+
   async function exportTransactionsToExcel() {
     try {
       setError("");
@@ -2013,6 +2526,16 @@ export function useMoneyTransactionsPage() {
     deleteSponsorId,
     setDeleteSponsorId,
     deletingSponsor,
+
+    loanRepaymentSponsor,
+    loanRepaymentForm,
+    setLoanRepaymentForm,
+    savingLoanRepayment,
+    loanInterestSponsor,
+    loanInterestForm,
+    setLoanInterestForm,
+    savingLoanInterest,
+
     error,
     errorDetails,
     stripeSyncing,
@@ -2048,6 +2571,13 @@ export function useMoneyTransactionsPage() {
     closeSponsorForm,
     saveSponsor,
     deleteSponsor,
+
+    openLoanRepaymentModal,
+    closeLoanRepaymentModal,
+    saveLoanRepayment,
+    openLoanInterestModal,
+    closeLoanInterestModal,
+    saveLoanInterest,
 
     fillTestTransaction,
     startEditTransaction,

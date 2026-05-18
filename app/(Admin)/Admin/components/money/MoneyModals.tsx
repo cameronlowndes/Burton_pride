@@ -3,7 +3,25 @@
 import type { Dispatch, SetStateAction } from "react";
 import { X } from "lucide-react";
 
-import type { FundingType, Sponsor, SponsorFormState } from "@/lib/money/types";
+import type {
+  FundingType,
+  LoanInterestFormState,
+  LoanRepaymentFormState,
+  Sponsor,
+  SponsorBreakdown,
+  SponsorFormState,
+} from "@/lib/money/types";
+
+type LoanActionFunding = SponsorBreakdown & {
+  loan_interest_pence?: number | null;
+  loan_repaid_pence?: number | null;
+  loan_remaining_pence?: number | null;
+  loan_total_owed_pence?: number | null;
+  loan_due_date?: string | null;
+  loan_repayment_terms?: string | null;
+  is_loan_paid_off?: boolean | null;
+  loan_paid_off_at?: string | null;
+};
 
 type MoneyModalsProps = {
   sponsorFormOpen: boolean;
@@ -40,6 +58,20 @@ type MoneyModalsProps = {
   setDeleteAllPassword: Dispatch<SetStateAction<string>>;
   onCloseDeleteAll: () => void;
   onDeleteAll: () => void | Promise<void>;
+
+  loanRepaymentSponsor: LoanActionFunding | null;
+  loanRepaymentForm: LoanRepaymentFormState;
+  setLoanRepaymentForm: Dispatch<SetStateAction<LoanRepaymentFormState>>;
+  savingLoanRepayment: boolean;
+  onCloseLoanRepayment: () => void;
+  onSaveLoanRepayment: () => void | Promise<void>;
+
+  loanInterestSponsor: LoanActionFunding | null;
+  loanInterestForm: LoanInterestFormState;
+  setLoanInterestForm: Dispatch<SetStateAction<LoanInterestFormState>>;
+  savingLoanInterest: boolean;
+  onCloseLoanInterest: () => void;
+  onSaveLoanInterest: () => void | Promise<void>;
 };
 
 function fundingTypeLabel(type: FundingType) {
@@ -72,7 +104,7 @@ function receivedAmountPlaceholder(type: FundingType) {
 
 function notesPlaceholder(type: FundingType) {
   if (type === "grant") return "Grant notes / agreed use / restrictions";
-  if (type === "loan") return "Loan notes / repayment terms / restrictions";
+  if (type === "loan") return "Loan notes / extra notes / restrictions";
   if (type === "other") return "Funding notes / agreed use / restrictions";
   return "Notes / agreed use / restrictions";
 }
@@ -112,6 +144,20 @@ export default function MoneyModals({
   setDeleteAllPassword,
   onCloseDeleteAll,
   onDeleteAll,
+
+  loanRepaymentSponsor,
+  loanRepaymentForm,
+  setLoanRepaymentForm,
+  savingLoanRepayment,
+  onCloseLoanRepayment,
+  onSaveLoanRepayment,
+
+  loanInterestSponsor,
+  loanInterestForm,
+  setLoanInterestForm,
+  savingLoanInterest,
+  onCloseLoanInterest,
+  onSaveLoanInterest,
 }: MoneyModalsProps) {
   const activeFundingType = sponsorForm.fundingType || "sponsor";
   const activeFundingLabel = fundingTypeLabel(activeFundingType);
@@ -120,7 +166,7 @@ export default function MoneyModals({
     <>
       {sponsorFormOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
+         <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#070716] p-4 text-white shadow-2xl sm:p-5">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="break-words text-xl font-bold">
@@ -156,6 +202,24 @@ export default function MoneyModals({
                     setSponsorForm((prev) => ({
                       ...prev,
                       fundingType: event.target.value as FundingType,
+                      loanMonthlyPayment:
+                        event.target.value === "loan"
+                          ? prev.loanMonthlyPayment
+                          : "",
+                      loanInterestType:
+                        event.target.value === "loan"
+                          ? prev.loanInterestType || "none"
+                          : "none",
+                      loanInterestAmount:
+                        event.target.value === "loan"
+                          ? prev.loanInterestAmount
+                          : "",
+                      loanDueDate:
+                        event.target.value === "loan" ? prev.loanDueDate : "",
+                      loanRepaymentTerms:
+                        event.target.value === "loan"
+                          ? prev.loanRepaymentTerms
+                          : "",
                     }))
                   }
                   className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/40"
@@ -163,15 +227,12 @@ export default function MoneyModals({
                   <option className="bg-[#070716] text-white" value="sponsor">
                     Sponsor
                   </option>
-
                   <option className="bg-[#070716] text-white" value="grant">
                     Grant Money
                   </option>
-
                   <option className="bg-[#070716] text-white" value="loan">
                     Loan
                   </option>
-
                   <option className="bg-[#070716] text-white" value="other">
                     Other
                   </option>
@@ -254,6 +315,167 @@ export default function MoneyModals({
                 className="w-full rounded-xl bg-emerald-500/10 p-3 outline-none ring-1 ring-emerald-300/20 focus:ring-emerald-300/40"
               />
 
+              {activeFundingType === "loan" && (
+                <div className="space-y-4 rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4">
+                  <div className="rounded-2xl border border-blue-300/20 bg-black/20 p-4 text-sm leading-6 text-blue-100">
+                    <strong>Loan setup:</strong> add the loan amount, planned
+                    monthly payment, any lender interest, and the due date. Money
+                    you have actually paid back must be added later using{" "}
+                    <strong>Record loan repayment</strong>.
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-blue-100">
+                      Planned monthly repayment amount
+                    </label>
+
+                    <input
+                      value={sponsorForm.loanMonthlyPayment}
+                      onChange={(event) =>
+                        setSponsorForm((prev) => ({
+                          ...prev,
+                          loanMonthlyPayment: event.target.value,
+                        }))
+                      }
+                      placeholder="Example: 120.01"
+                      type="number"
+                      step="0.01"
+                      className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+                    />
+
+                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
+                      This is the payment plan only. It does not count as paid
+                      back until you use “Record loan repayment”.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-blue-100">
+                      Is the lender adding interest?
+                    </label>
+
+                    <select
+                      value={sponsorForm.loanInterestType}
+                      onChange={(event) =>
+                        setSponsorForm((prev) => ({
+                          ...prev,
+                          loanInterestType: event.target.value as
+                            | "none"
+                            | "fixed"
+                            | "percentage",
+                          loanInterestAmount:
+                            event.target.value === "none"
+                              ? ""
+                              : prev.loanInterestAmount,
+                        }))
+                      }
+                      className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+                    >
+                      <option className="bg-[#070716] text-white" value="none">
+                        No interest added
+                      </option>
+
+                      <option className="bg-[#070716] text-white" value="fixed">
+                        Yes - fixed interest added on top
+                      </option>
+
+                      <option
+                        className="bg-[#070716] text-white"
+                        value="percentage"
+                      >
+                        Yes - percentage interest added on top
+                      </option>
+                    </select>
+
+                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
+                      Interest is only extra money charged by the lender. Do not
+                      use this for repayments.
+                    </p>
+                  </div>
+
+                  {sponsorForm.loanInterestType !== "none" && (
+                    <div>
+                      <label className="mb-2 block text-sm font-bold text-blue-100">
+                        {sponsorForm.loanInterestType === "percentage"
+                          ? "Interest percentage added by lender"
+                          : "Interest charge added by lender"}
+                      </label>
+
+                      <input
+                        value={sponsorForm.loanInterestAmount}
+                        onChange={(event) =>
+                          setSponsorForm((prev) => ({
+                            ...prev,
+                            loanInterestAmount: event.target.value,
+                          }))
+                        }
+                        placeholder={
+                          sponsorForm.loanInterestType === "percentage"
+                            ? "Example: 10 means 10% extra owed"
+                            : "Example: 200 means £200 extra interest added"
+                        }
+                        type="number"
+                        step="0.01"
+                        className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+                      />
+
+                      <div className="mt-3 rounded-xl border border-orange-300/20 bg-orange-500/10 p-3 text-xs leading-5 text-orange-100">
+                        Only use this if the lender is charging extra interest
+                        on top of the loan. Do not use this box for repayments.
+                        Repayments should be added using the “Record loan
+                        repayment” button after saving the loan.
+                      </div>
+
+                      <div className="mt-3 rounded-xl border border-yellow-300/20 bg-yellow-500/10 p-3 text-xs leading-5 text-yellow-100">
+                        This interest will be added to the total loan owed. For
+                        example, a £1,300 loan with £200 interest will show as
+                        £1,500 owed.
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-blue-100">
+                      Loan due date
+                    </label>
+
+                    <input
+                      type="date"
+                      value={sponsorForm.loanDueDate}
+                      onChange={(event) =>
+                        setSponsorForm((prev) => ({
+                          ...prev,
+                          loanDueDate: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+                    />
+
+                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
+                      The date the loan should be fully paid back by.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-blue-100">
+                      Repayment terms
+                    </label>
+
+                    <textarea
+                      value={sponsorForm.loanRepaymentTerms}
+                      onChange={(event) =>
+                        setSponsorForm((prev) => ({
+                          ...prev,
+                          loanRepaymentTerms: event.target.value,
+                        }))
+                      }
+                      placeholder="Example: Planned repayment is £120.01 per month. Full loan must be paid by the due date."
+                      className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+                    />
+                  </div>
+                </div>
+              )}
+
               <textarea
                 value={sponsorForm.notes}
                 onChange={(event) =>
@@ -267,10 +489,20 @@ export default function MoneyModals({
               />
 
               <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-                This will be saved as{" "}
-                <strong>{activeFundingLabel}</strong>. You can track money
-                received, money spent, and remaining balance in the funding
-                breakdown.
+                {activeFundingType === "loan" ? (
+                  <>
+                    This will be saved as <strong>Loan</strong>. Loan amount and
+                    interest show what is owed. Money paid back should be
+                    recorded later using <strong>Record loan repayment</strong>.
+                  </>
+                ) : (
+                  <>
+                    This will be saved as{" "}
+                    <strong>{activeFundingLabel}</strong>. You can track money
+                    received, money spent, and remaining balance in the funding
+                    breakdown.
+                  </>
+                )}
               </div>
 
               <button
@@ -287,6 +519,232 @@ export default function MoneyModals({
                     ? "Update Funding"
                     : "Save Funding"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loanRepaymentSponsor && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-orange-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="break-words text-xl font-bold">
+                  Record loan repayment
+                </h2>
+
+                <p className="text-sm text-white/60">
+                  Record money paid back to{" "}
+                  <strong>{loanRepaymentSponsor.sponsor_name}</strong>.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onCloseLoanRepayment}
+                disabled={savingLoanRepayment}
+                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
+                aria-label="Close loan repayment form"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4 text-sm leading-6 text-orange-100">
+                Use this form only when Burton Pride has actually paid money
+                back to the lender. This reduces the amount still to repay.
+              </div>
+
+              <input
+                value={loanRepaymentForm.amount}
+                onChange={(event) =>
+                  setLoanRepaymentForm((prev) => ({
+                    ...prev,
+                    amount: event.target.value,
+                  }))
+                }
+                placeholder="Amount paid back, e.g. 200"
+                type="number"
+                step="0.01"
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
+              />
+
+              <select
+                value={loanRepaymentForm.paymentMethod}
+                onChange={(event) =>
+                  setLoanRepaymentForm((prev) => ({
+                    ...prev,
+                    paymentMethod: event.target.value,
+                  }))
+                }
+                className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
+              >
+                <option className="bg-[#070716] text-white" value="Bank Transfer">
+                  Bank Transfer
+                </option>
+                <option className="bg-[#070716] text-white" value="Cash">
+                  Cash
+                </option>
+                <option className="bg-[#070716] text-white" value="Card Machine">
+                  Card Machine
+                </option>
+                <option className="bg-[#070716] text-white" value="PayPal">
+                  PayPal
+                </option>
+                <option className="bg-[#070716] text-white" value="Online Payment">
+                  Online Payment
+                </option>
+                <option className="bg-[#070716] text-white" value="Other Types">
+                  Other Types
+                </option>
+              </select>
+
+              <input
+                type="date"
+                value={loanRepaymentForm.transactionDate}
+                onChange={(event) =>
+                  setLoanRepaymentForm((prev) => ({
+                    ...prev,
+                    transactionDate: event.target.value,
+                  }))
+                }
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
+              />
+
+              <textarea
+                value={loanRepaymentForm.note}
+                onChange={(event) =>
+                  setLoanRepaymentForm((prev) => ({
+                    ...prev,
+                    note: event.target.value,
+                  }))
+                }
+                placeholder="Note, e.g. first repayment / monthly loan repayment"
+                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
+              />
+
+              <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4 text-sm text-orange-100">
+                This will be saved as an expense and linked to the loan.
+              </div>
+
+              <div className="flex flex-col justify-end gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onCloseLoanRepayment}
+                  disabled={savingLoanRepayment}
+                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onSaveLoanRepayment}
+                  disabled={savingLoanRepayment}
+                  className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-black hover:bg-orange-400 disabled:opacity-60"
+                >
+                  {savingLoanRepayment ? "Saving..." : "Save Repayment"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loanInterestSponsor && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-blue-300/20 bg-[#070716] p-6 text-white shadow-2xl">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="break-words text-xl font-bold">
+                  Add lender interest
+                </h2>
+
+                <p className="text-sm text-white/60">
+                  Add extra interest charged by{" "}
+                  <strong>{loanInterestSponsor.sponsor_name}</strong>.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onCloseLoanInterest}
+                disabled={savingLoanInterest}
+                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
+                aria-label="Close loan interest form"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
+                Use this only for extra interest or charges added by the lender.
+                Do not use this for money Burton Pride has paid back.
+              </div>
+
+              <input
+                value={loanInterestForm.amount}
+                onChange={(event) =>
+                  setLoanInterestForm((prev) => ({
+                    ...prev,
+                    amount: event.target.value,
+                  }))
+                }
+                placeholder="Interest charged by lender, e.g. 25"
+                type="number"
+                step="0.01"
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+              />
+
+              <input
+                type="date"
+                value={loanInterestForm.transactionDate}
+                onChange={(event) =>
+                  setLoanInterestForm((prev) => ({
+                    ...prev,
+                    transactionDate: event.target.value,
+                  }))
+                }
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+              />
+
+              <textarea
+                value={loanInterestForm.note}
+                onChange={(event) =>
+                  setLoanInterestForm((prev) => ({
+                    ...prev,
+                    note: event.target.value,
+                  }))
+                }
+                placeholder="Note, e.g. lender added interest charge"
+                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
+              />
+
+              <div className="rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4 text-sm text-blue-100">
+                This will increase the total amount owed on the loan.
+              </div>
+
+              <div className="flex flex-col justify-end gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onCloseLoanInterest}
+                  disabled={savingLoanInterest}
+                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onSaveLoanInterest}
+                  disabled={savingLoanInterest}
+                  className="rounded-xl bg-blue-500 px-4 py-3 text-sm font-bold text-white hover:bg-blue-400 disabled:opacity-60"
+                >
+                  {savingLoanInterest ? "Saving..." : "Save Lender Interest"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

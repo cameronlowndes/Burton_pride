@@ -646,7 +646,9 @@ export default function MoneyDashboardPage() {
               <div className="space-y-3 text-sm">
                 <div className="rounded-2xl bg-black/20 p-4">
                   <div className="flex justify-between gap-3">
-                    <span className="text-white/60">Transactions this year</span>
+                    <span className="text-white/60">
+                      Transactions this year
+                    </span>
 
                     <strong className="text-white">
                       {moneyPage.yearTransactions.length}
@@ -817,6 +819,8 @@ export default function MoneyDashboardPage() {
               openNewSponsorForm={moneyPage.openNewSponsorForm}
               startEditSponsor={moneyPage.startEditSponsor}
               setDeleteSponsorId={moneyPage.setDeleteSponsorId}
+              openLoanRepaymentModal={moneyPage.openLoanRepaymentModal}
+              openLoanInterestModal={moneyPage.openLoanInterestModal}
             />
           </div>
         </div>
@@ -872,6 +876,8 @@ export default function MoneyDashboardPage() {
               deletingAll={moneyPage.deletingAll}
               repayingId={moneyPage.repayingId}
               checkingId={moneyPage.checkingId}
+              bankReconcilingId={moneyPage.bankReconcilingId}
+              financeNoteUpdatingId={moneyPage.financeNoteUpdatingId}
               deleting={moneyPage.deleting}
               onPrint={moneyPage.printTransactions}
               onExportExcel={moneyPage.exportTransactionsToExcel}
@@ -886,6 +892,10 @@ export default function MoneyDashboardPage() {
               onHideTransaction={moneyPage.setDeleteId}
               onTogglePersonalFundsRepaid={moneyPage.togglePersonalFundsRepaid}
               onMarkTransactionChecked={moneyPage.markTransactionChecked}
+              onUpdateBankReconciliationStatus={
+                moneyPage.updateBankReconciliationStatus
+              }
+              onUpdateFinanceNote={moneyPage.updateFinanceNote}
             />
           </div>
         </div>
@@ -963,6 +973,18 @@ export default function MoneyDashboardPage() {
         setDeleteAllPassword={moneyPage.setDeleteAllPassword}
         onCloseDeleteAll={moneyPage.closeDeleteAll}
         onDeleteAll={moneyPage.deleteAllTransactions}
+        loanRepaymentSponsor={moneyPage.loanRepaymentSponsor}
+        loanRepaymentForm={moneyPage.loanRepaymentForm}
+        setLoanRepaymentForm={moneyPage.setLoanRepaymentForm}
+        savingLoanRepayment={moneyPage.savingLoanRepayment}
+        onCloseLoanRepayment={moneyPage.closeLoanRepaymentModal}
+        onSaveLoanRepayment={moneyPage.saveLoanRepayment}
+        loanInterestSponsor={moneyPage.loanInterestSponsor}
+        loanInterestForm={moneyPage.loanInterestForm}
+        setLoanInterestForm={moneyPage.setLoanInterestForm}
+        savingLoanInterest={moneyPage.savingLoanInterest}
+        onCloseLoanInterest={moneyPage.closeLoanInterestModal}
+        onSaveLoanInterest={moneyPage.saveLoanInterest}
       />
     </main>
   );

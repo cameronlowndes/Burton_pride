@@ -1,5 +1,7 @@
 export type FundingType = "sponsor" | "grant" | "loan" | "other";
 
+export type LoanInterestType = "none" | "fixed" | "percentage";
+
 export type BankReconciliationStatus =
   | "unmatched"
   | "matched"
@@ -12,6 +14,17 @@ export type FinanceNoteStatus =
   | "ask_sponsor"
   | "bank_query"
   | "resolved";
+
+export type TransactionSource =
+  | "manual"
+  | "website_donation"
+  | "website_monthly_donation"
+  | "sponsorship"
+  | "grant"
+  | "loan"
+  | "loan_repayment"
+  | "loan_interest"
+  | string;
 
 export type TransactionAttachment = {
   id: string;
@@ -80,7 +93,7 @@ export type Transaction = {
   sponsor_name: string | null;
   sponsorship_note: string | null;
 
-  source: string | null;
+  source: TransactionSource | null;
   stripe_session_id: string | null;
   stripe_invoice_id: string | null;
   stripe_customer_id: string | null;
@@ -127,6 +140,19 @@ export type Sponsor = {
    * other = any other restricted funding
    */
   funding_type: FundingType | null;
+
+  /**
+   * Loan tracking fields.
+   * Only used when funding_type is "loan".
+   */
+  loan_monthly_payment_pence?: number | null;
+  loan_interest_type?: LoanInterestType | null;
+  loan_interest_pence?: number | null;
+  loan_interest_percentage?: number | null;
+  loan_due_date?: string | null;
+  loan_repayment_terms?: string | null;
+  is_loan_paid_off?: boolean | null;
+  loan_paid_off_at?: string | null;
 };
 
 export type SponsorBreakdown = {
@@ -146,6 +172,28 @@ export type SponsorBreakdown = {
    * Lets the UI show Sponsor, Grant Money, Loan, or Other Funding.
    */
   funding_type: FundingType | null;
+
+  /**
+   * Loan tracking breakdown fields.
+   * These let the UI show:
+   * - monthly repayment
+   * - interest
+   * - total owed
+   * - paid back
+   * - still to repay
+   * - due date
+   */
+  loan_monthly_payment_pence?: number | null;
+  loan_interest_type?: LoanInterestType | null;
+  loan_interest_pence?: number | null;
+  loan_interest_percentage?: number | null;
+  loan_repaid_pence?: number | null;
+  loan_total_owed_pence?: number | null;
+  loan_remaining_pence?: number | null;
+  loan_due_date?: string | null;
+  loan_repayment_terms?: string | null;
+  is_loan_paid_off?: boolean | null;
+  loan_paid_off_at?: string | null;
 };
 
 export type CarryForwardNote = {
@@ -228,6 +276,33 @@ export type SponsorFormState = {
   agreedAmount: string;
   receivedAmount: string;
   notes: string;
+
+  /**
+   * Loan-only form fields.
+   * These are shown when fundingType is "loan".
+   */
+  loanMonthlyPayment: string;
+  loanInterestType: LoanInterestType;
+  loanInterestAmount: string;
+  loanDueDate: string;
+  loanRepaymentTerms: string;
+};
+
+export type LoanRepaymentFormState = {
+  sponsorId: string;
+  sponsorName: string;
+  amount: string;
+  paymentMethod: string;
+  transactionDate: string;
+  note: string;
+};
+
+export type LoanInterestFormState = {
+  sponsorId: string;
+  sponsorName: string;
+  amount: string;
+  transactionDate: string;
+  note: string;
 };
 
 export type MoneyTotals = {
@@ -278,6 +353,29 @@ export const initialSponsorForm: SponsorFormState = {
   agreedAmount: "",
   receivedAmount: "",
   notes: "",
+
+  loanMonthlyPayment: "",
+  loanInterestType: "none",
+  loanInterestAmount: "",
+  loanDueDate: "",
+  loanRepaymentTerms: "",
+};
+
+export const initialLoanRepaymentForm: LoanRepaymentFormState = {
+  sponsorId: "",
+  sponsorName: "",
+  amount: "",
+  paymentMethod: "Bank Transfer",
+  transactionDate: new Date().toISOString().slice(0, 10),
+  note: "",
+};
+
+export const initialLoanInterestForm: LoanInterestFormState = {
+  sponsorId: "",
+  sponsorName: "",
+  amount: "",
+  transactionDate: new Date().toISOString().slice(0, 10),
+  note: "",
 };
 
 export const paymentMethods = [

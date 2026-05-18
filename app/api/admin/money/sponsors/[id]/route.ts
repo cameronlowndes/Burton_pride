@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 export const runtime = "nodejs";
 
 type FundingType = "sponsor" | "grant" | "loan" | "other";
+type LoanInterestType = "none" | "fixed" | "percentage";
 
 type RouteContext = {
   params: Promise<{
@@ -12,7 +13,7 @@ type RouteContext = {
 };
 
 function toPence(value: unknown) {
-  const amount = Number(String(value || "0"));
+  const amount = Number(String(value || "0").replace(/,/g, ""));
 
   if (!Number.isFinite(amount) || amount < 0) {
     return 0;
@@ -41,11 +42,74 @@ function cleanFundingType(value: unknown): FundingType {
   return "sponsor";
 }
 
+function cleanLoanInterestType(value: unknown): LoanInterestType {
+  const interestType = String(value || "none").trim().toLowerCase();
+
+  if (
+    interestType === "none" ||
+    interestType === "fixed" ||
+    interestType === "percentage"
+  ) {
+    return interestType;
+  }
+
+  return "none";
+}
+
+function toPercentage(value: unknown) {
+  const percentage = Number(String(value || "0").replace(/,/g, ""));
+
+  if (!Number.isFinite(percentage) || percentage < 0) {
+    return 0;
+  }
+
+  return percentage;
+}
+
 function fundingTypeLabel(type: FundingType) {
   if (type === "grant") return "grant / funder";
   if (type === "loan") return "loan provider";
   if (type === "other") return "funding";
   return "sponsor";
+}
+
+function buildLoanFields(body: any, fundingType: FundingType) {
+  if (fundingType !== "loan") {
+    return {
+      loan_monthly_payment_pence: 0,
+      loan_interest_type: "none" as LoanInterestType,
+      loan_interest_pence: 0,
+      loan_interest_percentage: 0,
+      loan_due_date: null as string | null,
+      loan_repayment_terms: null as string | null,
+      is_loan_paid_off: false,
+      loan_paid_off_at: null as string | null,
+    };
+  }
+
+  const loanInterestType = cleanLoanInterestType(
+    body.loanInterestType || body.loan_interest_type
+  );
+
+  const loanInterestAmount =
+    body.loanInterestAmount ?? body.loan_interest_amount;
+
+  return {
+    loan_monthly_payment_pence: toPence(
+      body.loanMonthlyPayment ?? body.loan_monthly_payment
+    ),
+    loan_interest_type: loanInterestType,
+    loan_interest_pence:
+      loanInterestType === "fixed" ? toPence(loanInterestAmount) : 0,
+    loan_interest_percentage:
+      loanInterestType === "percentage" ? toPercentage(loanInterestAmount) : 0,
+    loan_due_date: clean(body.loanDueDate || body.loan_due_date),
+    loan_repayment_terms: clean(
+      body.loanRepaymentTerms || body.loan_repayment_terms
+    ),
+    is_loan_paid_off: Boolean(body.is_loan_paid_off || false),
+    loan_paid_off_at: body.loan_paid_off_at || null,
+  };
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
@@ -90,6 +154,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
+    const loanFields = buildLoanFields(body, fundingType);
+
     const updateData = {
       funding_type: fundingType,
       sponsor_name: sponsorName,
@@ -100,6 +166,15 @@ export async function PATCH(req: Request, context: RouteContext) {
       received_amount_pence: receivedAmountPence,
       notes,
       is_active: true,
+
+      loan_monthly_payment_pence: loanFields.loan_monthly_payment_pence,
+      loan_interest_type: loanFields.loan_interest_type,
+      loan_interest_pence: loanFields.loan_interest_pence,
+      loan_interest_percentage: loanFields.loan_interest_percentage,
+      loan_due_date: loanFields.loan_due_date,
+      loan_repayment_terms: loanFields.loan_repayment_terms,
+      is_loan_paid_off: loanFields.is_loan_paid_off,
+      loan_paid_off_at: loanFields.loan_paid_off_at,
     };
 
     const { data, error } = await supabaseAdmin
@@ -121,18 +196,30 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
 
-    await supabaseAdmin
+    const { error: transactionUpdateError } = await supabaseAdmin
       .from("money_transactions")
       .update({
         sponsor_name: sponsorName,
       })
       .eq("sponsor_id", sponsorId);
 
+    if (transactionUpdateError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: transactionUpdateError.message,
+          details: transactionUpdateError,
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       sponsor: {
         ...data,
         funding_type: cleanFundingType(data?.funding_type),
+        loan_interest_type: cleanLoanInterestType(data?.loan_interest_type),
       },
     });
   } catch (err: any) {

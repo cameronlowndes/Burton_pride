@@ -1,7 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Banknote,
@@ -41,6 +41,10 @@ type YearlySponsorBreakdown = {
   carried_forward_pence?: number;
   notes?: string | null;
   funding_type?: FundingType | null;
+  loan_monthly_payment_pence?: number | null;
+  loan_repaid_pence?: number | null;
+  loan_remaining_pence?: number | null;
+  loan_total_owed_pence?: number | null;
 };
 
 type DuplicateMatch = {
@@ -88,6 +92,28 @@ const paymentMethods = [
   "Other Types",
 ];
 
+const loanRepaymentPaymentMethods = [
+  "Bank Transfer",
+  "Online Payment",
+  "Cash",
+  "Card Machine",
+  "PayPal",
+  "Other Types",
+];
+
+const loanTransactionModes = [
+  {
+    value: "Loan Repayment",
+    label: "Pay back the loan",
+    help: "Use this when Burton Pride has paid money back to the lender.",
+  },
+  {
+    value: "Loan Spending",
+    label: "Use loan money for spending",
+    help: "Use this when Burton Pride is spending money that came from this loan.",
+  },
+];
+
 const financeNoteOptions: {
   value: FinanceNoteStatus;
   label: string;
@@ -130,6 +156,16 @@ function amountToPence(amount: string) {
   return Math.round(cleanAmount * 100);
 }
 
+function penceToPoundsInput(value: number | null | undefined) {
+  const pence = Number(value || 0);
+
+  if (!Number.isFinite(pence) || pence <= 0) {
+    return "";
+  }
+
+  return (pence / 100).toFixed(2);
+}
+
 function fundingTypeLabel(type?: FundingType | string | null) {
   if (type === "grant") return "Grant Money";
   if (type === "loan") return "Loan";
@@ -142,6 +178,10 @@ function fundingTypeShortLabel(type?: FundingType | string | null) {
   if (type === "loan") return "loan";
   if (type === "other") return "funding";
   return "sponsor";
+}
+
+function getLoanMode(category: string | null | undefined) {
+  return category === "Loan Spending" ? "Loan Spending" : "Loan Repayment";
 }
 
 function formatFileSize(size?: number | null) {
@@ -211,15 +251,58 @@ export default function MoneyTransactionForm({
     selectedFunding?.funding_type ||
     "sponsor";
 
+  const isLoanFunding = selectedFundingType === "loan";
+  const hasLinkedFunding = Boolean(form.sponsorId);
+
+  const loanMode = getLoanMode(form.category);
+  const isLoanRepayment = isLoanFunding && loanMode === "Loan Repayment";
+  const isLoanSpending = isLoanFunding && loanMode === "Loan Spending";
+
+  const plannedLoanRepaymentPence =
+    selectedSponsorBreakdown?.loan_monthly_payment_pence ??
+    selectedFunding?.loan_monthly_payment_pence ??
+    0;
+
+  const plannedLoanRepaymentAmount = penceToPoundsInput(
+    plannedLoanRepaymentPence
+  );
+
+  const lockLoanRepaymentAmount =
+    isLoanRepayment && plannedLoanRepaymentPence > 0;
+
+  useEffect(() => {
+    if (!lockLoanRepaymentAmount || !plannedLoanRepaymentAmount) {
+      return;
+    }
+
+    setForm((prev) => {
+      if (prev.amount === plannedLoanRepaymentAmount) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        amount: plannedLoanRepaymentAmount,
+      };
+    });
+  }, [lockLoanRepaymentAmount, plannedLoanRepaymentAmount, setForm]);
+
   const selectedFundingLabel = fundingTypeLabel(selectedFundingType);
   const selectedFundingShortLabel = fundingTypeShortLabel(selectedFundingType);
 
   const currentAmountPence = amountToPence(form.amount);
-  const remainingPence = selectedSponsorBreakdown?.remaining_pence ?? 0;
+
+  const normalRemainingPence = selectedSponsorBreakdown?.remaining_pence ?? 0;
+  const loanStillToRepayPence =
+    selectedSponsorBreakdown?.loan_remaining_pence ?? normalRemainingPence;
+
+  const balanceToCheckPence = isLoanRepayment
+    ? loanStillToRepayPence
+    : normalRemainingPence;
 
   const overSpendPence =
-    form.sponsorId && currentAmountPence > remainingPence
-      ? currentAmountPence - remainingPence
+    form.sponsorId && currentAmountPence > balanceToCheckPence
+      ? currentAmountPence - balanceToCheckPence
       : 0;
 
   const existingAttachments = editingTransaction?.attachments || [];
@@ -236,7 +319,11 @@ export default function MoneyTransactionForm({
 
   async function checkDuplicateBeforeSave() {
     const paymentMethod = form.sponsorId
-      ? "Sponsorship Money"
+      ? isLoanRepayment
+        ? form.paymentMethod || "Bank Transfer"
+        : isLoanSpending
+          ? "Loan Money"
+          : "Sponsorship Money"
       : form.paymentMethod;
 
     if (
@@ -370,6 +457,13 @@ export default function MoneyTransactionForm({
     setFundingOverspendWarningOpen(false);
   }
 
+  function resetWarnings() {
+    setDuplicateWarning(null);
+    setDuplicateError(null);
+    setMissingReceiptWarningOpen(false);
+    setFundingOverspendWarningOpen(false);
+  }
+
   return (
     <>
       <form
@@ -418,37 +512,54 @@ export default function MoneyTransactionForm({
           <input
             value={form.title}
             onChange={(event) => {
-              setDuplicateWarning(null);
-              setDuplicateError(null);
-              setMissingReceiptWarningOpen(false);
-              setFundingOverspendWarningOpen(false);
+              resetWarnings();
 
               setForm((prev) => ({
                 ...prev,
                 title: event.target.value,
               }));
             }}
-            placeholder="Title"
+            placeholder={
+              isLoanFunding
+                ? isLoanRepayment
+                  ? "Title, e.g. Loan repayment"
+                  : "Title, e.g. Spending from loan money"
+                : "Title"
+            }
             className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
           />
 
-          {form.sponsorId ? (
-            <div className="rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100">
+          {hasLinkedFunding ? (
+            <div
+              className={`rounded-xl border p-3 text-sm ${
+                isLoanFunding
+                  ? "border-orange-300/20 bg-orange-500/10 text-orange-100"
+                  : "border-red-300/20 bg-red-500/10 text-red-100"
+              }`}
+            >
               <p className="font-bold">Transaction type</p>
-              <p className="mt-1 text-lg font-black text-white">Money Out</p>
-              <p className="mt-1 text-xs text-red-100/70">
-                This is locked because this transaction is spending from a
-                linked {selectedFundingShortLabel} record.
+
+              <p className="mt-1 text-lg font-black text-white">
+                {isLoanFunding
+                  ? isLoanRepayment
+                    ? "Loan Repayment"
+                    : "Loan Spending"
+                  : "Money Out"}
+              </p>
+
+              <p className="mt-1 text-xs text-white/70">
+                {isLoanFunding
+                  ? isLoanRepayment
+                    ? "This records money Burton Pride has paid back to the lender. It reduces the amount still owed on this loan."
+                    : "This records Burton Pride spending money that came from this loan. It does not count as paying the loan back."
+                  : `This is locked because this transaction is spending from a linked ${selectedFundingShortLabel} record.`}
               </p>
             </div>
           ) : (
             <select
               value={form.type}
               onChange={(event) => {
-                setDuplicateWarning(null);
-                setDuplicateError(null);
-                setMissingReceiptWarningOpen(false);
-                setFundingOverspendWarningOpen(false);
+                resetWarnings();
 
                 setForm((prev) => ({
                   ...prev,
@@ -474,64 +585,205 @@ export default function MoneyTransactionForm({
             </select>
           )}
 
-          <input
-            value={form.amount}
-            onChange={(event) => {
-              setDuplicateWarning(null);
-              setDuplicateError(null);
-              setFundingOverspendWarningOpen(false);
-              saveOverFundingLimitRef.current = false;
+          <div>
+            <input
+              value={
+                lockLoanRepaymentAmount ? plannedLoanRepaymentAmount : form.amount
+              }
+              onChange={(event) => {
+                if (lockLoanRepaymentAmount) {
+                  return;
+                }
 
-              setForm((prev) => ({
-                ...prev,
-                amount: event.target.value,
-              }));
-            }}
-            placeholder="Amount"
-            type="number"
-            step="0.01"
-            className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
-          />
+                setDuplicateWarning(null);
+                setDuplicateError(null);
+                setFundingOverspendWarningOpen(false);
+                saveOverFundingLimitRef.current = false;
 
-          <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
-            <label className="mb-1 block text-sm font-bold text-amber-100">
-              Use restricted funding for this spending
+                setForm((prev) => ({
+                  ...prev,
+                  amount: event.target.value,
+                }));
+              }}
+              placeholder={
+                isLoanFunding
+                  ? isLoanRepayment
+                    ? plannedLoanRepaymentAmount
+                      ? `Locked repayment amount: £${plannedLoanRepaymentAmount}`
+                      : "Amount paid back to lender"
+                    : "Amount spent from loan money"
+                  : "Amount"
+              }
+              type="number"
+              step="0.01"
+              disabled={lockLoanRepaymentAmount}
+              className={`w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40 ${
+                lockLoanRepaymentAmount
+                  ? "cursor-not-allowed opacity-75 ring-orange-300/30"
+                  : ""
+              }`}
+            />
+
+            {lockLoanRepaymentAmount && (
+              <p className="mt-2 rounded-xl border border-orange-300/20 bg-orange-500/10 px-3 py-2 text-xs leading-5 text-orange-100">
+                This amount is locked to the planned monthly repayment of{" "}
+                <strong>£{plannedLoanRepaymentAmount}</strong>. To pay a
+                different amount, change the loan’s planned monthly repayment
+                amount first.
+              </p>
+            )}
+
+            {isLoanRepayment && !lockLoanRepaymentAmount && (
+              <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                No planned monthly repayment amount is saved on this loan yet,
+                so this repayment amount is editable.
+              </p>
+            )}
+          </div>
+
+          <div
+            className={`rounded-xl border p-3 ${
+              isLoanFunding
+                ? "border-orange-300/20 bg-orange-500/10"
+                : "border-amber-300/20 bg-amber-500/10"
+            }`}
+          >
+            <label
+              className={`mb-1 block text-sm font-bold ${
+                isLoanFunding ? "text-orange-100" : "text-amber-100"
+              }`}
+            >
+              {isLoanFunding
+                ? "Choose what this loan transaction is for"
+                : "Use restricted funding for this spending"}
             </label>
 
-            <p className="mb-2 text-xs text-amber-100/70">
-              Choose a sponsor, grant, loan or other funding record when this
-              payment is being paid from restricted funding.
+            <p
+              className={`mb-2 text-xs ${
+                isLoanFunding ? "text-orange-100/75" : "text-amber-100/70"
+              }`}
+            >
+              {isLoanFunding
+                ? "Choose whether this is money paid back to the lender, or spending using loan money."
+                : "Choose a sponsor, grant, loan or other funding record when this payment is being paid from restricted funding."}
             </p>
+
+            {isLoanFunding && (
+              <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {loanTransactionModes.map((mode) => {
+                  const active = loanMode === mode.value;
+
+                  return (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => {
+                        resetWarnings();
+
+                        setForm((prev) => ({
+                          ...prev,
+                          category: mode.value,
+                          amount:
+                            mode.value === "Loan Repayment" &&
+                            plannedLoanRepaymentAmount
+                              ? plannedLoanRepaymentAmount
+                              : mode.value === "Loan Spending" &&
+                                  prev.amount === plannedLoanRepaymentAmount
+                                ? ""
+                                : prev.amount,
+                          paymentMethod:
+                            mode.value === "Loan Repayment"
+                              ? prev.paymentMethod &&
+                                prev.paymentMethod !== "Sponsorship Money" &&
+                                prev.paymentMethod !== "Loan Money"
+                                ? prev.paymentMethod
+                                : "Bank Transfer"
+                              : "Loan Money",
+                          sponsorshipNote:
+                            mode.value === "Loan Repayment"
+                              ? prev.sponsorshipNote || "Loan repayment"
+                              : prev.sponsorshipNote === "Loan repayment"
+                                ? ""
+                                : prev.sponsorshipNote,
+                        }));
+                      }}
+                      className={`rounded-xl px-3 py-3 text-left text-sm font-black ring-1 ${
+                        active
+                          ? "bg-orange-500 text-black ring-orange-200/60"
+                          : "bg-black/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/10"
+                      }`}
+                    >
+                      <span className="block">{mode.label}</span>
+                      <span
+                        className={`mt-1 block text-xs font-normal ${
+                          active ? "text-black/70" : "text-orange-100/65"
+                        }`}
+                      >
+                        {mode.help}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <select
               value={form.sponsorId}
               onChange={(event) => {
-                setDuplicateWarning(null);
-                setDuplicateError(null);
-                setMissingReceiptWarningOpen(false);
-                setFundingOverspendWarningOpen(false);
+                resetWarnings();
                 saveOverFundingLimitRef.current = false;
 
                 const selected = displaySponsors.find(
                   (sponsor) => sponsor.id === event.target.value
                 );
 
+                const selectedType = selected?.funding_type || "sponsor";
+                const selectedIsLoan = selectedType === "loan";
+
+                const selectedMonthlyRepaymentAmount = selectedIsLoan
+                  ? penceToPoundsInput(selected?.loan_monthly_payment_pence)
+                  : "";
+
                 setForm((prev) => ({
                   ...prev,
                   sponsorId: selected?.id || "",
                   sponsorName: selected?.sponsor_name || "",
                   type: selected ? "expense" : prev.type,
-                  category: selected ? "Sponsorship" : "",
+                  category: selected
+                    ? selectedIsLoan
+                      ? "Loan Repayment"
+                      : "Sponsorship"
+                    : "",
+                  amount:
+                    selectedIsLoan && selectedMonthlyRepaymentAmount
+                      ? selectedMonthlyRepaymentAmount
+                      : !selected
+                        ? ""
+                        : prev.amount,
                   paymentMethod: selected
-                    ? "Sponsorship Money"
-                    : prev.paymentMethod === "Sponsorship Money"
+                    ? selectedIsLoan
+                      ? prev.paymentMethod &&
+                        prev.paymentMethod !== "Sponsorship Money" &&
+                        prev.paymentMethod !== "Loan Money"
+                        ? prev.paymentMethod
+                        : "Bank Transfer"
+                      : "Sponsorship Money"
+                    : prev.paymentMethod === "Sponsorship Money" ||
+                        prev.paymentMethod === "Loan Money"
                       ? ""
                       : prev.paymentMethod,
                   isPersonalFunds: selected ? false : prev.isPersonalFunds,
                   personalFundsName: selected ? "" : prev.personalFundsName,
+                  sponsorshipNote: selectedIsLoan
+                    ? prev.sponsorshipNote || "Loan repayment"
+                    : prev.sponsorshipNote,
                 }));
               }}
-              className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
+              className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ${
+                isLoanFunding
+                  ? "ring-orange-300/20 focus:ring-orange-300/40"
+                  : "ring-white/10 focus:ring-amber-300/40"
+              }`}
             >
               <option className="bg-[#11111f] text-white" value="">
                 Choose funding record...
@@ -550,22 +802,62 @@ export default function MoneyTransactionForm({
             </select>
 
             {form.sponsorId && selectedSponsorBreakdown && (
-              <div className="mt-3 rounded-xl border border-amber-300/20 bg-black/20 p-3 text-xs text-amber-100">
+              <div
+                className={`mt-3 rounded-xl border bg-black/20 p-3 text-xs ${
+                  isLoanFunding
+                    ? "border-orange-300/20 text-orange-100"
+                    : "border-amber-300/20 text-amber-100"
+                }`}
+              >
                 <div className="flex justify-between gap-3">
                   <span>Funding type</span>
                   <strong>{selectedFundingLabel}</strong>
                 </div>
 
-                <div className="mt-1 flex justify-between gap-3">
-                  <span>Remaining funding balance</span>
-                  <strong>{money(remainingPence)}</strong>
-                </div>
+                {isLoanFunding ? (
+                  <>
+                    <div className="mt-1 flex justify-between gap-3">
+                      <span>Loan received</span>
+                      <strong>
+                        {money(selectedSponsorBreakdown.received_pence)}
+                      </strong>
+                    </div>
 
-                {currentAmountPence > 0 && (
-                  <div className="mt-1 flex justify-between gap-3">
-                    <span>This spend</span>
-                    <strong>{money(currentAmountPence)}</strong>
-                  </div>
+                    <div className="mt-1 flex justify-between gap-3">
+                      <span>Still to repay</span>
+                      <strong>{money(loanStillToRepayPence)}</strong>
+                    </div>
+
+                    <div className="mt-1 flex justify-between gap-3">
+                      <span>Loan money available</span>
+                      <strong>{money(normalRemainingPence)}</strong>
+                    </div>
+
+                    {currentAmountPence > 0 && (
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>
+                          {isLoanRepayment
+                            ? "This repayment"
+                            : "This loan spend"}
+                        </span>
+                        <strong>{money(currentAmountPence)}</strong>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-1 flex justify-between gap-3">
+                      <span>Remaining funding balance</span>
+                      <strong>{money(normalRemainingPence)}</strong>
+                    </div>
+
+                    {currentAmountPence > 0 && (
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>This spend</span>
+                        <strong>{money(currentAmountPence)}</strong>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -573,17 +865,33 @@ export default function MoneyTransactionForm({
             {overSpendPence > 0 && (
               <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-sm text-red-100">
                 <p className="font-black text-white">
-                  Funding balance warning
+                  {isLoanRepayment
+                    ? "Loan repayment warning"
+                    : "Funding balance warning"}
                 </p>
+
                 <p className="mt-1">
-                  This spend is {money(overSpendPence)} over the remaining{" "}
-                  {selectedFundingShortLabel} balance.
+                  {isLoanRepayment
+                    ? `This repayment is ${money(
+                        overSpendPence
+                      )} more than the amount still owed on this loan.`
+                    : `This spend is ${money(
+                        overSpendPence
+                      )} over the remaining ${selectedFundingShortLabel} balance.`}
                 </p>
               </div>
             )}
 
-            <label className="mt-3 block text-sm font-bold text-amber-100">
-              Funding spending note{" "}
+            <label
+              className={`mt-3 block text-sm font-bold ${
+                isLoanFunding ? "text-orange-100" : "text-amber-100"
+              }`}
+            >
+              {isLoanFunding
+                ? isLoanRepayment
+                  ? "Loan repayment note"
+                  : "Loan spending note"
+                : "Funding spending note"}{" "}
               {form.sponsorId && <span className="text-red-200">*</span>}
             </label>
 
@@ -597,52 +905,81 @@ export default function MoneyTransactionForm({
               }
               placeholder={
                 form.sponsorId
-                  ? `Required: explain what this ${selectedFundingShortLabel} money was spent on`
+                  ? isLoanFunding
+                    ? isLoanRepayment
+                      ? "Required: explain this loan repayment, e.g. £200 paid back to lender"
+                      : "Required: explain what the loan money was spent on"
+                    : `Required: explain what this ${selectedFundingShortLabel} money was spent on`
                   : "Example: Paid from grant money for event supplies"
               }
               required={Boolean(form.sponsorId)}
               className={`mt-2 min-h-20 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/40 ${
                 form.sponsorId && !form.sponsorshipNote.trim()
                   ? "ring-red-300/40 focus:ring-red-300/60"
-                  : "ring-white/10 focus:ring-amber-300/40"
+                  : isLoanFunding
+                    ? "ring-orange-300/20 focus:ring-orange-300/40"
+                    : "ring-white/10 focus:ring-amber-300/40"
               }`}
             />
 
             {form.sponsorId && (
               <p className="mt-2 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
-                Required: add a clear note so Burton Pride can prove why this{" "}
-                {selectedFundingShortLabel} money was used.
+                {isLoanFunding
+                  ? isLoanRepayment
+                    ? "Required: add a clear note so Burton Pride can prove this was a loan repayment."
+                    : "Required: add a clear note so Burton Pride can prove what the loan money was used for."
+                  : `Required: add a clear note so Burton Pride can prove why this ${selectedFundingShortLabel} money was used.`}
               </p>
             )}
 
             <button
               type="button"
               onClick={openNewSponsorForm}
-              className="mt-3 rounded-xl bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/30"
+              className={`mt-3 rounded-xl px-4 py-2 text-sm font-bold ring-1 ${
+                isLoanFunding
+                  ? "bg-orange-500/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/30"
+                  : "bg-amber-500/20 text-amber-100 ring-amber-300/20 hover:bg-amber-500/30"
+              }`}
             >
               Add New Funding
             </button>
           </div>
 
-          {form.sponsorId ? (
+          {form.sponsorId && (!isLoanFunding || isLoanSpending) ? (
             <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
               <p className="font-bold">Payment method</p>
               <p className="mt-1 text-lg font-black text-white">
-                Funding Money
+                {isLoanSpending ? "Loan Money" : "Funding Money"}
               </p>
               <p className="mt-1 text-xs text-amber-100/70">
-                This is locked because a funding record is linked. Remove the
-                funding record if this was paid another way.
+                {isLoanSpending
+                  ? "This is locked because this transaction is spending money from the selected loan."
+                  : "This is locked because a sponsor, grant or funding record is linked. Remove the funding record if this was paid another way."}
               </p>
             </div>
           ) : (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-              <p className="mb-3 text-sm font-bold text-white/70">
-                Payment method
+            <div
+              className={`rounded-xl border p-3 ${
+                isLoanRepayment
+                  ? "border-orange-300/20 bg-orange-500/10"
+                  : "border-white/10 bg-black/20"
+              }`}
+            >
+              <p
+                className={`mb-3 text-sm font-bold ${
+                  isLoanRepayment ? "text-orange-100" : "text-white/70"
+                }`}
+              >
+                {isLoanRepayment
+                  ? "How was this loan repayment paid?"
+                  : "Payment method"}
               </p>
 
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {paymentMethods.map((method) => {
+                {(isLoanRepayment
+                  ? loanRepaymentPaymentMethods
+                  : paymentMethods
+                ).map((method) => {
                   const active = form.paymentMethod === method;
 
                   return (
@@ -657,14 +994,21 @@ export default function MoneyTransactionForm({
                           ...prev,
                           paymentMethod: method,
                           isPersonalFunds:
-                            method === "Personal Funds"
+                            !isLoanFunding && method === "Personal Funds"
                               ? true
-                              : prev.isPersonalFunds,
+                              : isLoanFunding
+                                ? false
+                                : prev.isPersonalFunds,
+                          personalFundsName: isLoanFunding
+                            ? ""
+                            : prev.personalFundsName,
                         }));
                       }}
                       className={`rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
                         active
-                          ? "bg-pink-500 text-white ring-2 ring-pink-200/50"
+                          ? isLoanRepayment
+                            ? "bg-orange-500 text-black ring-2 ring-orange-200/50"
+                            : "bg-pink-500 text-white ring-2 ring-pink-200/50"
                           : "bg-white/10 text-white/80 ring-1 ring-white/10 hover:bg-white/20"
                       }`}
                     >
@@ -955,7 +1299,13 @@ export default function MoneyTransactionForm({
                 description: event.target.value,
               }))
             }
-            placeholder="Notes"
+            placeholder={
+              isLoanFunding
+                ? isLoanRepayment
+                  ? "Extra notes about this repayment"
+                  : "Extra notes about this loan spending"
+                : "Notes"
+            }
             className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
           />
 
@@ -1137,7 +1487,11 @@ export default function MoneyTransactionForm({
           <button
             type="submit"
             disabled={saving || checkingDuplicate}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-pink-500 p-3 font-bold text-white hover:bg-pink-400 disabled:opacity-60"
+            className={`flex w-full items-center justify-center gap-2 rounded-xl p-3 font-bold disabled:opacity-60 ${
+              isLoanFunding
+                ? "bg-orange-500 text-black hover:bg-orange-400"
+                : "bg-pink-500 text-white hover:bg-pink-400"
+            }`}
           >
             {checkingDuplicate ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1157,7 +1511,11 @@ export default function MoneyTransactionForm({
                   ? "Update Transaction"
                   : form.isRepeating
                     ? "Create Repeating Payments"
-                    : "Save Transaction"}
+                    : isLoanFunding
+                      ? isLoanRepayment
+                        ? "Save Loan Repayment"
+                        : "Save Loan Spending"
+                      : "Save Transaction"}
           </button>
         </div>
       </form>
@@ -1172,12 +1530,15 @@ export default function MoneyTransactionForm({
 
               <div className="min-w-0 flex-1">
                 <h3 className="text-xl font-black text-white">
-                  Funding overspend warning
+                  {isLoanRepayment
+                    ? "Loan repayment warning"
+                    : "Funding overspend warning"}
                 </h3>
 
                 <p className="mt-2 text-sm leading-6 text-white/70">
-                  This transaction is linked to a funding record, but the amount
-                  is higher than the remaining balance.
+                  {isLoanRepayment
+                    ? "This repayment is higher than the amount still owed on this loan."
+                    : "This transaction is linked to a funding record, but the amount is higher than the remaining balance."}
                 </p>
 
                 <div className="mt-3 rounded-2xl border border-red-300/20 bg-red-500/10 p-3 text-sm leading-6 text-red-50">
@@ -1191,25 +1552,35 @@ export default function MoneyTransactionForm({
                   </div>
 
                   <div className="mt-1 flex justify-between gap-3">
-                    <span>Remaining balance</span>
-                    <strong>{money(remainingPence)}</strong>
+                    <span>
+                      {isLoanRepayment
+                        ? "Still to repay"
+                        : "Remaining balance"}
+                    </span>
+                    <strong>{money(balanceToCheckPence)}</strong>
                   </div>
 
                   <div className="mt-1 flex justify-between gap-3">
-                    <span>This spend</span>
+                    <span>
+                      {isLoanRepayment ? "This repayment" : "This spend"}
+                    </span>
                     <strong>{money(currentAmountPence)}</strong>
                   </div>
 
                   <div className="mt-1 flex justify-between gap-3 text-red-100">
-                    <span>Overspend amount</span>
+                    <span>
+                      {isLoanRepayment
+                        ? "Over repayment amount"
+                        : "Overspend amount"}
+                    </span>
                     <strong>{money(overSpendPence)}</strong>
                   </div>
                 </div>
 
                 <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm leading-6 text-amber-50">
-                  Please check the funding record before saving. You can go back
-                  and reduce the amount, choose a different funding record, or
-                  continue if this is correct.
+                  {isLoanRepayment
+                    ? "Please check the loan record before saving. Continue only if this is correct."
+                    : "Please check the funding record before saving. You can go back and reduce the amount, choose a different funding record, or continue if this is correct."}
                 </p>
 
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
@@ -1226,7 +1597,9 @@ export default function MoneyTransactionForm({
                     onClick={saveOverFundingLimit}
                     className="rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400"
                   >
-                    OK, save over funding balance
+                    {isLoanRepayment
+                      ? "OK, save over loan balance"
+                      : "OK, save over funding balance"}
                   </button>
                 </div>
               </div>
