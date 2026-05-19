@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Home, PlusCircle, RefreshCcw, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  Home,
+  PlusCircle,
+  RefreshCcw,
+  ShieldCheck,
+} from "lucide-react";
 
 import MoneyHeader from "../../../../components/money/MoneyHeader";
 import MoneyPageStatus from "../../../../components/money/MoneyPageStatus";
@@ -223,6 +229,18 @@ export default function SponsorTrackingPage() {
         setDeleteAllPassword={moneyPage.setDeleteAllPassword}
         onCloseDeleteAll={moneyPage.closeDeleteAll}
         onDeleteAll={moneyPage.deleteAllTransactions}
+        loanRepaymentSponsor={moneyPage.loanRepaymentSponsor}
+        loanRepaymentForm={moneyPage.loanRepaymentForm}
+        setLoanRepaymentForm={moneyPage.setLoanRepaymentForm}
+        savingLoanRepayment={moneyPage.savingLoanRepayment}
+        onCloseLoanRepayment={moneyPage.closeLoanRepaymentModal}
+        onSaveLoanRepayment={moneyPage.saveLoanRepayment}
+        loanInterestSponsor={moneyPage.loanInterestSponsor}
+        loanInterestForm={moneyPage.loanInterestForm}
+        setLoanInterestForm={moneyPage.setLoanInterestForm}
+        savingLoanInterest={moneyPage.savingLoanInterest}
+        onCloseLoanInterest={moneyPage.closeLoanInterestModal}
+        onSaveLoanInterest={moneyPage.saveLoanInterest}
       />
     </main>
   );

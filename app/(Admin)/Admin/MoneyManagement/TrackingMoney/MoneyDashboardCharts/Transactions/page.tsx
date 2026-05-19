@@ -123,8 +123,8 @@ export default function MoneyTransactionsPage() {
         <MoneyMainGrid
           form={moneyPage.form}
           setForm={moneyPage.setForm}
-          invoiceFile={moneyPage.invoiceFile}
-          setInvoiceFile={moneyPage.setInvoiceFile}
+          invoiceFiles={moneyPage.invoiceFiles}
+          setInvoiceFiles={moneyPage.setInvoiceFiles}
           editingTransaction={moneyPage.editingTransaction}
           displaySponsors={moneyPage.displaySponsors}
           yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
@@ -156,6 +156,9 @@ export default function MoneyTransactionsPage() {
           deletingYear={moneyPage.deletingYear}
           deletingAll={moneyPage.deletingAll}
           repayingId={moneyPage.repayingId}
+          checkingId={moneyPage.checkingId}
+          bankReconcilingId={moneyPage.bankReconcilingId}
+          financeNoteUpdatingId={moneyPage.financeNoteUpdatingId}
           deleting={moneyPage.deleting}
           onPrint={moneyPage.printTransactions}
           onExportExcel={moneyPage.exportTransactionsToExcel}
@@ -165,6 +168,11 @@ export default function MoneyTransactionsPage() {
           onEditTransaction={moneyPage.startEditTransaction}
           onHideTransaction={moneyPage.setDeleteId}
           onTogglePersonalFundsRepaid={moneyPage.togglePersonalFundsRepaid}
+          onMarkTransactionChecked={moneyPage.markTransactionChecked}
+          onUpdateBankReconciliationStatus={
+            moneyPage.updateBankReconciliationStatus
+          }
+          onUpdateFinanceNote={moneyPage.updateFinanceNote}
         />
       </div>
 
@@ -199,6 +207,18 @@ export default function MoneyTransactionsPage() {
         setDeleteAllPassword={moneyPage.setDeleteAllPassword}
         onCloseDeleteAll={moneyPage.closeDeleteAll}
         onDeleteAll={moneyPage.deleteAllTransactions}
+        loanRepaymentSponsor={moneyPage.loanRepaymentSponsor}
+        loanRepaymentForm={moneyPage.loanRepaymentForm}
+        setLoanRepaymentForm={moneyPage.setLoanRepaymentForm}
+        savingLoanRepayment={moneyPage.savingLoanRepayment}
+        onCloseLoanRepayment={moneyPage.closeLoanRepaymentModal}
+        onSaveLoanRepayment={moneyPage.saveLoanRepayment}
+        loanInterestSponsor={moneyPage.loanInterestSponsor}
+        loanInterestForm={moneyPage.loanInterestForm}
+        setLoanInterestForm={moneyPage.setLoanInterestForm}
+        savingLoanInterest={moneyPage.savingLoanInterest}
+        onCloseLoanInterest={moneyPage.closeLoanInterestModal}
+        onSaveLoanInterest={moneyPage.saveLoanInterest}
       />
     </main>
   );
