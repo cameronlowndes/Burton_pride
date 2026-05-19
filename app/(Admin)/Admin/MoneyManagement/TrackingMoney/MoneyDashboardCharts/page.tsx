@@ -6,9 +6,11 @@ import {
   ArrowRight,
   Banknote,
   CalendarDays,
+  Coins,
   FileText,
   HandCoins,
   LayoutDashboard,
+  PiggyBank,
   PlusCircle,
   RefreshCcw,
   ReceiptText,
@@ -525,6 +527,51 @@ export default function MoneyDashboardPage() {
             </p>
 
             <p className="mt-4 text-sm font-black">Create report</p>
+          </Link>
+
+          <Link
+            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
+            className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <Coins className="h-5 w-5" />
+              </div>
+
+              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+            </div>
+
+            <h2 className="text-lg font-black text-white">Cash Tin Tracker</h2>
+
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Track cash fundraising days, starting cash, money received, money
+              banked, cash spent, who counted it, and any difference.
+            </p>
+
+            <p className="mt-4 text-sm font-black">Open cash tracker</p>
+          </Link>
+
+          <Link
+            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
+            className="group rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-purple-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <PiggyBank className="h-5 w-5" />
+              </div>
+
+              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+            </div>
+
+            <h2 className="text-lg font-black text-white">Budget Planning</h2>
+
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Compare planned budget against actual spending for venue,
+              insurance, printing, security, performers, equipment,
+              accessibility, and other costs.
+            </p>
+
+            <p className="mt-4 text-sm font-black">Open budget planner</p>
           </Link>
         </section>
 

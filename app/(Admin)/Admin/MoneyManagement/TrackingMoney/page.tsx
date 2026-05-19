@@ -1,6 +1,13 @@
 "use client";
 
-import { RefreshCcw } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  Calculator,
+  Coins,
+  PiggyBank,
+  RefreshCcw,
+} from "lucide-react";
 
 import MoneyHeader from "../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../components/money/MoneySummaryCards";
@@ -10,6 +17,7 @@ import MoneySponsorSection from "../../components/money/MoneySponsorSection";
 import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown";
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
+import MoneyBudgetPlanning from "../../components/money/MoneyBudgetPlanning";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
@@ -83,6 +91,102 @@ export default function MoneyTransactionsPage() {
           yearTransactionsLength={money.yearTransactions.length}
         />
 
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="mb-5 flex flex-col gap-2">
+            <h2 className="text-2xl font-black text-white">
+              Money tracker tools
+            </h2>
+
+            <p className="max-w-3xl text-sm leading-6 text-white/60">
+              Extra tools for tracking cash fundraising, budget planning, and
+              keeping Burton Pride accounts clear.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
+              className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20">
+                <Coins className="h-6 w-6" />
+              </div>
+
+              <h3 className="text-xl font-black text-white">
+                Cash Tin Tracker
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Track cash fundraising days, starting cash, money received,
+                money banked, cash spent, who counted it, and any difference.
+              </p>
+
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-amber-100">
+                Open cash tracker
+                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
+              className="group rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-emerald-500/20"
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/20 text-emerald-100 ring-1 ring-emerald-300/20">
+                <PiggyBank className="h-6 w-6" />
+              </div>
+
+              <h3 className="text-xl font-black text-white">
+                Budget Planning
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Compare planned budget against actual spending for venue,
+                insurance, printing, security, performers, equipment,
+                accessibility, and other costs.
+              </p>
+
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-emerald-100">
+                Open budget planner
+                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </Link>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-black text-sky-100">
+                  <Calculator className="h-4 w-4" />
+                  Quick account checks
+                </div>
+
+                <p className="mt-1 text-sm text-white/60">
+                  Use these tools before finalising reports, locking a month, or
+                  closing the year.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-black hover:bg-amber-300"
+                >
+                  <Coins className="h-4 w-4" />
+                  Cash tin
+                </Link>
+
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400"
+                >
+                  <PiggyBank className="h-4 w-4" />
+                  Budget
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <MoneyYearLockPanel
           selectedYear={money.selectedYear}
           selectedYearLocked={money.selectedYearLocked}
@@ -91,6 +195,15 @@ export default function MoneyTransactionsPage() {
           lockingYear={money.lockingYear}
           onLockYear={money.lockSelectedYear}
           onUnlockYear={money.unlockSelectedYear}
+          printMonthOptions={money.printMonthOptions}
+          selectedLockMonth={money.selectedLockMonth}
+          setSelectedLockMonth={money.setSelectedLockMonth}
+          selectedMonthLocked={money.selectedMonthLocked}
+          monthLockPassword={money.monthLockPassword}
+          setMonthLockPassword={money.setMonthLockPassword}
+          lockingMonth={money.lockingMonth}
+          onLockMonth={money.lockSelectedMonth}
+          onUnlockMonth={money.unlockSelectedMonth}
         />
 
         <MoneyStatsCards totals={money.totals} />
@@ -98,6 +211,14 @@ export default function MoneyTransactionsPage() {
         <MoneyCarryForwardNote
           selectedYear={money.selectedYear}
           carryForwardNote={money.carryForwardNote}
+        />
+
+        <MoneyBudgetPlanning
+          selectedYear={money.selectedYear}
+          budgetItems={money.budgetItems}
+          transactions={money.yearTransactions}
+          savingBudget={money.savingBudget}
+          onSaveBudget={money.saveBudgetItems}
         />
 
         <MoneySponsorSection

@@ -50,6 +50,28 @@ type YearLock = {
   updated_at?: string | null;
 };
 
+type MonthLock = {
+  id?: string;
+  year: string;
+  month_key: string;
+  is_locked: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
+  unlocked_at?: string | null;
+  unlocked_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type BudgetItem = {
+  id?: string | null;
+  year: string;
+  category_key: string;
+  category_label: string;
+  planned_amount_pence: number;
+  notes?: string | null;
+};
+
 type CarryForwardNote = {
   selectedYear: string;
   previousIncome: number;
@@ -232,6 +254,16 @@ function calculatePercentageInterestPence(
   return Math.round(principalPence * (cleanPercentage / 100));
 }
 
+function getTodayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getCurrentMonthKey() {
+  return `${new Date().getFullYear()}-${String(
+    new Date().getMonth() + 1
+  ).padStart(2, "0")}`;
+}
+
 export function useMoneyTransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
@@ -242,6 +274,15 @@ export function useMoneyTransactionsPage() {
   const [yearLocks, setYearLocks] = useState<YearLock[]>([]);
   const [yearLockPassword, setYearLockPassword] = useState("");
   const [lockingYear, setLockingYear] = useState(false);
+
+  const [monthLocks, setMonthLocks] = useState<MonthLock[]>([]);
+  const [selectedLockMonth, setSelectedLockMonth] =
+    useState<string>(getCurrentMonthKey());
+  const [monthLockPassword, setMonthLockPassword] = useState("");
+  const [lockingMonth, setLockingMonth] = useState(false);
+
+  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [savingBudget, setSavingBudget] = useState(false);
 
   const [form, setForm] = useState<FormState>(initialForm);
   const [invoiceFiles, setInvoiceFiles] = useState<File[]>([]);
@@ -295,7 +336,6 @@ export function useMoneyTransactionsPage() {
 
   const [deleteSponsorId, setDeleteSponsorId] = useState<string | null>(null);
   const [deletingSponsor, setDeletingSponsor] = useState(false);
-
 
   const [loanRepaymentSponsor, setLoanRepaymentSponsor] =
     useState<LoanActionFunding | null>(null);
@@ -430,6 +470,97 @@ export function useMoneyTransactionsPage() {
     }
   }
 
+  async function loadMonthLocks() {
+    try {
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(`/api/admin/money/month-locks?t=${Date.now()}`, {
+        cache: "no-store",
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to load month locks",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setMonthLocks(data.locks || []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load month locks");
+      setErrorDetails(err);
+    }
+  }
+
+  async function loadBudgetItems() {
+    try {
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/budget?year=${selectedYear}&t=${Date.now()}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to load budget planning.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setBudgetItems(data.budgetItems || []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load budget planning.");
+      setErrorDetails(err);
+    }
+  }
+
+  async function saveBudgetItems(items: BudgetItem[]) {
+    try {
+      setSavingBudget(true);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch("/api/admin/money/budget", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          year: selectedYear,
+          items,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to save budget planning.",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      await loadBudgetItems();
+    } catch (err: any) {
+      setError(err?.message || "Failed to save budget planning.");
+      setErrorDetails(err);
+    } finally {
+      setSavingBudget(false);
+    }
+  }
+
   async function syncStripeDonations() {
     try {
       setStripeSyncing(true);
@@ -464,6 +595,8 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
+      await loadBudgetItems();
     } catch (err: any) {
       const message =
         err?.message || "Something went wrong syncing Stripe donations.";
@@ -480,7 +613,13 @@ export function useMoneyTransactionsPage() {
     loadTransactions();
     loadSponsors();
     loadYearLocks();
+    loadMonthLocks();
+    loadBudgetItems();
   }, []);
+
+  useEffect(() => {
+    loadBudgetItems();
+  }, [selectedYear]);
 
   const selectedSponsor = useMemo(() => {
     if (selectedSponsorId === "all") return null;
@@ -526,6 +665,42 @@ export function useMoneyTransactionsPage() {
   }, [yearLocks, selectedYear]);
 
   const selectedYearLocked = Boolean(selectedYearLock?.is_locked);
+
+  const selectedMonthLock = useMemo(() => {
+    return (
+      monthLocks.find((item) => item.month_key === selectedLockMonth) || null
+    );
+  }, [monthLocks, selectedLockMonth]);
+
+  const selectedMonthLocked = Boolean(selectedMonthLock?.is_locked);
+
+  function isYearLocked(year: string) {
+    return yearLocks.some(
+      (item) => String(item.year) === String(year) && item.is_locked === true
+    );
+  }
+
+  function isMonthLocked(monthKey: string) {
+    return monthLocks.some(
+      (item) => item.month_key === monthKey && item.is_locked === true
+    );
+  }
+
+  function getLockMessage(date: string | null | undefined) {
+    const safeDate = date || getTodayDate();
+    const year = getTransactionYear(safeDate);
+    const monthKey = getTransactionMonthKey(safeDate);
+
+    if (isYearLocked(year)) {
+      return `${year} is locked. Unlock this year with the main admin password before making changes.`;
+    }
+
+    if (isMonthLocked(monthKey)) {
+      return `${monthKey} is locked. Unlock this month with the main admin password before making changes.`;
+    }
+
+    return "";
+  }
 
   const yearTransactions = useMemo(() => {
     return transactions.filter((item) => {
@@ -709,8 +884,8 @@ export function useMoneyTransactionsPage() {
         const previousCarryForward = isLoan
           ? 0
           : sponsorStartedBeforeThisYear && previousReceived === 0
-          ? manualReceivedFromSponsorRecord - previousSpent
-          : previousReceived - previousSpent;
+            ? manualReceivedFromSponsorRecord - previousSpent
+            : previousReceived - previousSpent;
 
         const safeCarryForward = Math.max(previousCarryForward, 0);
 
@@ -1024,12 +1199,6 @@ export function useMoneyTransactionsPage() {
     };
   }, [printTransactionsList, totals.openingBalance]);
 
-  function isYearLocked(year: string) {
-    return yearLocks.some(
-      (item) => String(item.year) === String(year) && item.is_locked === true
-    );
-  }
-
   function openNewSponsorForm() {
     setEditingSponsor(null);
     setSponsorForm(initialSponsorForm);
@@ -1052,6 +1221,7 @@ export function useMoneyTransactionsPage() {
     }
 
     setEditingSponsor(sponsor);
+
     const editableSponsor = sponsor as Sponsor & {
       loan_monthly_payment_pence?: number | null;
       loan_interest_type?: "none" | "fixed" | "percentage" | string | null;
@@ -1088,11 +1258,12 @@ export function useMoneyTransactionsPage() {
         loanInterestType === "percentage"
           ? String(editableSponsor.loan_interest_percentage || "")
           : editableSponsor.loan_interest_pence
-          ? (editableSponsor.loan_interest_pence / 100).toFixed(2)
-          : "",
+            ? (editableSponsor.loan_interest_pence / 100).toFixed(2)
+            : "",
       loanDueDate: editableSponsor.loan_due_date || "",
       loanRepaymentTerms: editableSponsor.loan_repayment_terms || "",
     });
+
     setSponsorFormOpen(true);
   }
 
@@ -1149,6 +1320,8 @@ export function useMoneyTransactionsPage() {
       closeSponsorForm();
       await loadSponsors();
       await loadTransactions();
+      await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1208,6 +1381,8 @@ export function useMoneyTransactionsPage() {
       setDeleteSponsorId(null);
       await loadSponsors();
       await loadTransactions();
+      await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1226,7 +1401,7 @@ export function useMoneyTransactionsPage() {
       category: "",
       amount: "25.00",
       paymentMethod: "Stripe",
-      transactionDate: new Date().toISOString().slice(0, 10),
+      transactionDate: getTodayDate(),
       isPersonalFunds: false,
       personalFundsName: "",
       sponsorId: "",
@@ -1248,14 +1423,10 @@ export function useMoneyTransactionsPage() {
   }
 
   function startEditTransaction(item: Transaction) {
-    const editYear = getTransactionYear(
-      item.transaction_date || item.created_at
-    );
+    const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
-    if (isYearLocked(editYear)) {
-      setError(
-        `${editYear} is locked. Unlock this year with the main admin password before editing this transaction.`
-      );
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -1312,8 +1483,7 @@ export function useMoneyTransactionsPage() {
       category: editCategory,
       amount: ((item.amount_pence || 0) / 100).toFixed(2),
       paymentMethod: editPaymentMethod,
-      transactionDate:
-        item.transaction_date || new Date().toISOString().slice(0, 10),
+      transactionDate: item.transaction_date || getTodayDate(),
       isPersonalFunds: hasSponsorLinked ? false : isPersonal,
       personalFundsName: hasSponsorLinked ? "" : item.personal_funds_name || "",
       sponsorId: matchingSponsor?.id || item.sponsor_id || "",
@@ -1370,12 +1540,10 @@ export function useMoneyTransactionsPage() {
         return;
       }
 
-      const saveYear = getTransactionYear(form.transactionDate);
+      const lockMessage = getLockMessage(form.transactionDate);
 
-      if (isYearLocked(saveYear)) {
-        setError(
-          `${saveYear} is locked. Unlock this year with the main admin password before adding or editing transactions.`
-        );
+      if (lockMessage) {
+        setError(lockMessage);
         setSaving(false);
         return;
       }
@@ -1495,14 +1663,13 @@ export function useMoneyTransactionsPage() {
 
       for (let index = 0; index < datesToCreate.length; index += 1) {
         const transactionDate = datesToCreate[index];
-        const transactionYear = getTransactionYear(transactionDate);
+        const repeatingLockMessage = getLockMessage(transactionDate);
 
-        if (isYearLocked(transactionYear)) {
+        if (repeatingLockMessage) {
           throw {
-            message: `${transactionYear} is locked. Unlock this year before creating this repeating payment.`,
+            message: repeatingLockMessage,
             details: {
               transactionDate,
-              transactionYear,
             },
           };
         }
@@ -1596,6 +1763,7 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1605,14 +1773,10 @@ export function useMoneyTransactionsPage() {
   }
 
   async function markTransactionChecked(item: Transaction) {
-    const checkYear = getTransactionYear(
-      item.transaction_date || item.created_at
-    );
+    const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
-    if (isYearLocked(checkYear)) {
-      setError(
-        `${checkYear} is locked. Unlock this year with the main admin password before changing the checked status.`
-      );
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -1662,6 +1826,7 @@ export function useMoneyTransactionsPage() {
 
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1675,14 +1840,10 @@ export function useMoneyTransactionsPage() {
     status: BankReconciliationStatus,
     note = ""
   ) {
-    const transactionYear = getTransactionYear(
-      item.transaction_date || item.created_at
-    );
+    const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
-    if (isYearLocked(transactionYear)) {
-      setError(
-        `${transactionYear} is locked. Unlock this year with the main admin password before changing the bank reconciliation status.`
-      );
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -1733,6 +1894,7 @@ export function useMoneyTransactionsPage() {
 
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1746,14 +1908,10 @@ export function useMoneyTransactionsPage() {
     status: FinanceNoteStatus,
     note = ""
   ) {
-    const transactionYear = getTransactionYear(
-      item.transaction_date || item.created_at
-    );
+    const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
-    if (isYearLocked(transactionYear)) {
-      setError(
-        `${transactionYear} is locked. Unlock this year with the main admin password before changing finance notes.`
-      );
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -1803,6 +1961,7 @@ export function useMoneyTransactionsPage() {
 
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1817,14 +1976,12 @@ export function useMoneyTransactionsPage() {
     const transactionToDelete = transactions.find((item) => item.id === deleteId);
 
     if (transactionToDelete) {
-      const deleteYear = getTransactionYear(
+      const lockMessage = getLockMessage(
         transactionToDelete.transaction_date || transactionToDelete.created_at
       );
 
-      if (isYearLocked(deleteYear)) {
-        setError(
-          `${deleteYear} is locked. Unlock this year with the main admin password before hiding this transaction.`
-        );
+      if (lockMessage) {
+        setError(lockMessage);
         setDeleteId(null);
         return;
       }
@@ -1863,6 +2020,7 @@ export function useMoneyTransactionsPage() {
       setDeleteId(null);
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -1954,6 +2112,72 @@ export function useMoneyTransactionsPage() {
     await updateYearLock("unlock");
   }
 
+  async function updateMonthLock(action: "lock" | "unlock") {
+    try {
+      setLockingMonth(true);
+      setError("");
+      setErrorDetails(null);
+
+      const cleanPassword = monthLockPassword.trim();
+
+      if (!cleanPassword) {
+        setError("Please enter the main admin password.");
+        setLockingMonth(false);
+        return;
+      }
+
+      if (!selectedLockMonth || selectedLockMonth === "all") {
+        setError("Please choose a single month to lock.");
+        setLockingMonth(false);
+        return;
+      }
+
+      await verifyMainAdminDeletePassword(cleanPassword);
+
+      const res = await fetch("/api/admin/money/month-locks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          year: selectedYear,
+          monthKey: selectedLockMonth,
+          action,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message:
+            data.error ||
+            (action === "lock"
+              ? `Failed to lock ${selectedLockMonth}.`
+              : `Failed to unlock ${selectedLockMonth}.`),
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setMonthLockPassword("");
+      await loadMonthLocks();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setLockingMonth(false);
+    }
+  }
+
+  async function lockSelectedMonth() {
+    await updateMonthLock("lock");
+  }
+
+  async function unlockSelectedMonth() {
+    await updateMonthLock("unlock");
+  }
+
   async function deleteSelectedYearTransactions() {
     try {
       setDeletingYear(true);
@@ -1963,6 +2187,20 @@ export function useMoneyTransactionsPage() {
       if (selectedYearLocked) {
         setError(
           `${selectedYear} is locked. Unlock this year before deleting its transactions.`
+        );
+        setDeletingYear(false);
+        return;
+      }
+
+      const lockedMonths = monthLocks.filter(
+        (item) => item.year === selectedYear && item.is_locked === true
+      );
+
+      if (lockedMonths.length > 0) {
+        setError(
+          `Cannot delete ${selectedYear} while locked months exist. Unlock these months first: ${lockedMonths
+            .map((item) => item.month_key)
+            .join(", ")}.`
         );
         setDeletingYear(false);
         return;
@@ -2008,6 +2246,7 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2023,11 +2262,22 @@ export function useMoneyTransactionsPage() {
       setErrorDetails(null);
 
       const lockedYears = yearLocks.filter((item) => item.is_locked === true);
+      const lockedMonths = monthLocks.filter((item) => item.is_locked === true);
 
       if (lockedYears.length > 0) {
         setError(
           `Cannot delete everything while locked years exist. Unlock these years first: ${lockedYears
             .map((item) => item.year)
+            .join(", ")}.`
+        );
+        setDeletingAll(false);
+        return;
+      }
+
+      if (lockedMonths.length > 0) {
+        setError(
+          `Cannot delete everything while locked months exist. Unlock these months first: ${lockedMonths
+            .map((item) => item.month_key)
             .join(", ")}.`
         );
         setDeletingAll(false);
@@ -2071,6 +2321,7 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2083,14 +2334,10 @@ export function useMoneyTransactionsPage() {
     item: Transaction,
     proofFiles: File[] = []
   ) {
-    const repayYear = getTransactionYear(
-      item.transaction_date || item.created_at
-    );
+    const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
-    if (isYearLocked(repayYear)) {
-      setError(
-        `${repayYear} is locked. Unlock this year with the main admin password before changing repayments.`
-      );
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -2134,6 +2381,9 @@ export function useMoneyTransactionsPage() {
       }
 
       await loadTransactions();
+      await loadSponsors();
+      await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2143,10 +2393,10 @@ export function useMoneyTransactionsPage() {
   }
 
   function openLoanRepaymentModal(sponsor: SponsorBreakdown) {
-    if (selectedYearLocked) {
-      setError(
-        `${selectedYear} is locked. Unlock this year with the main admin password before recording a loan repayment.`
-      );
+    const lockMessage = getLockMessage(getTodayDate());
+
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -2155,7 +2405,7 @@ export function useMoneyTransactionsPage() {
       ...initialLoanRepaymentForm,
       sponsorId: sponsor.sponsor_id,
       sponsorName: sponsor.sponsor_name,
-      transactionDate: new Date().toISOString().slice(0, 10),
+      transactionDate: getTodayDate(),
     });
     setError("");
     setErrorDetails(null);
@@ -2176,14 +2426,10 @@ export function useMoneyTransactionsPage() {
       setErrorDetails(null);
 
       const amountPence = poundsToPence(loanRepaymentForm.amount);
-      const transactionYear = getTransactionYear(
-        loanRepaymentForm.transactionDate
-      );
+      const lockMessage = getLockMessage(loanRepaymentForm.transactionDate);
 
-      if (isYearLocked(transactionYear)) {
-        setError(
-          `${transactionYear} is locked. Unlock this year with the main admin password before recording a loan repayment.`
-        );
+      if (lockMessage) {
+        setError(lockMessage);
         setSavingLoanRepayment(false);
         return;
       }
@@ -2214,8 +2460,14 @@ export function useMoneyTransactionsPage() {
       uploadData.append("source", "loan_repayment");
       uploadData.append("isPersonalFunds", "false");
       uploadData.append("personalFundsName", "");
-      uploadData.append("sponsorId", loanRepaymentForm.sponsorId || loanRepaymentSponsor.sponsor_id);
-      uploadData.append("sponsorName", loanRepaymentForm.sponsorName || loanRepaymentSponsor.sponsor_name);
+      uploadData.append(
+        "sponsorId",
+        loanRepaymentForm.sponsorId || loanRepaymentSponsor.sponsor_id
+      );
+      uploadData.append(
+        "sponsorName",
+        loanRepaymentForm.sponsorName || loanRepaymentSponsor.sponsor_name
+      );
       uploadData.append(
         "sponsorshipNote",
         loanRepaymentForm.note ||
@@ -2249,6 +2501,7 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2258,10 +2511,10 @@ export function useMoneyTransactionsPage() {
   }
 
   function openLoanInterestModal(sponsor: SponsorBreakdown) {
-    if (selectedYearLocked) {
-      setError(
-        `${selectedYear} is locked. Unlock this year with the main admin password before adding loan interest.`
-      );
+    const lockMessage = getLockMessage(getTodayDate());
+
+    if (lockMessage) {
+      setError(lockMessage);
       return;
     }
 
@@ -2270,7 +2523,7 @@ export function useMoneyTransactionsPage() {
       ...initialLoanInterestForm,
       sponsorId: sponsor.sponsor_id,
       sponsorName: sponsor.sponsor_name,
-      transactionDate: new Date().toISOString().slice(0, 10),
+      transactionDate: getTodayDate(),
     });
     setError("");
     setErrorDetails(null);
@@ -2291,12 +2544,10 @@ export function useMoneyTransactionsPage() {
       setErrorDetails(null);
 
       const amountPence = poundsToPence(loanInterestForm.amount);
-      const transactionYear = getTransactionYear(loanInterestForm.transactionDate);
+      const lockMessage = getLockMessage(loanInterestForm.transactionDate);
 
-      if (isYearLocked(transactionYear)) {
-        setError(
-          `${transactionYear} is locked. Unlock this year with the main admin password before adding loan interest.`
-        );
+      if (lockMessage) {
+        setError(lockMessage);
         setSavingLoanInterest(false);
         return;
       }
@@ -2321,8 +2572,14 @@ export function useMoneyTransactionsPage() {
       uploadData.append("source", "loan_interest");
       uploadData.append("isPersonalFunds", "false");
       uploadData.append("personalFundsName", "");
-      uploadData.append("sponsorId", loanInterestForm.sponsorId || loanInterestSponsor.sponsor_id);
-      uploadData.append("sponsorName", loanInterestForm.sponsorName || loanInterestSponsor.sponsor_name);
+      uploadData.append(
+        "sponsorId",
+        loanInterestForm.sponsorId || loanInterestSponsor.sponsor_id
+      );
+      uploadData.append(
+        "sponsorName",
+        loanInterestForm.sponsorName || loanInterestSponsor.sponsor_name
+      );
       uploadData.append(
         "sponsorshipNote",
         loanInterestForm.note ||
@@ -2356,6 +2613,7 @@ export function useMoneyTransactionsPage() {
       await loadTransactions();
       await loadSponsors();
       await loadYearLocks();
+      await loadMonthLocks();
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2460,12 +2718,16 @@ export function useMoneyTransactionsPage() {
     setSelectedPrintMonth("all");
     setSelectedViewMonth("all");
     setYearLockPassword("");
+    setMonthLockPassword("");
+    setSelectedLockMonth(`${year}-01`);
   }
 
   function refreshAll() {
     loadTransactions();
     loadSponsors();
     loadYearLocks();
+    loadMonthLocks();
+    loadBudgetItems();
   }
 
   function closeDeleteYear() {
@@ -2542,12 +2804,28 @@ export function useMoneyTransactionsPage() {
     stripeSyncMessage,
     stripeSyncError,
 
+    budgetItems,
+    savingBudget,
+    loadBudgetItems,
+    saveBudgetItems,
+
     yearLocks,
     selectedYearLock,
     selectedYearLocked,
     yearLockPassword,
     setYearLockPassword,
     lockingYear,
+
+    monthLocks,
+    selectedLockMonth,
+    setSelectedLockMonth,
+    selectedMonthLock,
+    selectedMonthLocked,
+    monthLockPassword,
+    setMonthLockPassword,
+    lockingMonth,
+    isMonthLocked,
+    getLockMessage,
 
     displaySponsors,
     yearOptions,
@@ -2591,6 +2869,8 @@ export function useMoneyTransactionsPage() {
 
     lockSelectedYear,
     unlockSelectedYear,
+    lockSelectedMonth,
+    unlockSelectedMonth,
     deleteSelectedYearTransactions,
     deleteAllTransactions,
     togglePersonalFundsRepaid,

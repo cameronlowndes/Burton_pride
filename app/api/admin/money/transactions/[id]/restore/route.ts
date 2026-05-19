@@ -48,6 +48,14 @@ function buildChangedFields(beforeData: any, afterData: any) {
   };
 }
 
+function isCashTinTransaction(transaction: any) {
+  return (
+    transaction?.source === "cash_tin" ||
+    transaction?.category === "Cash Fundraising" ||
+    transaction?.payment_method === "Cash"
+  );
+}
+
 export async function PATCH(
   _req: Request,
   context: { params: Promise<{ id: string }> }
@@ -110,13 +118,15 @@ export async function PATCH(
       );
     }
 
+    const restoredAt = new Date().toISOString();
+
     const { data: restoredTransaction, error: restoreError } =
       await supabaseAdmin
         .from("money_transactions")
         .update({
           deleted_at: null,
           deleted_by: null,
-          updated_at: new Date().toISOString(),
+          updated_at: restoredAt,
         })
         .eq("id", id)
         .select("*")
@@ -131,6 +141,37 @@ export async function PATCH(
         },
         { status: 500 }
       );
+    }
+
+    let restoredCashTinRecord: any = null;
+
+    if (isCashTinTransaction(restoredTransaction)) {
+      const { data: cashTinRecord, error: cashTinRestoreError } =
+        await supabaseAdmin
+          .from("money_cash_tin_days")
+          .update({
+            deleted_at: null,
+            deleted_by: null,
+            updated_at: restoredAt,
+          })
+          .eq("money_transaction_id", restoredTransaction.id)
+          .select("*")
+          .maybeSingle();
+
+      if (cashTinRestoreError) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Transaction was restored, but the linked cash tin record could not be restored.",
+            details: cashTinRestoreError,
+            transaction: restoredTransaction,
+          },
+          { status: 500 }
+        );
+      }
+
+      restoredCashTinRecord = cashTinRecord;
     }
 
     const changedFields = buildChangedFields(
@@ -153,7 +194,9 @@ export async function PATCH(
         source: "money_tracker",
         route: "/api/admin/money/transactions/[id]/restore",
         restored_from_hidden: true,
-        restored_at: new Date().toISOString(),
+        restored_cash_tin_record: Boolean(restoredCashTinRecord),
+        restored_cash_tin_record_id: restoredCashTinRecord?.id || null,
+        restored_at: restoredAt,
       },
     };
 
@@ -172,6 +215,7 @@ export async function PATCH(
             "Transaction was restored, but the audit log could not be saved.",
           details: auditError,
           transaction: restoredTransaction,
+          restoredCashTinRecord,
           auditPayload,
         },
         { status: 500 }
@@ -181,8 +225,11 @@ export async function PATCH(
     return NextResponse.json({
       ok: true,
       transaction: restoredTransaction,
+      restoredCashTinRecord,
       auditLog,
-      message: "Transaction restored and audit log saved successfully.",
+      message: restoredCashTinRecord
+        ? "Transaction restored, cash tin record returned to Cash Tin Tracker, and audit log saved successfully."
+        : "Transaction restored and audit log saved successfully.",
     });
   } catch (err: any) {
     return NextResponse.json(

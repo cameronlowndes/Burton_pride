@@ -332,13 +332,6 @@ export function printMoneyReport({
 
                 <td>
                   <strong>${escapeHtml(item.title)}</strong>
-                  ${
-                    item.description
-                      ? `<div class="muted">${escapeHtml(
-                          item.description
-                        )}</div>`
-                      : ""
-                  }
                 </td>
 
                 <td>
@@ -804,7 +797,7 @@ export function printMoneyReport({
             <tr>
               <th>Reference</th>
               <th>Date</th>
-              <th>Title / Notes</th>
+              <th>Title</th>
               <th>Type</th>
               <th>Amount</th>
               <th>Funding</th>
