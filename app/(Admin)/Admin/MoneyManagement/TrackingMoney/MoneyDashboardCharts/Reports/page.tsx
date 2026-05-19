@@ -226,6 +226,18 @@ export default function MoneyReportsPage() {
         setDeleteAllPassword={moneyPage.setDeleteAllPassword}
         onCloseDeleteAll={moneyPage.closeDeleteAll}
         onDeleteAll={moneyPage.deleteAllTransactions}
+        loanRepaymentSponsor={moneyPage.loanRepaymentSponsor}
+        loanRepaymentForm={moneyPage.loanRepaymentForm}
+        setLoanRepaymentForm={moneyPage.setLoanRepaymentForm}
+        savingLoanRepayment={moneyPage.savingLoanRepayment}
+        onCloseLoanRepayment={moneyPage.closeLoanRepaymentModal}
+        onSaveLoanRepayment={moneyPage.saveLoanRepayment}
+        loanInterestSponsor={moneyPage.loanInterestSponsor}
+        loanInterestForm={moneyPage.loanInterestForm}
+        setLoanInterestForm={moneyPage.setLoanInterestForm}
+        savingLoanInterest={moneyPage.savingLoanInterest}
+        onCloseLoanInterest={moneyPage.closeLoanInterestModal}
+        onSaveLoanInterest={moneyPage.saveLoanInterest}
       />
     </main>
   );
