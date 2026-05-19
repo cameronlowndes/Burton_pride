@@ -102,8 +102,8 @@ export default function AddTransactionPage() {
           <MoneyTransactionForm
             form={moneyPage.form}
             setForm={moneyPage.setForm}
-            invoiceFile={moneyPage.invoiceFile}
-            setInvoiceFile={moneyPage.setInvoiceFile}
+            invoiceFiles={moneyPage.invoiceFiles}
+            setInvoiceFiles={moneyPage.setInvoiceFiles}
             editingTransaction={moneyPage.editingTransaction}
             displaySponsors={moneyPage.displaySponsors}
             yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
@@ -147,6 +147,18 @@ export default function AddTransactionPage() {
         setDeleteAllPassword={moneyPage.setDeleteAllPassword}
         onCloseDeleteAll={moneyPage.closeDeleteAll}
         onDeleteAll={moneyPage.deleteAllTransactions}
+        loanRepaymentSponsor={moneyPage.loanRepaymentSponsor}
+        loanRepaymentForm={moneyPage.loanRepaymentForm}
+        setLoanRepaymentForm={moneyPage.setLoanRepaymentForm}
+        savingLoanRepayment={moneyPage.savingLoanRepayment}
+        onCloseLoanRepayment={moneyPage.closeLoanRepaymentModal}
+        onSaveLoanRepayment={moneyPage.saveLoanRepayment}
+        loanInterestSponsor={moneyPage.loanInterestSponsor}
+        loanInterestForm={moneyPage.loanInterestForm}
+        setLoanInterestForm={moneyPage.setLoanInterestForm}
+        savingLoanInterest={moneyPage.savingLoanInterest}
+        onCloseLoanInterest={moneyPage.closeLoanInterestModal}
+        onSaveLoanInterest={moneyPage.saveLoanInterest}
       />
     </main>
   );
