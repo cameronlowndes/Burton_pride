@@ -200,6 +200,18 @@ export default function MoneyTransactionsPage() {
         setDeleteAllPassword={money.setDeleteAllPassword}
         onCloseDeleteAll={money.closeDeleteAll}
         onDeleteAll={money.deleteAllTransactions}
+        loanRepaymentSponsor={money.loanRepaymentSponsor}
+        loanRepaymentForm={money.loanRepaymentForm}
+        setLoanRepaymentForm={money.setLoanRepaymentForm}
+        savingLoanRepayment={money.savingLoanRepayment}
+        onCloseLoanRepayment={money.closeLoanRepaymentModal}
+        onSaveLoanRepayment={money.saveLoanRepayment}
+        loanInterestSponsor={money.loanInterestSponsor}
+        loanInterestForm={money.loanInterestForm}
+        setLoanInterestForm={money.setLoanInterestForm}
+        savingLoanInterest={money.savingLoanInterest}
+        onCloseLoanInterest={money.closeLoanInterestModal}
+        onSaveLoanInterest={money.saveLoanInterest}
       />
     </main>
   );
