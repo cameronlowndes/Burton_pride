@@ -62,6 +62,47 @@ type DuplicateMatch = {
   personal_funds_name: string | null;
 };
 
+type BudgetItem = {
+  id?: string | null;
+  year?: string;
+  category_key: string;
+  category_label: string;
+  planned_amount_pence?: number;
+  notes?: string | null;
+};
+
+const defaultBudgetItems: BudgetItem[] = [
+  { category_key: "venue", category_label: "Venue" },
+  { category_key: "insurance", category_label: "Insurance" },
+  { category_key: "printing", category_label: "Printing" },
+  { category_key: "security", category_label: "Security" },
+  { category_key: "performers", category_label: "Performers" },
+  { category_key: "equipment", category_label: "Equipment" },
+  { category_key: "accessibility", category_label: "Accessibility" },
+  { category_key: "other", category_label: "Other costs" },
+];
+
+function getBudgetFormValue(form: FormState) {
+  const item = form as FormState & {
+    budgetCategory?: string | null;
+    budgetCategoryKey?: string | null;
+    budget_category?: string | null;
+    budget_category_key?: string | null;
+    costArea?: string | null;
+    cost_area?: string | null;
+  };
+
+  return (
+    item.budgetCategory ||
+    item.budgetCategoryKey ||
+    item.budget_category ||
+    item.budget_category_key ||
+    item.costArea ||
+    item.cost_area ||
+    ""
+  );
+}
+
 type MoneyTransactionFormProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -73,6 +114,7 @@ type MoneyTransactionFormProps = {
   saving: boolean;
   displaySponsors: Sponsor[];
   yearlySponsorBreakdown: YearlySponsorBreakdown[];
+  budgetItems?: BudgetItem[];
 
   handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
@@ -216,6 +258,7 @@ export default function MoneyTransactionForm({
   saving,
   displaySponsors,
   yearlySponsorBreakdown,
+  budgetItems = [],
   handleSubmit,
   cancelEditTransaction,
   fillTestTransaction,
@@ -238,7 +281,7 @@ export default function MoneyTransactionForm({
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
-        (sponsor) => sponsor.sponsor_id === form.sponsorId
+        (sponsor) => sponsor.sponsor_id === form.sponsorId,
       )
     : null;
 
@@ -253,6 +296,12 @@ export default function MoneyTransactionForm({
 
   const isLoanFunding = selectedFundingType === "loan";
   const hasLinkedFunding = Boolean(form.sponsorId);
+  const isItemDonation =
+    !hasLinkedFunding && form.paymentMethod === "Item Donation";
+  const budgetOptions =
+    budgetItems.length > 0 ? budgetItems : defaultBudgetItems;
+  const selectedBudgetCategory = getBudgetFormValue(form);
+  const canManuallyLinkBudget = !isItemDonation;
 
   const loanMode = getLoanMode(form.category);
   const isLoanRepayment = isLoanFunding && loanMode === "Loan Repayment";
@@ -264,7 +313,7 @@ export default function MoneyTransactionForm({
     0;
 
   const plannedLoanRepaymentAmount = penceToPoundsInput(
-    plannedLoanRepaymentPence
+    plannedLoanRepaymentPence,
   );
 
   const lockLoanRepaymentAmount =
@@ -314,8 +363,9 @@ export default function MoneyTransactionForm({
   const needsReceiptWarning = invoiceFiles.length === 0 && !hasExistingReceipt;
 
   const selectedFinanceNoteOption =
-    financeNoteOptions.find((option) => option.value === form.financeNoteStatus) ||
-    financeNoteOptions[0];
+    financeNoteOptions.find(
+      (option) => option.value === form.financeNoteStatus,
+    ) || financeNoteOptions[0];
 
   async function checkDuplicateBeforeSave() {
     const paymentMethod = form.sponsorId
@@ -356,7 +406,7 @@ export default function MoneyTransactionForm({
             payment_method: paymentMethod,
             ignore_id: editingTransaction?.id || null,
           }),
-        }
+        },
       );
 
       const payload = await response.json().catch(() => null);
@@ -390,7 +440,7 @@ export default function MoneyTransactionForm({
         }
       } catch (error: any) {
         setDuplicateError(
-          error?.message || "Could not check for duplicate transactions."
+          error?.message || "Could not check for duplicate transactions.",
         );
         return;
       }
@@ -555,6 +605,19 @@ export default function MoneyTransactionForm({
                   : `This is locked because this transaction is spending from a linked ${selectedFundingShortLabel} record.`}
               </p>
             </div>
+          ) : isItemDonation ? (
+            <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+              <p className="font-bold">Transaction type</p>
+
+              <p className="mt-1 text-lg font-black text-white">
+                Item Donation
+              </p>
+
+              <p className="mt-1 text-xs text-emerald-100/75">
+                This records the estimated value of donated items only. It does
+                not count as Burton Pride money in, money out, or cash balance.
+              </p>
+            </div>
           ) : (
             <select
               value={form.type}
@@ -588,7 +651,9 @@ export default function MoneyTransactionForm({
           <div>
             <input
               value={
-                lockLoanRepaymentAmount ? plannedLoanRepaymentAmount : form.amount
+                lockLoanRepaymentAmount
+                  ? plannedLoanRepaymentAmount
+                  : form.amount
               }
               onChange={(event) => {
                 if (lockLoanRepaymentAmount) {
@@ -606,13 +671,15 @@ export default function MoneyTransactionForm({
                 }));
               }}
               placeholder={
-                isLoanFunding
-                  ? isLoanRepayment
-                    ? plannedLoanRepaymentAmount
-                      ? `Locked repayment amount: £${plannedLoanRepaymentAmount}`
-                      : "Amount paid back to lender"
-                    : "Amount spent from loan money"
-                  : "Amount"
+                isItemDonation
+                  ? "Estimated item value"
+                  : isLoanFunding
+                    ? isLoanRepayment
+                      ? plannedLoanRepaymentAmount
+                        ? `Locked repayment amount: £${plannedLoanRepaymentAmount}`
+                        : "Amount paid back to lender"
+                      : "Amount spent from loan money"
+                    : "Amount"
               }
               type="number"
               step="0.01"
@@ -639,311 +706,339 @@ export default function MoneyTransactionForm({
                 so this repayment amount is editable.
               </p>
             )}
-          </div>
 
-          <div
-            className={`rounded-xl border p-3 ${
-              isLoanFunding
-                ? "border-orange-300/20 bg-orange-500/10"
-                : "border-amber-300/20 bg-amber-500/10"
-            }`}
-          >
-            <label
-              className={`mb-1 block text-sm font-bold ${
-                isLoanFunding ? "text-orange-100" : "text-amber-100"
-              }`}
-            >
-              {isLoanFunding
-                ? "Choose what this loan transaction is for"
-                : "Use restricted funding for this spending"}
-            </label>
-
-            <p
-              className={`mb-2 text-xs ${
-                isLoanFunding ? "text-orange-100/75" : "text-amber-100/70"
-              }`}
-            >
-              {isLoanFunding
-                ? "Choose whether this is money paid back to the lender, or spending using loan money."
-                : "Choose a sponsor, grant, loan or other funding record when this payment is being paid from restricted funding."}
-            </p>
-
-            {isLoanFunding && (
-              <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {loanTransactionModes.map((mode) => {
-                  const active = loanMode === mode.value;
-
-                  return (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      onClick={() => {
-                        resetWarnings();
-
-                        setForm((prev) => ({
-                          ...prev,
-                          category: mode.value,
-                          amount:
-                            mode.value === "Loan Repayment" &&
-                            plannedLoanRepaymentAmount
-                              ? plannedLoanRepaymentAmount
-                              : mode.value === "Loan Spending" &&
-                                  prev.amount === plannedLoanRepaymentAmount
-                                ? ""
-                                : prev.amount,
-                          paymentMethod:
-                            mode.value === "Loan Repayment"
-                              ? prev.paymentMethod &&
-                                prev.paymentMethod !== "Sponsorship Money" &&
-                                prev.paymentMethod !== "Loan Money"
-                                ? prev.paymentMethod
-                                : "Bank Transfer"
-                              : "Loan Money",
-                          sponsorshipNote:
-                            mode.value === "Loan Repayment"
-                              ? prev.sponsorshipNote || "Loan repayment"
-                              : prev.sponsorshipNote === "Loan repayment"
-                                ? ""
-                                : prev.sponsorshipNote,
-                        }));
-                      }}
-                      className={`rounded-xl px-3 py-3 text-left text-sm font-black ring-1 ${
-                        active
-                          ? "bg-orange-500 text-black ring-orange-200/60"
-                          : "bg-black/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/10"
-                      }`}
-                    >
-                      <span className="block">{mode.label}</span>
-                      <span
-                        className={`mt-1 block text-xs font-normal ${
-                          active ? "text-black/70" : "text-orange-100/65"
-                        }`}
-                      >
-                        {mode.help}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            <select
-              value={form.sponsorId}
-              onChange={(event) => {
-                resetWarnings();
-                saveOverFundingLimitRef.current = false;
-
-                const selected = displaySponsors.find(
-                  (sponsor) => sponsor.id === event.target.value
-                );
-
-                const selectedType = selected?.funding_type || "sponsor";
-                const selectedIsLoan = selectedType === "loan";
-
-                const selectedMonthlyRepaymentAmount = selectedIsLoan
-                  ? penceToPoundsInput(selected?.loan_monthly_payment_pence)
-                  : "";
-
-                setForm((prev) => ({
-                  ...prev,
-                  sponsorId: selected?.id || "",
-                  sponsorName: selected?.sponsor_name || "",
-                  type: selected ? "expense" : prev.type,
-                  category: selected
-                    ? selectedIsLoan
-                      ? "Loan Repayment"
-                      : "Sponsorship"
-                    : "",
-                  amount:
-                    selectedIsLoan && selectedMonthlyRepaymentAmount
-                      ? selectedMonthlyRepaymentAmount
-                      : !selected
-                        ? ""
-                        : prev.amount,
-                  paymentMethod: selected
-                    ? selectedIsLoan
-                      ? prev.paymentMethod &&
-                        prev.paymentMethod !== "Sponsorship Money" &&
-                        prev.paymentMethod !== "Loan Money"
-                        ? prev.paymentMethod
-                        : "Bank Transfer"
-                      : "Sponsorship Money"
-                    : prev.paymentMethod === "Sponsorship Money" ||
-                        prev.paymentMethod === "Loan Money"
-                      ? ""
-                      : prev.paymentMethod,
-                  isPersonalFunds: selected ? false : prev.isPersonalFunds,
-                  personalFundsName: selected ? "" : prev.personalFundsName,
-                  sponsorshipNote: selectedIsLoan
-                    ? prev.sponsorshipNote || "Loan repayment"
-                    : prev.sponsorshipNote,
-                }));
-              }}
-              className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ${
-                isLoanFunding
-                  ? "ring-orange-300/20 focus:ring-orange-300/40"
-                  : "ring-white/10 focus:ring-amber-300/40"
-              }`}
-            >
-              <option className="bg-[#11111f] text-white" value="">
-                Choose funding record...
-              </option>
-
-              {displaySponsors.map((sponsor) => (
-                <option
-                  key={sponsor.id}
-                  value={sponsor.id}
-                  className="bg-[#11111f] text-white"
-                >
-                  {fundingTypeLabel(sponsor.funding_type)} —{" "}
-                  {sponsor.sponsor_name}
-                </option>
-              ))}
-            </select>
-
-            {form.sponsorId && selectedSponsorBreakdown && (
-              <div
-                className={`mt-3 rounded-xl border bg-black/20 p-3 text-xs ${
-                  isLoanFunding
-                    ? "border-orange-300/20 text-orange-100"
-                    : "border-amber-300/20 text-amber-100"
-                }`}
-              >
-                <div className="flex justify-between gap-3">
-                  <span>Funding type</span>
-                  <strong>{selectedFundingLabel}</strong>
-                </div>
-
-                {isLoanFunding ? (
-                  <>
-                    <div className="mt-1 flex justify-between gap-3">
-                      <span>Loan received</span>
-                      <strong>
-                        {money(selectedSponsorBreakdown.received_pence)}
-                      </strong>
-                    </div>
-
-                    <div className="mt-1 flex justify-between gap-3">
-                      <span>Still to repay</span>
-                      <strong>{money(loanStillToRepayPence)}</strong>
-                    </div>
-
-                    <div className="mt-1 flex justify-between gap-3">
-                      <span>Loan money available</span>
-                      <strong>{money(normalRemainingPence)}</strong>
-                    </div>
-
-                    {currentAmountPence > 0 && (
-                      <div className="mt-1 flex justify-between gap-3">
-                        <span>
-                          {isLoanRepayment
-                            ? "This repayment"
-                            : "This loan spend"}
-                        </span>
-                        <strong>{money(currentAmountPence)}</strong>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="mt-1 flex justify-between gap-3">
-                      <span>Remaining funding balance</span>
-                      <strong>{money(normalRemainingPence)}</strong>
-                    </div>
-
-                    {currentAmountPence > 0 && (
-                      <div className="mt-1 flex justify-between gap-3">
-                        <span>This spend</span>
-                        <strong>{money(currentAmountPence)}</strong>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {overSpendPence > 0 && (
-              <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-sm text-red-100">
-                <p className="font-black text-white">
-                  {isLoanRepayment
-                    ? "Loan repayment warning"
-                    : "Funding balance warning"}
-                </p>
-
-                <p className="mt-1">
-                  {isLoanRepayment
-                    ? `This repayment is ${money(
-                        overSpendPence
-                      )} more than the amount still owed on this loan.`
-                    : `This spend is ${money(
-                        overSpendPence
-                      )} over the remaining ${selectedFundingShortLabel} balance.`}
-                </p>
-              </div>
-            )}
-
-            <label
-              className={`mt-3 block text-sm font-bold ${
-                isLoanFunding ? "text-orange-100" : "text-amber-100"
-              }`}
-            >
-              {isLoanFunding
-                ? isLoanRepayment
-                  ? "Loan repayment note"
-                  : "Loan spending note"
-                : "Funding spending note"}{" "}
-              {form.sponsorId && <span className="text-red-200">*</span>}
-            </label>
-
-            <textarea
-              value={form.sponsorshipNote}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  sponsorshipNote: event.target.value,
-                }))
-              }
-              placeholder={
-                form.sponsorId
-                  ? isLoanFunding
-                    ? isLoanRepayment
-                      ? "Required: explain this loan repayment, e.g. £200 paid back to lender"
-                      : "Required: explain what the loan money was spent on"
-                    : `Required: explain what this ${selectedFundingShortLabel} money was spent on`
-                  : "Example: Paid from grant money for event supplies"
-              }
-              required={Boolean(form.sponsorId)}
-              className={`mt-2 min-h-20 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/40 ${
-                form.sponsorId && !form.sponsorshipNote.trim()
-                  ? "ring-red-300/40 focus:ring-red-300/60"
-                  : isLoanFunding
-                    ? "ring-orange-300/20 focus:ring-orange-300/40"
-                    : "ring-white/10 focus:ring-amber-300/40"
-              }`}
-            />
-
-            {form.sponsorId && (
-              <p className="mt-2 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
-                {isLoanFunding
-                  ? isLoanRepayment
-                    ? "Required: add a clear note so Burton Pride can prove this was a loan repayment."
-                    : "Required: add a clear note so Burton Pride can prove what the loan money was used for."
-                  : `Required: add a clear note so Burton Pride can prove why this ${selectedFundingShortLabel} money was used.`}
+            {isItemDonation && (
+              <p className="mt-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
+                This is the estimated value of the donated item only. It will
+                not be counted as Burton Pride money in, money out, or cash
+                balance.
               </p>
             )}
+          </div>
 
-            <button
-              type="button"
-              onClick={openNewSponsorForm}
-              className={`mt-3 rounded-xl px-4 py-2 text-sm font-bold ring-1 ${
+          {isItemDonation ? (
+            <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+              <p className="font-black text-white">Item donation record</p>
+
+              <p className="mt-1 text-xs leading-5 text-emerald-100/75">
+                Use this for items given to Burton Pride, for example raffle
+                prizes, equipment, supplies, or stock. The amount is only the
+                estimated item value for records and reports.
+              </p>
+
+              <div className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-emerald-50">
+                <p>
+                  This will not be added to money in, money out, current
+                  balance, year-end balance, monthly income, or monthly
+                  spending.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`rounded-xl border p-3 ${
                 isLoanFunding
-                  ? "bg-orange-500/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/30"
-                  : "bg-amber-500/20 text-amber-100 ring-amber-300/20 hover:bg-amber-500/30"
+                  ? "border-orange-300/20 bg-orange-500/10"
+                  : "border-amber-300/20 bg-amber-500/10"
               }`}
             >
-              Add New Funding
-            </button>
-          </div>
+              <label
+                className={`mb-1 block text-sm font-bold ${
+                  isLoanFunding ? "text-orange-100" : "text-amber-100"
+                }`}
+              >
+                {isLoanFunding
+                  ? "Choose what this loan transaction is for"
+                  : "Use restricted funding for this spending"}
+              </label>
+
+              <p
+                className={`mb-2 text-xs ${
+                  isLoanFunding ? "text-orange-100/75" : "text-amber-100/70"
+                }`}
+              >
+                {isLoanFunding
+                  ? "Choose whether this is money paid back to the lender, or spending using loan money."
+                  : "Choose a sponsor, grant, loan or other funding record when this payment is being paid from restricted funding."}
+              </p>
+
+              {isLoanFunding && (
+                <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {loanTransactionModes.map((mode) => {
+                    const active = loanMode === mode.value;
+
+                    return (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        onClick={() => {
+                          resetWarnings();
+
+                          setForm((prev) => ({
+                            ...prev,
+                            category: mode.value,
+                            amount:
+                              mode.value === "Loan Repayment" &&
+                              plannedLoanRepaymentAmount
+                                ? plannedLoanRepaymentAmount
+                                : mode.value === "Loan Spending" &&
+                                    prev.amount === plannedLoanRepaymentAmount
+                                  ? ""
+                                  : prev.amount,
+                            paymentMethod:
+                              mode.value === "Loan Repayment"
+                                ? prev.paymentMethod &&
+                                  prev.paymentMethod !== "Sponsorship Money" &&
+                                  prev.paymentMethod !== "Loan Money"
+                                  ? prev.paymentMethod
+                                  : "Bank Transfer"
+                                : "Loan Money",
+                            sponsorshipNote:
+                              mode.value === "Loan Repayment"
+                                ? prev.sponsorshipNote || "Loan repayment"
+                                : prev.sponsorshipNote === "Loan repayment"
+                                  ? ""
+                                  : prev.sponsorshipNote,
+                          }));
+                        }}
+                        className={`rounded-xl px-3 py-3 text-left text-sm font-black ring-1 ${
+                          active
+                            ? "bg-orange-500 text-black ring-orange-200/60"
+                            : "bg-black/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/10"
+                        }`}
+                      >
+                        <span className="block">{mode.label}</span>
+                        <span
+                          className={`mt-1 block text-xs font-normal ${
+                            active ? "text-black/70" : "text-orange-100/65"
+                          }`}
+                        >
+                          {mode.help}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <select
+                value={form.sponsorId}
+                onChange={(event) => {
+                  resetWarnings();
+                  saveOverFundingLimitRef.current = false;
+
+                  const selected = displaySponsors.find(
+                    (sponsor) => sponsor.id === event.target.value,
+                  );
+
+                  const selectedType = selected?.funding_type || "sponsor";
+                  const selectedIsLoan = selectedType === "loan";
+
+                  const selectedMonthlyRepaymentAmount = selectedIsLoan
+                    ? penceToPoundsInput(selected?.loan_monthly_payment_pence)
+                    : "";
+
+                  setForm((prev) => ({
+                    ...prev,
+                    sponsorId: selected?.id || "",
+                    sponsorName: selected?.sponsor_name || "",
+                    type: selected ? "expense" : prev.type,
+                    category: selected
+                      ? selectedIsLoan
+                        ? "Loan Repayment"
+                        : "Sponsorship"
+                      : "",
+                    amount:
+                      selectedIsLoan && selectedMonthlyRepaymentAmount
+                        ? selectedMonthlyRepaymentAmount
+                        : !selected
+                          ? ""
+                          : prev.amount,
+                    paymentMethod: selected
+                      ? selectedIsLoan
+                        ? prev.paymentMethod &&
+                          prev.paymentMethod !== "Sponsorship Money" &&
+                          prev.paymentMethod !== "Loan Money"
+                          ? prev.paymentMethod
+                          : "Bank Transfer"
+                        : "Sponsorship Money"
+                      : prev.paymentMethod === "Sponsorship Money" ||
+                          prev.paymentMethod === "Loan Money"
+                        ? ""
+                        : prev.paymentMethod,
+                    isPersonalFunds: selected ? false : prev.isPersonalFunds,
+                    personalFundsName: selected ? "" : prev.personalFundsName,
+                    sponsorshipNote: selectedIsLoan
+                      ? prev.sponsorshipNote || "Loan repayment"
+                      : prev.sponsorshipNote,
+                  }));
+                }}
+                className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ${
+                  isLoanFunding
+                    ? "ring-orange-300/20 focus:ring-orange-300/40"
+                    : "ring-white/10 focus:ring-amber-300/40"
+                }`}
+              >
+                <option className="bg-[#11111f] text-white" value="">
+                  Choose funding record...
+                </option>
+
+                {displaySponsors.map((sponsor) => (
+                  <option
+                    key={sponsor.id}
+                    value={sponsor.id}
+                    className="bg-[#11111f] text-white"
+                  >
+                    {fundingTypeLabel(sponsor.funding_type)} —{" "}
+                    {sponsor.sponsor_name}
+                  </option>
+                ))}
+              </select>
+
+              {form.sponsorId && selectedSponsorBreakdown && (
+                <div
+                  className={`mt-3 rounded-xl border bg-black/20 p-3 text-xs ${
+                    isLoanFunding
+                      ? "border-orange-300/20 text-orange-100"
+                      : "border-amber-300/20 text-amber-100"
+                  }`}
+                >
+                  <div className="flex justify-between gap-3">
+                    <span>Funding type</span>
+                    <strong>{selectedFundingLabel}</strong>
+                  </div>
+
+                  {isLoanFunding ? (
+                    <>
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>Loan received</span>
+                        <strong>
+                          {money(selectedSponsorBreakdown.received_pence)}
+                        </strong>
+                      </div>
+
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>Still to repay</span>
+                        <strong>{money(loanStillToRepayPence)}</strong>
+                      </div>
+
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>Loan money available</span>
+                        <strong>{money(normalRemainingPence)}</strong>
+                      </div>
+
+                      {currentAmountPence > 0 && (
+                        <div className="mt-1 flex justify-between gap-3">
+                          <span>
+                            {isLoanRepayment
+                              ? "This repayment"
+                              : "This loan spend"}
+                          </span>
+                          <strong>{money(currentAmountPence)}</strong>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="mt-1 flex justify-between gap-3">
+                        <span>Remaining funding balance</span>
+                        <strong>{money(normalRemainingPence)}</strong>
+                      </div>
+
+                      {currentAmountPence > 0 && (
+                        <div className="mt-1 flex justify-between gap-3">
+                          <span>This spend</span>
+                          <strong>{money(currentAmountPence)}</strong>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {overSpendPence > 0 && (
+                <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-sm text-red-100">
+                  <p className="font-black text-white">
+                    {isLoanRepayment
+                      ? "Loan repayment warning"
+                      : "Funding balance warning"}
+                  </p>
+
+                  <p className="mt-1">
+                    {isLoanRepayment
+                      ? `This repayment is ${money(
+                          overSpendPence,
+                        )} more than the amount still owed on this loan.`
+                      : `This spend is ${money(
+                          overSpendPence,
+                        )} over the remaining ${selectedFundingShortLabel} balance.`}
+                  </p>
+                </div>
+              )}
+
+              <label
+                className={`mt-3 block text-sm font-bold ${
+                  isLoanFunding ? "text-orange-100" : "text-amber-100"
+                }`}
+              >
+                {isLoanFunding
+                  ? isLoanRepayment
+                    ? "Loan repayment note"
+                    : "Loan spending note"
+                  : "Funding spending note"}{" "}
+                {form.sponsorId && <span className="text-red-200">*</span>}
+              </label>
+
+              <textarea
+                value={form.sponsorshipNote}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    sponsorshipNote: event.target.value,
+                  }))
+                }
+                placeholder={
+                  form.sponsorId
+                    ? isLoanFunding
+                      ? isLoanRepayment
+                        ? "Required: explain this loan repayment, e.g. £200 paid back to lender"
+                        : "Required: explain what the loan money was spent on"
+                      : `Required: explain what this ${selectedFundingShortLabel} money was spent on`
+                    : "Example: Paid from grant money for event supplies"
+                }
+                required={Boolean(form.sponsorId)}
+                className={`mt-2 min-h-20 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/40 ${
+                  form.sponsorId && !form.sponsorshipNote.trim()
+                    ? "ring-red-300/40 focus:ring-red-300/60"
+                    : isLoanFunding
+                      ? "ring-orange-300/20 focus:ring-orange-300/40"
+                      : "ring-white/10 focus:ring-amber-300/40"
+                }`}
+              />
+
+              {form.sponsorId && (
+                <p className="mt-2 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
+                  {isLoanFunding
+                    ? isLoanRepayment
+                      ? "Required: add a clear note so Burton Pride can prove this was a loan repayment."
+                      : "Required: add a clear note so Burton Pride can prove what the loan money was used for."
+                    : `Required: add a clear note so Burton Pride can prove why this ${selectedFundingShortLabel} money was used.`}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={openNewSponsorForm}
+                className={`mt-3 rounded-xl px-4 py-2 text-sm font-bold ring-1 ${
+                  isLoanFunding
+                    ? "bg-orange-500/20 text-orange-100 ring-orange-300/20 hover:bg-orange-500/30"
+                    : "bg-amber-500/20 text-amber-100 ring-amber-300/20 hover:bg-amber-500/30"
+                }`}
+              >
+                Add New Funding
+              </button>
+            </div>
+          )}
 
           {form.sponsorId && (!isLoanFunding || isLoanSpending) ? (
             <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
@@ -990,19 +1085,55 @@ export default function MoneyTransactionForm({
                         setDuplicateWarning(null);
                         setDuplicateError(null);
 
-                        setForm((prev) => ({
-                          ...prev,
-                          paymentMethod: method,
-                          isPersonalFunds:
-                            !isLoanFunding && method === "Personal Funds"
-                              ? true
-                              : isLoanFunding
+                        setForm((prev) => {
+                          const nextIsItemDonation = method === "Item Donation";
+
+                          return {
+                            ...prev,
+                            paymentMethod: method,
+                            sponsorId: nextIsItemDonation ? "" : prev.sponsorId,
+                            sponsorName: nextIsItemDonation
+                              ? ""
+                              : prev.sponsorName,
+                            type: nextIsItemDonation ? "income" : prev.type,
+                            category: nextIsItemDonation
+                              ? "Item Donation"
+                              : prev.category === "Item Donation"
+                                ? ""
+                                : prev.category,
+                            budgetCategory: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budgetCategory,
+                            budgetCategoryKey: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budgetCategoryKey,
+                            budget_category: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budget_category,
+                            budget_category_key: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budget_category_key,
+                            budgetCategoryLabel: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budgetCategoryLabel,
+                            budget_category_label: nextIsItemDonation
+                              ? ""
+                              : (prev as any).budget_category_label,
+                            isPersonalFunds:
+                              nextIsItemDonation || isLoanFunding
                                 ? false
-                                : prev.isPersonalFunds,
-                          personalFundsName: isLoanFunding
-                            ? ""
-                            : prev.personalFundsName,
-                        }));
+                                : method === "Personal Funds"
+                                  ? true
+                                  : prev.isPersonalFunds,
+                            personalFundsName:
+                              nextIsItemDonation || isLoanFunding
+                                ? ""
+                                : prev.personalFundsName,
+                            sponsorshipNote: nextIsItemDonation
+                              ? ""
+                              : prev.sponsorshipNote,
+                          };
+                        });
                       }}
                       className={`rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
                         active
@@ -1025,11 +1156,100 @@ export default function MoneyTransactionForm({
               )}
 
               {form.paymentMethod && (
-                <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
+                <p
+                  className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                    isItemDonation
+                      ? "bg-emerald-500/10 text-emerald-100 ring-1 ring-emerald-300/20"
+                      : "bg-white/10 text-white/70"
+                  }`}
+                >
                   Selected:{" "}
                   <span className="font-bold text-white">
                     {form.paymentMethod}
                   </span>
+                  {isItemDonation && (
+                    <span className="mt-1 block text-emerald-100/75">
+                      Record the item value only. This is not cash money in or
+                      money out.
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+
+          {canManuallyLinkBudget && (
+            <div className="rounded-xl border border-pink-300/25 bg-pink-500/10 p-3 ring-1 ring-pink-300/10">
+              <label className="mb-1 block text-sm font-black text-pink-100">
+                Which budget is this going to?
+              </label>
+
+              <p className="mb-3 text-xs leading-5 text-pink-100/70">
+                Choose the Budget Planning row for this transaction. This lets
+                you fix it manually if automatic matching puts it in the wrong
+                place.
+              </p>
+
+              <select
+                value={selectedBudgetCategory}
+                onChange={(event) => {
+                  const selectedKey = event.target.value;
+                  const selectedBudget = budgetOptions.find(
+                    (item) => item.category_key === selectedKey,
+                  );
+
+                  setForm(
+                    (prev) =>
+                      ({
+                        ...prev,
+                        budgetCategory: selectedKey,
+                        budgetCategoryKey: selectedKey,
+                        budget_category: selectedKey,
+                        budget_category_key: selectedKey,
+                        budgetCategoryLabel:
+                          selectedBudget?.category_label || "",
+                        budget_category_label:
+                          selectedBudget?.category_label || "",
+                      }) as FormState,
+                  );
+                }}
+                className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-pink-300/25 focus:ring-pink-300/60"
+              >
+                <option className="bg-[#11111f] text-white" value="">
+                  Auto match from title / notes
+                </option>
+
+                {budgetOptions.map((item) => (
+                  <option
+                    key={item.category_key}
+                    value={item.category_key}
+                    className="bg-[#11111f] text-white"
+                  >
+                    {item.category_label}
+                  </option>
+                ))}
+              </select>
+
+              {selectedBudgetCategory ? (
+                <p className="mt-2 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/80">
+                  Selected budget: {" "}
+                  <strong className="text-white">
+                    {budgetOptions.find(
+                      (item) => item.category_key === selectedBudgetCategory,
+                    )?.category_label || selectedBudgetCategory}
+                  </strong>
+                </p>
+              ) : (
+                <p className="mt-2 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/70">
+                  Auto match is on. Budget Planning will try to match this from
+                  the title, notes, category, and payment information.
+                </p>
+              )}
+
+              {form.type === "income" && (
+                <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  This is currently set as Money In. Budget Planning actual
+                  spending is normally counted from Money Out transactions only.
                 </p>
               )}
             </div>
@@ -1145,8 +1365,8 @@ export default function MoneyTransactionForm({
                       onChange={(event) =>
                         setForm((prev) => ({
                           ...prev,
-                          repeatFrequency:
-                            event.target.value as RepeatFrequency,
+                          repeatFrequency: event.target
+                            .value as RepeatFrequency,
                         }))
                       }
                       className="w-full rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-purple-300/20 focus:ring-purple-300/50"
@@ -1220,7 +1440,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {form.type === "expense" && !form.sponsorId && (
+          {form.type === "expense" && !form.sponsorId && !isItemDonation && (
             <label className="flex items-start gap-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
               <input
                 type="checkbox"
@@ -1300,11 +1520,13 @@ export default function MoneyTransactionForm({
               }))
             }
             placeholder={
-              isLoanFunding
-                ? isLoanRepayment
-                  ? "Extra notes about this repayment"
-                  : "Extra notes about this loan spending"
-                : "Notes"
+              isItemDonation
+                ? "Notes about the donated item, who donated it, or what it will be used for"
+                : isLoanFunding
+                  ? isLoanRepayment
+                    ? "Extra notes about this repayment"
+                    : "Extra notes about this loan spending"
+                  : "Notes"
             }
             className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
           />
@@ -1488,9 +1710,11 @@ export default function MoneyTransactionForm({
             type="submit"
             disabled={saving || checkingDuplicate}
             className={`flex w-full items-center justify-center gap-2 rounded-xl p-3 font-bold disabled:opacity-60 ${
-              isLoanFunding
-                ? "bg-orange-500 text-black hover:bg-orange-400"
-                : "bg-pink-500 text-white hover:bg-pink-400"
+              isItemDonation
+                ? "bg-emerald-500 text-black hover:bg-emerald-400"
+                : isLoanFunding
+                  ? "bg-orange-500 text-black hover:bg-orange-400"
+                  : "bg-pink-500 text-white hover:bg-pink-400"
             }`}
           >
             {checkingDuplicate ? (
@@ -1511,11 +1735,13 @@ export default function MoneyTransactionForm({
                   ? "Update Transaction"
                   : form.isRepeating
                     ? "Create Repeating Payments"
-                    : isLoanFunding
-                      ? isLoanRepayment
-                        ? "Save Loan Repayment"
-                        : "Save Loan Spending"
-                      : "Save Transaction"}
+                    : isItemDonation
+                      ? "Save Item Donation"
+                      : isLoanFunding
+                        ? isLoanRepayment
+                          ? "Save Loan Repayment"
+                          : "Save Loan Spending"
+                        : "Save Transaction"}
           </button>
         </div>
       </form>
@@ -1553,9 +1779,7 @@ export default function MoneyTransactionForm({
 
                   <div className="mt-1 flex justify-between gap-3">
                     <span>
-                      {isLoanRepayment
-                        ? "Still to repay"
-                        : "Remaining balance"}
+                      {isLoanRepayment ? "Still to repay" : "Remaining balance"}
                     </span>
                     <strong>{money(balanceToCheckPence)}</strong>
                   </div>

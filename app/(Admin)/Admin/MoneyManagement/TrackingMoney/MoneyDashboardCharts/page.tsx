@@ -530,7 +530,7 @@ export default function MoneyDashboardPage() {
           </Link>
 
           <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
+            href="/Admin/MoneyManagement/TrackingMoney/CashTinTracker"
             className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -552,7 +552,7 @@ export default function MoneyDashboardPage() {
           </Link>
 
           <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
+            href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
             className="group rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-purple-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
           >
             <div className="mb-4 flex items-center justify-between gap-3">

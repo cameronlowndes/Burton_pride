@@ -34,6 +34,9 @@ type MoneyAuditLog = {
   actor_user_id: string | null;
   actor_name: string | null;
   actor_email: string | null;
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_user_id?: string | null;
   before_data: any;
   after_data: any;
   changed_fields: any;
@@ -344,8 +347,126 @@ function nameFromEmail(email: string | null | undefined) {
     .trim();
 }
 
+function cleanLogValue(value: unknown) {
+  const text = String(value || "").trim();
+  return text || "";
+}
+
+function normaliseText(value: unknown) {
+  return cleanLogValue(value).toLowerCase();
+}
+
+function isWebsiteGeneratedLog(log: MoneyAuditLog) {
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+  const createdFrom = normaliseText(log.metadata?.created_from);
+  const auditEvent = normaliseText(log.metadata?.audit_event);
+  const title = normaliseText(getTransactionTitle(log));
+
+  return (
+    source.includes("stripe donation sync") ||
+    source.includes("stripe_sync") ||
+    source.includes("sync_stripe") ||
+    source.includes("website donation") ||
+    source.includes("website_donation") ||
+    source.includes("website_monthly_donation") ||
+    source.includes("donation sync") ||
+    route.includes("sync-stripe") ||
+    route.includes("stripe") ||
+    createdFrom.includes("sync-stripe") ||
+    auditEvent.includes("stripe") ||
+    (log.action === "create" && title.includes("donation"))
+  );
+}
+
+function getMetadataValue(log: MoneyAuditLog, keys: string[]) {
+  for (const key of keys) {
+    const value = cleanLogValue(log.metadata?.[key]);
+
+    if (value) return value;
+  }
+
+  return "";
+}
+
 function getActorDisplayName(log: MoneyAuditLog) {
-  return log.actor_name || nameFromEmail(log.actor_email) || "Unknown user";
+  if (isWebsiteGeneratedLog(log)) {
+    return "Website / Stripe Sync";
+  }
+
+  const directName =
+    cleanLogValue(log.actor_name) ||
+    cleanLogValue(log.created_by) ||
+    getMetadataValue(log, [
+      "actor_name",
+      "created_by",
+      "updated_by",
+      "createdBy",
+      "updatedBy",
+      "admin_name",
+      "user_name",
+    ]);
+
+  const directEmail =
+    cleanLogValue(log.actor_email) ||
+    cleanLogValue(log.created_by_email) ||
+    getMetadataValue(log, [
+      "actor_email",
+      "created_by_email",
+      "updated_by_email",
+      "createdByEmail",
+      "updatedByEmail",
+      "admin_email",
+      "user_email",
+    ]);
+
+  return directName || nameFromEmail(directEmail) || "Unknown user";
+}
+
+function getActorEmailDisplay(log: MoneyAuditLog) {
+  if (isWebsiteGeneratedLog(log)) {
+    return "Created automatically from the website / Stripe";
+  }
+
+  return (
+    cleanLogValue(log.actor_email) ||
+    cleanLogValue(log.created_by_email) ||
+    getMetadataValue(log, [
+      "actor_email",
+      "created_by_email",
+      "updated_by_email",
+      "createdByEmail",
+      "updatedByEmail",
+      "admin_email",
+      "user_email",
+    ])
+  );
+}
+
+function getActorUserIdDisplay(log: MoneyAuditLog) {
+  if (isWebsiteGeneratedLog(log)) {
+    return "website_automated_sync";
+  }
+
+  return (
+    cleanLogValue(log.actor_user_id) ||
+    cleanLogValue(log.created_by_user_id) ||
+    getMetadataValue(log, [
+      "actor_id",
+      "created_by_user_id",
+      "updated_by_user_id",
+      "user_id",
+      "admin_id",
+    ])
+  );
+}
+
+function getActorUniqueKey(log: MoneyAuditLog) {
+  return (
+    getActorEmailDisplay(log) ||
+    getActorUserIdDisplay(log) ||
+    getActorDisplayName(log)
+  );
 }
 
 function getSourceLabel(log: MoneyAuditLog) {
@@ -662,7 +783,7 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
         logs
           .map(
             (log) =>
-              log.actor_email || log.actor_user_id || getActorDisplayName(log),
+              getActorUniqueKey(log),
           )
           .filter(Boolean),
       ).size,
@@ -772,7 +893,7 @@ export default function MoneyAuditLogsPage() {
           getTransactionTitle(log).toLowerCase().includes(q) ||
           log.transaction_id?.toLowerCase().includes(q) ||
           getActorDisplayName(log).toLowerCase().includes(q) ||
-          log.actor_email?.toLowerCase().includes(q) ||
+          getActorEmailDisplay(log).toLowerCase().includes(q) ||
           JSON.stringify(log.changed_fields || {})
             .toLowerCase()
             .includes(q) ||
@@ -865,7 +986,7 @@ export default function MoneyAuditLogsPage() {
         logs
           .map(
             (log) =>
-              log.actor_email || log.actor_user_id || getActorDisplayName(log),
+              getActorUniqueKey(log),
           )
           .filter(Boolean),
       ).size,
@@ -1033,7 +1154,7 @@ export default function MoneyAuditLogsPage() {
       styleCard("A8:B8", "A9:B10", "Edited", filteredLogs.filter((log) => log.action === "edit" && !isCheckedAuditLog(log) && !isUncheckedAuditLog(log)).length, "FFF0F9FF");
       styleCard("C8:D8", "C9:D10", "Hidden", filteredLogs.filter((log) => isHiddenAuditLog(log)).length, "FFFFF7ED");
       styleCard("E8:F8", "E9:F10", "Deleted", filteredLogs.filter((log) => !isHiddenAuditLog(log) && (log.action === "delete" || log.action === "delete_year" || log.action === "delete_all")).length, "FFFEF2F2");
-      styleCard("G8:H8", "G9:H10", "Users", new Set(filteredLogs.map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log)).filter(Boolean)).size, "FFF8FAFC");
+      styleCard("G8:H8", "G9:H10", "Users", new Set(filteredLogs.map((log) => getActorUniqueKey(log)).filter(Boolean)).size, "FFF8FAFC");
       styleCard("A11:B11", "A12:B13", "Paid Back", filteredLogs.filter((log) => log.action === "mark_paid_back" || log.action === "mark_not_paid_back").length, "FFFDF2F8");
 
       addMergedSection(summarySheet, "Report Filters", "A15", "H15", "FF334155");
@@ -1280,8 +1401,8 @@ export default function MoneyAuditLogsPage() {
             transactionTitle: getTransactionTitle(log),
             transactionId: log.transaction_id || "",
             actorName: getActorDisplayName(log),
-            actorEmail: log.actor_email || "",
-            actorUserId: log.actor_user_id || "",
+            actorEmail: getActorEmailDisplay(log),
+            actorUserId: getActorUserIdDisplay(log),
             changedFields: changedNames.map(cleanFieldName).join(", "),
             changedCount: changedNames.length,
             source: getSourceLabel(log),
@@ -1302,8 +1423,8 @@ export default function MoneyAuditLogsPage() {
           };
           row.getCell("changedCount").font = { bold: true };
 
-          if (!log.actor_email) styleMutedCell(row.getCell("actorEmail"));
-          if (!log.actor_user_id) styleMutedCell(row.getCell("actorUserId"));
+          if (!getActorEmailDisplay(log)) styleMutedCell(row.getCell("actorEmail"));
+          if (!getActorUserIdDisplay(log)) styleMutedCell(row.getCell("actorUserId"));
           if (changedNames.length === 0)
             styleMutedCell(row.getCell("changedFields"));
         });
@@ -1471,11 +1592,7 @@ export default function MoneyAuditLogsPage() {
       >();
 
       filteredLogs.forEach((log) => {
-        const key =
-          log.actor_email ||
-          log.actor_user_id ||
-          getActorDisplayName(log) ||
-          "Unknown user";
+        const key = getActorUniqueKey(log) || "Unknown user";
 
         const existing = userMap.get(key);
 
@@ -1484,8 +1601,8 @@ export default function MoneyAuditLogsPage() {
         } else {
           userMap.set(key, {
             name: getActorDisplayName(log),
-            email: log.actor_email || "",
-            userId: log.actor_user_id || "",
+            email: getActorEmailDisplay(log),
+            userId: getActorUserIdDisplay(log),
             logs: [log],
           });
         }
@@ -1968,10 +2085,10 @@ export default function MoneyAuditLogsPage() {
                               {getActorDisplayName(log)}
                             </p>
 
-                            {log.actor_email && (
+                            {getActorEmailDisplay(log) && (
                               <p className="mt-1 flex items-center gap-2 break-words text-xs text-white/45">
                                 <Mail className="h-3.5 w-3.5 text-white/30" />
-                                {log.actor_email}
+                                {getActorEmailDisplay(log)}
                               </p>
                             )}
                           </td>
@@ -2070,7 +2187,7 @@ export default function MoneyAuditLogsPage() {
                           {getActorDisplayName(log)}
                         </p>
                         <p className="mt-1 break-words text-xs text-white/45">
-                          {log.actor_email || "No email saved"}
+                          {getActorEmailDisplay(log) || "No email saved"}
                         </p>
                       </div>
 
@@ -2211,7 +2328,7 @@ export default function MoneyAuditLogsPage() {
                     </td>
                     <td>
                       <strong>{getActorDisplayName(log)}</strong>
-                      {log.actor_email && <small>{log.actor_email}</small>}
+                      {getActorEmailDisplay(log) && <small>{getActorEmailDisplay(log)}</small>}
                     </td>
                     <td>
                       {changedNames.length > 0
@@ -2534,8 +2651,8 @@ export default function MoneyAuditLogsPage() {
                 <InfoCard
                   label="Who did it"
                   title={getActorDisplayName(selectedLog)}
-                  subtitle={selectedLog.actor_email || "No email saved"}
-                  extra={selectedLog.actor_user_id || ""}
+                  subtitle={getActorEmailDisplay(selectedLog) || "No email saved"}
+                  extra={getActorUserIdDisplay(selectedLog)}
                   icon={<UserRound className="h-5 w-5" />}
                 />
 
