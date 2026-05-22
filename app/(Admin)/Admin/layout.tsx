@@ -55,46 +55,52 @@ const ALL_PERMISSION_KEYS = [
 function hasPermission(
   permissions: string[],
   adminRole: AdminRole | null,
-  permission: string
+  permission: string,
 ) {
   if (adminRole === "main_admin") return true;
   return permissions.includes(permission);
 }
 
+function normalisePath(pathname: string | null) {
+  return String(pathname || "").toLowerCase();
+}
+
 function getRequiredPermission(pathname: string | null) {
-  if (!pathname) return null;
+  const path = normalisePath(pathname);
 
-  if (pathname === "/Admin/Login") return null;
+  if (!path) return null;
 
-  if (pathname.startsWith("/Admin/Dashboard/PageEditor")) {
+  if (path === "/admin/login") return null;
+
+  if (path.startsWith("/admin/dashboard/pageeditor")) {
     return "site_pages:manage";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard/Logs")) {
+  if (path.startsWith("/admin/dashboard/logs")) {
     return "audit_logs:view";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard/Donations")) {
+  if (path.startsWith("/admin/dashboard/donations")) {
     return "donations:view";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard/Raffle")) {
+  if (path.startsWith("/admin/dashboard/raffle")) {
     return "raffle:view";
   }
 
-  if (pathname.startsWith("/Admin/Money")) {
+  if (path.startsWith("/admin/money")) {
     return "money:view";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard/Money")) {
+  if (path.startsWith("/admin/dashboard/money")) {
     return "money:view";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard/Users")) {
+  if (path.startsWith("/admin/dashboard/users")) {
     return "admin:users:manage";
   }
 
-  if (pathname.startsWith("/Admin/Dashboard")) {
+  if (path.startsWith("/admin/dashboard")) {
     return "admin:dashboard:view";
   }
 
@@ -103,7 +109,7 @@ function getRequiredPermission(pathname: string | null) {
 
 function getFirstAllowedPage(
   permissions: string[],
-  adminRole: AdminRole | null
+  adminRole: AdminRole | null,
 ) {
   if (adminRole === "main_admin") return "/Admin/Dashboard";
 
@@ -124,6 +130,96 @@ function getFirstAllowedPage(
   return null;
 }
 
+function LoadingPermissionsScreen() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
+            Admin Portal
+          </p>
+          <h1 className="mt-2 text-2xl font-black text-white">
+            Loading permissions...
+          </h1>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionErrorScreen({
+  permissionsError,
+}: {
+  permissionsError: string;
+}) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-lg rounded-3xl border border-red-300/25 bg-red-500/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-100/70">
+            Admin Portal
+          </p>
+
+          <h1 className="mt-2 text-2xl font-black text-white">
+            Could not load permissions
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-white/70">
+            {permissionsError}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-2xl bg-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/25"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RedirectingScreen() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
+            Restricted Access
+          </p>
+          <h1 className="mt-2 text-2xl font-black text-white">
+            Redirecting...
+          </h1>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoAccessScreen() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-lg rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
+            Restricted Access
+          </p>
+
+          <h1 className="mt-2 text-2xl font-black text-white">
+            You do not have access to any admin pages
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-white/70">
+            Ask a main admin to update your permissions in Admin Users.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminLayout({
   children,
 }: {
@@ -138,32 +234,21 @@ export default function AdminLayout({
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [permissionsError, setPermissionsError] = useState("");
 
-  const isLoginPage = pathname === "/Admin/Login";
-  const isDashboardRoute = pathname?.startsWith("/Admin/Dashboard");
-  const isEmailRoute = pathname?.startsWith("/Admin/Email");
-  const isMoneyRoute = pathname?.startsWith("/Admin/Money");
+  const path = normalisePath(pathname);
+
+  const isLoginPage = path === "/admin/login";
+  const isDashboardRoute = path.startsWith("/admin/dashboard");
+  const isEmailRoute = path.startsWith("/admin/email");
+  const isMoneyRoute = path.startsWith("/admin/money");
 
   /*
-    Important:
-    Login page must not wait for permissions or admin API calls.
-    This stops the blank gradient / loading loop.
-  */
-  if (isLoginPage) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-        {children}
-      </div>
-    );
-  }
-
-  /*
-    Important:
-    Money Management has its own Money Admin sidebar and full page layout.
-    This base admin layout should only protect /Admin/Money, then leave the
-    Money Management UI completely untouched.
+    FIX:
+    No hooks can be placed after a conditional return.
+    The old version returned early for /Admin/Login before useMemo/useEffect hooks,
+    then called those hooks on the next page. That changed the hook order and caused:
+    "React has detected a change in the order of Hooks called by AdminLayout".
   */
   const leaveMoneyLayoutUntouched = Boolean(isMoneyRoute);
-
   const showAdminNav = Boolean(isDashboardRoute);
   const useFullWidthLayout = Boolean(isEmailRoute);
 
@@ -175,7 +260,7 @@ export default function AdminLayout({
 
   const requiredPermission = useMemo(
     () => getRequiredPermission(pathname),
-    [pathname]
+    [pathname],
   );
 
   const safePermissions = useMemo(() => {
@@ -191,6 +276,18 @@ export default function AdminLayout({
     let cancelled = false;
 
     async function loadPermissions() {
+      /*
+        Login page should not wait for permissions or call the admin API,
+        but this must live inside the effect, not before the hooks.
+      */
+      if (isLoginPage) {
+        setPermissionsLoaded(true);
+        setPermissionsError("");
+        setPermissions([]);
+        setAdminRole(null);
+        return;
+      }
+
       try {
         setPermissionsLoaded(false);
         setPermissionsError("");
@@ -215,7 +312,7 @@ export default function AdminLayout({
         if (cancelled) return;
 
         setPermissionsError(
-          error?.message || "Failed to load admin permissions."
+          error?.message || "Failed to load admin permissions.",
         );
         setPermissions([]);
         setAdminRole(null);
@@ -231,9 +328,10 @@ export default function AdminLayout({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isLoginPage]);
 
   useEffect(() => {
+    if (isLoginPage) return;
     if (!permissionsLoaded) return;
     if (permissionsError) return;
     if (canAccessCurrentPage) return;
@@ -246,6 +344,7 @@ export default function AdminLayout({
   }, [
     adminRole,
     canAccessCurrentPage,
+    isLoginPage,
     permissionsError,
     permissionsLoaded,
     pathname,
@@ -253,98 +352,40 @@ export default function AdminLayout({
     safePermissions,
   ]);
 
-  if (!permissionsLoaded) {
+  /*
+    Returns are now AFTER every hook above.
+    That keeps hook order stable on every render.
+  */
+  if (isLoginPage) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-        <div className="flex min-h-screen items-center justify-center px-4">
-          <div className="rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
-              Admin Portal
-            </p>
-            <h1 className="mt-2 text-2xl font-black text-white">
-              Loading permissions...
-            </h1>
-          </div>
-        </div>
+        {children}
       </div>
     );
   }
 
+  if (!permissionsLoaded) {
+    return <LoadingPermissionsScreen />;
+  }
+
   if (permissionsError) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-        <div className="flex min-h-screen items-center justify-center px-4">
-          <div className="max-w-lg rounded-3xl border border-red-300/25 bg-red-500/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-100/70">
-              Admin Portal
-            </p>
-
-            <h1 className="mt-2 text-2xl font-black text-white">
-              Could not load permissions
-            </h1>
-
-            <p className="mt-3 text-sm leading-6 text-white/70">
-              {permissionsError}
-            </p>
-
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="mt-5 rounded-2xl bg-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/25"
-            >
-              Try again
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return <PermissionErrorScreen permissionsError={permissionsError} />;
   }
 
   if (!canAccessCurrentPage) {
     const fallback = getFirstAllowedPage(safePermissions, adminRole);
 
     if (fallback) {
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-          <div className="flex min-h-screen items-center justify-center px-4">
-            <div className="rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
-                Restricted Access
-              </p>
-              <h1 className="mt-2 text-2xl font-black text-white">
-                Redirecting...
-              </h1>
-            </div>
-          </div>
-        </div>
-      );
+      return <RedirectingScreen />;
     }
 
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-        <div className="flex min-h-screen items-center justify-center px-4">
-          <div className="max-w-lg rounded-3xl border border-white/15 bg-white/10 p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/60">
-              Restricted Access
-            </p>
-
-            <h1 className="mt-2 text-2xl font-black text-white">
-              You do not have access to any admin pages
-            </h1>
-
-            <p className="mt-3 text-sm leading-6 text-white/70">
-              Ask a main admin to update your permissions in Admin Users.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <NoAccessScreen />;
   }
 
   /*
-    Do this after the permission check.
-    This means /Admin/Money is still protected by money:view, but the base
-    Admin layout does not wrap, pad, add a header, or add the normal sidebar.
+    Money Management has its own full page layout.
+    This Admin layout only protects /Admin/Money with money:view,
+    then leaves the Money UI untouched.
   */
   if (leaveMoneyLayoutUntouched) {
     return <>{children}</>;

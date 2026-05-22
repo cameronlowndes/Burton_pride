@@ -23,6 +23,7 @@ import {
 import MoneyHeader from "../../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../../components/money/MoneySummaryCards";
 import MoneyPageStatus from "../../../components/money/MoneyPageStatus";
+import MoneyDashboardAlerts from "../../../components/money/MoneyDashboardAlerts";
 import MoneySponsorSection from "../../../components/money/MoneySponsorSection";
 import MoneyMonthlyBreakdown from "../../../components/money/MoneyMonthlyBreakdown";
 import MoneyDashboardCharts from "../../../components/money/MoneyDashboardCharts";
@@ -299,6 +300,17 @@ export default function MoneyDashboardPage() {
           filteredTransactionsLength={moneyPage.filteredTransactions.length}
           yearTransactionsLength={moneyPage.yearTransactions.length}
         />
+
+
+        <MoneyDashboardAlerts
+          selectedYear={moneyPage.selectedYear}
+          transactions={moneyPage.yearTransactions}
+          yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
+          failedCsvRows={(moneyPage as any).failedCsvRows || []}
+          onSetFilter={moneyPage.setFilter}
+          onSetSearchTerm={moneyPage.setSearchTerm}
+        />
+
 
         <MoneyStatsCards totals={moneyPage.totals} />
 

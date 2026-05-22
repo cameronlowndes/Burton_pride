@@ -3,22 +3,22 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  Calculator,
   Coins,
-  PiggyBank,
+  FileSpreadsheet,
   RefreshCcw,
 } from "lucide-react";
 
 import MoneyHeader from "../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../components/money/MoneySummaryCards";
 import MoneyPageStatus from "../../components/money/MoneyPageStatus";
+import MoneyDashboardAlerts from "../../components/money/MoneyDashboardAlerts";
 import MoneyMainGrid from "../../components/money/MoneyMainGrid";
 import MoneySponsorSection from "../../components/money/MoneySponsorSection";
 import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown";
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
-import MoneyBudgetPlanning from "../../components/money/MoneyBudgetPlanning";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
+import FundingReportExportButton from "../../components/money/FundingReportExportButton";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
@@ -91,6 +91,17 @@ export default function MoneyTransactionsPage() {
           yearTransactionsLength={money.yearTransactions.length}
         />
 
+
+        <MoneyDashboardAlerts
+          selectedYear={money.selectedYear}
+          transactions={money.yearTransactions}
+          yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+          failedCsvRows={(money as any).failedCsvRows || []}
+          onSetFilter={money.setFilter}
+          onSetSearchTerm={money.setSearchTerm}
+        />
+
+
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
           <div className="mb-5 flex flex-col gap-2">
             <h2 className="text-2xl font-black text-white">
@@ -98,12 +109,12 @@ export default function MoneyTransactionsPage() {
             </h2>
 
             <p className="max-w-3xl text-sm leading-6 text-white/60">
-              Extra tools for tracking cash fundraising, budget planning, and
-              keeping Burton Pride accounts clear.
+              Extra tools for tracking cash fundraising and keeping Burton
+              Pride accounts clear.
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4">
             <Link
               href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
               className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
@@ -126,64 +137,6 @@ export default function MoneyTransactionsPage() {
                 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
             </Link>
-
-            <Link
-              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
-              className="group rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-emerald-500/20"
-            >
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/20 text-emerald-100 ring-1 ring-emerald-300/20">
-                <PiggyBank className="h-6 w-6" />
-              </div>
-
-              <h3 className="text-xl font-black text-white">
-                Budget Planning
-              </h3>
-
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Compare planned budget against actual spending for venue,
-                insurance, printing, security, performers, equipment,
-                accessibility, and other costs.
-              </p>
-
-              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-emerald-100">
-                Open budget planner
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </div>
-            </Link>
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-black text-sky-100">
-                  <Calculator className="h-4 w-4" />
-                  Quick account checks
-                </div>
-
-                <p className="mt-1 text-sm text-white/60">
-                  Use these tools before finalising reports, locking a month, or
-                  closing the year.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-black hover:bg-amber-300"
-                >
-                  <Coins className="h-4 w-4" />
-                  Cash tin
-                </Link>
-
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/BudgetPlanning"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400"
-                >
-                  <PiggyBank className="h-4 w-4" />
-                  Budget
-                </Link>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -213,13 +166,130 @@ export default function MoneyTransactionsPage() {
           carryForwardNote={money.carryForwardNote}
         />
 
-        <MoneyBudgetPlanning
-          selectedYear={money.selectedYear}
-          budgetItems={money.budgetItems}
-          transactions={money.yearTransactions}
-          savingBudget={money.savingBudget}
-          onSaveBudget={money.saveBudgetItems}
-        />
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100">
+                <FileSpreadsheet className="h-4 w-4" />
+                Grant / funding reports
+              </div>
+
+              <h2 className="text-2xl font-black text-white">
+                Export funding record reports
+              </h2>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                Export one funding record at a time, showing money received,
+                money spent, remaining balance, linked transactions, receipts,
+                and notes for {money.selectedYear}.
+              </p>
+            </div>
+          </div>
+
+          {money.yearlySponsorBreakdown.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/60">
+              No funding or sponsor records found for {money.selectedYear}.
+              Add a sponsor/funding record first, then export its report here.
+            </div>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {money.yearlySponsorBreakdown.map((funding: any) => {
+                const fundingId =
+                  funding.id ||
+                  funding.sponsor_id ||
+                  funding.sponsorId ||
+                  funding.record_id ||
+                  "";
+
+                const fundingName =
+                  funding.sponsor_name ||
+                  funding.sponsorName ||
+                  funding.name ||
+                  funding.funding_name ||
+                  "Funding record";
+
+                const receivedPence =
+                  funding.received_pence ||
+                  funding.receivedPence ||
+                  funding.received_amount_pence ||
+                  0;
+
+                const spentPence =
+                  funding.spent_pence ||
+                  funding.spentPence ||
+                  funding.spent_amount_pence ||
+                  0;
+
+                const remainingPence =
+                  funding.remaining_pence ||
+                  funding.remainingPence ||
+                  receivedPence - spentPence;
+
+                return (
+                  <div
+                    key={fundingId || fundingName}
+                    className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-white">
+                          {fundingName}
+                        </h3>
+
+                        <div className="mt-3 grid gap-2 text-sm text-white/65 sm:grid-cols-3">
+                          <div className="rounded-xl bg-black/20 p-3">
+                            <p className="text-xs font-black uppercase tracking-wide text-emerald-100/70">
+                              Received
+                            </p>
+                            <p className="mt-1 font-black text-white">
+                              {new Intl.NumberFormat("en-GB", {
+                                style: "currency",
+                                currency: "GBP",
+                              }).format((Number(receivedPence) || 0) / 100)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl bg-black/20 p-3">
+                            <p className="text-xs font-black uppercase tracking-wide text-red-100/70">
+                              Spent
+                            </p>
+                            <p className="mt-1 font-black text-white">
+                              {new Intl.NumberFormat("en-GB", {
+                                style: "currency",
+                                currency: "GBP",
+                              }).format((Number(spentPence) || 0) / 100)}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl bg-black/20 p-3">
+                            <p className="text-xs font-black uppercase tracking-wide text-sky-100/70">
+                              Remaining
+                            </p>
+                            <p className="mt-1 font-black text-white">
+                              {new Intl.NumberFormat("en-GB", {
+                                style: "currency",
+                                currency: "GBP",
+                              }).format((Number(remainingPence) || 0) / 100)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        <FundingReportExportButton
+                          fundingId={fundingId}
+                          year={money.selectedYear}
+                          label="Export report"
+                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <MoneySponsorSection
           selectedYear={money.selectedYear}

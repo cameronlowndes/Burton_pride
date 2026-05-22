@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   Banknote,
+  Calculator,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -11,6 +13,7 @@ import {
   PiggyBank,
   Plus,
   Save,
+  Target,
   Trash2,
   X,
 } from "lucide-react";
@@ -34,6 +37,35 @@ type BudgetRow = BudgetItem & {
   remainingPence: number;
   percentUsed: number;
 };
+
+type SavingTargetState = {
+  id: string;
+  name: string;
+  targetAmount: string;
+  currentSaved: string;
+  months: string;
+  note: string;
+};
+
+function createEmptySavingTarget(
+  name = "New saving target",
+): SavingTargetState {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `saving-target-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return {
+    id,
+    name,
+    targetAmount: "",
+    currentSaved: "",
+    months: "",
+    note: "",
+  };
+}
+
+const DEFAULT_SAVING_TARGET_NAME = "General savings";
 
 type Props = {
   selectedYear: string;
@@ -95,6 +127,69 @@ function inputToPence(value: string) {
   const amount = Number(String(value || "0").replace(/,/g, ""));
   if (!Number.isFinite(amount)) return 0;
   return Math.round(amount * 100);
+}
+
+function cleanMoneyInput(value: string) {
+  return value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+}
+
+function cleanWholeNumberInput(value: string) {
+  return value.replace(/[^0-9]/g, "");
+}
+
+function normaliseSavingTarget(
+  value: Partial<SavingTargetState> | null | undefined,
+  fallbackName = DEFAULT_SAVING_TARGET_NAME,
+): SavingTargetState {
+  const blank = createEmptySavingTarget(fallbackName);
+
+  return {
+    id: String(value?.id || blank.id),
+    name: String(value?.name || fallbackName),
+    targetAmount: String(value?.targetAmount || ""),
+    currentSaved: String(value?.currentSaved || ""),
+    months: String(value?.months || ""),
+    note: String(value?.note || ""),
+  };
+}
+
+function safeParseSavingTargets(value: string | null): SavingTargetState[] {
+  if (!value) return [normaliseSavingTarget(null)];
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (Array.isArray(parsed)) {
+      const targets = parsed
+        .map((item, index) =>
+          normaliseSavingTarget(
+            item as Partial<SavingTargetState>,
+            index === 0
+              ? DEFAULT_SAVING_TARGET_NAME
+              : `Saving target ${index + 1}`,
+          ),
+        )
+        .filter((item) => item.id);
+
+      return targets.length > 0 ? targets : [normaliseSavingTarget(null)];
+    }
+
+    // Keeps old single-target localStorage data working after this update.
+    return [normaliseSavingTarget(parsed as Partial<SavingTargetState>)];
+  } catch {
+    return [normaliseSavingTarget(null)];
+  }
+}
+
+function buildBudgetAmountInputs(items: BudgetItem[]) {
+  return items.reduce<Record<string, string>>((acc, item) => {
+    acc[item.category_key] =
+      Number(item.planned_amount_pence || 0) > 0
+        ? penceToInput(item.planned_amount_pence)
+        : "";
+
+    return acc;
+  }, {});
 }
 
 function slugifyBudgetKey(value: string) {
@@ -350,7 +445,6 @@ function hasBudgetAuditChanges(payload: BudgetAuditPayload) {
   );
 }
 
-
 function cleanBudgetItemsForSave(items: BudgetItem[]) {
   return items.map((item) => {
     const cleaned: BudgetItem = {
@@ -404,13 +498,20 @@ function nameFromEmail(email: string | null | undefined) {
   return cleaned || null;
 }
 
-function getBudgetItemEditor(item: BudgetItem, currentEditor: BudgetEditor | null) {
+function getBudgetItemEditor(
+  item: BudgetItem,
+  currentEditor: BudgetEditor | null,
+) {
   const savedName = cleanEditorValue(item.updated_by);
   const savedEmail = cleanEditorValue(item.updated_by_email);
   const currentName = cleanEditorValue(currentEditor?.name);
   const currentEmail = cleanEditorValue(currentEditor?.email);
 
-  const name = savedName || nameFromEmail(savedEmail) || currentName || nameFromEmail(currentEmail);
+  const name =
+    savedName ||
+    nameFromEmail(savedEmail) ||
+    currentName ||
+    nameFromEmail(currentEmail);
   const email = savedEmail || currentEmail;
 
   return {
@@ -419,13 +520,19 @@ function getBudgetItemEditor(item: BudgetItem, currentEditor: BudgetEditor | nul
   };
 }
 
-function budgetEditorDisplayName(item: BudgetItem, currentEditor: BudgetEditor | null) {
+function budgetEditorDisplayName(
+  item: BudgetItem,
+  currentEditor: BudgetEditor | null,
+) {
   const editor = getBudgetItemEditor(item, currentEditor);
 
   return editor.name || editor.email || "Not recorded yet";
 }
 
-function budgetEditorDisplayEmail(item: BudgetItem, currentEditor: BudgetEditor | null) {
+function budgetEditorDisplayEmail(
+  item: BudgetItem,
+  currentEditor: BudgetEditor | null,
+) {
   return getBudgetItemEditor(item, currentEditor).email;
 }
 
@@ -484,9 +591,7 @@ function getEditorFromPayload(payload: any): BudgetEditor | null {
 }
 
 async function fetchBudgetEditor(): Promise<BudgetEditor | null> {
-  const endpoints = [
-    "/api/admin/me/permissions",
-  ];
+  const endpoints = ["/api/admin/me/permissions"];
 
   for (const endpoint of endpoints) {
     try {
@@ -539,18 +644,12 @@ function getAuditLogErrorMessage(status: number, details: string) {
   }
 
   if (status >= 500) {
-    return [
-      "Audit log failed because the server returned an error.",
-      details,
-    ]
+    return ["Audit log failed because the server returned an error.", details]
       .filter(Boolean)
       .join(" ");
   }
 
-  return [
-    `Audit log failed with status ${status}.`,
-    details,
-  ]
+  return [`Audit log failed with status ${status}.`, details]
     .filter(Boolean)
     .join(" ");
 }
@@ -660,6 +759,481 @@ async function createBudgetAuditLog(
   }
 }
 
+
+type SavingTargetAuditAction =
+  | "saving_target_create"
+  | "saving_target_update"
+  | "saving_target_clear"
+  | "saving_target_monthly_saved"
+  | "saving_target_soft_delete"
+  | "saving_target_draft_remove";
+
+type SavingTargetAuditLogResult = {
+  ok: boolean;
+  skipped?: boolean;
+  error?: string;
+  status?: number;
+  details?: string;
+};
+
+function savingTargetAuditSnapshot(target: SavingTargetState | null) {
+  if (!target) return null;
+
+  return {
+    id: target.id,
+    name: target.name,
+    target_amount_pence: inputToPence(target.targetAmount),
+    saved_amount_pence: inputToPence(target.currentSaved),
+    months_to_save: Math.max(1, Number(target.months || 1) || 1),
+    notes: target.note || "",
+  };
+}
+
+function getSavingTargetAuditTitle(
+  target: SavingTargetState | null | undefined,
+  selectedYear: string,
+) {
+  const name = String(target?.name || DEFAULT_SAVING_TARGET_NAME).trim();
+
+  return `Saving Target - ${name} (${selectedYear})`;
+}
+
+function buildSavingTargetChangedFields(
+  beforeTarget: SavingTargetState | null,
+  afterTarget: SavingTargetState | null,
+) {
+  const beforeData = savingTargetAuditSnapshot(beforeTarget);
+  const afterData = savingTargetAuditSnapshot(afterTarget);
+
+  const fieldLabels: Record<string, string> = {
+    id: "ID",
+    name: "Target name",
+    target_amount_pence: "Target amount",
+    saved_amount_pence: "Already saved",
+    months_to_save: "Months to save",
+    notes: "Notes",
+  };
+
+  const allFields = new Set([
+    ...Object.keys(beforeData || {}),
+    ...Object.keys(afterData || {}),
+  ]);
+
+  const changed: Record<
+    string,
+    {
+      label: string;
+      before: any;
+      after: any;
+    }
+  > = {};
+
+  allFields.forEach((field) => {
+    const beforeValue = beforeData?.[field as keyof typeof beforeData] ?? null;
+    const afterValue = afterData?.[field as keyof typeof afterData] ?? null;
+
+    if (String(beforeValue ?? "") !== String(afterValue ?? "")) {
+      changed[field] = {
+        label: fieldLabels[field] || field,
+        before: beforeValue,
+        after: afterValue,
+      };
+    }
+  });
+
+  return changed;
+}
+
+function getSavingTargetAuditLabel(action: SavingTargetAuditAction) {
+  if (action === "saving_target_create") return "Saving target created";
+  if (action === "saving_target_update") return "Saving target updated";
+  if (action === "saving_target_clear") return "Saving target cleared";
+  if (action === "saving_target_monthly_saved") {
+    return "Saving target monthly amount added";
+  }
+  if (action === "saving_target_soft_delete") return "Saving target soft deleted";
+  if (action === "saving_target_draft_remove") return "Saving target draft removed";
+
+  return String(action).replace(/_/g, " ");
+}
+
+async function createSavingTargetAuditLog({
+  action,
+  selectedYear,
+  beforeTarget,
+  afterTarget,
+  editor,
+  metadata = {},
+}: {
+  action: SavingTargetAuditAction;
+  selectedYear: string;
+  beforeTarget: SavingTargetState | null;
+  afterTarget: SavingTargetState | null;
+  editor: BudgetEditor | null;
+  metadata?: Record<string, any>;
+}): Promise<SavingTargetAuditLogResult> {
+  const beforeData = savingTargetAuditSnapshot(beforeTarget);
+  const afterData = savingTargetAuditSnapshot(afterTarget);
+  const changedFields = buildSavingTargetChangedFields(beforeTarget, afterTarget);
+
+  const targetForTitle = afterTarget || beforeTarget;
+  const targetId = afterTarget?.id || beforeTarget?.id || null;
+  const targetName = targetForTitle?.name || DEFAULT_SAVING_TARGET_NAME;
+
+  try {
+    const response = await fetch("/api/admin/money/audit-logs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        transactionId: targetId,
+        transaction_id: targetId,
+        transactionTitle: getSavingTargetAuditTitle(targetForTitle, selectedYear),
+        transaction_title: getSavingTargetAuditTitle(targetForTitle, selectedYear),
+
+        actorName: editor?.name || null,
+        actor_name: editor?.name || null,
+        actorEmail: editor?.email || null,
+        actor_email: editor?.email || null,
+
+        createdBy: editor?.name || null,
+        created_by: editor?.name || null,
+        createdByEmail: editor?.email || null,
+        created_by_email: editor?.email || null,
+
+        beforeData,
+        before_data: beforeData,
+        afterData,
+        after_data: afterData,
+
+        changedFields,
+        changed_fields: changedFields,
+
+        metadata: {
+          area: "saving_targets",
+          year: selectedYear,
+          source: "money_budget_planning_saving_target_ui",
+          audit_event: action,
+          audit_label: getSavingTargetAuditLabel(action),
+          target_id: targetId,
+          target_name: targetName,
+          actor_name: editor?.name || null,
+          actor_email: editor?.email || null,
+          created_by: editor?.name || null,
+          created_by_email: editor?.email || null,
+          changed_field_count: Object.keys(changedFields).length,
+          ...metadata,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const details = await response.text().catch(() => "");
+      const error = getAuditLogErrorMessage(response.status, details);
+
+      console.error(
+        "Failed to save saving target audit log:",
+        response.status,
+        details,
+      );
+
+      return {
+        ok: false,
+        error,
+        status: response.status,
+        details,
+      };
+    }
+
+    return {
+      ok: true,
+    };
+  } catch (error: any) {
+    const message =
+      error?.message ||
+      "Saving target audit log failed because the request could not be completed.";
+
+    console.error("Failed to save saving target audit log:", error);
+
+    return {
+      ok: false,
+      error: message,
+      details: message,
+    };
+  }
+}
+
+function getSavingTargetAuditErrorMessage(result: SavingTargetAuditLogResult) {
+  return (
+    result.error ||
+    result.details ||
+    "Saving target was saved, but the audit log could not be created."
+  );
+}
+
+
+type SavingTargetApiRow = {
+  id: string;
+  year: string;
+  target_name: string;
+  target_amount_pence: number;
+  saved_amount_pence: number;
+  months_to_save: number;
+  notes?: string | null;
+  created_by?: string | null;
+  created_by_email?: string | null;
+  updated_by?: string | null;
+  updated_by_email?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+function apiRowToSavingTarget(row: SavingTargetApiRow): SavingTargetState {
+  return {
+    id: row.id,
+    name: row.target_name || DEFAULT_SAVING_TARGET_NAME,
+    targetAmount:
+      Number(row.target_amount_pence || 0) > 0
+        ? penceToInput(row.target_amount_pence)
+        : "",
+    currentSaved:
+      Number(row.saved_amount_pence || 0) > 0
+        ? penceToInput(row.saved_amount_pence)
+        : "",
+    months:
+      Number(row.months_to_save || 0) > 0 ? String(row.months_to_save) : "",
+    note: row.notes || "",
+  };
+}
+
+function savingTargetToApiPayload(
+  target: SavingTargetState,
+  selectedYear: string,
+) {
+  return {
+    id: target.id,
+    year: selectedYear,
+    target_name: target.name || DEFAULT_SAVING_TARGET_NAME,
+    target_amount_pence: inputToPence(target.targetAmount),
+    saved_amount_pence: inputToPence(target.currentSaved),
+    months_to_save: Math.max(1, Number(target.months || 1) || 1),
+    notes: target.note || "",
+  };
+}
+
+async function parseSavingTargetResponse(response: Response) {
+  const rawText = await response.text().catch(() => "");
+
+  let payload: any = null;
+
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const serverError =
+      payload?.error ||
+      payload?.message ||
+      "Saving target request failed.";
+
+    const serverDetails =
+      payload?.details ||
+      payload?.hint ||
+      payload?.code ||
+      rawText ||
+      "No extra server details were returned.";
+
+    const helpLines = [
+      `Saving target error (${response.status} ${response.statusText || "Request failed"})`,
+      "",
+      `Main error: ${serverError}`,
+      `Details: ${serverDetails}`,
+      `API route: ${response.url || "/api/admin/money/saving-targets"}`,
+    ];
+
+    if (response.status === 404) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• Make sure app/api/admin/money/saving-targets/route.ts exists.",
+        "• Make sure the route exports GET, POST, PATCH and DELETE.",
+      );
+    }
+
+    if (response.status === 405) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• The API route exists, but the HTTP method is missing.",
+        "• Add the matching export function, for example export async function POST(request: Request).",
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• Make sure you are signed in as an admin.",
+        "• Check Clerk/admin permissions for this route.",
+      );
+    }
+
+    if (response.status >= 500) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• Check the Vercel/server logs for the full database error.",
+        "• Make sure the money_saving_targets Supabase table exists.",
+        "• Make sure columns such as deleted_at, target_name and target_amount_pence exist.",
+      );
+    }
+
+    const error = new Error(helpLines.join("\n")) as Error & {
+      status?: number;
+      payload?: any;
+    };
+
+    error.status = response.status;
+    error.payload = payload;
+
+    throw error;
+  }
+
+  return payload || {};
+}
+
+
+async function parseDeletedItemsResponse(response: Response) {
+  const rawText = await response.text().catch(() => "");
+
+  let payload: any = null;
+
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const serverError =
+      payload?.error ||
+      payload?.message ||
+      "Deleted items request failed.";
+
+    const serverDetails =
+      payload?.details ||
+      payload?.hint ||
+      payload?.code ||
+      rawText ||
+      "No extra server details were returned.";
+
+    const helpLines = [
+      `Deleted items error (${response.status} ${response.statusText || "Request failed"})`,
+      "",
+      `Main error: ${serverError}`,
+      `Details: ${serverDetails}`,
+      `API route: ${response.url || "/api/admin/money/deleted-items"}`,
+    ];
+
+    if (response.status === 404) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• Make sure app/api/admin/money/deleted-items/route.ts exists.",
+        "• Make sure the route exports DELETE for soft deleting budget tracker items.",
+        "• Make sure the selected budget row still exists in Supabase.",
+      );
+    }
+
+    if (response.status === 405) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• The deleted-items route exists but the DELETE method is missing.",
+        "• Add export async function DELETE(request: Request) to app/api/admin/money/deleted-items/route.ts.",
+      );
+    }
+
+    if (response.status >= 500) {
+      helpLines.push(
+        "",
+        "What to check:",
+        "• Check the terminal/Vercel logs.",
+        "• Make sure your budget tracker table name is listed in POSSIBLE_BUDGET_TABLES.",
+        "• Make sure the budget tracker table has deleted_at, deleted_by, deleted_by_email and deleted_by_user_id columns.",
+      );
+    }
+
+    throw new Error(helpLines.join("\n"));
+  }
+
+  return payload || {};
+}
+
+function isSavedSavingTargetId(id: string | null | undefined) {
+  return Boolean(id && !String(id).startsWith("saving-target-"));
+}
+
+async function saveSavingTargetToDatabase(
+  target: SavingTargetState,
+  selectedYear: string,
+) {
+  const creating = !isSavedSavingTargetId(target.id);
+
+  try {
+    const response = await fetch("/api/admin/money/saving-targets", {
+      method: creating ? "POST" : "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(
+        creating
+          ? {
+              ...savingTargetToApiPayload(target, selectedYear),
+              id: undefined,
+            }
+          : savingTargetToApiPayload(target, selectedYear),
+      ),
+    });
+
+    const payload = await parseSavingTargetResponse(response);
+
+    return payload?.target ? apiRowToSavingTarget(payload.target) : target;
+  } catch (error: any) {
+    /**
+     * If this target ID came from old browser/local data, Supabase will not
+     * have that row. Instead of showing a red 404 forever, save it again as a
+     * new database target.
+     */
+    if (!creating && error?.status === 404) {
+      const response = await fetch("/api/admin/money/saving-targets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...savingTargetToApiPayload(target, selectedYear),
+          id: undefined,
+        }),
+      });
+
+      const payload = await parseSavingTargetResponse(response);
+
+      return payload?.target ? apiRowToSavingTarget(payload.target) : target;
+    }
+
+    throw error;
+  }
+}
+
 export default function MoneyBudgetPlanning({
   selectedYear,
   budgetItems,
@@ -672,25 +1246,98 @@ export default function MoneyBudgetPlanning({
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draftItems, setDraftItems] = useState<BudgetItem[]>(budgetItems);
+  const [draftAmountInputs, setDraftAmountInputs] = useState<
+    Record<string, string>
+  >(() => buildBudgetAmountInputs(budgetItems));
   const [newBudgetName, setNewBudgetName] = useState("");
   const [newBudgetError, setNewBudgetError] = useState<string | null>(null);
   const [auditLogError, setAuditLogError] = useState<string | null>(null);
-  const [editorDetails, setEditorDetails] = useState<BudgetEditor | null>(() => {
-    const name =
-      cleanEditorValue(currentAdminName) || nameFromEmail(currentAdminEmail);
-    const email = cleanEditorValue(currentAdminEmail);
+  const [editorDetails, setEditorDetails] = useState<BudgetEditor | null>(
+    () => {
+      const name =
+        cleanEditorValue(currentAdminName) || nameFromEmail(currentAdminEmail);
+      const email = cleanEditorValue(currentAdminEmail);
 
-    return name || email
-      ? {
-          name,
-          email,
-        }
-      : null;
-  });
+      return name || email
+        ? {
+            name,
+            email,
+          }
+        : null;
+    },
+  );
+  const [savingTargets, setSavingTargets] = useState<SavingTargetState[]>(
+    () => [normaliseSavingTarget(null)],
+  );
+  const [selectedSavingTargetId, setSelectedSavingTargetId] = useState("");
+  const [newSavingTargetName, setNewSavingTargetName] = useState("");
+  const [savingTargetError, setSavingTargetError] = useState<string | null>(
+    null,
+  );
+  const [savingTargetLoading, setSavingTargetLoading] = useState(false);
+  const [savingTargetSaving, setSavingTargetSaving] = useState(false);
+  const [deleteSavingTargetPopup, setDeleteSavingTargetPopup] =
+    useState<SavingTargetState | null>(null);
+  const [deleteBudgetAreaPopup, setDeleteBudgetAreaPopup] =
+    useState<BudgetItem | null>(null);
+  const [deletingBudgetArea, setDeletingBudgetArea] = useState(false);
 
   useEffect(() => {
     setDraftItems(budgetItems);
+    setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
   }, [budgetItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSavingTargets() {
+      setSavingTargetLoading(true);
+      setSavingTargetError(null);
+
+      try {
+        const response = await fetch(
+          `/api/admin/money/saving-targets?year=${encodeURIComponent(
+            selectedYear,
+          )}`,
+          { cache: "no-store" },
+        );
+
+        const payload = await parseSavingTargetResponse(response);
+        const targets = Array.isArray(payload?.targets)
+          ? payload.targets.map((row: SavingTargetApiRow) =>
+              apiRowToSavingTarget(row),
+            )
+          : [];
+
+        if (cancelled) return;
+
+        const nextTargets =
+          targets.length > 0 ? targets : [normaliseSavingTarget(null)];
+
+        setSavingTargets(nextTargets);
+        setSelectedSavingTargetId(nextTargets[0]?.id || "");
+        setNewSavingTargetName("");
+      } catch (error: any) {
+        if (cancelled) return;
+
+        setSavingTargets([normaliseSavingTarget(null)]);
+        setSelectedSavingTargetId("");
+        setSavingTargetError(
+          error?.message || "Could not load saving targets from the database.",
+        );
+      } finally {
+        if (!cancelled) {
+          setSavingTargetLoading(false);
+        }
+      }
+    }
+
+    loadSavingTargets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedYear]);
 
   useEffect(() => {
     const name =
@@ -764,10 +1411,69 @@ export default function MoneyBudgetPlanning({
     };
   }, [rows]);
 
+  const selectedSavingTarget = useMemo(() => {
+    return (
+      savingTargets.find((target) => target.id === selectedSavingTargetId) ||
+      savingTargets[0] ||
+      normaliseSavingTarget(null)
+    );
+  }, [savingTargets, selectedSavingTargetId]);
+
+  const savingTargetSummaries = useMemo(() => {
+    return savingTargets.map((target) => {
+      const targetPence = inputToPence(target.targetAmount);
+      const currentSavedPence = inputToPence(target.currentSaved);
+      const progressPercent =
+        targetPence > 0
+          ? Math.min(100, Math.round((currentSavedPence / targetPence) * 100))
+          : 0;
+
+      return {
+        ...target,
+        targetPence,
+        currentSavedPence,
+        remainingToSavePence: Math.max(targetPence - currentSavedPence, 0),
+        progressPercent,
+      };
+    });
+  }, [savingTargets]);
+
+  const savingTargetTotals = useMemo(() => {
+    const targetPence = inputToPence(selectedSavingTarget.targetAmount);
+    const currentSavedPence = inputToPence(selectedSavingTarget.currentSaved);
+    const months = Math.max(
+      0,
+      Math.floor(Number(selectedSavingTarget.months || 0) || 0),
+    );
+    const remainingToSavePence = Math.max(targetPence - currentSavedPence, 0);
+    const monthlyRequiredPence =
+      months > 0 ? Math.ceil(remainingToSavePence / months) : 0;
+    const progressPercent =
+      targetPence > 0
+        ? Math.min(100, Math.round((currentSavedPence / targetPence) * 100))
+        : 0;
+
+    return {
+      targetPence,
+      currentSavedPence,
+      months,
+      remainingToSavePence,
+      monthlyRequiredPence,
+      progressPercent,
+    };
+  }, [
+    selectedSavingTarget.currentSaved,
+    selectedSavingTarget.months,
+    selectedSavingTarget.targetAmount,
+  ]);
+
+  const hasSavingTarget = savingTargetTotals.targetPence > 0;
+
   const hasOverBudgetRows = rows.some((item) => item.remainingPence < 0);
 
   function startEditing() {
     setDraftItems(budgetItems);
+    setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -777,6 +1483,7 @@ export default function MoneyBudgetPlanning({
 
   function cancelEditing() {
     setDraftItems(budgetItems);
+    setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -785,7 +1492,7 @@ export default function MoneyBudgetPlanning({
 
   function updateDraft(
     categoryKey: string,
-    field: "planned_amount_pence" | "notes" | "category_label",
+    field: "notes" | "category_label",
     value: string,
   ) {
     setDraftItems((prev) =>
@@ -794,11 +1501,432 @@ export default function MoneyBudgetPlanning({
 
         return {
           ...item,
-          [field]:
-            field === "planned_amount_pence" ? inputToPence(value) : value,
+          [field]: value,
         };
       }),
     );
+  }
+
+  function updateDraftPlannedAmount(categoryKey: string, value: string) {
+    setDraftAmountInputs((prev) => ({
+      ...prev,
+      [categoryKey]: value,
+    }));
+
+    setDraftItems((prev) =>
+      prev.map((item) => {
+        if (item.category_key !== categoryKey) return item;
+
+        return {
+          ...item,
+          planned_amount_pence: inputToPence(value),
+        };
+      }),
+    );
+  }
+
+  function formatDraftPlannedAmount(categoryKey: string) {
+    setDraftAmountInputs((prev) => {
+      const rawValue = prev[categoryKey];
+
+      if (rawValue === undefined || rawValue === "") {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [categoryKey]: penceToInput(inputToPence(rawValue)),
+      };
+    });
+  }
+
+  function updateSavingTarget(field: keyof SavingTargetState, value: string) {
+    const cleanedValue =
+      field === "targetAmount" || field === "currentSaved"
+        ? cleanMoneyInput(value)
+        : field === "months"
+          ? cleanWholeNumberInput(value)
+          : value;
+
+    setSavingTargets((prev) =>
+      prev.map((target) =>
+        target.id === selectedSavingTarget.id
+          ? {
+              ...target,
+              [field]: cleanedValue,
+            }
+          : target,
+      ),
+    );
+  }
+
+  async function saveSelectedSavingTarget() {
+    const targetName = selectedSavingTarget.name.trim();
+
+    if (!targetName) {
+      setSavingTargetError("Enter a name for the selected saving target.");
+      return;
+    }
+
+    setSavingTargetSaving(true);
+    setSavingTargetError(null);
+
+    try {
+      const wasAlreadySaved = isSavedSavingTargetId(selectedSavingTarget.id);
+      const beforeTarget = selectedSavingTarget;
+
+      const savedTarget = await saveSavingTargetToDatabase(
+        selectedSavingTarget,
+        selectedYear,
+      );
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: wasAlreadySaved ? "saving_target_update" : "saving_target_create",
+        selectedYear,
+        beforeTarget: wasAlreadySaved ? beforeTarget : null,
+        afterTarget: savedTarget,
+        editor: editorDetails,
+        metadata: {
+          route: "/api/admin/money/saving-targets",
+          trigger: "save_selected_target_button",
+        },
+      });
+
+      setSavingTargets((prev) => {
+        const found = prev.some(
+          (target) => target.id === selectedSavingTarget.id,
+        );
+
+        if (!found) return [savedTarget, ...prev];
+
+        return prev.map((target) =>
+          target.id === selectedSavingTarget.id ? savedTarget : target,
+        );
+      });
+      setSelectedSavingTargetId(savedTarget.id);
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Saving target saved, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+    } catch (error: any) {
+      setSavingTargetError(
+        error?.message || "Could not save the selected saving target.",
+      );
+    } finally {
+      setSavingTargetSaving(false);
+    }
+  }
+
+  async function clearSavingTarget() {
+    const resetTarget = normaliseSavingTarget({
+      id: selectedSavingTarget.id,
+      name: selectedSavingTarget.name || DEFAULT_SAVING_TARGET_NAME,
+    });
+
+    setSavingTargets((prev) =>
+      prev.map((target) =>
+        target.id === selectedSavingTarget.id ? resetTarget : target,
+      ),
+    );
+
+    setSavingTargetSaving(true);
+    setSavingTargetError(null);
+
+    try {
+      const beforeTarget = selectedSavingTarget;
+
+      const savedTarget = await saveSavingTargetToDatabase(
+        resetTarget,
+        selectedYear,
+      );
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: "saving_target_clear",
+        selectedYear,
+        beforeTarget,
+        afterTarget: savedTarget,
+        editor: editorDetails,
+        metadata: {
+          route: "/api/admin/money/saving-targets",
+          trigger: "clear_selected_target_button",
+        },
+      });
+
+      setSavingTargets((prev) =>
+        prev.map((target) =>
+          target.id === selectedSavingTarget.id ? savedTarget : target,
+        ),
+      );
+      setSelectedSavingTargetId(savedTarget.id);
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Saving target cleared, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+    } catch (error: any) {
+      setSavingTargetError(
+        error?.message || "Could not clear the selected saving target.",
+      );
+    } finally {
+      setSavingTargetSaving(false);
+    }
+  }
+
+  async function addSavingTarget() {
+    const label = newSavingTargetName.trim();
+
+    if (!label) {
+      setSavingTargetError("Enter a name for the saving target first.");
+      return;
+    }
+
+    const nameAlreadyExists = savingTargets.some(
+      (target) => target.name.toLowerCase().trim() === label.toLowerCase(),
+    );
+
+    if (nameAlreadyExists) {
+      setSavingTargetError("A saving target with this name already exists.");
+      return;
+    }
+
+    setSavingTargetSaving(true);
+    setSavingTargetError(null);
+
+    try {
+      const newTarget = createEmptySavingTarget(label);
+      const response = await fetch("/api/admin/money/saving-targets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          year: selectedYear,
+          target_name: label,
+          target_amount_pence: 0,
+          saved_amount_pence: 0,
+          months_to_save: 1,
+          notes: "",
+        }),
+      });
+
+      const payload = await parseSavingTargetResponse(response);
+      const savedTarget = payload?.target
+        ? apiRowToSavingTarget(payload.target)
+        : newTarget;
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: "saving_target_create",
+        selectedYear,
+        beforeTarget: null,
+        afterTarget: savedTarget,
+        editor: editorDetails,
+        metadata: {
+          route: "/api/admin/money/saving-targets",
+          trigger: "add_target_button",
+        },
+      });
+
+      setSavingTargets((prev) => {
+        const withoutBlankDefault =
+          prev.length === 1 &&
+          !isSavedSavingTargetId(prev[0]?.id) &&
+          !prev[0]?.targetAmount &&
+          !prev[0]?.currentSaved &&
+          !prev[0]?.months &&
+          !prev[0]?.note
+            ? []
+            : prev;
+
+        return [...withoutBlankDefault, savedTarget];
+      });
+      setSelectedSavingTargetId(savedTarget.id);
+      setNewSavingTargetName("");
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Saving target created, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+    } catch (error: any) {
+      setSavingTargetError(
+        error?.message || "Could not add the new saving target.",
+      );
+    } finally {
+      setSavingTargetSaving(false);
+    }
+  }
+
+  function openDeleteSavingTargetPopup(target: SavingTargetState) {
+    setSavingTargetError(null);
+    setDeleteSavingTargetPopup(target);
+  }
+
+  function closeDeleteSavingTargetPopup() {
+    if (savingTargetSaving) return;
+    setDeleteSavingTargetPopup(null);
+  }
+
+  async function confirmSoftDeleteSavingTarget() {
+    if (!deleteSavingTargetPopup?.id) return;
+
+    await removeSavingTarget(deleteSavingTargetPopup.id);
+    setDeleteSavingTargetPopup(null);
+  }
+
+  async function removeSavingTarget(targetId: string) {
+    if (!targetId) return;
+
+    if (!isSavedSavingTargetId(targetId)) {
+      const beforeTarget =
+        savingTargets.find((target) => target.id === targetId) || null;
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: "saving_target_draft_remove",
+        selectedYear,
+        beforeTarget,
+        afterTarget: null,
+        editor: editorDetails,
+        metadata: {
+          trigger: "delete_unsaved_saving_target",
+          database_row: false,
+        },
+      });
+
+      setSavingTargets((prev) => {
+        const nextTargets = prev.filter((target) => target.id !== targetId);
+        const fallback = nextTargets.length > 0 ? nextTargets : [normaliseSavingTarget(null)];
+        setSelectedSavingTargetId(fallback[0]?.id || "");
+        return fallback;
+      });
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Saving target removed from draft, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+
+      return;
+    }
+
+    setSavingTargetSaving(true);
+    setSavingTargetError(null);
+
+    try {
+      const beforeTarget =
+        savingTargets.find((target) => target.id === targetId) || null;
+
+      const response = await fetch(
+        `/api/admin/money/saving-targets?id=${encodeURIComponent(targetId)}`,
+        { method: "DELETE" },
+      );
+
+      const payload = await parseSavingTargetResponse(response);
+      const afterTarget = payload?.target
+        ? apiRowToSavingTarget(payload.target)
+        : null;
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: "saving_target_soft_delete",
+        selectedYear,
+        beforeTarget,
+        afterTarget,
+        editor: editorDetails,
+        metadata: {
+          route: "/api/admin/money/saving-targets",
+          trigger: "delete_selected_target_button",
+          soft_delete: true,
+        },
+      });
+
+      setSavingTargets((prev) => {
+        const nextTargets = prev.filter((target) => target.id !== targetId);
+        const fallback = nextTargets.length > 0 ? nextTargets : [normaliseSavingTarget(null)];
+
+        if (selectedSavingTargetId === targetId) {
+          setSelectedSavingTargetId(fallback[0]?.id || "");
+        }
+
+        return fallback;
+      });
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Saving target soft deleted, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+    } catch (error: any) {
+      setSavingTargetError(
+        error?.message || "Could not remove the selected saving target.",
+      );
+    } finally {
+      setSavingTargetSaving(false);
+    }
+  }
+
+  async function addCurrentSavedFromMonthlyAmount() {
+    if (savingTargetTotals.monthlyRequiredPence <= 0) return;
+
+    const nextSavedPence =
+      savingTargetTotals.currentSavedPence +
+      savingTargetTotals.monthlyRequiredPence;
+
+    const updatedTarget = {
+      ...selectedSavingTarget,
+      currentSaved: penceToInput(nextSavedPence),
+    };
+
+    setSavingTargets((prev) =>
+      prev.map((target) =>
+        target.id === selectedSavingTarget.id ? updatedTarget : target,
+      ),
+    );
+
+    setSavingTargetSaving(true);
+    setSavingTargetError(null);
+
+    try {
+      const beforeTarget = selectedSavingTarget;
+
+      const savedTarget = await saveSavingTargetToDatabase(
+        updatedTarget,
+        selectedYear,
+      );
+
+      const auditResult = await createSavingTargetAuditLog({
+        action: "saving_target_monthly_saved",
+        selectedYear,
+        beforeTarget,
+        afterTarget: savedTarget,
+        editor: editorDetails,
+        metadata: {
+          route: "/api/admin/money/saving-targets",
+          trigger: "add_one_month_saved_button",
+          monthly_required_pence: savingTargetTotals.monthlyRequiredPence,
+        },
+      });
+
+      setSavingTargets((prev) =>
+        prev.map((target) =>
+          target.id === selectedSavingTarget.id ? savedTarget : target,
+        ),
+      );
+      setSelectedSavingTargetId(savedTarget.id);
+
+      if (!auditResult.ok) {
+        setSavingTargetError(
+          `Monthly saving update saved, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
+        );
+      }
+    } catch (error: any) {
+      setSavingTargetError(
+        error?.message || "Could not save the monthly saving update.",
+      );
+    } finally {
+      setSavingTargetSaving(false);
+    }
   }
 
   function addBudgetArea() {
@@ -840,7 +1968,8 @@ export default function MoneyBudgetPlanning({
       category_label: label,
       planned_amount_pence: 0,
       notes: "",
-      updated_by: editorDetails?.name || nameFromEmail(editorDetails?.email) || null,
+      updated_by:
+        editorDetails?.name || nameFromEmail(editorDetails?.email) || null,
       updated_by_email: editorDetails?.email || null,
     };
 
@@ -852,20 +1981,86 @@ export default function MoneyBudgetPlanning({
       return [...prev.slice(0, otherIndex), newItem, ...prev.slice(otherIndex)];
     });
 
+    setDraftAmountInputs((prev) => ({
+      ...prev,
+      [categoryKey]: "",
+    }));
+
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
   }
 
-  function removeBudgetArea(categoryKey: string) {
+  function removeBudgetAreaFromDraft(categoryKey: string) {
     setDraftItems((prev) =>
       prev.filter((item) => item.category_key !== categoryKey),
     );
+
+    setDraftAmountInputs((prev) => {
+      const next = { ...prev };
+      delete next[categoryKey];
+      return next;
+    });
+  }
+
+  function openDeleteBudgetAreaPopup(item: BudgetItem) {
+    setAuditLogError(null);
+    setNewBudgetError(null);
+    setDeleteBudgetAreaPopup(item);
+  }
+
+  function closeDeleteBudgetAreaPopup() {
+    if (deletingBudgetArea) return;
+    setDeleteBudgetAreaPopup(null);
+  }
+
+  async function confirmSoftDeleteBudgetArea() {
+    if (!deleteBudgetAreaPopup) return;
+
+    const item = deleteBudgetAreaPopup;
+
+    /**
+     * If the custom budget area has not been saved to Supabase yet,
+     * there is no database row to soft delete. Remove it from this draft only.
+     */
+    if (!item.id) {
+      removeBudgetAreaFromDraft(item.category_key);
+      setDeleteBudgetAreaPopup(null);
+      return;
+    }
+
+    setDeletingBudgetArea(true);
+    setAuditLogError(null);
+
+    try {
+      const response = await fetch("/api/admin/money/deleted-items", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "budget_item",
+          id: item.id,
+        }),
+      });
+
+      await parseDeletedItemsResponse(response);
+
+      removeBudgetAreaFromDraft(item.category_key);
+      setDeleteBudgetAreaPopup(null);
+    } catch (error: any) {
+      setAuditLogError(
+        error?.message || "Could not soft delete the budget tracker item.",
+      );
+    } finally {
+      setDeletingBudgetArea(false);
+    }
   }
 
   async function saveBudget() {
     const beforeItems = cleanBudgetItemsForSave(budgetItems);
-    const editorName = editorDetails?.name || nameFromEmail(editorDetails?.email) || null;
+    const editorName =
+      editorDetails?.name || nameFromEmail(editorDetails?.email) || null;
     const editorEmail = editorDetails?.email || null;
     const afterItems = cleanBudgetItemsForSave(draftItems).map((item) => ({
       ...item,
@@ -903,6 +2098,7 @@ export default function MoneyBudgetPlanning({
     }
 
     setDraftItems(afterItems);
+    setDraftAmountInputs(buildBudgetAmountInputs(afterItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -1019,6 +2215,385 @@ export default function MoneyBudgetPlanning({
           <p className="mt-2 text-2xl font-black text-white">
             {totals.percentUsed}%
           </p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-3xl border border-sky-300/20 bg-sky-500/10 p-4 ring-1 ring-sky-300/10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100">
+              <Target className="h-4 w-4" />
+              Saving target planner
+            </div>
+
+            <h3 className="mt-3 text-xl font-black text-white">
+              Create saving targets for different things
+            </h3>
+
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-sky-100/70">
+              Add separate targets for things like insurance, pitch hire, stage,
+              security, or emergency savings. Each target works out how much to
+              put away each month.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning/Delete"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25"
+            >
+              <Trash2 className="h-4 w-4" />
+              View deleted items
+            </Link>
+
+            <button
+              type="button"
+              onClick={clearSavingTarget}
+              disabled={savingTargetSaving || savingTargetLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <X className="h-4 w-4" />
+              Clear selected target
+            </button>
+          </div>
+        </div>
+
+        {(savingTargetLoading || savingTargetError) && (
+          <div
+            className={`mt-4 rounded-2xl border p-4 text-sm ${
+              savingTargetError
+                ? "border-red-300/30 bg-red-500/10 text-red-100"
+                : "border-sky-300/20 bg-sky-500/10 text-sky-100"
+            }`}
+          >
+            {savingTargetError ? (
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-black text-white">Saving target error</p>
+                  <p className="mt-2 whitespace-pre-wrap break-words leading-6 text-red-100/90">
+                    {savingTargetError}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              "Loading saving targets from the database..."
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
+          <label className="mb-2 block text-sm font-black text-emerald-100">
+            Add another saving target
+          </label>
+
+          <p className="mb-3 text-xs leading-5 text-emerald-100/70">
+            Example targets: Public liability insurance, pitch hire, stage,
+            performers, security, printing, or emergency reserve.
+          </p>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={newSavingTargetName}
+              onChange={(event) => {
+                setNewSavingTargetName(event.target.value);
+                setSavingTargetError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addSavingTarget();
+                }
+              }}
+              placeholder="Example: Public liability insurance"
+              className="min-w-0 flex-1 rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-emerald-300/20 placeholder:text-white/35 focus:ring-emerald-300/50"
+            />
+
+            <button
+              type="button"
+              onClick={addSavingTarget}
+              disabled={savingTargetSaving || savingTargetLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              Add target
+            </button>
+          </div>
+
+          {savingTargetError && (
+            <p className="mt-2 whitespace-pre-wrap break-words rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-100">
+              {savingTargetError}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {savingTargetSummaries.map((target) => {
+            const active = target.id === selectedSavingTarget.id;
+
+            return (
+              <button
+                key={target.id}
+                type="button"
+                onClick={() => setSelectedSavingTargetId(target.id)}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  active
+                    ? "border-sky-300/40 bg-sky-400/15 ring-2 ring-sky-300/30"
+                    : "border-white/10 bg-black/20 hover:bg-white/10"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-black text-white">
+                      {target.name || "Saving target"}
+                    </p>
+
+                    <p className="mt-1 text-xs text-sky-100/65">
+                      {money(target.currentSavedPence)} saved of{" "}
+                      {money(target.targetPence)}
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black text-white">
+                    {target.progressPercent}%
+                  </span>
+                </div>
+
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-sky-300"
+                    style={{ width: `${target.progressPercent}%` }}
+                  />
+                </div>
+
+                <p className="mt-2 text-xs text-sky-100/65">
+                  Still to save: {money(target.remainingToSavePence)}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-wide text-sky-100/60">
+              Editing selected target
+            </p>
+            <p className="mt-1 break-words text-lg font-black text-white">
+              {selectedSavingTarget.name || "Saving target"}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openDeleteSavingTargetPopup(selectedSavingTarget)}
+            disabled={savingTargetSaving || savingTargetLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete selected target
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-sky-100/75">
+            Changes to the selected saving target are saved to Supabase when you press Save selected target.
+          </p>
+
+          <button
+            type="button"
+            onClick={saveSelectedSavingTarget}
+            disabled={savingTargetSaving || savingTargetLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Save className="h-4 w-4" />
+            {savingTargetSaving ? "Saving target..." : "Save selected target"}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-5">
+          <label className="block rounded-2xl border border-white/10 bg-black/20 p-3">
+            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-sky-100/70">
+              Target name
+            </span>
+            <input
+              type="text"
+              value={selectedSavingTarget.name}
+              onChange={(event) =>
+                updateSavingTarget("name", event.target.value)
+              }
+              placeholder="Example: Insurance"
+              className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+            />
+          </label>
+
+          <label className="block rounded-2xl border border-white/10 bg-black/20 p-3">
+            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-sky-100/70">
+              Target amount
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={selectedSavingTarget.targetAmount}
+              onChange={(event) =>
+                updateSavingTarget("targetAmount", event.target.value)
+              }
+              placeholder="Example: 1000"
+              className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+            />
+          </label>
+
+          <label className="block rounded-2xl border border-white/10 bg-black/20 p-3">
+            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-sky-100/70">
+              Already saved
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={selectedSavingTarget.currentSaved}
+              onChange={(event) =>
+                updateSavingTarget("currentSaved", event.target.value)
+              }
+              placeholder="Example: 150"
+              className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+            />
+          </label>
+
+          <label className="block rounded-2xl border border-white/10 bg-black/20 p-3">
+            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-sky-100/70">
+              How many months?
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={selectedSavingTarget.months}
+              onChange={(event) =>
+                updateSavingTarget("months", event.target.value)
+              }
+              placeholder="Example: 6"
+              className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+            />
+          </label>
+
+          <label className="block rounded-2xl border border-white/10 bg-black/20 p-3">
+            <span className="mb-2 block text-xs font-black uppercase tracking-wide text-sky-100/70">
+              Target note
+            </span>
+            <input
+              type="text"
+              value={selectedSavingTarget.note}
+              onChange={(event) =>
+                updateSavingTarget("note", event.target.value)
+              }
+              placeholder="Example: Needs paying before June"
+              className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-2xl border border-sky-300/20 bg-black/20 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-sky-100/70">
+              Target
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">
+              {money(savingTargetTotals.targetPence)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-100/70">
+              Still to save
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">
+              {money(savingTargetTotals.remainingToSavePence)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-purple-100/70">
+              Put away monthly
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">
+              {savingTargetTotals.months > 0
+                ? money(savingTargetTotals.monthlyRequiredPence)
+                : "Set months"}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-100/70">
+              Monthly guide
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">
+              {savingTargetTotals.months > 0
+                ? money(savingTargetTotals.monthlyRequiredPence)
+                : "Set months"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3 text-xs font-bold uppercase tracking-wide text-sky-100/70">
+                <span>
+                  Progress for {selectedSavingTarget.name || "selected target"}
+                </span>
+                <span>{savingTargetTotals.progressPercent}%</span>
+              </div>
+
+              <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-sky-300"
+                  style={{ width: `${savingTargetTotals.progressPercent}%` }}
+                />
+              </div>
+
+              {hasSavingTarget ? (
+                <p className="mt-3 text-sm leading-6 text-sky-100/75">
+                  {savingTargetTotals.months > 0 ? (
+                    <>
+                      To reach {money(savingTargetTotals.targetPence)} for{" "}
+                      <strong className="text-white">
+                        {selectedSavingTarget.name || "this target"}
+                      </strong>{" "}
+                      in {savingTargetTotals.months} month
+                      {savingTargetTotals.months === 1 ? "" : "s"}, put away{" "}
+                      <strong className="text-white">
+                        {money(savingTargetTotals.monthlyRequiredPence)}
+                      </strong>{" "}
+                      every month.
+                    </>
+                  ) : (
+                    <>
+                      Enter how many months you have to calculate the monthly
+                      saving amount.
+                    </>
+                  )}
+                </p>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-sky-100/65">
+                  Add a target amount to start the selected saving plan.
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={addCurrentSavedFromMonthlyAmount}
+              disabled={
+                savingTargetTotals.monthlyRequiredPence <= 0 ||
+                savingTargetSaving ||
+                savingTargetLoading
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Calculator className="h-4 w-4" />
+              Add one month saved
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1189,14 +2764,18 @@ export default function MoneyBudgetPlanning({
                               type="number"
                               min="0"
                               step="0.01"
-                              value={penceToInput(item.planned_amount_pence)}
+                              inputMode="decimal"
+                              value={draftAmountInputs[item.category_key] ?? ""}
                               onChange={(event) =>
-                                updateDraft(
+                                updateDraftPlannedAmount(
                                   item.category_key,
-                                  "planned_amount_pence",
                                   event.target.value,
                                 )
                               }
+                              onBlur={() =>
+                                formatDraftPlannedAmount(item.category_key)
+                              }
+                              placeholder="0.00"
                               className="w-32 rounded-xl bg-black/30 p-2 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
                             />
                           ) : (
@@ -1270,12 +2849,23 @@ export default function MoneyBudgetPlanning({
                             </p>
 
                             {(editing
-                              ? editorDetails?.email || budgetEditorDisplayEmail(item, editorDetails)
-                              : budgetEditorDisplayEmail(item, editorDetails)) && (
+                              ? editorDetails?.email ||
+                                budgetEditorDisplayEmail(item, editorDetails)
+                              : budgetEditorDisplayEmail(
+                                  item,
+                                  editorDetails,
+                                )) && (
                               <p className="mt-1 break-all text-pink-100/65">
                                 {editing
-                                  ? editorDetails?.email || budgetEditorDisplayEmail(item, editorDetails)
-                                  : budgetEditorDisplayEmail(item, editorDetails)}
+                                  ? editorDetails?.email ||
+                                    budgetEditorDisplayEmail(
+                                      item,
+                                      editorDetails,
+                                    )
+                                  : budgetEditorDisplayEmail(
+                                      item,
+                                      editorDetails,
+                                    )}
                               </p>
                             )}
 
@@ -1292,9 +2882,7 @@ export default function MoneyBudgetPlanning({
                             {customBudgetArea ? (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  removeBudgetArea(item.category_key)
-                                }
+                                onClick={() => openDeleteBudgetAreaPopup(item)}
                                 disabled={savingBudget}
                                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
                               >
@@ -1325,6 +2913,177 @@ export default function MoneyBudgetPlanning({
           )}
         </div>
       )}
+
+
+      {deleteBudgetAreaPopup && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-200 ring-1 ring-red-300/30">
+                <Trash2 className="h-6 w-6" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xl font-black text-white">
+                  Soft delete budget tracker item?
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-white/70">
+                  This will remove the budget area from the Budget Tracker page,
+                  but it will not be permanently deleted from Supabase.
+                </p>
+
+                <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-red-100/70">
+                    Selected budget area
+                  </p>
+
+                  <p className="mt-1 break-words text-lg font-black text-white">
+                    {deleteBudgetAreaPopup.category_label || "Budget area"}
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-red-100/80">
+                    Planned budget:{" "}
+                    <strong className="text-white">
+                      {money(deleteBudgetAreaPopup.planned_amount_pence || 0)}
+                    </strong>
+                  </p>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-50">
+                  <p className="font-black text-white">
+                    This is a soft delete.
+                  </p>
+
+                  <p className="mt-1">
+                    The API route{" "}
+                    <strong>/api/admin/money/deleted-items</strong> will be
+                    called with <strong>DELETE</strong>. The database row will
+                    stay in your budget tracker table and the API will set{" "}
+                    <strong>deleted_at</strong>, <strong>deleted_by</strong>,{" "}
+                    <strong>deleted_by_email</strong>, and{" "}
+                    <strong>deleted_by_user_id</strong>. The deleted item can
+                    then show on the deleted items page and be restored.
+                  </p>
+
+                  {!deleteBudgetAreaPopup.id && (
+                    <p className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-amber-100/80">
+                      This budget area has not been saved to Supabase yet, so
+                      it will only be removed from this draft.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={closeDeleteBudgetAreaPopup}
+                    disabled={deletingBudgetArea}
+                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={confirmSoftDeleteBudgetArea}
+                    disabled={deletingBudgetArea}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {deletingBudgetArea
+                      ? "Soft deleting..."
+                      : "Yes, soft delete budget area"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteSavingTargetPopup && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-200 ring-1 ring-red-300/30">
+                <Trash2 className="h-6 w-6" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xl font-black text-white">
+                  Soft delete saving target?
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-white/70">
+                  This will remove the saving target from the Budget Planning
+                  page, but it will not be permanently deleted from Supabase.
+                </p>
+
+                <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-red-100/70">
+                    Selected saving target
+                  </p>
+
+                  <p className="mt-1 break-words text-lg font-black text-white">
+                    {deleteSavingTargetPopup.name || "Saving target"}
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-red-100/80">
+                    Target:{" "}
+                    <strong className="text-white">
+                      {money(inputToPence(deleteSavingTargetPopup.targetAmount))}
+                    </strong>{" "}
+                    · Saved:{" "}
+                    <strong className="text-white">
+                      {money(inputToPence(deleteSavingTargetPopup.currentSaved))}
+                    </strong>
+                  </p>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-50">
+                  <p className="font-black text-white">
+                    This is a soft delete.
+                  </p>
+
+                  <p className="mt-1">
+                    The database row will stay in{" "}
+                    <strong>money_saving_targets</strong>. The API will set{" "}
+                    <strong>deleted_at</strong>, <strong>deleted_by</strong>,{" "}
+                    <strong>deleted_by_email</strong>, and{" "}
+                    <strong>deleted_by_user_id</strong>, then normal loading
+                    will hide it from this page.
+                  </p>
+                </div>
+
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={closeDeleteSavingTargetPopup}
+                    disabled={savingTargetSaving}
+                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={confirmSoftDeleteSavingTarget}
+                    disabled={savingTargetSaving}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {savingTargetSaving
+                      ? "Soft deleting..."
+                      : "Yes, soft delete target"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </section>
   );
 }

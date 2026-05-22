@@ -301,7 +301,10 @@ export default function MoneyTransactionForm({
   const budgetOptions =
     budgetItems.length > 0 ? budgetItems : defaultBudgetItems;
   const selectedBudgetCategory = getBudgetFormValue(form);
-  const canManuallyLinkBudget = !isItemDonation;
+  const isPersonalFundsPayment =
+    form.paymentMethod === "Personal Funds" || Boolean(form.isPersonalFunds);
+
+  const canManuallyLinkBudget = !isItemDonation && !isPersonalFundsPayment;
 
   const loanMode = getLoanMode(form.category);
   const isLoanRepayment = isLoanFunding && loanMode === "Loan Repayment";
@@ -1087,42 +1090,62 @@ export default function MoneyTransactionForm({
 
                         setForm((prev) => {
                           const nextIsItemDonation = method === "Item Donation";
+                          const nextIsPersonalFunds =
+                            method === "Personal Funds";
 
                           return {
                             ...prev,
                             paymentMethod: method,
-                            sponsorId: nextIsItemDonation ? "" : prev.sponsorId,
-                            sponsorName: nextIsItemDonation
-                              ? ""
-                              : prev.sponsorName,
-                            type: nextIsItemDonation ? "income" : prev.type,
+                            sponsorId:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : prev.sponsorId,
+                            sponsorName:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : prev.sponsorName,
+                            type: nextIsItemDonation
+                              ? "income"
+                              : nextIsPersonalFunds
+                                ? "expense"
+                                : prev.type,
                             category: nextIsItemDonation
                               ? "Item Donation"
                               : prev.category === "Item Donation"
                                 ? ""
                                 : prev.category,
-                            budgetCategory: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budgetCategory,
-                            budgetCategoryKey: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budgetCategoryKey,
-                            budget_category: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budget_category,
-                            budget_category_key: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budget_category_key,
-                            budgetCategoryLabel: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budgetCategoryLabel,
-                            budget_category_label: nextIsItemDonation
-                              ? ""
-                              : (prev as any).budget_category_label,
+
+                            // Personal Funds are not Burton Pride spending until paid back,
+                            // so do not send them to Budget Planning.
+                            budgetCategory:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budgetCategory,
+                            budgetCategoryKey:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budgetCategoryKey,
+                            budget_category:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budget_category,
+                            budget_category_key:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budget_category_key,
+                            budgetCategoryLabel:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budgetCategoryLabel,
+                            budget_category_label:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).budget_category_label,
+
                             isPersonalFunds:
                               nextIsItemDonation || isLoanFunding
                                 ? false
-                                : method === "Personal Funds"
+                                : nextIsPersonalFunds
                                   ? true
                                   : prev.isPersonalFunds,
                             personalFundsName:
@@ -1457,6 +1480,27 @@ export default function MoneyTransactionForm({
                     personalFundsName: event.target.checked
                       ? prev.personalFundsName
                       : "",
+
+                    // Personal Funds are not Burton Pride spending until paid back,
+                    // so clear any manual Budget Planning link.
+                    budgetCategory: event.target.checked
+                      ? ""
+                      : (prev as any).budgetCategory,
+                    budgetCategoryKey: event.target.checked
+                      ? ""
+                      : (prev as any).budgetCategoryKey,
+                    budget_category: event.target.checked
+                      ? ""
+                      : (prev as any).budget_category,
+                    budget_category_key: event.target.checked
+                      ? ""
+                      : (prev as any).budget_category_key,
+                    budgetCategoryLabel: event.target.checked
+                      ? ""
+                      : (prev as any).budgetCategoryLabel,
+                    budget_category_label: event.target.checked
+                      ? ""
+                      : (prev as any).budget_category_label,
                   }))
                 }
                 className="mt-1 h-4 w-4 rounded border-white/20"
