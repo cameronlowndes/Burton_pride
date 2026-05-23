@@ -2131,9 +2131,9 @@ export default function MoneyAuditLogsPage() {
   }
 
   return (
-    <main className="min-h-screen w-full overflow-x-auto bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1700px] min-w-0 space-y-6">
-        <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur">
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
+        <section className="w-full max-w-none overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur">
           <div className="relative p-6">
             <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-purple-500/20 blur-3xl" />
             <div className="absolute -bottom-24 left-10 h-56 w-56 rounded-full bg-pink-500/10 blur-3xl" />
@@ -2304,7 +2304,7 @@ export default function MoneyAuditLogsPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
           <div className="mb-4 flex flex-col gap-3 2xl:flex-row 2xl:items-center">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
@@ -2593,7 +2593,7 @@ export default function MoneyAuditLogsPage() {
             </div>
           ) : (
             <>
-              <div className="hidden max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 xl:block">
+              <div className="hidden w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 xl:block">
                 <table className="w-full min-w-[1250px] text-sm">
                   <thead className="bg-white/10 text-white/60">
                     <tr>

@@ -187,8 +187,8 @@ export default function MoneyDashboardPage() {
     .slice(0, 6);
 
   return (
-    <main className="min-h-screen w-full max-w-full overflow-x-auto bg-[#070716] px-3 py-5 text-white sm:px-5 lg:px-6">
-      <div className="mx-auto w-full max-w-[1900px] min-w-0 space-y-6">
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
         <MoneyHeader
           selectedYear={moneyPage.selectedYear}
           yearOptions={moneyPage.yearOptions}
@@ -301,7 +301,6 @@ export default function MoneyDashboardPage() {
           yearTransactionsLength={moneyPage.yearTransactions.length}
         />
 
-
         <MoneyDashboardAlerts
           selectedYear={moneyPage.selectedYear}
           transactions={moneyPage.yearTransactions}
@@ -309,8 +308,8 @@ export default function MoneyDashboardPage() {
           failedCsvRows={(moneyPage as any).failedCsvRows || []}
           onSetFilter={moneyPage.setFilter}
           onSetSearchTerm={moneyPage.setSearchTerm}
+          onMarkTransactionChecked={moneyPage.markTransactionChecked}
         />
-
 
         <MoneyStatsCards totals={moneyPage.totals} />
 
@@ -587,22 +586,22 @@ export default function MoneyDashboardPage() {
           </Link>
         </section>
 
-        <section className="grid min-w-0 grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 space-y-6">
-            <MoneyDashboardCharts
-              selectedYear={moneyPage.selectedYear}
-              transactions={moneyPage.transactions}
-              yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
-            />
+        <section className="min-w-0 space-y-6">
+          <MoneyDashboardCharts
+            selectedYear={moneyPage.selectedYear}
+            transactions={moneyPage.transactions}
+            yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
+          />
 
+          <div className="w-full max-w-none min-w-0">
             <MoneyMonthlyBreakdown
               selectedYear={moneyPage.selectedYear}
               transactions={moneyPage.transactions}
             />
           </div>
 
-          <aside className="min-w-0 space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
+          <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
+            <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
               <div className="mb-4 flex items-start gap-3">
                 <div className="rounded-2xl bg-purple-500/15 p-3 text-purple-200 ring-1 ring-purple-300/20">
                   <CalendarDays className="h-5 w-5" />
@@ -628,7 +627,7 @@ export default function MoneyDashboardPage() {
                   No transactions found for {moneyPage.selectedYear}.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {recentTransactions.map((item) => (
                     <div
                       key={item.id}
@@ -685,7 +684,7 @@ export default function MoneyDashboardPage() {
               </Link>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
+            <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
               <div className="mb-4 flex items-start gap-3">
                 <div className="rounded-2xl bg-amber-500/15 p-3 text-amber-200 ring-1 ring-amber-300/20">
                   <Sparkles className="h-5 w-5" />
@@ -702,7 +701,7 @@ export default function MoneyDashboardPage() {
                 </div>
               </div>
 
-              <div className="space-y-3 text-sm">
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <div className="rounded-2xl bg-black/20 p-4">
                   <div className="flex justify-between gap-3">
                     <span className="text-white/60">
@@ -766,13 +765,13 @@ export default function MoneyDashboardPage() {
                 </div>
               </div>
             </div>
-          </aside>
+          </section>
         </section>
       </div>
 
       {reportsWindowOpen && (
-        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-4 py-8 backdrop-blur-sm md:flex">
-          <div className="w-full max-w-[1200px] rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-1 py-4 backdrop-blur-sm sm:px-2 md:flex">
+          <div className="w-full max-w-none rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-white">Reports</h2>
@@ -849,8 +848,8 @@ export default function MoneyDashboardPage() {
       )}
 
       {sponsorWindowOpen && (
-        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-4 py-8 backdrop-blur-sm md:flex">
-          <div className="w-full max-w-[1300px] rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-1 py-4 backdrop-blur-sm sm:px-2 md:flex">
+          <div className="w-full max-w-none rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-white">
@@ -886,8 +885,8 @@ export default function MoneyDashboardPage() {
       )}
 
       {transactionsWindowOpen && (
-        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-4 py-8 backdrop-blur-sm md:flex">
-          <div className="w-full max-w-[1500px] rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-1 py-4 backdrop-blur-sm sm:px-2 md:flex">
+          <div className="w-full max-w-none rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-white">
@@ -961,7 +960,7 @@ export default function MoneyDashboardPage() {
       )}
 
       {addTransactionOpen && (
-        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-4 py-8 backdrop-blur-sm md:flex">
+        <div className="fixed inset-0 z-50 hidden items-start justify-center overflow-y-auto bg-black/75 px-1 py-4 backdrop-blur-sm sm:px-2 md:flex">
           <div className="w-full max-w-[520px] rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="min-w-0">

@@ -318,11 +318,11 @@ export default function HiddenTransactionsPage() {
   }
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1550px] space-y-6">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 flex-1">
               <Link
                 href="/Admin/Money"
                 className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20"
@@ -366,7 +366,7 @@ export default function HiddenTransactionsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid w-full max-w-none gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-purple-500/10 p-5">
             <p className="text-sm text-purple-200">Hidden Items</p>
             <p className="text-3xl font-bold">{totals.count}</p>
@@ -383,9 +383,9 @@ export default function HiddenTransactionsPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+          <div className="mb-4 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold">Hidden Payments</h2>
               <p className="text-sm text-white/50">
                 Restore a payment to bring it back into the main tracker. The
@@ -393,7 +393,7 @@ export default function HiddenTransactionsPage() {
               </p>
             </div>
 
-            <div className="relative w-full lg:max-w-md">
+            <div className="relative w-full lg:w-[520px] lg:shrink-0">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
               <input
                 value={searchTerm}
@@ -413,8 +413,8 @@ export default function HiddenTransactionsPage() {
               No hidden transactions found.
             </div>
           ) : (
-            <div className="max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1400px] text-sm">
+            <div className="w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
+              <table className="w-full min-w-[1500px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
@@ -585,7 +585,7 @@ export default function HiddenTransactionsPage() {
       </div>
 
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-1 py-4 backdrop-blur-sm sm:px-2">
           <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
             <h2 className="text-xl font-bold">Permanently delete payment?</h2>
 

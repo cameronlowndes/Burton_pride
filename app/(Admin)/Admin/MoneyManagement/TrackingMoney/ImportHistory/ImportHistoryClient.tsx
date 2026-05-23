@@ -236,7 +236,7 @@ export default function ImportHistoryClient() {
 
   return (
     <>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid w-full max-w-none gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-white/60">Total imports</p>
@@ -278,23 +278,23 @@ export default function ImportHistoryClient() {
         </div>
       </section>
 
-      <section className="rounded-[2rem] border border-white/10 bg-white/[0.06] p-4 shadow-2xl backdrop-blur-xl sm:p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
+      <section className="w-full max-w-none rounded-[2rem] border border-white/10 bg-white/[0.06] p-4 shadow-2xl backdrop-blur-xl sm:p-5">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1">
             <h2 className="text-2xl font-black">CSV import batches</h2>
             <p className="mt-1 text-sm text-white/60">
               Every CSV upload should create one batch record here.
             </p>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto lg:shrink-0">
             <div className="relative">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search imports..."
-                className="w-full rounded-2xl border border-white/10 bg-black/25 py-3 pl-11 pr-4 text-sm font-bold text-white outline-none placeholder:text-white/35 focus:border-sky-300/40 sm:w-80"
+                className="w-full rounded-2xl border border-white/10 bg-black/25 py-3 pl-11 pr-4 text-sm font-bold text-white outline-none placeholder:text-white/35 focus:border-sky-300/40 sm:w-96 lg:w-[520px]"
               />
             </div>
 
@@ -321,7 +321,7 @@ export default function ImportHistoryClient() {
           </div>
         )}
 
-        <div className="mt-5 overflow-hidden rounded-3xl border border-white/10">
+        <div className="mt-5 w-full max-w-none overflow-hidden rounded-3xl border border-white/10">
           {loading ? (
             <div className="flex min-h-[260px] items-center justify-center">
               <div className="flex items-center gap-3 text-white/70">
@@ -339,8 +339,8 @@ export default function ImportHistoryClient() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-[1100px] w-full text-left text-sm">
+            <div className="w-full max-w-none overflow-x-auto">
+              <table className="w-full min-w-[1200px] text-left text-sm">
                 <thead className="bg-black/30 text-xs uppercase tracking-[0.18em] text-white/45">
                   <tr>
                     <th className="px-4 py-4">Date</th>
@@ -453,8 +453,8 @@ export default function ImportHistoryClient() {
       </section>
 
       {selectedBatchId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-md">
-          <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-[2rem] border border-white/10 bg-[#0b0b1f] shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-1 py-4 backdrop-blur-md sm:px-2">
+          <div className="max-h-[92vh] w-full max-w-none overflow-hidden rounded-[2rem] border border-white/10 bg-[#0b0b1f] shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5">
               <div>
                 <h3 className="text-2xl font-black">Import batch details</h3>
@@ -490,7 +490,7 @@ export default function ImportHistoryClient() {
                 </div>
               ) : selectedDetails ? (
                 <div className="space-y-5">
-                  <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <section className="grid w-full max-w-none gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                       <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
                         File
@@ -541,7 +541,7 @@ export default function ImportHistoryClient() {
                     </div>
                   </section>
 
-                  <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  <section className="grid w-full max-w-none gap-4 sm:grid-cols-2 lg:grid-cols-5">
                     <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                       <p className="text-sm font-bold text-white/55">
                         Total rows
@@ -588,7 +588,7 @@ export default function ImportHistoryClient() {
                     </div>
                   </section>
 
-                  <section className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                  <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <h4 className="text-xl font-black">Failed rows</h4>
@@ -622,8 +622,8 @@ export default function ImportHistoryClient() {
                           </p>
                         </div>
                       ) : (
-                        <div className="overflow-x-auto">
-                          <table className="min-w-[850px] w-full text-left text-sm">
+                        <div className="w-full max-w-none overflow-x-auto">
+                          <table className="w-full min-w-[950px] text-left text-sm">
                             <thead className="bg-black/30 text-xs uppercase tracking-[0.18em] text-white/45">
                               <tr>
                                 <th className="px-4 py-4">Row</th>

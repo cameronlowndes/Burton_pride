@@ -19,6 +19,7 @@ import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
 import FundingReportExportButton from "../../components/money/FundingReportExportButton";
+import ManualBankBalanceCheck from "../../components/money/ManualBankBalanceCheck";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
@@ -26,8 +27,8 @@ export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
 
   return (
-    <main className="min-h-screen w-full max-w-full overflow-x-auto bg-[#070716] px-3 py-5 text-white sm:px-5 lg:px-6">
-      <div className="mx-auto w-full max-w-[1600px] min-w-0 space-y-6">
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
         <MoneyHeader
           selectedYear={money.selectedYear}
           yearOptions={money.yearOptions}
@@ -91,7 +92,6 @@ export default function MoneyTransactionsPage() {
           yearTransactionsLength={money.yearTransactions.length}
         />
 
-
         <MoneyDashboardAlerts
           selectedYear={money.selectedYear}
           transactions={money.yearTransactions}
@@ -99,8 +99,8 @@ export default function MoneyTransactionsPage() {
           failedCsvRows={(money as any).failedCsvRows || []}
           onSetFilter={money.setFilter}
           onSetSearchTerm={money.setSearchTerm}
+          onMarkTransactionChecked={money.markTransactionChecked}
         />
-
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
           <div className="mb-5 flex flex-col gap-2">
@@ -116,7 +116,7 @@ export default function MoneyTransactionsPage() {
 
           <div className="grid gap-4">
             <Link
-              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/CashTinTracker"
+              href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
               className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
             >
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20">
@@ -160,6 +160,11 @@ export default function MoneyTransactionsPage() {
         />
 
         <MoneyStatsCards totals={money.totals} />
+
+        <ManualBankBalanceCheck
+          selectedYear={money.selectedYear}
+          trackerBalancePence={money.totals.balance}
+        />
 
         <MoneyCarryForwardNote
           selectedYear={money.selectedYear}
@@ -304,60 +309,62 @@ export default function MoneyTransactionsPage() {
           transactions={money.transactions}
         />
 
-        <MoneyMainGrid
-          form={money.form}
-          setForm={money.setForm}
-          invoiceFiles={money.invoiceFiles}
-          setInvoiceFiles={money.setInvoiceFiles}
-          editingTransaction={money.editingTransaction}
-          displaySponsors={money.displaySponsors}
-          yearlySponsorBreakdown={money.yearlySponsorBreakdown}
-          saving={money.saving}
-          handleSubmit={money.handleSubmit}
-          cancelEditTransaction={money.cancelEditTransaction}
-          fillTestTransaction={money.fillTestTransaction}
-          openNewSponsorForm={money.openNewSponsorForm}
-          loading={money.loading}
-          transactions={money.transactions}
-          filteredTransactions={money.filteredTransactions}
-          yearTransactions={money.yearTransactions}
-          printTransactionsList={money.printTransactionsList}
-          printMonthOptions={money.printMonthOptions}
-          selectedYear={money.selectedYear}
-          selectedViewMonth={money.selectedViewMonth}
-          setSelectedViewMonth={money.setSelectedViewMonth}
-          selectedPrintMonth={money.selectedPrintMonth}
-          setSelectedPrintMonth={money.setSelectedPrintMonth}
-          searchTerm={money.searchTerm}
-          setSearchTerm={money.setSearchTerm}
-          filter={money.filter}
-          setFilter={money.setFilter}
-          selectedSponsorId={money.selectedSponsorId}
-          setSelectedSponsorId={money.setSelectedSponsorId}
-          selectedSponsor={money.selectedSponsor}
-          selectedPaymentMethod={money.selectedPaymentMethod}
-          setSelectedPaymentMethod={money.setSelectedPaymentMethod}
-          deletingYear={money.deletingYear}
-          deletingAll={money.deletingAll}
-          repayingId={money.repayingId}
-          checkingId={money.checkingId}
-          bankReconcilingId={money.bankReconcilingId}
-          financeNoteUpdatingId={money.financeNoteUpdatingId}
-          deleting={money.deleting}
-          onPrint={money.printTransactions}
-          onExportExcel={money.exportTransactionsToExcel}
-          onExportYearlyReport={money.exportFullYearlyReport}
-          onOpenDeleteYear={() => money.setDeleteYearOpen(true)}
-          onOpenDeleteAll={() => money.setDeleteAllOpen(true)}
-          onEditTransaction={money.startEditTransaction}
-          onHideTransaction={money.setDeleteId}
-          onTogglePersonalFundsRepaid={money.togglePersonalFundsRepaid}
-          onMarkTransactionChecked={money.markTransactionChecked}
-          onUpdateBankReconciliationStatus={
-            money.updateBankReconciliationStatus
-          }
-          onUpdateFinanceNote={money.updateFinanceNote}
-        />
+        <div id="money-transactions-table" data-money-transactions-table>
+          <MoneyMainGrid
+            form={money.form}
+            setForm={money.setForm}
+            invoiceFiles={money.invoiceFiles}
+            setInvoiceFiles={money.setInvoiceFiles}
+            editingTransaction={money.editingTransaction}
+            displaySponsors={money.displaySponsors}
+            yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+            saving={money.saving}
+            handleSubmit={money.handleSubmit}
+            cancelEditTransaction={money.cancelEditTransaction}
+            fillTestTransaction={money.fillTestTransaction}
+            openNewSponsorForm={money.openNewSponsorForm}
+            loading={money.loading}
+            transactions={money.transactions}
+            filteredTransactions={money.filteredTransactions}
+            yearTransactions={money.yearTransactions}
+            printTransactionsList={money.printTransactionsList}
+            printMonthOptions={money.printMonthOptions}
+            selectedYear={money.selectedYear}
+            selectedViewMonth={money.selectedViewMonth}
+            setSelectedViewMonth={money.setSelectedViewMonth}
+            selectedPrintMonth={money.selectedPrintMonth}
+            setSelectedPrintMonth={money.setSelectedPrintMonth}
+            searchTerm={money.searchTerm}
+            setSearchTerm={money.setSearchTerm}
+            filter={money.filter}
+            setFilter={money.setFilter}
+            selectedSponsorId={money.selectedSponsorId}
+            setSelectedSponsorId={money.setSelectedSponsorId}
+            selectedSponsor={money.selectedSponsor}
+            selectedPaymentMethod={money.selectedPaymentMethod}
+            setSelectedPaymentMethod={money.setSelectedPaymentMethod}
+            deletingYear={money.deletingYear}
+            deletingAll={money.deletingAll}
+            repayingId={money.repayingId}
+            checkingId={money.checkingId}
+            bankReconcilingId={money.bankReconcilingId}
+            financeNoteUpdatingId={money.financeNoteUpdatingId}
+            deleting={money.deleting}
+            onPrint={money.printTransactions}
+            onExportExcel={money.exportTransactionsToExcel}
+            onExportYearlyReport={money.exportFullYearlyReport}
+            onOpenDeleteYear={() => money.setDeleteYearOpen(true)}
+            onOpenDeleteAll={() => money.setDeleteAllOpen(true)}
+            onEditTransaction={money.startEditTransaction}
+            onHideTransaction={money.setDeleteId}
+            onTogglePersonalFundsRepaid={money.togglePersonalFundsRepaid}
+            onMarkTransactionChecked={money.markTransactionChecked}
+            onUpdateBankReconciliationStatus={
+              money.updateBankReconciliationStatus
+            }
+            onUpdateFinanceNote={money.updateFinanceNote}
+          />
+        </div>
       </div>
 
       <MoneyPageModals

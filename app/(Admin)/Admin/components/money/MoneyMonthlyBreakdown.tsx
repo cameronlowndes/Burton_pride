@@ -1,651 +1,502 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  Coins,
+  LockKeyhole,
   TrendingDown,
   TrendingUp,
   Wallet,
 } from "lucide-react";
-import type { Transaction } from "@/lib/money/types";
+
+type MoneyTransaction = {
+  id?: string;
+  created_at?: string | null;
+  transaction_date?: string | null;
+  title?: string | null;
+  description?: string | null;
+  type?: "income" | "expense" | string | null;
+  category?: string | null;
+  amount_pence?: number | null;
+  payment_method?: string | null;
+
+  sponsor_id?: string | null;
+  sponsor_name?: string | null;
+  sponsorship_note?: string | null;
+  funding_type?: string | null;
+
+  source?: string | null;
+
+  is_personal_funds?: boolean | null;
+  personal_funds_repaid?: boolean | null;
+
+  deleted_at?: string | null;
+};
 
 type MoneyMonthlyBreakdownProps = {
   selectedYear: string;
-  transactions: Transaction[];
+  transactions: MoneyTransaction[];
 };
 
-type MonthlyRow = {
+type MonthRow = {
   key: string;
-  label: string;
+  shortLabel: string;
+  longLabel: string;
+  moneyIn: number;
+  moneyOut: number;
+  restrictedIncome: number;
+  restrictedSpent: number;
+  restrictedLeft: number;
   generalIncome: number;
-  donations: number;
-  generalExpenses: number;
-  personalFundsPaidBack: number;
-  personalFundsOutstanding: number;
-  personalFundsTotal: number;
-  generalMoneyOut: number;
-  restrictedFundingIn: number;
-  restrictedFundingSpent: number;
-  restrictedFundingLeft: number;
-  monthBalance: number;
-  runningBalance: number;
+  generalOut: number;
+  generalBalance: number;
+  unpaidPersonalFunds: number;
+  transactionCount: number;
 };
 
-const months = [
-  { key: "01", label: "January" },
-  { key: "02", label: "February" },
-  { key: "03", label: "March" },
-  { key: "04", label: "April" },
-  { key: "05", label: "May" },
-  { key: "06", label: "June" },
-  { key: "07", label: "July" },
-  { key: "08", label: "August" },
-  { key: "09", label: "September" },
-  { key: "10", label: "October" },
-  { key: "11", label: "November" },
-  { key: "12", label: "December" },
+const MONTHS = [
+  { key: "01", shortLabel: "Jan", longLabel: "January" },
+  { key: "02", shortLabel: "Feb", longLabel: "February" },
+  { key: "03", shortLabel: "Mar", longLabel: "March" },
+  { key: "04", shortLabel: "Apr", longLabel: "April" },
+  { key: "05", shortLabel: "May", longLabel: "May" },
+  { key: "06", shortLabel: "Jun", longLabel: "June" },
+  { key: "07", shortLabel: "Jul", longLabel: "July" },
+  { key: "08", shortLabel: "Aug", longLabel: "August" },
+  { key: "09", shortLabel: "Sep", longLabel: "September" },
+  { key: "10", shortLabel: "Oct", longLabel: "October" },
+  { key: "11", shortLabel: "Nov", longLabel: "November" },
+  { key: "12", shortLabel: "Dec", longLabel: "December" },
 ];
 
-function money(value: number) {
+function formatMoney(value: number) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "GBP",
   }).format((Number(value) || 0) / 100);
 }
 
-function getTransactionMonth(transaction: Transaction) {
-  const dateValue = transaction.transaction_date || transaction.created_at || "";
-  if (!dateValue) return "";
-
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return String(date.getMonth() + 1).padStart(2, "0");
+function getTransactionDate(item: MoneyTransaction) {
+  return item.transaction_date || item.created_at || "";
 }
 
-function getTransactionYear(transaction: Transaction) {
-  const dateValue = transaction.transaction_date || transaction.created_at || "";
+function getTransactionYear(item: MoneyTransaction) {
+  const dateValue = getTransactionDate(item);
+
   if (!dateValue) return "";
 
   const date = new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "";
+
+  if (Number.isNaN(date.getTime())) {
+    return String(dateValue).slice(0, 4);
+  }
 
   return String(date.getFullYear());
 }
 
-function isDonationTransaction(transaction: Transaction) {
-  const source = String(transaction.source || "").toLowerCase();
-  const title = String(transaction.title || "").toLowerCase();
-  const category = String(transaction.category || "").toLowerCase();
+function getTransactionMonth(item: MoneyTransaction) {
+  const dateValue = getTransactionDate(item);
+
+  if (!dateValue) return "";
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(dateValue).slice(5, 7);
+  }
+
+  return String(date.getMonth() + 1).padStart(2, "0");
+}
+
+function isDeleted(item: MoneyTransaction) {
+  return Boolean(item.deleted_at);
+}
+
+function isIncome(item: MoneyTransaction) {
+  return item.type === "income";
+}
+
+function isExpense(item: MoneyTransaction) {
+  return item.type === "expense";
+}
+
+function isRestrictedFunding(item: MoneyTransaction) {
+  const source = String(item.source || "").toLowerCase();
+  const category = String(item.category || "").toLowerCase();
+
+  return Boolean(
+    item.sponsor_id ||
+      item.sponsor_name ||
+      item.sponsorship_note ||
+      source === "sponsorship" ||
+      category === "sponsorship" ||
+      category === "grant" ||
+      category === "restricted funding" ||
+      category === "restricted"
+  );
+}
+
+function isPersonalFunds(item: MoneyTransaction) {
+  return Boolean(
+    item.is_personal_funds ||
+      String(item.payment_method || "").toLowerCase() === "personal funds"
+  );
+}
+
+function getAmount(item: MoneyTransaction) {
+  return Number(item.amount_pence || 0);
+}
+
+function buildMonthRows(transactions: MoneyTransaction[], selectedYear: string) {
+  return MONTHS.map((month) => {
+    const monthTransactions = transactions.filter((item) => {
+      if (isDeleted(item)) return false;
+      if (selectedYear && getTransactionYear(item) !== selectedYear) return false;
+      return getTransactionMonth(item) === month.key;
+    });
+
+    const row: MonthRow = {
+      key: `${selectedYear}-${month.key}`,
+      shortLabel: month.shortLabel,
+      longLabel: month.longLabel,
+      moneyIn: 0,
+      moneyOut: 0,
+      restrictedIncome: 0,
+      restrictedSpent: 0,
+      restrictedLeft: 0,
+      generalIncome: 0,
+      generalOut: 0,
+      generalBalance: 0,
+      unpaidPersonalFunds: 0,
+      transactionCount: monthTransactions.length,
+    };
+
+    for (const item of monthTransactions) {
+      const amount = getAmount(item);
+      const restricted = isRestrictedFunding(item);
+      const personal = isPersonalFunds(item);
+      const unpaidPersonal = personal && !item.personal_funds_repaid;
+
+      if (isIncome(item)) {
+        row.moneyIn += amount;
+
+        if (restricted) {
+          row.restrictedIncome += amount;
+        } else {
+          row.generalIncome += amount;
+        }
+      }
+
+      if (isExpense(item)) {
+        row.moneyOut += amount;
+
+        if (restricted) {
+          row.restrictedSpent += amount;
+        } else if (unpaidPersonal) {
+          row.unpaidPersonalFunds += amount;
+        } else {
+          row.generalOut += amount;
+        }
+      }
+    }
+
+    row.restrictedLeft = row.restrictedIncome - row.restrictedSpent;
+    row.generalBalance = row.generalIncome - row.generalOut;
+
+    return row;
+  });
+}
+
+function MetricCard({
+  title,
+  value,
+  note,
+  tone,
+  icon,
+}: {
+  title: string;
+  value: string;
+  note?: string;
+  tone: "emerald" | "red" | "amber" | "sky";
+  icon: React.ReactNode;
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-100"
+      : tone === "red"
+        ? "border-red-300/20 bg-red-500/10 text-red-100"
+        : tone === "amber"
+          ? "border-amber-300/20 bg-amber-500/10 text-amber-100"
+          : "border-sky-300/20 bg-sky-500/10 text-sky-100";
 
   return (
-    source === "website_donation" ||
-    source === "website_monthly_donation" ||
-    source.includes("donation") ||
-    title.includes("donation") ||
-    category.includes("donation")
+    <div className={`min-w-0 rounded-2xl border p-4 ${toneClass}`}>
+      <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide opacity-80">
+        {icon}
+        <span className="break-words">{title}</span>
+      </div>
+
+      <p className="break-words text-xl font-black text-white sm:text-2xl">
+        {value}
+      </p>
+
+      {note && (
+        <p className="mt-2 break-words text-xs font-bold leading-5 opacity-80">
+          {note}
+        </p>
+      )}
+    </div>
   );
 }
 
-function isSponsorshipTransaction(transaction: Transaction) {
-  const source = String(transaction.source || "").toLowerCase();
-  const category = String(transaction.category || "").toLowerCase();
-  const paymentMethod = String(transaction.payment_method || "").toLowerCase();
+function MonthProgress({
+  label,
+  value,
+  max,
+  tone,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: "emerald" | "red" | "amber" | "sky";
+}) {
+  const percent = max > 0 ? Math.min(100, Math.round((Math.abs(value) / max) * 100)) : 0;
 
-  return Boolean(
-    source === "sponsorship" ||
-      source === "grant" ||
-      source === "loan" ||
-      source === "restricted_funding" ||
-      source === "funding" ||
-      category === "sponsorship" ||
-      category.includes("sponsor") ||
-      category.includes("grant") ||
-      category.includes("restricted") ||
-      paymentMethod === "sponsorship money" ||
-      transaction.sponsor_id ||
-      transaction.sponsor_name ||
-      transaction.sponsorship_note
+  const barClass =
+    tone === "emerald"
+      ? "bg-emerald-400"
+      : tone === "red"
+        ? "bg-red-400"
+        : tone === "amber"
+          ? "bg-amber-400"
+          : "bg-sky-400";
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+        <span className="break-words text-white/60">{label}</span>
+        <span className="shrink-0 font-bold text-white/75">{formatMoney(value)}</span>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${percent}%` }} />
+      </div>
+    </div>
   );
-}
-
-function isPersonalFunds(transaction: Transaction) {
-  const paymentMethod = String(transaction.payment_method || "").toLowerCase();
-
-  return Boolean(
-    transaction.is_personal_funds === true ||
-      paymentMethod === "personal funds" ||
-      transaction.personal_funds_name
-  );
-}
-
-function isHiddenTransaction(transaction: Transaction) {
-  return Boolean(
-    "deleted_at" in transaction &&
-      (transaction as Transaction & { deleted_at?: string | null }).deleted_at
-  );
-}
-
-function isTestPayment(transaction: Transaction) {
-  return Boolean(transaction.is_test_payment === true);
 }
 
 export default function MoneyMonthlyBreakdown({
   selectedYear,
   transactions,
 }: MoneyMonthlyBreakdownProps) {
-  const [minimised, setMinimised] = useState(true);
+  const [open, setOpen] = useState(true);
 
-  const yearTransactions = transactions.filter((transaction) => {
-    if (isHiddenTransaction(transaction)) return false;
-    if (isTestPayment(transaction)) return false;
-    return getTransactionYear(transaction) === selectedYear;
-  });
-
-  let runningBalance = 0;
-  let runningRestrictedFunding = 0;
-
-  const monthlyRows: MonthlyRow[] = months.map((month) => {
-    const monthTransactions = yearTransactions.filter(
-      (transaction) => getTransactionMonth(transaction) === month.key
-    );
-
-    const generalIncome = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "income" && !isSponsorshipTransaction(transaction)
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const donations = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "income" &&
-          !isSponsorshipTransaction(transaction)
-      )
-      .filter(isDonationTransaction)
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const restrictedFundingIn = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "income" && isSponsorshipTransaction(transaction)
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const restrictedFundingSpent = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "expense" && isSponsorshipTransaction(transaction)
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const generalExpenses = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "expense" &&
-          !isPersonalFunds(transaction) &&
-          !isSponsorshipTransaction(transaction)
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const personalFundsPaidBack = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "expense" &&
-          isPersonalFunds(transaction) &&
-          transaction.personal_funds_repaid === true
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const personalFundsOutstanding = monthTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === "expense" &&
-          isPersonalFunds(transaction) &&
-          transaction.personal_funds_repaid !== true
-      )
-      .reduce(
-        (total, transaction) => total + Number(transaction.amount_pence || 0),
-        0
-      );
-
-    const personalFundsTotal =
-      personalFundsPaidBack + personalFundsOutstanding;
-
-    /*
-      General balance rule:
-      Restricted sponsor, grant, loan, or funding transactions are kept separate.
-      They do not count as general Burton Pride money in or general money out.
-
-      Personal funds rule:
-      Unpaid personal funds are tracked as money owed, but they do not reduce
-      the general balance until marked paid back.
-    */
-    const generalMoneyOut = generalExpenses + personalFundsPaidBack;
-    const monthBalance = generalIncome - generalMoneyOut;
-
-    runningBalance += monthBalance;
-    runningRestrictedFunding += restrictedFundingIn - restrictedFundingSpent;
-
-    return {
-      key: month.key,
-      label: month.label,
-      generalIncome,
-      donations,
-      generalExpenses,
-      personalFundsPaidBack,
-      personalFundsOutstanding,
-      personalFundsTotal,
-      generalMoneyOut,
-      restrictedFundingIn,
-      restrictedFundingSpent,
-      restrictedFundingLeft: runningRestrictedFunding,
-      monthBalance,
-      runningBalance,
-    };
-  });
-
-  const totals = monthlyRows.reduce(
-    (acc, row) => ({
-      generalIncome: acc.generalIncome + row.generalIncome,
-      donations: acc.donations + row.donations,
-      generalExpenses: acc.generalExpenses + row.generalExpenses,
-      personalFundsPaidBack:
-        acc.personalFundsPaidBack + row.personalFundsPaidBack,
-      personalFundsOutstanding:
-        acc.personalFundsOutstanding + row.personalFundsOutstanding,
-      personalFundsTotal: acc.personalFundsTotal + row.personalFundsTotal,
-      generalMoneyOut: acc.generalMoneyOut + row.generalMoneyOut,
-      restrictedFundingIn: acc.restrictedFundingIn + row.restrictedFundingIn,
-      restrictedFundingSpent:
-        acc.restrictedFundingSpent + row.restrictedFundingSpent,
-      monthBalance: acc.monthBalance + row.monthBalance,
-    }),
-    {
-      generalIncome: 0,
-      donations: 0,
-      generalExpenses: 0,
-      personalFundsPaidBack: 0,
-      personalFundsOutstanding: 0,
-      personalFundsTotal: 0,
-      generalMoneyOut: 0,
-      restrictedFundingIn: 0,
-      restrictedFundingSpent: 0,
-      monthBalance: 0,
-    }
+  const rows = useMemo(
+    () => buildMonthRows(transactions || [], selectedYear),
+    [transactions, selectedYear]
   );
 
-  const restrictedFundingLeft =
-    totals.restrictedFundingIn - totals.restrictedFundingSpent;
+  const totals = useMemo(() => {
+    return rows.reduce(
+      (acc, row) => {
+        acc.moneyIn += row.moneyIn;
+        acc.moneyOut += row.moneyOut;
+        acc.restrictedIncome += row.restrictedIncome;
+        acc.restrictedSpent += row.restrictedSpent;
+        acc.restrictedLeft += row.restrictedLeft;
+        acc.generalIncome += row.generalIncome;
+        acc.generalOut += row.generalOut;
+        acc.generalBalance += row.generalBalance;
+        acc.unpaidPersonalFunds += row.unpaidPersonalFunds;
+        acc.transactionCount += row.transactionCount;
+        return acc;
+      },
+      {
+        moneyIn: 0,
+        moneyOut: 0,
+        restrictedIncome: 0,
+        restrictedSpent: 0,
+        restrictedLeft: 0,
+        generalIncome: 0,
+        generalOut: 0,
+        generalBalance: 0,
+        unpaidPersonalFunds: 0,
+        transactionCount: 0,
+      }
+    );
+  }, [rows]);
 
-  const bestMonth = [...monthlyRows].sort(
-    (a, b) => b.monthBalance - a.monthBalance
-  )[0];
-
-  const highestExpenseMonth = [...monthlyRows].sort(
-    (a, b) => b.generalMoneyOut - a.generalMoneyOut
-  )[0];
+  const maxMonthValue = useMemo(() => {
+    return Math.max(
+      1,
+      ...rows.flatMap((row) => [
+        Math.abs(row.moneyIn),
+        Math.abs(row.moneyOut),
+        Math.abs(row.restrictedLeft),
+        Math.abs(row.generalBalance),
+      ])
+    );
+  }, [rows]);
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-white sm:p-5">
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-sky-200" />
+    <section className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+      <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-100 ring-1 ring-sky-300/20">
+            <CalendarDays className="h-5 w-5" />
+          </div>
 
-            <h2 className="text-xl font-bold">Monthly Breakdown</h2>
+          <div className="min-w-0">
+            <h2 className="break-words text-2xl font-black text-white">
+              Monthly Breakdown
+            </h2>
+
+            <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-white/60">
+              Jan to Dec view for {selectedYear}. Restricted sponsor, grant,
+              loan, or funding money is kept separate from the general Burton
+              Pride balance. Unpaid personal funds only reduce the balance after
+              they are marked paid back.
+            </p>
 
             <button
               type="button"
-              onClick={() => setMinimised((prev) => !prev)}
-              className="ml-0 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 sm:ml-3"
+              onClick={() => setOpen((current) => !current)}
+              className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
             >
-              {minimised ? (
-                <>
-                  <ChevronDown className="h-4 w-4" />
-                  Show
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="h-4 w-4" />
-                  Minimise
-                </>
-              )}
+              {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {open ? "Hide" : "Show"}
             </button>
           </div>
-
-          <p className="mt-1 text-sm text-white/50">
-            Jan to Dec view for {selectedYear}. Restricted sponsor, grant, loan,
-            or funding money is kept separate from the general Burton Pride
-            balance. Unpaid personal funds only reduce the balance after they
-            are marked paid back.
-          </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4 lg:min-w-[760px]">
-          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-emerald-100/70">
-              <TrendingUp className="h-4 w-4" />
-              General Money In
-            </div>
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:w-[720px] xl:grid-cols-4">
+          <MetricCard
+            title="General Money In"
+            value={formatMoney(totals.generalIncome)}
+            tone="emerald"
+            icon={<TrendingUp className="h-4 w-4" />}
+          />
 
-            <p className="mt-1 text-lg font-black text-emerald-200">
-              {money(totals.generalIncome)}
-            </p>
-          </div>
+          <MetricCard
+            title="General Money Out"
+            value={formatMoney(totals.generalOut)}
+            note={
+              totals.unpaidPersonalFunds > 0
+                ? `${formatMoney(totals.unpaidPersonalFunds)} personal funds not counted yet`
+                : undefined
+            }
+            tone="red"
+            icon={<TrendingDown className="h-4 w-4" />}
+          />
 
-          <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-red-100/70">
-              <TrendingDown className="h-4 w-4" />
-              General Money Out
-            </div>
+          <MetricCard
+            title="Restricted Funding Left"
+            value={formatMoney(totals.restrictedLeft)}
+            tone="amber"
+            icon={<LockKeyhole className="h-4 w-4" />}
+          />
 
-            <p className="mt-1 text-lg font-black text-red-200">
-              {money(totals.generalMoneyOut)}
-            </p>
-
-            {totals.personalFundsOutstanding > 0 && (
-              <p className="mt-1 text-[11px] font-bold text-orange-200">
-                {money(totals.personalFundsOutstanding)} personal funds not
-                counted yet
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-amber-100/70">
-              <Wallet className="h-4 w-4" />
-              Restricted Funding Left
-            </div>
-
-            <p
-              className={`mt-1 text-lg font-black ${
-                restrictedFundingLeft >= 0 ? "text-amber-200" : "text-red-200"
-              }`}
-            >
-              {money(restrictedFundingLeft)}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-sky-100/70">
-              <Wallet className="h-4 w-4" />
-              General Balance
-            </div>
-
-            <p
-              className={`mt-1 text-lg font-black ${
-                totals.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
-              }`}
-            >
-              {money(totals.monthBalance)}
-            </p>
-          </div>
+          <MetricCard
+            title="General Balance"
+            value={formatMoney(totals.generalBalance)}
+            tone="sky"
+            icon={<Wallet className="h-4 w-4" />}
+          />
         </div>
       </div>
 
-      {!minimised && (
-        <>
-          <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Best general month
-              </p>
+      {open && (
+        <div className="mt-5 min-w-0">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {rows.map((row) => {
+              const hasActivity = row.transactionCount > 0;
 
-              <p className="mt-1 text-sm font-bold text-white">
-                {bestMonth?.label || "None"}
-              </p>
+              return (
+                <div
+                  key={row.key}
+                  className={`min-w-0 rounded-2xl border p-4 ${
+                    hasActivity
+                      ? "border-white/10 bg-black/25"
+                      : "border-white/5 bg-black/10"
+                  }`}
+                >
+                  <div className="mb-4 flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="break-words text-base font-black text-white">
+                        {row.shortLabel}
+                      </h3>
+                      <p className="mt-1 text-xs text-white/40">
+                        {row.transactionCount} transaction
+                        {row.transactionCount === 1 ? "" : "s"}
+                      </p>
+                    </div>
 
-              <p
-                className={`mt-1 text-lg font-black ${
-                  (bestMonth?.monthBalance || 0) >= 0
-                    ? "text-emerald-200"
-                    : "text-red-200"
-                }`}
-              >
-                {money(bestMonth?.monthBalance || 0)}
-              </p>
+                    <div
+                      className={`shrink-0 rounded-xl px-3 py-1 text-xs font-black ring-1 ${
+                        row.generalBalance >= 0
+                          ? "bg-emerald-500/10 text-emerald-100 ring-emerald-300/20"
+                          : "bg-red-500/10 text-red-100 ring-red-300/20"
+                      }`}
+                    >
+                      Balance {formatMoney(row.generalBalance)}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <MonthProgress
+                      label="Money in"
+                      value={row.generalIncome}
+                      max={maxMonthValue}
+                      tone="emerald"
+                    />
+
+                    <MonthProgress
+                      label="Money out"
+                      value={row.generalOut}
+                      max={maxMonthValue}
+                      tone="red"
+                    />
+
+                    <MonthProgress
+                      label="Restricted left"
+                      value={row.restrictedLeft}
+                      max={maxMonthValue}
+                      tone="amber"
+                    />
+
+                    {row.unpaidPersonalFunds > 0 && (
+                      <div className="rounded-xl bg-orange-500/10 px-3 py-2 text-xs font-bold leading-5 text-orange-100 ring-1 ring-orange-300/20">
+                        {formatMoney(row.unpaidPersonalFunds)} personal funds
+                        not counted yet
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {totals.transactionCount === 0 && (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/60">
+              No monthly transaction activity found for {selectedYear}.
             </div>
+          )}
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Highest general money out month
-              </p>
-
-              <p className="mt-1 text-sm font-bold text-white">
-                {highestExpenseMonth?.label || "None"}
-              </p>
-
-              <p className="mt-1 text-lg font-black text-red-200">
-                {money(highestExpenseMonth?.generalMoneyOut || 0)}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-amber-100/70">
-                Restricted funding left
-              </p>
-
-              <p className="mt-1 text-sm font-bold text-white">
-                Sponsor, grant, loan, or restricted pot
-              </p>
-
-              <p
-                className={`mt-1 text-lg font-black ${
-                  restrictedFundingLeft >= 0 ? "text-amber-200" : "text-red-200"
-                }`}
-              >
-                {money(restrictedFundingLeft)}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3">
-              <p className="text-xs font-bold uppercase tracking-wide text-orange-100/70">
-                Personal funds outstanding
-              </p>
-
-              <p className="mt-1 text-sm font-bold text-white">
-                Not counted as Burton Pride money out yet
-              </p>
-
-              <p className="mt-1 text-lg font-black text-orange-200">
-                {money(totals.personalFundsOutstanding)}
+          <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 text-sm leading-6 text-sky-100/80">
+            <div className="flex items-start gap-3">
+              <Coins className="mt-0.5 h-5 w-5 shrink-0 text-sky-100" />
+              <p>
+                General balance is calculated from unrestricted money in minus
+                unrestricted money out. Restricted sponsor, grant, loan, or
+                funding balances are shown separately so they do not look like
+                free general money.
               </p>
             </div>
           </div>
-
-          <div className="mb-4 space-y-3">
-            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100/80">
-              <strong className="text-amber-100">
-                Restricted funding rule:
-              </strong>{" "}
-              sponsor, grant, loan, or restricted funding money is shown in its
-              own columns and does not reduce the general Burton Pride balance.
-            </div>
-
-            <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-3 text-sm text-orange-100/80">
-              <strong className="text-orange-100">Personal funds rule:</strong>{" "}
-              unpaid personal funds are tracked as money owed, but they do not
-              reduce Burton Pride balance until marked paid back.
-            </div>
-          </div>
-
-          <div className="w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full">
-            <table className="w-full min-w-[1450px] text-sm">
-              <thead className="bg-white/10 text-white/60">
-                <tr>
-                  <th className="p-3 text-left">Month</th>
-                  <th className="p-3 text-right">General In</th>
-                  <th className="p-3 text-right">Donations</th>
-                  <th className="p-3 text-right">General Out</th>
-                  <th className="p-3 text-right">Normal Expenses</th>
-                  <th className="p-3 text-right">Restricted In</th>
-                  <th className="p-3 text-right">Restricted Spent</th>
-                  <th className="p-3 text-right">Restricted Left</th>
-                  <th className="p-3 text-right">Personal Paid Back</th>
-                  <th className="p-3 text-right">Personal Outstanding</th>
-                  <th className="p-3 text-right">Month General Balance</th>
-                  <th className="p-3 text-right">Running General Balance</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {monthlyRows.map((row) => (
-                  <tr key={row.key} className="border-t border-white/10">
-                    <td className="whitespace-nowrap p-3 font-bold text-white">
-                      {row.label}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-emerald-200">
-                      {money(row.generalIncome)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-pink-200">
-                      {money(row.donations)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-red-200">
-                      {money(row.generalMoneyOut)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-orange-200">
-                      {money(row.generalExpenses)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-amber-200">
-                      {money(row.restrictedFundingIn)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-yellow-200">
-                      {money(row.restrictedFundingSpent)}
-                    </td>
-
-                    <td
-                      className={`whitespace-nowrap p-3 text-right font-black ${
-                        row.restrictedFundingLeft >= 0
-                          ? "text-amber-200"
-                          : "text-red-200"
-                      }`}
-                    >
-                      {money(row.restrictedFundingLeft)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-emerald-200">
-                      {money(row.personalFundsPaidBack)}
-                    </td>
-
-                    <td className="whitespace-nowrap p-3 text-right font-bold text-orange-200">
-                      {money(row.personalFundsOutstanding)}
-                    </td>
-
-                    <td
-                      className={`whitespace-nowrap p-3 text-right font-black ${
-                        row.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
-                      }`}
-                    >
-                      {money(row.monthBalance)}
-                    </td>
-
-                    <td
-                      className={`whitespace-nowrap p-3 text-right font-black ${
-                        row.runningBalance >= 0
-                          ? "text-white"
-                          : "text-red-200"
-                      }`}
-                    >
-                      {money(row.runningBalance)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-
-              <tfoot className="border-t border-white/20 bg-white/10">
-                <tr>
-                  <td className="p-3 font-black text-white">Total</td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-emerald-200">
-                    {money(totals.generalIncome)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-pink-200">
-                    {money(totals.donations)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-red-200">
-                    {money(totals.generalMoneyOut)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-orange-200">
-                    {money(totals.generalExpenses)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-amber-200">
-                    {money(totals.restrictedFundingIn)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-yellow-200">
-                    {money(totals.restrictedFundingSpent)}
-                  </td>
-
-                  <td
-                    className={`whitespace-nowrap p-3 text-right font-black ${
-                      restrictedFundingLeft >= 0
-                        ? "text-amber-200"
-                        : "text-red-200"
-                    }`}
-                  >
-                    {money(restrictedFundingLeft)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-emerald-200">
-                    {money(totals.personalFundsPaidBack)}
-                  </td>
-
-                  <td className="whitespace-nowrap p-3 text-right font-black text-orange-200">
-                    {money(totals.personalFundsOutstanding)}
-                  </td>
-
-                  <td
-                    className={`whitespace-nowrap p-3 text-right font-black ${
-                      totals.monthBalance >= 0 ? "text-sky-200" : "text-red-200"
-                    }`}
-                  >
-                    {money(totals.monthBalance)}
-                  </td>
-
-                  <td
-                    className={`whitespace-nowrap p-3 text-right font-black ${
-                      totals.monthBalance >= 0 ? "text-white" : "text-red-200"
-                    }`}
-                  >
-                    {money(totals.monthBalance)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </>
+        </div>
       )}
     </section>
   );

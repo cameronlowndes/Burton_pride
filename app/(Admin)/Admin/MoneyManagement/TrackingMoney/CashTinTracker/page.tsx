@@ -374,8 +374,8 @@ export default function CashTinTrackerPage() {
   }
 
   return (
-    <main className="min-h-screen w-full max-w-full overflow-x-auto bg-[#070716] px-3 py-5 text-white sm:px-5 lg:px-6">
-      <div className="mx-auto w-full max-w-[1600px] min-w-0 space-y-6">
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
         <MoneyHeader
           selectedYear={moneyPage.selectedYear}
           yearOptions={moneyPage.yearOptions}
@@ -386,9 +386,9 @@ export default function CashTinTrackerPage() {
           }}
         />
 
-        <section className="overflow-hidden rounded-[2rem] border border-amber-300/20 bg-gradient-to-br from-amber-500/15 via-white/[0.04] to-white/[0.02] p-5 shadow-2xl sm:p-6 lg:p-8">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
+        <section className="w-full max-w-none overflow-hidden rounded-[2rem] border border-amber-300/20 bg-gradient-to-br from-amber-500/15 via-white/[0.04] to-white/[0.02] p-5 shadow-2xl sm:p-6 lg:p-8">
+          <div className="flex min-w-0 flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0 flex-1">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-100">
                 <Coins className="h-4 w-4" />
                 Cash Tin Tracker
@@ -398,7 +398,7 @@ export default function CashTinTrackerPage() {
                 Cash fundraising day tracker
               </h1>
 
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65 sm:text-base">
+              <p className="mt-3 max-w-5xl text-sm leading-6 text-white/65 sm:text-base">
                 Track cash fundraising days, starting cash, money received, cash
                 spent, money banked, who counted it, who banked it, and any
                 difference.
@@ -437,7 +437,7 @@ export default function CashTinTrackerPage() {
               </div>
             </div>
 
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 lg:min-w-[560px]">
+            <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 xl:w-[680px] xl:shrink-0">
               <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
                 <p className="text-xs font-bold uppercase tracking-wide text-emerald-100">
                   Cash received
@@ -495,7 +495,7 @@ export default function CashTinTrackerPage() {
           </div>
         )}
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl sm:p-5">
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl sm:p-5">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-2xl font-black text-white">
@@ -532,7 +532,7 @@ export default function CashTinTrackerPage() {
             </div>
           </div>
 
-          <form onSubmit={saveCashTinDay} className="grid gap-4 lg:grid-cols-4">
+          <form onSubmit={saveCashTinDay} className="grid w-full min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div>
               <label className="mb-2 block text-sm font-bold text-white/80">
                 Date
@@ -705,7 +705,7 @@ export default function CashTinTrackerPage() {
               />
             </div>
 
-            <div className="lg:col-span-4">
+            <div className="md:col-span-2 xl:col-span-4">
               <label className="mb-2 block text-sm font-bold text-white/80">
                 Notes
               </label>
@@ -718,7 +718,7 @@ export default function CashTinTrackerPage() {
               />
             </div>
 
-            <div className="lg:col-span-4">
+            <div className="md:col-span-2 xl:col-span-4">
               <button
                 type="submit"
                 disabled={savingCashTin}
@@ -739,7 +739,7 @@ export default function CashTinTrackerPage() {
           </form>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl sm:p-5">
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl sm:p-5">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-2xl font-black text-white">
@@ -762,8 +762,8 @@ export default function CashTinTrackerPage() {
               No cash tin records yet for {moneyPage.selectedYear}.
             </div>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-white/10">
-              <div className="overflow-x-auto">
+            <div className="w-full max-w-none overflow-hidden rounded-2xl border border-white/10">
+              <div className="w-full max-w-none overflow-x-auto">
                 <table className="w-full min-w-[1200px] text-left text-sm">
                   <thead className="bg-white/10 text-xs uppercase tracking-wide text-white/55">
                     <tr>
@@ -888,7 +888,7 @@ export default function CashTinTrackerPage() {
           )}
         </section>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex w-full flex-wrap gap-3">
           <Link
             href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts"
             className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
