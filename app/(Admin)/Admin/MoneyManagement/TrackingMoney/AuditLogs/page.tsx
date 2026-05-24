@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -1348,765 +1349,79 @@ export default function MoneyAuditLogsPage() {
       setError("");
       setErrorDetails(null);
 
-      const workbook = new ExcelJS.Workbook();
-      const now = new Date();
-      const fileDate = now.toISOString().slice(0, 10);
+      const params = new URLSearchParams();
 
-      workbook.creator = "Burton Pride C.I.C";
-      workbook.created = now;
-      workbook.modified = now;
-      workbook.subject = "Money audit logs";
-      workbook.title = "Burton Pride Money Audit Logs";
-      workbook.company = "Burton Pride C.I.C";
-
-      const summarySheet = workbook.addWorksheet("Print Report", {
-        views: [{ showGridLines: false }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-          horizontalCentered: true,
-          margins: {
-            left: 0.25,
-            right: 0.25,
-            top: 0.35,
-            bottom: 0.35,
-            header: 0.15,
-            footer: 0.15,
-          },
-        },
-      });
-
-      summarySheet.properties.defaultRowHeight = 21;
-      summarySheet.columns = [
-        { key: "a", width: 22 },
-        { key: "b", width: 14 },
-        { key: "c", width: 22 },
-        { key: "d", width: 14 },
-        { key: "e", width: 22 },
-        { key: "f", width: 14 },
-        { key: "g", width: 22 },
-        { key: "h", width: 14 },
-      ];
-
-      for (let rowNumber = 1; rowNumber <= 44; rowNumber += 1) {
-        const row = summarySheet.getRow(rowNumber);
-        row.height = 21;
-        for (let colNumber = 1; colNumber <= 8; colNumber += 1) {
-          const cell = row.getCell(colNumber);
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FFFFFFFF" },
-          };
-        }
-      }
-
-      summarySheet.mergeCells("A1:H1");
-      summarySheet.getCell("A1").value = "Burton Pride C.I.C - Money Audit Report";
-      summarySheet.getCell("A1").font = {
-        bold: true,
-        size: 24,
-        color: { argb: "FFFFFFFF" },
-      };
-      summarySheet.getCell("A1").fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF111827" },
-      };
-      summarySheet.getCell("A1").alignment = {
-        horizontal: "center",
-        vertical: "middle",
-      };
-      summarySheet.getRow(1).height = 34;
-
-      summarySheet.mergeCells("A2:H2");
-      summarySheet.getCell("A2").value = `Printed report version | Generated ${now.toLocaleString("en-GB")} | Year: ${selectedYear === "all" ? "All years" : selectedYear} | Showing ${filteredLogs.length} of ${logs.length} loaded logs`;
-      summarySheet.getCell("A2").font = {
-        bold: true,
-        size: 11,
-        color: { argb: "FF374151" },
-      };
-      summarySheet.getCell("A2").alignment = {
-        horizontal: "center",
-        vertical: "middle",
-        wrapText: true,
-      };
-      summarySheet.getRow(2).height = 26;
-
-      function styleCard(
-        labelRange: string,
-        valueRange: string,
-        label: string,
-        value: number,
-        fillColour: string,
-      ) {
-        summarySheet.mergeCells(labelRange);
-        summarySheet.mergeCells(valueRange);
-
-        const labelCell = summarySheet.getCell(labelRange.split(":")[0]);
-        const valueCell = summarySheet.getCell(valueRange.split(":")[0]);
-
-        labelCell.value = label;
-        labelCell.font = {
-          bold: true,
-          size: 10,
-          color: { argb: "FF374151" },
-        };
-        labelCell.alignment = {
-          horizontal: "left",
-          vertical: "middle",
-        };
-
-        valueCell.value = value;
-        valueCell.font = {
-          bold: true,
-          size: 22,
-          color: { argb: "FF111827" },
-        };
-        valueCell.alignment = {
-          horizontal: "left",
-          vertical: "middle",
-        };
-
-        [labelCell, valueCell].forEach((cell) => {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: fillColour },
-          };
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFCBD5E1" } },
-            left: { style: "thin", color: { argb: "FFCBD5E1" } },
-            bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-            right: { style: "thin", color: { argb: "FFCBD5E1" } },
-          };
-        });
-      }
-
-      styleCard("A4:B4", "A5:B6", "Total Logs", filteredLogs.length, "FFF8FAFC");
-      styleCard("C4:D4", "C5:D6", "Created", filteredLogs.filter((log) => log.action === "create").length, "FFECFDF5");
-      styleCard("E4:F4", "E5:F6", "Checked", filteredLogs.filter((log) => isCheckedAuditLog(log)).length, "FFEFF6FF");
-      styleCard("G4:H4", "G5:H6", "Unchecked", filteredLogs.filter((log) => isUncheckedAuditLog(log)).length, "FFFFFBEB");
-      styleCard("A8:B8", "A9:B10", "Edited", filteredLogs.filter((log) => log.action === "edit" && !isCheckedAuditLog(log) && !isUncheckedAuditLog(log)).length, "FFF0F9FF");
-      styleCard("C8:D8", "C9:D10", "Hidden", filteredLogs.filter((log) => isHiddenAuditLog(log)).length, "FFFFF7ED");
-      styleCard("E8:F8", "E9:F10", "Deleted", filteredLogs.filter((log) => !isHiddenAuditLog(log) && (log.action === "delete" || log.action === "delete_year" || log.action === "delete_all")).length, "FFFEF2F2");
-      styleCard("G8:H8", "G9:H10", "Users", new Set(filteredLogs.map((log) => getActorUniqueKey(log)).filter(Boolean)).size, "FFF8FAFC");
-      styleCard("A11:B11", "A12:B13", "Paid Back", filteredLogs.filter((log) => log.action === "mark_paid_back" || log.action === "mark_not_paid_back").length, "FFFDF2F8");
-
-      addMergedSection(summarySheet, "Report Filters", "A15", "H15", "FF334155");
-      const filterHeader = summarySheet.addRow([
-        "Action",
-        "Year",
-        "Search",
-        "Date From",
-        "Date To",
-        "Sort",
-        "Loaded Logs",
-        "Visible Logs",
-      ]);
-      styleHeaderRow(filterHeader, "FF111827");
-
-      const filterValueRow = summarySheet.addRow([
-        selectedAction === "all"
-          ? "All actions"
-          : actionOptions.find((item) => item.value === selectedAction)?.label ||
-            actionLabel(selectedAction),
-        selectedYear === "all" ? "All years" : selectedYear,
-        searchTerm || "No search",
-        dateFrom || "No start date",
-        dateTo || "No end date",
-        sortMode,
-        logs.length,
-        filteredLogs.length,
-      ]);
-      styleBodyRow(filterValueRow);
-      filterValueRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: "FF111827" } };
-        cell.alignment = {
-          horizontal: "center",
-          vertical: "middle",
-          wrapText: true,
-        };
-      });
-
-      addMergedSection(summarySheet, "Action Breakdown", "A20", "H20", "FF334155");
-      const actionBreakdownHeader = summarySheet.addRow([
-        "Action",
-        "Count",
-        "Notes",
-        "Action",
-        "Count",
-        "Notes",
-        "Action",
-        "Count",
-      ]);
-      styleHeaderRow(actionBreakdownHeader, "FF111827");
-
-      const actionBreakdownRows = [
-        {
-          label: "Created",
-          count: filteredLogs.filter((log) => log.action === "create").length,
-          notes: "Created records.",
-        },
-        {
-          label: "Edited",
-          count: filteredLogs.filter(
-            (log) =>
-          log.action === "edit" &&
-          !isCheckedAuditLog(log) &&
-          !isUncheckedAuditLog(log),
-          ).length,
-          notes: "Edited records.",
-        },
-        {
-          label: "Checked",
-          count: filteredLogs.filter((log) => isCheckedAuditLog(log)).length,
-          notes: "Marked as checked.",
-        },
-        {
-          label: "Unchecked",
-          count: filteredLogs.filter((log) => isUncheckedAuditLog(log)).length,
-          notes: "Checked status undone.",
-        },
-        {
-          label: "Hidden",
-          count: filteredLogs.filter((log) => isHiddenAuditLog(log)).length,
-          notes: "Soft-deleted/hidden.",
-        },
-        {
-          label: "Deleted Year",
-          count: filteredLogs.filter((log) => log.action === "delete_year")
-            .length,
-          notes: "Year delete actions.",
-        },
-        {
-          label: "Deleted All",
-          count: filteredLogs.filter((log) => log.action === "delete_all")
-            .length,
-          notes: "Delete-all actions.",
-        },
-        {
-          label: "Restored",
-          count: filteredLogs.filter((log) => log.action === "restore").length,
-          notes: "Restored records.",
-        },
-        {
-          label: "Paid Back",
-          count: filteredLogs.filter(
-            (log) =>
-              log.action === "mark_paid_back" ||
-              log.action === "mark_not_paid_back",
-          ).length,
-          notes: "Repayment changes.",
-        },
-      ];
-
-      for (let index = 0; index < actionBreakdownRows.length; index += 3) {
-        const first = actionBreakdownRows[index];
-        const second = actionBreakdownRows[index + 1];
-        const third = actionBreakdownRows[index + 2];
-
-        const row = summarySheet.addRow([
-          first?.label || "",
-          first?.count ?? "",
-          first?.notes || "",
-          second?.label || "",
-          second?.count ?? "",
-          second?.notes || "",
-          third?.label || "",
-          third?.count ?? "",
-        ]);
-
-        styleBodyRow(row);
-
-        [1, 4, 7].forEach((cellNumber) => {
-          row.getCell(cellNumber).font = { bold: true, color: { argb: "FF111827" } };
-        });
-
-        [2, 5, 8].forEach((cellNumber) => {
-          row.getCell(cellNumber).font = { bold: true, color: { argb: "FF111827" } };
-          row.getCell(cellNumber).alignment = {
-            horizontal: "center",
-            vertical: "middle",
-          };
-        });
-      }
-
-      addMergedSection(summarySheet, "Latest Audit Logs", "A27", "H27", "FF334155");
-      const latestHeader = summarySheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Who",
-        "Changed Fields",
-        "Source",
-        "Route",
-        "Log ID",
-      ]);
-      styleHeaderRow(latestHeader, "FF111827");
-
-      filteredLogs.slice(0, 12).forEach((log) => {
-        const changedNames = getChangedFieldNames(log.changed_fields);
-        const row = summarySheet.addRow([
-          formatExcelDate(log.created_at),
-          actionLabel(log.action, log),
-          getTransactionTitle(log),
-          getActorDisplayName(log),
-          changedNames.map(cleanFieldName).join(", ") || "—",
-          getSourceLabel(log),
-          log.metadata?.route || "",
-          log.id,
-        ]);
-
-        styleBodyRow(row);
-        row.getCell(1).numFmt = "dd mmm yyyy, hh:mm";
-        styleActionCell(row.getCell(2), log.action, log);
-        row.getCell(3).font = { bold: true, color: { argb: "FF111827" } };
-        row.getCell(4).font = { bold: true, color: { argb: "FF111827" } };
-      });
-
-      summarySheet.pageSetup.printArea = "A1:H44";
-      summarySheet.headerFooter.oddFooter = "&LPrinted by Burton Pride C.I.C&RPage &P of &N";
-
-      const logsSheet = workbook.addWorksheet("Audit Logs", {
-        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      logsSheet.properties.defaultRowHeight = 28;
-
-      logsSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "transactionId", width: 38 },
-        { key: "actorName", width: 26 },
-        { key: "actorEmail", width: 34 },
-        { key: "actorUserId", width: 34 },
-        { key: "changedFields", width: 46 },
-        { key: "changedCount", width: 14 },
-        { key: "source", width: 22 },
-        { key: "route", width: 44 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(logsSheet, "Burton Pride C.I.C - Audit Logs", "A1", "L1");
-      addMergedSubtitle(
-        logsSheet,
-        `Formatted export | Generated ${now.toLocaleString("en-GB")} | Rows: ${filteredLogs.length}`,
-        "A2",
-        "L2",
-      );
-
-      logsSheet.addRow([]);
-
-      const auditHeader = logsSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Transaction ID",
-        "Who",
-        "Email",
-        "User ID",
-        "Changed Fields",
-        "Changed Count",
-        "Source",
-        "Route",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(auditHeader, "FF111827");
-
-      if (filteredLogs.length === 0) {
-        const emptyRow = logsSheet.addRow([
-          "No audit logs found for the current filters.",
-        ]);
-        styleBodyRow(emptyRow);
+      if (selectedYear !== "all") {
+        params.set("year", selectedYear);
       } else {
-        filteredLogs.forEach((log) => {
-          const changedNames = getChangedFieldNames(log.changed_fields);
-          const row = logsSheet.addRow({
-            createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action, log),
-            transactionTitle: getTransactionTitle(log),
-            transactionId: log.transaction_id || "",
-            actorName: getActorDisplayName(log),
-            actorEmail: getActorEmailDisplay(log),
-            actorUserId: getActorUserIdDisplay(log),
-            changedFields: changedNames.map(cleanFieldName).join(", "),
-            changedCount: changedNames.length,
-            source: getSourceLabel(log),
-            route: log.metadata?.route || "",
-            logId: log.id,
-          });
+        params.set("year", String(new Date().getFullYear()));
+      }
 
-          styleBodyRow(row);
+      const route = `/api/admin/money/export/audit-logs-export?${params.toString()}`;
 
-          row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action, log);
+      const response = await fetch(route, {
+        method: "GET",
+        cache: "no-store",
+      });
 
-          row.getCell("transactionTitle").font = { bold: true };
-          row.getCell("actorName").font = { bold: true };
-          row.getCell("changedCount").alignment = {
-            horizontal: "center",
-            vertical: "middle",
+      if (!response.ok) {
+        const text = await response.text();
+
+        let data: any = {};
+
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {
+            rawResponse: text,
           };
-          row.getCell("changedCount").font = { bold: true };
+        }
 
-          if (!getActorEmailDisplay(log)) styleMutedCell(row.getCell("actorEmail"));
-          if (!getActorUserIdDisplay(log)) styleMutedCell(row.getCell("actorUserId"));
-          if (changedNames.length === 0)
-            styleMutedCell(row.getCell("changedFields"));
-        });
+        throw {
+          message:
+            data?.error ||
+            data?.details?.message ||
+            `Audit logs export failed with status ${response.status}`,
+          details: {
+            route,
+            status: response.status,
+            statusText: response.statusText,
+            response: data,
+          },
+          status: response.status,
+        };
       }
 
-      logsSheet.autoFilter = {
-        from: "A4",
-        to: "L4",
-      };
+      const blob = await response.blob();
 
-      const changedSheet = workbook.addWorksheet("Changed Fields", {
-        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      changedSheet.properties.defaultRowHeight = 32;
-
-      changedSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "actorName", width: 26 },
-        { key: "field", width: 26 },
-        { key: "before", width: 55 },
-        { key: "after", width: 55 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(
-        changedSheet,
-        "Burton Pride C.I.C - Changed Fields",
-        "A1",
-        "H1",
-      );
-      addMergedSubtitle(
-        changedSheet,
-        "One row per changed field, with before and after values.",
-        "A2",
-        "H2",
-      );
-
-      changedSheet.addRow([]);
-
-      const changedHeader = changedSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Who",
-        "Field",
-        "Before",
-        "After",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(changedHeader, "FF111827");
-
-      let changedFieldRowCount = 0;
-
-      filteredLogs.forEach((log) => {
-        const changed = log.changed_fields || {};
-        const entries = Object.entries(changed);
-
-        entries.forEach(([field, value]: [string, any]) => {
-          changedFieldRowCount += 1;
-
-          const row = changedSheet.addRow({
-            createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action, log),
-            transactionTitle: getTransactionTitle(log),
-            actorName: getActorDisplayName(log),
-            field: cleanFieldName(field),
-            before: shortValue(value?.before),
-            after: shortValue(value?.after),
-            logId: log.id,
-          });
-
-          styleBodyRow(row);
-          row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action, log);
-          row.getCell("transactionTitle").font = { bold: true };
-          row.getCell("actorName").font = { bold: true };
-          row.getCell("field").font = { bold: true };
-          styleDangerCell(row.getCell("before"));
-          styleSuccessCell(row.getCell("after"));
-        });
-      });
-
-      if (changedFieldRowCount === 0) {
-        const emptyRow = changedSheet.addRow([
-          "No changed field rows found for the current filters.",
-        ]);
-        styleBodyRow(emptyRow);
+      if (!blob || blob.size === 0) {
+        throw {
+          message: "The audit logs export returned an empty file.",
+          details: {
+            route,
+            year: selectedYear,
+            expectedFile:
+              "app/api/admin/money/export/audit-logs-export/route.ts",
+          },
+        };
       }
 
-      changedSheet.autoFilter = {
-        from: "A4",
-        to: "H4",
-      };
+      const fileYear =
+        selectedYear === "all" ? new Date().getFullYear() : selectedYear;
 
-      const usersSheet = workbook.addWorksheet("Users", {
-        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
 
-      usersSheet.properties.defaultRowHeight = 24;
+      link.href = objectUrl;
+      link.download = `burton-pride-money-audit-logs-${fileYear}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`;
 
-      usersSheet.columns = [
-        { key: "name", width: 30 },
-        { key: "email", width: 36 },
-        { key: "userId", width: 40 },
-        { key: "total", width: 14 },
-        { key: "created", width: 14 },
-        { key: "edited", width: 14 },
-        { key: "hidden", width: 14 },
-        { key: "deleted", width: 14 },
-        { key: "paidBack", width: 18 },
-        { key: "latest", width: 24 },
-      ];
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
 
-      addMergedTitle(
-        usersSheet,
-        "Burton Pride C.I.C - Audit Users",
-        "A1",
-        "J1",
-      );
-      addMergedSubtitle(usersSheet, "Summary by user / actor.", "A2", "J2");
-
-      usersSheet.addRow([]);
-
-      const usersHeader = usersSheet.addRow([
-        "Name",
-        "Email",
-        "User ID",
-        "Total Actions",
-        "Created",
-        "Edited",
-        "Hidden",
-        "Deleted",
-        "Paid Back Changes",
-        "Latest Action",
-      ]);
-
-      styleHeaderRow(usersHeader, "FF111827");
-
-      const userMap = new Map<
-        string,
-        {
-          name: string;
-          email: string;
-          userId: string;
-          logs: MoneyAuditLog[];
-        }
-      >();
-
-      filteredLogs.forEach((log) => {
-        const key = getActorUniqueKey(log) || "Unknown user";
-
-        const existing = userMap.get(key);
-
-        if (existing) {
-          existing.logs.push(log);
-        } else {
-          userMap.set(key, {
-            name: getActorDisplayName(log),
-            email: getActorEmailDisplay(log),
-            userId: getActorUserIdDisplay(log),
-            logs: [log],
-          });
-        }
-      });
-
-      Array.from(userMap.values())
-        .sort((a, b) => b.logs.length - a.logs.length)
-        .forEach((user) => {
-          const userLogs = user.logs;
-          const latest = [...userLogs].sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() -
-              new Date(a.created_at).getTime(),
-          )[0];
-
-          const row = usersSheet.addRow({
-            name: user.name,
-            email: user.email,
-            userId: user.userId,
-            total: userLogs.length,
-            created: userLogs.filter((log) => log.action === "create").length,
-            edited: userLogs.filter(
-              (log) =>
-          log.action === "edit" &&
-          !isCheckedAuditLog(log) &&
-          !isUncheckedAuditLog(log),
-            ).length,
-            hidden: userLogs.filter((log) => isHiddenAuditLog(log)).length,
-            deleted: userLogs.filter(
-              (log) =>
-                !isHiddenAuditLog(log) &&
-                (log.action === "delete" ||
-                  log.action === "delete_year" ||
-                  log.action === "delete_all"),
-            ).length,
-            paidBack: userLogs.filter(
-              (log) =>
-                log.action === "mark_paid_back" ||
-                log.action === "mark_not_paid_back",
-            ).length,
-            latest: formatExcelDate(latest?.created_at),
-          });
-
-          styleBodyRow(row);
-          row.getCell("name").font = { bold: true };
-          row.getCell("latest").numFmt = "dd mmm yyyy, hh:mm";
-
-          [
-            "total",
-            "created",
-            "edited",
-            "hidden",
-            "deleted",
-            "paidBack",
-          ].forEach((key) => {
-            row.getCell(key).alignment = {
-              horizontal: "center",
-              vertical: "middle",
-            };
-            row.getCell(key).font = { bold: true };
-          });
-        });
-
-      usersSheet.autoFilter = {
-        from: "A4",
-        to: "J4",
-      };
-
-      const rawSheet = workbook.addWorksheet("Raw JSON", {
-        views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      rawSheet.properties.defaultRowHeight = 45;
-
-      rawSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "actorName", width: 26 },
-        { key: "beforeData", width: 70 },
-        { key: "afterData", width: 70 },
-        { key: "changedFields", width: 70 },
-        { key: "metadata", width: 70 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(
-        rawSheet,
-        "Burton Pride C.I.C - Audit Raw JSON",
-        "A1",
-        "I1",
-      );
-      addMergedSubtitle(
-        rawSheet,
-        "Full raw audit log data for checking details.",
-        "A2",
-        "I2",
-      );
-
-      rawSheet.addRow([]);
-
-      const rawHeader = rawSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Who",
-        "Before Data",
-        "After Data",
-        "Changed Fields",
-        "Metadata",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(rawHeader, "FF111827");
-
-      filteredLogs.forEach((log) => {
-        const row = rawSheet.addRow({
-          createdAt: formatExcelDate(log.created_at),
-          action: actionLabel(log.action, log),
-          transactionTitle: getTransactionTitle(log),
-          actorName: getActorDisplayName(log),
-          beforeData: safeJson(log.before_data),
-          afterData: safeJson(log.after_data),
-          changedFields: safeJson(log.changed_fields),
-          metadata: safeJson(log.metadata),
-          logId: log.id,
-        });
-
-        styleBodyRow(row);
-        row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-        styleActionCell(row.getCell("action"), log.action, log);
-        row.getCell("transactionTitle").font = { bold: true };
-        row.getCell("actorName").font = { bold: true };
-      });
-
-      rawSheet.autoFilter = {
-        from: "A4",
-        to: "I4",
-      };
-
-      [summarySheet, logsSheet, changedSheet, usersSheet, rawSheet].forEach(
-        (sheet) => {
-          sheet.eachRow((row) => {
-            row.eachCell((cell) => {
-              cell.alignment = {
-                ...cell.alignment,
-                vertical: cell.alignment?.vertical || "top",
-                wrapText: true,
-              };
-            });
-          });
-        },
-      );
-
-      await downloadWorkbook(
-        workbook,
-        `burton-pride-money-audit-logs-${fileDate}.xlsx`,
-      );
+      window.URL.revokeObjectURL(objectUrl);
     } catch (err: any) {
       setError(err?.message || "Failed to export formatted Excel file");
       setErrorDetails(err);

@@ -1,12 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  ArrowRight,
-  Coins,
-  FileSpreadsheet,
-  RefreshCcw,
-} from "lucide-react";
+import { ArrowRight, Coins, RefreshCcw } from "lucide-react";
 
 import MoneyHeader from "../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../components/money/MoneySummaryCards";
@@ -18,7 +13,6 @@ import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown"
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
-import FundingReportExportButton from "../../components/money/FundingReportExportButton";
 import ManualBankBalanceCheck from "../../components/money/ManualBankBalanceCheck";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
@@ -170,131 +164,6 @@ export default function MoneyTransactionsPage() {
           selectedYear={money.selectedYear}
           carryForwardNote={money.carryForwardNote}
         />
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
-          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="min-w-0">
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100">
-                <FileSpreadsheet className="h-4 w-4" />
-                Grant / funding reports
-              </div>
-
-              <h2 className="text-2xl font-black text-white">
-                Export funding record reports
-              </h2>
-
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
-                Export one funding record at a time, showing money received,
-                money spent, remaining balance, linked transactions, receipts,
-                and notes for {money.selectedYear}.
-              </p>
-            </div>
-          </div>
-
-          {money.yearlySponsorBreakdown.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/60">
-              No funding or sponsor records found for {money.selectedYear}.
-              Add a sponsor/funding record first, then export its report here.
-            </div>
-          ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {money.yearlySponsorBreakdown.map((funding: any) => {
-                const fundingId =
-                  funding.id ||
-                  funding.sponsor_id ||
-                  funding.sponsorId ||
-                  funding.record_id ||
-                  "";
-
-                const fundingName =
-                  funding.sponsor_name ||
-                  funding.sponsorName ||
-                  funding.name ||
-                  funding.funding_name ||
-                  "Funding record";
-
-                const receivedPence =
-                  funding.received_pence ||
-                  funding.receivedPence ||
-                  funding.received_amount_pence ||
-                  0;
-
-                const spentPence =
-                  funding.spent_pence ||
-                  funding.spentPence ||
-                  funding.spent_amount_pence ||
-                  0;
-
-                const remainingPence =
-                  funding.remaining_pence ||
-                  funding.remainingPence ||
-                  receivedPence - spentPence;
-
-                return (
-                  <div
-                    key={fundingId || fundingName}
-                    className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <h3 className="break-words text-lg font-black text-white">
-                          {fundingName}
-                        </h3>
-
-                        <div className="mt-3 grid gap-2 text-sm text-white/65 sm:grid-cols-3">
-                          <div className="rounded-xl bg-black/20 p-3">
-                            <p className="text-xs font-black uppercase tracking-wide text-emerald-100/70">
-                              Received
-                            </p>
-                            <p className="mt-1 font-black text-white">
-                              {new Intl.NumberFormat("en-GB", {
-                                style: "currency",
-                                currency: "GBP",
-                              }).format((Number(receivedPence) || 0) / 100)}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl bg-black/20 p-3">
-                            <p className="text-xs font-black uppercase tracking-wide text-red-100/70">
-                              Spent
-                            </p>
-                            <p className="mt-1 font-black text-white">
-                              {new Intl.NumberFormat("en-GB", {
-                                style: "currency",
-                                currency: "GBP",
-                              }).format((Number(spentPence) || 0) / 100)}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl bg-black/20 p-3">
-                            <p className="text-xs font-black uppercase tracking-wide text-sky-100/70">
-                              Remaining
-                            </p>
-                            <p className="mt-1 font-black text-white">
-                              {new Intl.NumberFormat("en-GB", {
-                                style: "currency",
-                                currency: "GBP",
-                              }).format((Number(remainingPence) || 0) / 100)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0">
-                        <FundingReportExportButton
-                          fundingId={fundingId}
-                          year={money.selectedYear}
-                          label="Export report"
-                          className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
 
         <MoneySponsorSection
           selectedYear={money.selectedYear}

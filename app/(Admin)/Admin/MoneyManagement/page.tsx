@@ -106,11 +106,7 @@ export default function MoneyManagementHomePage() {
                 </Link>
               </div>
 
-              <p className="mt-4 text-xs leading-5 text-emerald-100/70">
-                Next step: save each admin’s filters in the database using their
-                Clerk user ID, so Cameron’s filters, another admin’s filters,
-                and future users’ filters stay separate.
-              </p>
+              
             </div>
           )}
         </div>
