@@ -190,7 +190,7 @@ export default function MoneyManagementSidebar({
 
             <div className="min-w-0 leading-tight">
               <div className="truncate text-lg font-black text-white">
-                Money Admin
+                Money Management APP
               </div>
               <div className="truncate text-sm font-medium text-white/75">
                 {currentTitle}
@@ -326,7 +326,7 @@ function DesktopSidebar({
         </div>
 
         <div className="text-2xl font-black text-white drop-shadow">
-          Money Admin
+          Money Management APP
         </div>
         <div className="text-sm font-medium text-white/75">
           Manage finances easily

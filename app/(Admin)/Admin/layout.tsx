@@ -234,6 +234,15 @@ export default function AdminLayout({
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [permissionsError, setPermissionsError] = useState("");
 
+  /*
+    Browser tab title.
+    This makes the tab show:
+    Burton Pride Admin Portal APP
+  */
+  useEffect(() => {
+    document.title = "Burton Pride Admin Portal APP";
+  }, []);
+
   const path = normalisePath(pathname);
 
   const isLoginPage = path === "/admin/login";

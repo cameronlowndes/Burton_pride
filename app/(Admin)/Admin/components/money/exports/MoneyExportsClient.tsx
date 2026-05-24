@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ElementType } from "react";
 import {
@@ -19,6 +20,7 @@ import {
   Landmark,
   Loader2,
   PiggyBank,
+  Printer,
   ReceiptText,
   RefreshCcw,
   ScrollText,
@@ -37,7 +39,6 @@ type IconKey =
   | "spreadsheet"
   | "receipt"
   | "history"
-  
   | "personal"
   | "upload"
   | "bank";
@@ -130,7 +131,6 @@ function getCategory(item: ExportItem): ExportCategory {
   if (item.key === "receipts" || item.key === "bank-balance-checks") {
     return "checking";
   }
-
 
   return "admin";
 }
@@ -275,6 +275,15 @@ function buildUrlWithYear(url: string, year: number) {
   return `${path}?${params.toString()}`;
 }
 
+function buildPrintUrl(exportKey: string, year: number) {
+  const safeExportKey = encodeURIComponent(exportKey);
+  const params = new URLSearchParams();
+
+  params.set("year", String(year));
+
+  return `/api/admin/money/export/print/${safeExportKey}?${params.toString()}`;
+}
+
 function fileNameWithYear(
   fileName: string,
   defaultYear: number,
@@ -291,6 +300,95 @@ function routeToFilePath(route: string) {
   }
 
   return `app${pathOnly}/route.ts`;
+}
+
+async function saveExportLog({
+  action,
+  item,
+  year,
+  route,
+  fileName,
+  status,
+  errorMessage,
+  metadata,
+}: {
+  action: "export" | "print";
+  item: ExportItem | { key: string; title: string; fileName?: string };
+  year: number;
+  route: string;
+  fileName?: string;
+  status: "started" | "success" | "failed";
+  errorMessage?: string;
+  metadata?: any;
+}) {
+  try {
+    await fetch("/api/admin/money/export/logs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({
+        action,
+        export_key: item.key,
+        export_title: item.title,
+        export_type: action,
+        export_year: year,
+        route,
+        file_name: fileName || item.fileName || null,
+        status,
+        error_message: errorMessage || null,
+        metadata: metadata || null,
+      }),
+    });
+  } catch (error) {
+    console.error("Could not save export log", error);
+  }
+}
+
+function openPrintExport({
+  exportKey,
+  exportTitle,
+  year,
+  fileName,
+}: {
+  exportKey: string;
+  exportTitle: string;
+  year: number;
+  fileName?: string;
+}) {
+  const printUrl = buildPrintUrl(exportKey, year);
+
+  saveExportLog({
+    action: "print",
+    item: {
+      key: exportKey,
+      title: exportTitle,
+      fileName,
+    },
+    year,
+    route: printUrl,
+    fileName,
+    status: "started",
+    metadata: {
+      opened_from: "money_exports_page",
+    },
+  });
+
+  window.open(printUrl, "_blank", "width=1200,height=850");
+}
+
+function printSingleExportItem(
+  item: ExportItem,
+  selectedYear: number,
+  defaultYear: number
+) {
+  openPrintExport({
+    exportKey: item.key,
+    exportTitle: item.title,
+    year: selectedYear,
+    fileName: fileNameWithYear(item.fileName, defaultYear, selectedYear),
+  });
 }
 
 function getHelpfulError(statusCode: number, route: string) {
@@ -461,7 +559,7 @@ function StatusBox({
   return (
     <div
       className={classNames(
-        "mt-5 w-full rounded-2xl border p-4 text-sm shadow-xl",
+        "money-print-hidden mt-5 w-full rounded-2xl border p-4 text-sm shadow-xl",
         status.type === "success" &&
           "border-emerald-400/30 bg-emerald-500/10 text-emerald-100",
         status.type === "error" &&
@@ -595,7 +693,7 @@ function StatusBox({
 
 function HelpPanel() {
   return (
-    <section className="grid gap-4 xl:grid-cols-3">
+    <section className="money-print-hidden grid gap-4 xl:grid-cols-3">
       <div className="rounded-[2rem] border border-emerald-300/20 bg-emerald-400/10 p-5 shadow-2xl backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-300/20 text-emerald-100">
@@ -706,9 +804,26 @@ export default function MoneyExportsClient({
 
   async function downloadExport(item: ExportItem) {
     const route = buildUrlWithYear(item.url, selectedYear);
+    const expectedFileName = fileNameWithYear(
+      item.fileName,
+      defaultYear,
+      selectedYear
+    );
 
     try {
       setDownloadingKey(item.key);
+
+      await saveExportLog({
+        action: "export",
+        item,
+        year: selectedYear,
+        route,
+        fileName: expectedFileName,
+        status: "started",
+        metadata: {
+          opened_from: "money_exports_page",
+        },
+      });
 
       setStatus({
         type: "loading",
@@ -718,11 +833,7 @@ export default function MoneyExportsClient({
         details: [
           `Export: ${item.title}`,
           `Year: ${selectedYear}`,
-          `Expected file: ${fileNameWithYear(
-            item.fileName,
-            defaultYear,
-            selectedYear
-          )}`,
+          `Expected file: ${expectedFileName}`,
         ],
       });
 
@@ -762,6 +873,21 @@ export default function MoneyExportsClient({
 
         errorStatus.copyText = makeCopyText(errorStatus);
 
+        await saveExportLog({
+          action: "export",
+          item,
+          year: selectedYear,
+          route,
+          fileName: expectedFileName,
+          status: "failed",
+          errorMessage: String(errorData.error || help.message || ""),
+          metadata: {
+            http_status: response.status,
+            status_text: response.statusText,
+            details,
+          },
+        });
+
         console.error("Money export failed", {
           exportKey: item.key,
           exportTitle: item.title,
@@ -799,6 +925,21 @@ export default function MoneyExportsClient({
 
         emptyStatus.copyText = makeCopyText(emptyStatus);
 
+        await saveExportLog({
+          action: "export",
+          item,
+          year: selectedYear,
+          route,
+          fileName: expectedFileName,
+          status: "failed",
+          errorMessage: "The export route returned an empty file.",
+          metadata: {
+            http_status: response.status,
+            status_text: response.statusText,
+            file_size_bytes: 0,
+          },
+        });
+
         setStatus(emptyStatus);
         return;
       }
@@ -807,17 +948,25 @@ export default function MoneyExportsClient({
 
       const link = document.createElement("a");
       link.href = objectUrl;
-      link.download = fileNameWithYear(
-        item.fileName,
-        defaultYear,
-        selectedYear
-      );
+      link.download = expectedFileName;
 
       document.body.appendChild(link);
       link.click();
       link.remove();
 
       window.URL.revokeObjectURL(objectUrl);
+
+      await saveExportLog({
+        action: "export",
+        item,
+        year: selectedYear,
+        route,
+        fileName: expectedFileName,
+        status: "success",
+        metadata: {
+          file_size_bytes: blob.size,
+        },
+      });
 
       setStatus({
         type: "success",
@@ -827,11 +976,7 @@ export default function MoneyExportsClient({
         details: [
           `Export: ${item.title}`,
           `Year: ${selectedYear}`,
-          `File name: ${fileNameWithYear(
-            item.fileName,
-            defaultYear,
-            selectedYear
-          )}`,
+          `File name: ${expectedFileName}`,
           `File size: ${(blob.size / 1024).toFixed(1)} KB`,
         ],
       });
@@ -855,6 +1000,16 @@ export default function MoneyExportsClient({
       };
 
       unexpectedStatus.copyText = makeCopyText(unexpectedStatus);
+
+      await saveExportLog({
+        action: "export",
+        item,
+        year: selectedYear,
+        route,
+        fileName: expectedFileName,
+        status: "failed",
+        errorMessage: error?.message || String(error),
+      });
 
       console.error("Money export unexpected error", {
         exportKey: item.key,
@@ -880,346 +1035,549 @@ export default function MoneyExportsClient({
     setStatus(null);
   }
 
+  function printExportPage() {
+    openPrintExport({
+      exportKey: "all",
+      exportTitle: "All Export Print Reports",
+      year: selectedYear,
+      fileName: `burton-pride-all-export-print-reports-${selectedYear}.pdf`,
+    });
+  }
+
   const hasFilters = search.trim() || selectedCategory !== "all";
 
   return (
-    <div className="w-full space-y-6">
-      <section className="relative overflow-hidden rounded-[2rem] border border-emerald-300/30 bg-gradient-to-br from-emerald-400/20 via-white/10 to-blue-500/10 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-        <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-emerald-300/20 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-40 w-40 rounded-full bg-blue-300/10 blur-3xl" />
+    <>
+      <style jsx global>{`
+        @media screen {
+          .money-print-only {
+            display: none !important;
+          }
+        }
 
-        <div className="relative grid gap-6 xl:grid-cols-[1fr_auto] xl:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-300/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-100">
-              <Star className="h-4 w-4" />
-              Best option
-            </div>
+        @media print {
+          @page {
+            size: A4;
+            margin: 14mm;
+          }
 
-            <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
-              Send everything in one download
-            </h2>
+          html,
+          body {
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
 
-            <p className="mt-3 max-w-5xl text-sm leading-6 text-white/75 sm:text-base">
-              The Accountant Export Pack is the easiest option. It creates one
-              ZIP file with the yearly report, transaction list, receipts index,
-              audit logs, funding breakdown, personal funds report, and CSV
-              import history.
-            </p>
+          body * {
+            visibility: hidden;
+          }
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                <div className="text-2xl font-black text-white">
-                  {exportStats.total}
-                </div>
-                <div className="text-xs font-bold text-white/50">
-                  Export options
-                </div>
-              </div>
+          .money-print-page,
+          .money-print-page * {
+            visibility: visible;
+          }
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                <div className="text-2xl font-black text-white">
-                  {exportStats.excel}
-                </div>
-                <div className="text-xs font-bold text-white/50">
-                  Excel reports
-                </div>
-              </div>
+          .money-print-page {
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 100% !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                <div className="text-2xl font-black text-white">
-                  {exportStats.zip}
-                </div>
-                <div className="text-xs font-bold text-white/50">
-                  ZIP packs
-                </div>
-              </div>
-            </div>
-          </div>
+          .money-print-hidden {
+            display: none !important;
+          }
 
-          <div className="rounded-[1.75rem] border border-white/10 bg-slate-950/30 p-4">
-            <button
-              type="button"
-              onClick={downloadRecommendedPack}
-              disabled={!!downloadingKey || !recommendedItem}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-6 py-4 text-sm font-black text-emerald-950 shadow-xl shadow-emerald-950/30 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {downloadingKey === recommendedItem?.key ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <FileArchive className="h-5 w-5" />
-              )}
-              Download Full Accountant Pack
-            </button>
+          .money-print-only {
+            display: block !important;
+          }
 
-            <p className="mt-3 text-center text-xs font-bold text-white/50">
-              Recommended for accountant, committee checks, and year-end files.
-            </p>
-          </div>
+          .money-print-grid {
+            display: block !important;
+          }
+
+          .money-print-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            min-height: auto !important;
+            margin: 0 0 12px 0 !important;
+            padding: 14px !important;
+            border: 1px solid #d4d4d8 !important;
+            border-radius: 12px !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            box-shadow: none !important;
+            transform: none !important;
+          }
+
+          .money-print-card,
+          .money-print-card * {
+            color: #000000 !important;
+          }
+
+          .money-print-card span,
+          .money-print-card div,
+          .money-print-card p {
+            background: transparent !important;
+            border-color: #d4d4d8 !important;
+          }
+
+          .money-print-title {
+            color: #000000 !important;
+            font-size: 24px !important;
+            line-height: 1.2 !important;
+            margin: 0 0 6px 0 !important;
+          }
+
+          .money-print-subtitle {
+            color: #333333 !important;
+            font-size: 12px !important;
+            line-height: 1.45 !important;
+          }
+
+          .money-print-section-title {
+            color: #000000 !important;
+            font-size: 18px !important;
+            margin: 18px 0 10px 0 !important;
+          }
+
+          .money-print-small {
+            color: #333333 !important;
+            font-size: 11px !important;
+          }
+
+          .money-print-badge {
+            display: inline-block !important;
+            margin: 0 6px 6px 0 !important;
+            padding: 3px 8px !important;
+            border: 1px solid #d4d4d8 !important;
+            border-radius: 999px !important;
+            font-size: 10px !important;
+            font-weight: 700 !important;
+            color: #000000 !important;
+            background: #ffffff !important;
+          }
+
+          .money-print-button-area {
+            display: none !important;
+          }
+
+          svg,
+          .absolute {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      <div className="money-print-page w-full space-y-6">
+        <div className="money-print-only">
+          <h1 className="money-print-title">
+            Burton Pride Money Management Export List
+          </h1>
+
+          <p className="money-print-subtitle">Printing year: {selectedYear}</p>
+
+          <p className="money-print-subtitle">
+            This printout shows every export option available on the Money
+            Management export page.
+          </p>
         </div>
-      </section>
 
-      {showGuide && <HelpPanel />}
+        <section className="money-print-hidden relative overflow-hidden rounded-[2rem] border border-emerald-300/30 bg-gradient-to-br from-emerald-400/20 via-white/10 to-blue-500/10 p-5 shadow-2xl backdrop-blur-xl sm:p-6">
+          <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-emerald-300/20 blur-3xl" />
+          <div className="absolute bottom-0 left-0 h-40 w-40 rounded-full bg-blue-300/10 blur-3xl" />
 
-      <section className="w-full rounded-[2rem] border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur-xl">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
-          <label className="block xl:w-56">
-            <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
-              <CalendarDays className="h-4 w-4 text-emerald-200" />
-              Export year
-            </span>
+          <div className="relative grid gap-6 xl:grid-cols-[1fr_auto] xl:items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-300/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-100">
+                <Star className="h-4 w-4" />
+                Best option
+              </div>
 
-            <select
-              value={selectedYear}
-              onChange={(event) => setSelectedYear(Number(event.target.value))}
-              className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-emerald-300/30 transition focus:ring-4"
-            >
-              {years.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
+              <h2 className="mt-4 text-3xl font-black tracking-tight text-white sm:text-4xl">
+                Send everything in one download
+              </h2>
 
-          <label className="block flex-1">
-            <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
-              <Search className="h-4 w-4 text-blue-200" />
-              Search exports
-            </span>
+              <p className="mt-3 max-w-5xl text-sm leading-6 text-white/75 sm:text-base">
+                The Accountant Export Pack is the easiest option. It creates one
+                ZIP file with the yearly report, transaction list, receipts
+                index, audit logs, funding breakdown, personal funds report, and
+                CSV import history.
+              </p>
 
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search accountant, receipts, audit logs, funding, personal funds..."
-              className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-blue-300/30 placeholder:text-white/35 focus:ring-4"
-            />
-          </label>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                  <div className="text-2xl font-black text-white">
+                    {exportStats.total}
+                  </div>
+                  <div className="text-xs font-bold text-white/50">
+                    Export options
+                  </div>
+                </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 xl:w-auto">
-            <button
-              type="button"
-              onClick={() => setCompactMode((value) => !value)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
-            >
-              <Filter className="h-4 w-4" />
-              {compactMode ? "Big cards" : "Compact"}
-            </button>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                  <div className="text-2xl font-black text-white">
+                    {exportStats.excel}
+                  </div>
+                  <div className="text-xs font-bold text-white/50">
+                    Excel reports
+                  </div>
+                </div>
 
-            <button
-              type="button"
-              onClick={() => setShowGuide((value) => !value)}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
-            >
-              <Info className="h-4 w-4" />
-              {showGuide ? "Hide guide" : "Show guide"}
-            </button>
+                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                  <div className="text-2xl font-black text-white">
+                    {exportStats.zip}
+                  </div>
+                  <div className="text-xs font-bold text-white/50">
+                    ZIP packs
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/Exports/Logs"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                >
+                  <History className="h-4 w-4" />
+                  View export logs
+                </Link>
+              </div>
+            </div>
+
+            <div className="rounded-[1.75rem] border border-white/10 bg-slate-950/30 p-4">
+              <button
+                type="button"
+                onClick={downloadRecommendedPack}
+                disabled={!!downloadingKey || !recommendedItem}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-300 px-6 py-4 text-sm font-black text-emerald-950 shadow-xl shadow-emerald-950/30 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {downloadingKey === recommendedItem?.key ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <FileArchive className="h-5 w-5" />
+                )}
+                Download Full Accountant Pack
+              </button>
+
+              <p className="mt-3 text-center text-xs font-bold text-white/50">
+                Recommended for accountant, committee checks, and year-end
+                files.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {showGuide && <HelpPanel />}
+
+        <section className="money-print-hidden w-full rounded-[2rem] border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur-xl">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
+            <label className="block xl:w-56">
+              <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
+                <CalendarDays className="h-4 w-4 text-emerald-200" />
+                Export year
+              </span>
+
+              <select
+                value={selectedYear}
+                onChange={(event) =>
+                  setSelectedYear(Number(event.target.value))
+                }
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-emerald-300/30 transition focus:ring-4"
+              >
+                {years.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block flex-1">
+              <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
+                <Search className="h-4 w-4 text-blue-200" />
+                Search exports
+              </span>
+
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search accountant, receipts, audit logs, funding, personal funds..."
+                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-blue-300/30 placeholder:text-white/35 focus:ring-4"
+              />
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-5 xl:w-auto">
+              <button
+                type="button"
+                onClick={printExportPage}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-white/90"
+              >
+                <Printer className="h-4 w-4" />
+                Print page
+              </button>
+
+              <Link
+                href="/Admin/Money/ExportLogs"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+              >
+                <History className="h-4 w-4" />
+                Logs
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => setCompactMode((value) => !value)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+              >
+                <Filter className="h-4 w-4" />
+                {compactMode ? "Big cards" : "Compact"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowGuide((value) => !value)}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+              >
+                <Info className="h-4 w-4" />
+                {showGuide ? "Hide guide" : "Show guide"}
+              </button>
+
+              <button
+                type="button"
+                onClick={resetFilters}
+                disabled={!hasFilters}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {(Object.keys(CATEGORY_LABELS) as ExportCategory[]).map(
+              (category) => {
+                const active = selectedCategory === category;
+
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() => setSelectedCategory(category)}
+                    title={CATEGORY_HELP[category]}
+                    className={classNames(
+                      "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black transition",
+                      active
+                        ? "border-emerald-300 bg-emerald-300 text-emerald-950"
+                        : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
+                    )}
+                  >
+                    {active && <BadgeCheck className="h-3.5 w-3.5" />}
+                    {CATEGORY_LABELS[category]}
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-white/65">
+            <div className="flex items-start gap-2">
+              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
+
+              <div>
+                <span className="font-black text-white">
+                  Showing {filteredItems.length} of {exportItems.length}{" "}
+                  exports.
+                </span>{" "}
+                {CATEGORY_HELP[selectedCategory]}
+              </div>
+            </div>
+          </div>
+
+          <StatusBox status={status} onClear={() => setStatus(null)} />
+        </section>
+
+        <h2 className="money-print-only money-print-section-title">
+          Export options
+        </h2>
+
+        <section
+          className={classNames(
+            "money-print-grid grid w-full gap-5",
+            compactMode
+              ? "md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+              : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+          )}
+        >
+          {filteredItems.map((item) => {
+            const Icon = ICONS[item.iconKey] || FileSpreadsheet;
+            const isDownloading = downloadingKey === item.key;
+            const category = getCategory(item);
+            const contents = getExportContents(item);
+            const route = buildUrlWithYear(item.url, selectedYear);
+
+            return (
+              <article
+                key={item.key}
+                className={classNames(
+                  "money-print-card group relative flex flex-col overflow-hidden rounded-[2rem] border p-5 shadow-2xl backdrop-blur-xl transition duration-200 hover:-translate-y-1 hover:bg-white/[0.13]",
+                  compactMode ? "min-h-[250px]" : "min-h-[370px]",
+                  item.colour
+                )}
+              >
+                <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-white/10 blur-2xl transition group-hover:bg-white/20" />
+
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+                    <Icon className="h-6 w-6" />
+                  </div>
+
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {item.recommended && (
+                      <span className="money-print-badge rounded-full bg-emerald-300 px-3 py-1 text-xs font-black text-emerald-950">
+                        Best
+                      </span>
+                    )}
+
+                    <span className="money-print-badge rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-black text-white/70">
+                      {CATEGORY_LABELS[category]}
+                    </span>
+
+                    <span className="money-print-badge rounded-full border border-white/10 bg-slate-950/30 px-3 py-1 text-xs font-black text-white/60">
+                      {getPlainFileType(item.fileName)}
+                    </span>
+                  </div>
+                </div>
+
+                <h2 className="relative mt-5 text-xl font-black text-white">
+                  {item.title}
+                </h2>
+
+                <p className="relative mt-3 text-sm leading-6 text-white/70">
+                  {item.description}
+                </p>
+
+                <div className="relative mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-3 text-sm font-bold leading-5 text-white/80">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/45">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    When to use
+                  </div>
+                  {getSimpleUse(item)}
+                </div>
+
+                <div className="relative mt-4">
+                  <div className="mb-2 text-xs font-black uppercase tracking-wide text-white/45">
+                    Includes
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {contents.map((content) => (
+                      <span
+                        key={content}
+                        className="money-print-badge rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-white/65"
+                      >
+                        {content}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="money-print-only mt-4 space-y-1">
+                  <p className="money-print-small">
+                    <strong>File:</strong>{" "}
+                    {fileNameWithYear(item.fileName, defaultYear, selectedYear)}
+                  </p>
+
+                  <p className="money-print-small">
+                    <strong>Route:</strong> {route}
+                  </p>
+                </div>
+
+                <div className="flex-1" />
+
+                <div className="money-print-button-area">
+                  <button
+                    type="button"
+                    onClick={() => downloadExport(item)}
+                    disabled={!!downloadingKey}
+                    className={classNames(
+                      "relative mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-lg transition disabled:cursor-not-allowed disabled:opacity-50",
+                      item.buttonColour
+                    )}
+                  >
+                    {isDownloading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+
+                    {isDownloading ? "Downloading..." : item.buttonText}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      printSingleExportItem(item, selectedYear, defaultYear)
+                    }
+                    className="relative mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/15"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print version
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+
+        {filteredItems.length === 0 && (
+          <div className="money-print-hidden w-full rounded-[2rem] border border-white/10 bg-white/10 p-10 text-center shadow-2xl backdrop-blur-xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-white">
+              <Search className="h-6 w-6" />
+            </div>
+
+            <h3 className="mt-4 text-xl font-black text-white">
+              No exports found
+            </h3>
+
+            <p className="mt-2 text-sm text-white/60">
+              Try removing your search or changing the category filter.
+            </p>
 
             <button
               type="button"
               onClick={resetFilters}
-              disabled={!hasFilters}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
             >
               <RefreshCcw className="h-4 w-4" />
-              Reset
+              Reset filters
             </button>
           </div>
-        </div>
+        )}
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          {(Object.keys(CATEGORY_LABELS) as ExportCategory[]).map(
-            (category) => {
-              const active = selectedCategory === category;
-
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => setSelectedCategory(category)}
-                  title={CATEGORY_HELP[category]}
-                  className={classNames(
-                    "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black transition",
-                    active
-                      ? "border-emerald-300 bg-emerald-300 text-emerald-950"
-                      : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
-                  )}
-                >
-                  {active && <BadgeCheck className="h-3.5 w-3.5" />}
-                  {CATEGORY_LABELS[category]}
-                </button>
-              );
-            }
-          )}
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-white/65">
-          <div className="flex items-start gap-2">
-            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
+        <section className="money-print-hidden w-full rounded-[2rem] border border-amber-400/20 bg-amber-500/10 p-5 text-sm text-amber-50 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
 
             <div>
-              <span className="font-black text-white">
-                Showing {filteredItems.length} of {exportItems.length} exports.
-              </span>{" "}
-              {CATEGORY_HELP[selectedCategory]}
+              <h3 className="font-black">Important</h3>
+
+              <p className="mt-1 leading-6 text-amber-50/80">
+                The Accountant Export Pack works with the route:
+                <span className="mx-1 font-black">
+                  /api/admin/money/export/accountant-pack
+                </span>
+                . The smaller export buttons need their own API routes. If
+                those routes have not been created yet, those buttons will show
+                a detailed error message telling you what file or route to fix.
+              </p>
             </div>
           </div>
-        </div>
-
-        <StatusBox status={status} onClear={() => setStatus(null)} />
-      </section>
-
-      <section
-        className={classNames(
-          "grid w-full gap-5",
-          compactMode
-            ? "md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-            : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-        )}
-      >
-        {filteredItems.map((item) => {
-          const Icon = ICONS[item.iconKey] || FileSpreadsheet;
-          const isDownloading = downloadingKey === item.key;
-          const category = getCategory(item);
-          const contents = getExportContents(item);
-
-          return (
-            <article
-              key={item.key}
-              className={classNames(
-                "group relative flex flex-col overflow-hidden rounded-[2rem] border p-5 shadow-2xl backdrop-blur-xl transition duration-200 hover:-translate-y-1 hover:bg-white/[0.13]",
-                compactMode ? "min-h-[250px]" : "min-h-[370px]",
-                item.colour
-              )}
-            >
-              <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-white/10 blur-2xl transition group-hover:bg-white/20" />
-
-              <div className="relative flex items-start justify-between gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
-                  <Icon className="h-6 w-6" />
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  {item.recommended && (
-                    <span className="rounded-full bg-emerald-300 px-3 py-1 text-xs font-black text-emerald-950">
-                      Best
-                    </span>
-                  )}
-
-                  <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-black text-white/70">
-                    {CATEGORY_LABELS[category]}
-                  </span>
-
-                  <span className="rounded-full border border-white/10 bg-slate-950/30 px-3 py-1 text-xs font-black text-white/60">
-                    {getPlainFileType(item.fileName)}
-                  </span>
-                </div>
-              </div>
-
-              <h2 className="relative mt-5 text-xl font-black text-white">
-                {item.title}
-              </h2>
-
-              <p className="relative mt-3 text-sm leading-6 text-white/70">
-                {item.description}
-              </p>
-
-              {!compactMode && (
-                <>
-                  <div className="relative mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-3 text-sm font-bold leading-5 text-white/80">
-                    <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/45">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      When to use
-                    </div>
-                    {getSimpleUse(item)}
-                  </div>
-
-                  <div className="relative mt-4">
-                    <div className="mb-2 text-xs font-black uppercase tracking-wide text-white/45">
-                      Includes
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {contents.map((content) => (
-                        <span
-                          key={content}
-                          className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-white/65"
-                        >
-                          {content}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div className="flex-1" />
-
-              <button
-                type="button"
-                onClick={() => downloadExport(item)}
-                disabled={!!downloadingKey}
-                className={classNames(
-                  "relative mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-lg transition disabled:cursor-not-allowed disabled:opacity-50",
-                  item.buttonColour
-                )}
-              >
-                {isDownloading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-
-                {isDownloading ? "Downloading..." : item.buttonText}
-              </button>
-            </article>
-          );
-        })}
-      </section>
-
-      {filteredItems.length === 0 && (
-        <div className="w-full rounded-[2rem] border border-white/10 bg-white/10 p-10 text-center shadow-2xl backdrop-blur-xl">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-white">
-            <Search className="h-6 w-6" />
-          </div>
-
-          <h3 className="mt-4 text-xl font-black text-white">
-            No exports found
-          </h3>
-
-          <p className="mt-2 text-sm text-white/60">
-            Try removing your search or changing the category filter.
-          </p>
-
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
-          >
-            <RefreshCcw className="h-4 w-4" />
-            Reset filters
-          </button>
-        </div>
-      )}
-
-      <section className="w-full rounded-[2rem] border border-amber-400/20 bg-amber-500/10 p-5 text-sm text-amber-50 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-
-          <div>
-            <h3 className="font-black">Important</h3>
-
-            <p className="mt-1 leading-6 text-amber-50/80">
-              The Accountant Export Pack works with the route:
-              <span className="mx-1 font-black">
-                /api/admin/money/export/accountant-pack
-              </span>
-              . The smaller export buttons need their own API routes. If those
-              routes have not been created yet, those buttons will show a
-              detailed error message telling you what file or route to fix.
-            </p>
-          </div>
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </>
   );
 }
