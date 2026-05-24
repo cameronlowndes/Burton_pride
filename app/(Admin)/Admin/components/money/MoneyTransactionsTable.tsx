@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
@@ -7,6 +5,8 @@ import { useUser } from "@clerk/nextjs";
 import {
   AlertTriangle,
   ArrowDown,
+  CalendarClock,
+
   ArrowUp,
   CheckCircle2,
   ChevronDown,
@@ -117,6 +117,13 @@ type MoneyTransactionsTableProps = {
     note?: string
   ) => void | Promise<void>;
   onUpdateFinanceNote: (item: Transaction, status: FinanceNoteStatus, note?: string) => void | Promise<void>;
+
+  /**
+   * Receipt expiry/check reminder.
+   * Expenses with no receipt older than this number of days will be flagged.
+   * Default is 7 days.
+   */
+  receiptReminderDays?: number;
 };
 
 type SortKey =
@@ -138,6 +145,7 @@ type QuickFilter =
   | "unchecked"
   | "checked"
   | "missing_receipts"
+  | "receipt_overdue"
   | "finance_queries"
   | "bank_unmatched"
   | "personal_unpaid"
@@ -186,6 +194,14 @@ const financeNoteOptions: { value: FinanceNoteStatus; label: string }[] = [
   { value: "bank_query", label: "Bank query" },
   { value: "resolved", label: "Resolved" },
 ];
+
+const DEFAULT_RECEIPT_REMINDER_DAYS = 7;
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+const RECEIPT_OVERDUE_SEARCH_WORDS =
+  "receipt overdue overdue receipt old receipt expired receipt receipt expiry missing receipt over 7 days";
+
+const receiptReminderDayOptions = [3, 7, 14, 21, 30];
 
 const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "select", label: "Select", locked: true },
@@ -390,6 +406,73 @@ function transactionMonthKey(item: Transaction) {
   return rawDate.slice(0, 7);
 }
 
+function transactionReminderBaseDate(item: Transaction) {
+  return item.transaction_date || item.created_at || "";
+}
+
+function parseTransactionDate(item: Transaction) {
+  const rawDate = String(transactionReminderBaseDate(item) || "").trim();
+
+  if (!rawDate) return null;
+
+  const date = new Date(rawDate);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date;
+}
+
+function transactionAgeDays(item: Transaction) {
+  const date = parseTransactionDate(item);
+
+  if (!date) return 0;
+
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / MS_PER_DAY));
+}
+
+function receiptDueDate(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+  const date = parseTransactionDate(item);
+
+  if (!date) return null;
+
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)));
+
+  return nextDate;
+}
+
+function receiptDueDateLabel(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+  const date = receiptDueDate(item, reminderDays);
+
+  if (!date) return "No due date";
+
+  return formatDate(date.toISOString());
+}
+
+function receiptOverdueDays(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+  return Math.max(0, transactionAgeDays(item) - Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)));
+}
+
+function isReceiptOverdue(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+  return hasMissingReceiptWarning(item) && transactionAgeDays(item) >= Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS));
+}
+
+function receiptReminderLabel(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+  const ageDays = transactionAgeDays(item);
+  const overdueDays = receiptOverdueDays(item, reminderDays);
+  const dueDate = receiptDueDateLabel(item, reminderDays);
+
+  if (isReceiptOverdue(item, reminderDays)) {
+    return `Missing receipt for ${ageDays} day${ageDays === 1 ? "" : "s"} — overdue by ${overdueDays} day${overdueDays === 1 ? "" : "s"} (due ${dueDate})`;
+  }
+
+  if (hasMissingReceiptWarning(item)) {
+    return `Missing receipt for ${ageDays} day${ageDays === 1 ? "" : "s"} — due ${dueDate}`;
+  }
+
+  return "Receipt uploaded";
+}
+
 function isSpecialCheckedSearch(searchTerm: string) {
   const cleanSearch = searchTerm.trim().toLowerCase();
 
@@ -401,11 +484,19 @@ function isSpecialCheckedSearch(searchTerm: string) {
 
   const isCheckedSearch = cleanSearch === "checked";
 
+  const isReceiptOverdueSearch =
+    cleanSearch === "receipt overdue" ||
+    cleanSearch === "overdue receipt" ||
+    cleanSearch === "expired receipt" ||
+    cleanSearch === "receipt expiry" ||
+    cleanSearch === "old receipt";
+
   return {
     cleanSearch,
     isUncheckedSearch,
     isCheckedSearch,
-    isSpecialSearch: isUncheckedSearch || isCheckedSearch,
+    isReceiptOverdueSearch,
+    isSpecialSearch: isUncheckedSearch || isCheckedSearch || isReceiptOverdueSearch,
   };
 }
 
@@ -435,6 +526,7 @@ function getRowSearchText(item: Transaction) {
     (item as any).checked_by_name,
     (item as any).checked_by_email,
     missingReceipt ? "missing receipt no receipt receipt missing proof missing" : "receipt uploaded proof attached",
+    isReceiptOverdue(item) ? RECEIPT_OVERDUE_SEARCH_WORDS : "receipt not overdue",
     files.map((file) => file.file_name).join(" "),
     String(item.amount_pence || ""),
     money(item.amount_pence),
@@ -444,11 +536,12 @@ function getRowSearchText(item: Transaction) {
     .toLowerCase();
 }
 
-function transactionMatchesQuickFilter(item: Transaction, quickFilter: QuickFilter) {
+function transactionMatchesQuickFilter(item: Transaction, quickFilter: QuickFilter, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
   if (quickFilter === "all") return true;
   if (quickFilter === "unchecked") return !item.checked_at;
   if (quickFilter === "checked") return Boolean(item.checked_at);
   if (quickFilter === "missing_receipts") return hasMissingReceiptWarning(item);
+  if (quickFilter === "receipt_overdue") return isReceiptOverdue(item, receiptReminderDays);
   if (quickFilter === "finance_queries") return Boolean(item.finance_note_status && item.finance_note_status !== "none");
   if (quickFilter === "bank_unmatched") return !item.bank_reconciliation_status || item.bank_reconciliation_status === "unmatched";
   if (quickFilter === "personal_unpaid") return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
@@ -468,6 +561,7 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     "Personal Funds Name",
     "Bank Status",
     "Finance Status",
+    "Receipt Status",
     "Checked",
   ];
 
@@ -482,6 +576,7 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     item.personal_funds_name || "",
     item.bank_reconciliation_status || "unmatched",
     item.finance_note_status || "none",
+    isReceiptOverdue(item) ? receiptReminderLabel(item) : hasMissingReceiptWarning(item) ? "Missing receipt" : "Receipt uploaded",
     item.checked_at ? `Checked by ${getCheckedByDisplayName(item)}` : "Not checked",
   ]);
 
@@ -504,7 +599,7 @@ function Badge({ children, className }: { children: ReactNode; className: string
   return <span className={`inline-flex rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${className}`}>{children}</span>;
 }
 
-function WarningBadges({ item }: { item: Transaction }) {
+function WarningBadges({ item, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS }: { item: Transaction; receiptReminderDays?: number }) {
   const badges: ReactNode[] = [];
 
   if (!item.checked_at) {
@@ -516,9 +611,24 @@ function WarningBadges({ item }: { item: Transaction }) {
     );
   }
 
-  if (hasMissingReceiptWarning(item)) {
+  if (isReceiptOverdue(item, receiptReminderDays)) {
     badges.push(
-      <span key="receipt" className="inline-flex items-center gap-1 rounded-xl border border-red-300/20 bg-red-500/10 px-2 py-1 text-[11px] font-black text-red-100">
+      <span
+        key="receipt-overdue"
+        className="inline-flex items-center gap-1 rounded-xl border border-red-300/30 bg-red-500/15 px-2 py-1 text-[11px] font-black text-red-100"
+        title={receiptReminderLabel(item, receiptReminderDays)}
+      >
+        <CalendarClock className="h-3 w-3" />
+        Receipt overdue · {transactionAgeDays(item)} days
+      </span>
+    );
+  } else if (hasMissingReceiptWarning(item)) {
+    badges.push(
+      <span
+        key="receipt"
+        className="inline-flex items-center gap-1 rounded-xl border border-red-300/20 bg-red-500/10 px-2 py-1 text-[11px] font-black text-red-100"
+        title={receiptReminderLabel(item, receiptReminderDays)}
+      >
         <AlertTriangle className="h-3 w-3" />
         Missing receipt
       </span>
@@ -615,6 +725,7 @@ export default function MoneyTransactionsTable({
   onMarkTransactionChecked,
   onUpdateBankReconciliationStatus,
   onUpdateFinanceNote,
+  receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
 }: MoneyTransactionsTableProps) {
   const { user } = useUser();
 
@@ -622,12 +733,15 @@ export default function MoneyTransactionsTable({
   const currentUserEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || null;
   const currentUserName = user?.fullName || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || nameFromEmail(currentUserEmail) || null;
 
+  const receiptReminderDaysSafe = Math.max(1, Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS));
+
   const [repaymentProofFiles, setRepaymentProofFiles] = useState<Record<string, File[]>>({});
   const [financeNoteDrafts, setFinanceNoteDrafts] = useState<Record<string, { status: FinanceNoteStatus; note: string }>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [localReceiptReminderDays, setLocalReceiptReminderDays] = useState(receiptReminderDaysSafe);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -637,6 +751,8 @@ export default function MoneyTransactionsTable({
 
   const topActionButtonBase =
     "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none";
+
+  const activeReceiptReminderDays = Math.max(1, Number(localReceiptReminderDays || receiptReminderDaysSafe));
 
   function getFundingForTransaction(item: Transaction) {
     if (!isSponsorshipTransaction(item)) return null;
@@ -687,7 +803,7 @@ export default function MoneyTransactionsTable({
   }
 
   const visibleTransactions = useMemo(() => {
-    const { cleanSearch, isUncheckedSearch, isCheckedSearch, isSpecialSearch } = isSpecialCheckedSearch(searchTerm);
+    const { cleanSearch, isUncheckedSearch, isCheckedSearch, isReceiptOverdueSearch, isSpecialSearch } = isSpecialCheckedSearch(searchTerm);
 
     const baseItems = isSpecialSearch ? yearTransactions : filteredTransactions;
 
@@ -720,10 +836,11 @@ export default function MoneyTransactionsTable({
           : isSponsorshipTransaction(item) && Boolean(item.sponsor_id === selectedSponsorId || getFundingForTransaction(item)?.id === selectedSponsorId);
 
       const matchesCheckedSearch = isUncheckedSearch ? !item.checked_at : isCheckedSearch ? Boolean(item.checked_at) : true;
-      const matchesQuickFilter = transactionMatchesQuickFilter(item, quickFilter);
+      const matchesReceiptOverdueSearch = isReceiptOverdueSearch ? isReceiptOverdue(item, activeReceiptReminderDays) : true;
+      const matchesQuickFilter = transactionMatchesQuickFilter(item, quickFilter, activeReceiptReminderDays);
       const matchesTextSearch = !cleanSearch || isSpecialSearch || getRowSearchText(item).includes(cleanSearch);
 
-      return matchesMonth && matchesType && matchesPaymentMethod && matchesSponsor && matchesCheckedSearch && matchesQuickFilter && matchesTextSearch;
+      return matchesMonth && matchesType && matchesPaymentMethod && matchesSponsor && matchesCheckedSearch && matchesReceiptOverdueSearch && matchesQuickFilter && matchesTextSearch;
     });
 
     return [...filtered].sort((a, b) => {
@@ -737,7 +854,11 @@ export default function MoneyTransactionsTable({
       if (sortKey === "payment") result = compareText(a.payment_method, b.payment_method);
       if (sortKey === "checked") result = Number(Boolean(a.checked_at)) - Number(Boolean(b.checked_at));
       if (sortKey === "bank") result = compareText(a.bank_reconciliation_status || "unmatched", b.bank_reconciliation_status || "unmatched");
-      if (sortKey === "receipt") result = Number(!hasMissingReceiptWarning(a)) - Number(!hasMissingReceiptWarning(b));
+      if (sortKey === "receipt") {
+        const aOverdue = isReceiptOverdue(a, activeReceiptReminderDays) ? 2 : hasMissingReceiptWarning(a) ? 1 : 0;
+        const bOverdue = isReceiptOverdue(b, activeReceiptReminderDays) ? 2 : hasMissingReceiptWarning(b) ? 1 : 0;
+        result = aOverdue - bOverdue;
+      }
       if (sortKey === "finance") result = compareText(a.finance_note_status || "none", b.finance_note_status || "none");
 
       return sortDirection === "asc" ? result : result * -1;
@@ -754,6 +875,7 @@ export default function MoneyTransactionsTable({
     sortKey,
     sortDirection,
     quickFilter,
+    activeReceiptReminderDays,
   ]);
 
   const visibleIds = useMemo(() => visibleTransactions.map((item) => item.id).filter(Boolean), [visibleTransactions]);
@@ -767,12 +889,13 @@ export default function MoneyTransactionsTable({
         if (item.type === "expense") acc.expense += Number(item.amount_pence || 0);
         if (!item.checked_at) acc.unchecked += 1;
         if (hasMissingReceiptWarning(item)) acc.missingReceipts += 1;
+        if (isReceiptOverdue(item, activeReceiptReminderDays)) acc.overdueReceipts += 1;
         if (isPersonalFundsTransaction(item) && !item.personal_funds_repaid) acc.unpaidPersonal += Number(item.amount_pence || 0);
         return acc;
       },
-      { income: 0, expense: 0, unchecked: 0, missingReceipts: 0, unpaidPersonal: 0 }
+      { income: 0, expense: 0, unchecked: 0, missingReceipts: 0, overdueReceipts: 0, unpaidPersonal: 0 }
     );
-  }, [visibleTransactions]);
+  }, [visibleTransactions, activeReceiptReminderDays]);
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -863,9 +986,10 @@ export default function MoneyTransactionsTable({
     const isPersonal = isPersonalFundsTransaction(item);
     const hasFunding = isSponsorshipTransaction(item);
     const missingReceipt = hasMissingReceiptWarning(item);
+    const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
 
     return (
-      <div key={item.id} className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${missingReceipt ? "ring-1 ring-red-300/20" : ""}`}>
+      <div key={item.id} className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${receiptOverdue ? "ring-2 ring-red-300/30" : missingReceipt ? "ring-1 ring-red-300/20" : ""}`}>
         <div className="flex items-start justify-between gap-3">
           <label className="flex items-start gap-3">
             <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30" />
@@ -880,7 +1004,13 @@ export default function MoneyTransactionsTable({
           </div>
         </div>
 
-        <WarningBadges item={item} />
+        <WarningBadges item={item} receiptReminderDays={activeReceiptReminderDays} />
+
+        {receiptOverdue && (
+          <div className="mt-3 rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-xs font-bold leading-5 text-red-100">
+            {receiptReminderLabel(item, activeReceiptReminderDays)}
+          </div>
+        )}
 
         <div className="mt-4 grid gap-2 text-sm text-white/65 sm:grid-cols-2">
           <div>Date: <strong className="text-white">{none(item.transaction_date)}</strong></div>
@@ -985,10 +1115,24 @@ export default function MoneyTransactionsTable({
                   <option className="bg-[#11111f] text-white" value="unchecked">Unchecked only</option>
                   <option className="bg-[#11111f] text-white" value="checked">Checked only</option>
                   <option className="bg-[#11111f] text-white" value="missing_receipts">Missing receipts</option>
+                  <option className="bg-[#11111f] text-white" value="receipt_overdue">Receipt overdue</option>
                   <option className="bg-[#11111f] text-white" value="finance_queries">Finance queries</option>
                   <option className="bg-[#11111f] text-white" value="bank_unmatched">Bank unmatched</option>
                   <option className="bg-[#11111f] text-white" value="personal_unpaid">Personal funds unpaid</option>
                   <option className="bg-[#11111f] text-white" value="funding">Funding linked</option>
+                </select>
+
+                <select
+                  value={activeReceiptReminderDays}
+                  onChange={(event) => setLocalReceiptReminderDays(Number(event.target.value))}
+                  className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-red-300/20"
+                  title="Receipt reminder days"
+                >
+                  {receiptReminderDayOptions.map((days) => (
+                    <option key={days} className="bg-[#11111f] text-white" value={days}>
+                      Receipt overdue after {days} day{days === 1 ? "" : "s"}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -999,7 +1143,7 @@ export default function MoneyTransactionsTable({
                   </button>
                 ))}
 
-                <button type="button" onClick={() => { setSearchTerm(""); setFilter("all"); setSelectedSponsorId("all"); setSelectedPaymentMethod("all"); setQuickFilter("all"); }} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20">
+                <button type="button" onClick={() => { setSearchTerm(""); setFilter("all"); setSelectedSponsorId("all"); setSelectedPaymentMethod("all"); setQuickFilter("all"); setLocalReceiptReminderDays(receiptReminderDaysSafe); }} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20">
                   Clear all
                 </button>
               </div>
@@ -1032,11 +1176,12 @@ export default function MoneyTransactionsTable({
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20"><p className="text-xs font-black text-emerald-100/70">Money In</p><p className="mt-1 text-lg font-black text-white">{money(totals.income)}</p></div>
         <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20"><p className="text-xs font-black text-red-100/70">Money Out</p><p className="mt-1 text-lg font-black text-white">{money(totals.expense)}</p></div>
         <div className="rounded-2xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20"><p className="text-xs font-black text-sky-100/70">Balance in view</p><p className="mt-1 text-lg font-black text-white">{money(totals.income - totals.expense)}</p></div>
         <div className="rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20"><p className="text-xs font-black text-amber-100/70">Unchecked</p><p className="mt-1 text-lg font-black text-white">{totals.unchecked}</p></div>
+        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20"><p className="text-xs font-black text-red-100/70">Receipt overdue</p><p className="mt-1 text-lg font-black text-white">{totals.overdueReceipts}</p><p className="mt-1 text-[11px] font-bold text-red-100/55">after {activeReceiptReminderDays} days</p></div>
         <div className="rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20"><p className="text-xs font-black text-orange-100/70">Unpaid personal</p><p className="mt-1 text-lg font-black text-white">{money(totals.unpaidPersonal)}</p></div>
       </div>
 
@@ -1104,6 +1249,7 @@ export default function MoneyTransactionsTable({
                   const shortLabel = fundingShortLabel(fundingType);
                   const files = getTransactionFiles(item);
                   const missingReceipt = hasMissingReceiptWarning(item);
+                  const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
                   const proofFiles = repaymentProofFiles[item.id] || [];
                   const bankStatus = item.bank_reconciliation_status || "unmatched";
                   const financeDraft = getFinanceDraft(item);
@@ -1111,7 +1257,7 @@ export default function MoneyTransactionsTable({
                   const financeNoteChanged = financeDraft.status !== financeStatus || financeDraft.note !== (item.finance_note || "");
 
                   return (
-                    <tr key={item.id} className={`border-t border-white/10 ${missingReceipt ? "bg-red-500/[0.03]" : ""}`}>
+                    <tr key={item.id} className={`border-t border-white/10 ${receiptOverdue ? "bg-red-500/[0.07]" : missingReceipt ? "bg-red-500/[0.03]" : ""}`}>
                       <ColumnCell column="select" className="p-3 align-top"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} /></ColumnCell>
 
                       <ColumnCell column="reference" className="whitespace-nowrap p-3 align-top">
@@ -1123,7 +1269,7 @@ export default function MoneyTransactionsTable({
                       <ColumnCell column="title" className="max-w-[240px] p-3 align-top">
                         <button type="button" onClick={() => setDetailsItem(item)} className="break-words text-left font-semibold text-white hover:text-sky-200">{item.title}</button>
                         {item.description && <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">{item.description}</p>}
-                        <WarningBadges item={item} />
+                        <WarningBadges item={item} receiptReminderDays={activeReceiptReminderDays} />
                       </ColumnCell>
 
                       <ColumnCell column="type" className="whitespace-nowrap p-3 align-top">{item.type === "income" ? "Money In" : "Money Out"}</ColumnCell>
@@ -1189,7 +1335,18 @@ export default function MoneyTransactionsTable({
 
                       <ColumnCell column="receipt" className="min-w-[230px] p-3 align-top">
                         {missingReceipt ? (
-                          <div className="rounded-2xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs text-red-100"><div className="flex items-center gap-2 font-black"><AlertTriangle className="h-4 w-4" /> Missing receipt</div><div className="mt-1 text-red-100/70">This expense has no receipt, invoice, or proof file attached.</div></div>
+                          <div className={`rounded-2xl border px-3 py-2 text-xs text-red-100 ${receiptOverdue ? "border-red-300/30 bg-red-500/15" : "border-red-300/20 bg-red-500/10"}`}>
+                            <div className="flex items-center gap-2 font-black">
+                              {receiptOverdue ? <CalendarClock className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                              {receiptOverdue ? "Receipt overdue" : "Missing receipt"}
+                            </div>
+                            <div className="mt-1 text-red-100/70">
+                              {receiptReminderLabel(item, activeReceiptReminderDays)}
+                            </div>
+                            <div className="mt-2 rounded-xl bg-black/20 px-2 py-1 text-[11px] font-bold text-red-100/75">
+                              Rule: upload receipt within {activeReceiptReminderDays} day{activeReceiptReminderDays === 1 ? "" : "s"} of the expense.
+                            </div>
+                          </div>
                         ) : files.length > 0 ? (
                           <div className="space-y-2">
                             <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100"><div className="font-black">Receipt / proof attached</div><div className="mt-1 text-emerald-100/70">{files.length} file{files.length === 1 ? "" : "s"} attached.</div></div>

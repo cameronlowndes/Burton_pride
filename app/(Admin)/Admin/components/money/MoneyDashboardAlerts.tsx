@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Banknote,
+  CalendarClock,
   CheckCircle2,
   Eye,
   FileWarning,
@@ -52,6 +53,7 @@ type MoneyFilter = "all" | "income" | "expense" | "sponsorship" | "personal";
 type AlertKey =
   | "unchecked"
   | "missing-receipts"
+  | "receipt-overdue"
   | "personal-funds"
   | "overspent-funding"
   | "failed-csv"
@@ -64,6 +66,13 @@ type Props = {
   failedCsvRows?: FailedCsvRow[];
   onSetFilter?: (filter: MoneyFilter) => void;
   onSetSearchTerm?: (term: string) => void;
+
+  /**
+   * Receipt expiry/check reminder.
+   * Example: 7 means expenses older than 7 days with no receipt will be shown
+   * in the overdue receipt alert.
+   */
+  receiptReminderDays?: number;
 
   /**
    * Required for floating window checkboxes.
@@ -84,6 +93,8 @@ type DashboardAlert = {
   filter: MoneyFilter;
   searchTerm: string;
 };
+
+const DEFAULT_RECEIPT_REMINDER_DAYS = 7;
 
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat("en-GB", {
@@ -136,6 +147,24 @@ function safeDate(value: unknown) {
   });
 }
 
+function safeDateTime(value: unknown) {
+  const cleanValue = cleanText(value);
+
+  if (!cleanValue) return "No date";
+
+  const date = new Date(cleanValue);
+
+  if (Number.isNaN(date.getTime())) return cleanValue;
+
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function transactionId(transaction: Transaction) {
   return cleanText((transaction as any).id);
 }
@@ -161,6 +190,45 @@ function transactionDate(transaction: Transaction) {
     transaction.created_at ||
     ""
   );
+}
+
+function transactionCreatedAt(transaction: Transaction) {
+  return (transaction as any).created_at || transactionDate(transaction);
+}
+
+function transactionAgeDays(transaction: Transaction) {
+  const rawDate = transactionDate(transaction) || transactionCreatedAt(transaction);
+
+  if (!rawDate) return 0;
+
+  const date = new Date(String(rawDate));
+
+  if (Number.isNaN(date.getTime())) return 0;
+
+  const now = new Date();
+
+  return Math.max(
+    0,
+    Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+  );
+}
+
+function receiptDueDate(transaction: Transaction, receiptReminderDays: number) {
+  const rawDate = transactionDate(transaction) || transactionCreatedAt(transaction);
+
+  if (!rawDate) return "";
+
+  const date = new Date(String(rawDate));
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  date.setDate(date.getDate() + receiptReminderDays);
+
+  return date.toISOString();
+}
+
+function receiptOverdueDays(transaction: Transaction, receiptReminderDays: number) {
+  return Math.max(0, transactionAgeDays(transaction) - receiptReminderDays);
 }
 
 function isForSelectedYear(transaction: Transaction, selectedYear: string) {
@@ -327,6 +395,22 @@ function transactionFunding(transaction: Transaction) {
     cleanText((transaction as any).grant_name) ||
     "No funding record"
   );
+}
+
+function receiptReminderStatus(
+  transaction: Transaction,
+  receiptReminderDays: number
+) {
+  const ageDays = transactionAgeDays(transaction);
+  const dueDate = receiptDueDate(transaction, receiptReminderDays);
+  const overdueBy = receiptOverdueDays(transaction, receiptReminderDays);
+
+  return {
+    ageDays,
+    dueDate,
+    overdueBy,
+    isOverdue: ageDays >= receiptReminderDays,
+  };
 }
 
 function toneClasses(tone: DashboardAlert["tone"]) {
@@ -619,6 +703,7 @@ export default function MoneyDashboardAlerts({
   failedCsvRows = [],
   onSetFilter,
   onSetSearchTerm,
+  receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
   onMarkTransactionChecked,
 }: Props) {
   const [openAlertKey, setOpenAlertKey] = useState<AlertKey | null>(null);
@@ -628,6 +713,11 @@ export default function MoneyDashboardAlerts({
   );
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const receiptReminderDaysSafe = Math.max(
+    1,
+    Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)
+  );
 
   const activeTransactions = useMemo(() => {
     return transactions
@@ -648,6 +738,30 @@ export default function MoneyDashboardAlerts({
       (transaction) => isExpense(transaction) && !hasReceipt(transaction)
     );
   }, [activeTransactions]);
+
+  const overdueReceiptExpenses = useMemo(() => {
+    return missingReceiptExpenses
+      .filter((transaction) => {
+        const status = receiptReminderStatus(
+          transaction,
+          receiptReminderDaysSafe
+        );
+
+        return status.isOverdue;
+      })
+      .sort((a, b) => {
+        const aOverdue = receiptOverdueDays(a, receiptReminderDaysSafe);
+        const bOverdue = receiptOverdueDays(b, receiptReminderDaysSafe);
+
+        return bOverdue - aOverdue;
+      });
+  }, [missingReceiptExpenses, receiptReminderDaysSafe]);
+
+  const oldestOverdueReceiptDays = overdueReceiptExpenses.reduce(
+    (highest, transaction) =>
+      Math.max(highest, transactionAgeDays(transaction)),
+    0
+  );
 
   const unpaidPersonalFunds = useMemo(() => {
     return activeTransactions.filter(
@@ -762,6 +876,28 @@ ${details}`
       searchTerm: "missing receipt",
     },
     {
+      key: "receipt-overdue",
+      title: "Receipt expiry check",
+      message:
+        overdueReceiptExpenses.length > 0
+          ? `${overdueReceiptExpenses.length} expense${
+              overdueReceiptExpenses.length === 1 ? "" : "s"
+            } still have no receipt after ${receiptReminderDaysSafe} day${
+              receiptReminderDaysSafe === 1 ? "" : "s"
+            }. Oldest is ${oldestOverdueReceiptDays} day${
+              oldestOverdueReceiptDays === 1 ? "" : "s"
+            } old.`
+          : `No missing receipts older than ${receiptReminderDaysSafe} day${
+              receiptReminderDaysSafe === 1 ? "" : "s"
+            }.`,
+      count: overdueReceiptExpenses.length,
+      tone: overdueReceiptExpenses.length > 0 ? "red" : "emerald",
+      icon: overdueReceiptExpenses.length > 0 ? CalendarClock : CheckCircle2,
+      actionLabel: "Show overdue receipts",
+      filter: "expense",
+      searchTerm: "receipt overdue",
+    },
+    {
       key: "personal-funds",
       title: "Unpaid personal funds",
       message:
@@ -872,6 +1008,62 @@ ${details}`
       );
     }
 
+    if (alert.key === "receipt-overdue") {
+      if (overdueReceiptExpenses.length === 0) {
+        return (
+          <EmptyModalState
+            title={`No missing receipts older than ${receiptReminderDaysSafe} days`}
+          />
+        );
+      }
+
+      return overdueReceiptExpenses.map((transaction) => {
+        const status = receiptReminderStatus(
+          transaction,
+          receiptReminderDaysSafe
+        );
+
+        return renderTransactionCard(
+          transaction,
+          <div className="grid gap-3 rounded-xl bg-red-500/10 p-3 text-sm ring-1 ring-red-300/20 sm:grid-cols-3">
+            <DetailLine
+              label="Receipt rule"
+              value={`Receipt expected after ${receiptReminderDaysSafe} day${
+                receiptReminderDaysSafe === 1 ? "" : "s"
+              }`}
+            />
+
+            <DetailLine
+              label="Expense age"
+              value={`${status.ageDays} day${status.ageDays === 1 ? "" : "s"} old`}
+            />
+
+            <DetailLine
+              label="Overdue by"
+              value={`${status.overdueBy} day${
+                status.overdueBy === 1 ? "" : "s"
+              }`}
+            />
+
+            <DetailLine
+              label="Receipt due date"
+              value={status.dueDate ? safeDate(status.dueDate) : "No due date"}
+            />
+
+            <DetailLine
+              label="Created"
+              value={safeDateTime(transactionCreatedAt(transaction))}
+            />
+
+            <DetailLine
+              label="Action needed"
+              value="Upload a receipt or invoice, or add a finance note explaining why it is missing."
+            />
+          </div>
+        );
+      });
+    }
+
     if (alert.key === "personal-funds") {
       if (unpaidPersonalFunds.length === 0) {
         return <EmptyModalState title="No unpaid personal funds found" />;
@@ -967,6 +1159,8 @@ ${details}`
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
               These checks help keep accounts clean before printing reports,
               locking a month, or closing a funding record for {selectedYear}.
+              Receipts are flagged as overdue after {receiptReminderDaysSafe}{" "}
+              day{receiptReminderDaysSafe === 1 ? "" : "s"}.
             </p>
           </div>
 
@@ -1008,6 +1202,37 @@ ${details}`
                     <p className={`mt-2 text-sm leading-6 ${classes.text}`}>
                       {alert.message}
                     </p>
+
+                    {alert.key === "receipt-overdue" &&
+                      overdueReceiptExpenses.length > 0 && (
+                        <div className="mt-3 space-y-1 rounded-xl bg-black/20 p-3 text-xs text-white/65">
+                          {overdueReceiptExpenses.slice(0, 3).map((item) => {
+                            const status = receiptReminderStatus(
+                              item,
+                              receiptReminderDaysSafe
+                            );
+
+                            return (
+                              <div
+                                key={
+                                  transactionId(item) ||
+                                  transactionReference(item)
+                                }
+                                className="flex items-center justify-between gap-3"
+                              >
+                                <span className="break-words font-bold text-white/80">
+                                  {transactionTitle(item)}
+                                </span>
+
+                                <span className="shrink-0 text-red-100">
+                                  {status.overdueBy} day
+                                  {status.overdueBy === 1 ? "" : "s"} overdue
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                     {alert.key === "overspent-funding" &&
                       overspentFunding.length > 0 && (

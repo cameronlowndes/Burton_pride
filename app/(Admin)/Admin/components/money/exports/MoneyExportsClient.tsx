@@ -1557,26 +1557,6 @@ export default function MoneyExportsClient({
             </button>
           </div>
         )}
-
-        <section className="money-print-hidden w-full rounded-[2rem] border border-amber-400/20 bg-amber-500/10 p-5 text-sm text-amber-50 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-
-            <div>
-              <h3 className="font-black">Important</h3>
-
-              <p className="mt-1 leading-6 text-amber-50/80">
-                The Accountant Export Pack works with the route:
-                <span className="mx-1 font-black">
-                  /api/admin/money/export/accountant-pack
-                </span>
-                . The smaller export buttons need their own API routes. If
-                those routes have not been created yet, those buttons will show
-                a detailed error message telling you what file or route to fix.
-              </p>
-            </div>
-          </div>
-        </section>
       </div>
     </>
   );

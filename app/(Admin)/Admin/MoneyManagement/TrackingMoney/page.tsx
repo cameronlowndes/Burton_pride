@@ -17,6 +17,8 @@ import ManualBankBalanceCheck from "../../components/money/ManualBankBalanceChec
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
+const RECEIPT_REMINDER_DAYS = 7;
+
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
 
@@ -91,6 +93,7 @@ export default function MoneyTransactionsPage() {
           transactions={money.yearTransactions}
           yearlySponsorBreakdown={money.yearlySponsorBreakdown}
           failedCsvRows={(money as any).failedCsvRows || []}
+          receiptReminderDays={RECEIPT_REMINDER_DAYS}
           onSetFilter={money.setFilter}
           onSetSearchTerm={money.setSearchTerm}
           onMarkTransactionChecked={money.markTransactionChecked}
