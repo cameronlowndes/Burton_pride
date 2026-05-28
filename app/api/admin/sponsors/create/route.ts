@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function slugify(value: string) {
   return value
@@ -15,6 +16,17 @@ function getSupabaseClient() {
   return typeof supabaseAdmin === "function" ? supabaseAdmin : supabaseAdmin;
 }
 
+function formBoolean(value: FormDataEntryValue | null) {
+  const text = String(value || "").trim().toLowerCase();
+
+  return (
+    text === "true" ||
+    text === "1" ||
+    text === "yes" ||
+    text === "on"
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = getSupabaseClient();
@@ -22,21 +34,35 @@ export async function POST(req: Request) {
 
     const sponsor_name = String(formData.get("sponsor_name") || "").trim();
     const contact_name = String(formData.get("contact_name") || "").trim();
+
     const email =
       String(formData.get("email") || "").trim().toLowerCase() ||
       `no-email+${Date.now()}@burtonpride.local`;
+
     const phone = String(formData.get("phone") || "").trim();
-    const sponsorship_type = String(formData.get("sponsorship_type") || "").trim();
+
+    const raw_sponsorship_type = String(
+      formData.get("sponsorship_type") || ""
+    ).trim();
+
+    const is_main_sponsor = formBoolean(formData.get("is_main_sponsor"));
+
+    // Keep the real sponsor type in the database, but Main Sponsor is saved separately.
+    // This means the website/admin can clearly know it is a main sponsor.
+    const sponsorship_type = raw_sponsorship_type || "normal_sponsorship";
+
     const website = String(formData.get("website") || "").trim();
     const story = String(formData.get("story") || "").trim();
     const notes = String(formData.get("notes") || "").trim();
     const slug = String(formData.get("slug") || "").trim();
+
     const address_line1 = String(formData.get("address_line1") || "").trim();
     const address_line2 = String(formData.get("address_line2") || "").trim();
     const city = String(formData.get("city") || "").trim();
     const county = String(formData.get("county") || "").trim();
     const postcode = String(formData.get("postcode") || "").trim();
     const country = String(formData.get("country") || "").trim();
+
     const logoFile = formData.get("logo");
 
     if (!sponsor_name) {
@@ -65,11 +91,13 @@ export async function POST(req: Request) {
     if (logoFile instanceof File && logoFile.size > 0) {
       const safeName = slugify(sponsor_name || "sponsor");
       const originalName = logoFile.name || "logo.png";
+
       const ext = originalName.includes(".")
         ? originalName.split(".").pop()?.toLowerCase() || "png"
         : "png";
 
       const filePath = `sponsors/${Date.now()}-${safeName}.${ext}`;
+
       const arrayBuffer = await logoFile.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
@@ -113,9 +141,15 @@ export async function POST(req: Request) {
       county: county || null,
       postcode: postcode || null,
       country: country || null,
+
       status: "approved",
       is_read: true,
-      display_order: 9999,
+
+      // This is what tells the website/admin it is a Main Sponsor.
+      is_main_sponsor,
+
+      // Main sponsors go to the top by default.
+      display_order: is_main_sponsor ? 1 : 9999,
     };
 
     console.log("Insert sponsor payload:", insertPayload);
@@ -126,25 +160,49 @@ export async function POST(req: Request) {
       .select(`
         id,
         sponsor_name,
+        contact_name,
+        email,
+        phone,
         sponsorship_type,
+        website,
         logo_link,
         story,
+        notes,
         slug,
-        display_order
+        display_order,
+        is_main_sponsor,
+        address_line1,
+        address_line2,
+        city,
+        county,
+        postcode,
+        country,
+        created_at
       `)
       .single();
 
     if (error) {
       console.error("Insert sponsor error:", error);
+
       return NextResponse.json(
         { ok: false, error: error.message },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true, sponsor: data });
+    return NextResponse.json({
+      ok: true,
+      sponsor: {
+        ...data,
+        is_main_sponsor: Boolean(data.is_main_sponsor),
+        sponsor_display_type: data.is_main_sponsor
+          ? "Main Sponsor"
+          : data.sponsorship_type,
+      },
+    });
   } catch (error) {
     console.error("Create sponsor API error:", error);
+
     return NextResponse.json(
       {
         ok: false,

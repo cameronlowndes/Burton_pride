@@ -1,5 +1,5 @@
 import MetaHead from "../components/MetaHead"; // Adjust path as needed
-import SponsorsContent from "../components/Client/SponsorsContent";
+import SponsorsContent from "../../../SponsorsContent";
 
 export const metadata = {
   title: "Burton Pride - Sponsors",

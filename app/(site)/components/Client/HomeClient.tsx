@@ -103,6 +103,13 @@ export default function HomeClient() {
             >
               🌈 Burton Pride 2026
             </Link>
+
+            <Link
+              href="/Sponsor"
+              className="rounded-full bg-gradient-to-r from-yellow-300 via-orange-400 to-pink-500 px-5 py-2.5 text-base font-extrabold text-black shadow-lg shadow-yellow-400/60 transition-transform hover:scale-110 hover:from-yellow-200 hover:to-pink-400 sm:px-6 sm:py-3 sm:text-lg"
+            >
+              ⭐ View Our Sponsors
+            </Link>
           </motion.div>
         </motion.section>
 
@@ -129,6 +136,67 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
+            {/* Sponsors CTA */}
+            <motion.section
+              variants={fadeUp}
+              transition={{ delay: 0.152, duration: 0.6 }}
+            >
+              <div className="relative overflow-hidden rounded-3xl border-4 border-yellow-300 bg-gradient-to-r from-yellow-300 via-orange-300 to-pink-500 p-4 shadow-2xl shadow-yellow-400/50 sm:p-6">
+                <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-white/40 blur-3xl animate-pulse mix-blend-overlay" />
+                <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-purple-500/40 blur-3xl animate-pulse mix-blend-overlay" />
+
+                <div className="relative rounded-[28px] border border-white/25 bg-purple-950/80 px-5 py-8 text-center shadow-2xl backdrop-blur-md sm:px-10 sm:py-12">
+                  <p className="mb-4 inline-flex rounded-full bg-yellow-300 px-5 py-2 text-sm font-black uppercase tracking-wide text-purple-950 shadow-xl">
+                    Proudly Supported By
+                  </p>
+
+                  <h2 className="mb-5 text-4xl font-extrabold text-white drop-shadow-lg sm:text-6xl">
+                    ⭐ Meet Our Sponsors ⭐
+                  </h2>
+
+                  <p className="mx-auto mb-8 max-w-3xl text-base font-semibold leading-8 text-white/95 sm:text-xl">
+                    Our sponsors help make Burton Pride possible. See the
+                    amazing businesses and organisations supporting your local
+                    grassroots Pride.
+                  </p>
+
+                  <div className="mx-auto mb-8 grid max-w-3xl gap-4 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-4xl">🌈</p>
+                      <p className="mt-3 text-sm font-bold leading-5 text-white">
+                        Supporting the community
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-4xl">💛</p>
+                      <p className="mt-3 text-sm font-bold leading-5 text-white">
+                        Helping keep Pride free
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-4xl">⭐</p>
+                      <p className="mt-3 text-sm font-bold leading-5 text-white">
+                        Backing local Pride
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href="/Sponsor"
+                    className="inline-flex items-center justify-center rounded-full bg-yellow-300 px-10 py-4 text-xl font-extrabold text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform hover:scale-110 hover:bg-white sm:px-14 sm:py-5 sm:text-2xl"
+                  >
+                    ⭐ View Our Sponsors ⭐
+                  </Link>
+
+                  <p className="mt-5 text-sm font-bold text-white/85">
+                    Please support the organisations who support Burton Pride.
+                  </p>
+                </div>
+              </div>
+            </motion.section>
+
             {/* Burton Pride 2026 CTA */}
             <motion.section
               variants={fadeUp}
@@ -151,7 +219,8 @@ export default function HomeClient() {
                     Burton Pride 2026 is back on{" "}
                     <strong>Saturday 27th June 2026</strong>. Visit the main
                     event page for information about the event, travel, terms
-                    and conditions, volunteering, donations, and the after party.
+                    and conditions, volunteering, donations, and the after
+                    party.
                   </p>
 
                   <div className="flex flex-wrap justify-center gap-4">
