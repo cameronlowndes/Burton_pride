@@ -23,6 +23,30 @@ type LoanActionFunding = SponsorBreakdown & {
   loan_paid_off_at?: string | null;
 };
 
+type SupplierContact = {
+  id: string;
+  created_at?: string | null;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
+type SupplierFormState = {
+  supplierName: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  website: string;
+  category: string;
+  notes: string;
+  isActive: boolean;
+};
+
 type MoneyPageModalsProps = {
   sponsorFormOpen: boolean;
   editingSponsor: Sponsor | null;
@@ -31,6 +55,19 @@ type MoneyPageModalsProps = {
   savingSponsor: boolean;
   onCloseSponsorForm: () => void;
   onSaveSponsor: () => Promise<void>;
+
+  supplierFormOpen?: boolean;
+  editingSupplier?: SupplierContact | null;
+  supplierForm?: SupplierFormState;
+  setSupplierForm?: Dispatch<SetStateAction<SupplierFormState>>;
+  savingSupplier?: boolean;
+  onCloseSupplierForm?: () => void;
+  onSaveSupplier?: () => Promise<void>;
+
+  deleteSupplierId?: string | null;
+  deletingSupplier?: boolean;
+  setDeleteSupplierId?: Dispatch<SetStateAction<string | null>>;
+  onDeleteSupplier?: () => Promise<void>;
 
   deleteYearOpen: boolean;
   selectedYear: string;
@@ -83,6 +120,19 @@ export default function MoneyPageModals({
   onCloseSponsorForm,
   onSaveSponsor,
 
+  supplierFormOpen = false,
+  editingSupplier = null,
+  supplierForm,
+  setSupplierForm,
+  savingSupplier = false,
+  onCloseSupplierForm,
+  onSaveSupplier,
+
+  deleteSupplierId = null,
+  deletingSupplier = false,
+  setDeleteSupplierId,
+  onDeleteSupplier,
+
   deleteYearOpen,
   selectedYear,
   yearTransactionsLength,
@@ -133,6 +183,18 @@ export default function MoneyPageModals({
       savingSponsor={savingSponsor}
       onCloseSponsorForm={onCloseSponsorForm}
       onSaveSponsor={onSaveSponsor}
+      supplierFormOpen={supplierFormOpen}
+      editingSupplier={editingSupplier}
+      supplierForm={supplierForm}
+      setSupplierForm={setSupplierForm}
+      savingSupplier={savingSupplier}
+      onCloseSupplierForm={onCloseSupplierForm}
+      onSaveSupplier={onSaveSupplier}
+      deleteSupplierId={deleteSupplierId}
+      setDeleteSupplierId={setDeleteSupplierId}
+      deletingSupplier={deletingSupplier}
+      onCloseDeleteSupplier={() => setDeleteSupplierId?.(null)}
+      onDeleteSupplier={onDeleteSupplier}
       deleteYearOpen={deleteYearOpen}
       selectedYear={selectedYear}
       yearTransactionsLength={yearTransactionsLength}

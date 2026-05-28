@@ -23,6 +23,30 @@ type LoanActionFunding = SponsorBreakdown & {
   loan_paid_off_at?: string | null;
 };
 
+type SupplierContact = {
+  id: string;
+  created_at?: string | null;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
+type SupplierFormState = {
+  supplierName: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  website: string;
+  category: string;
+  notes: string;
+  isActive: boolean;
+};
+
 type MoneyModalsProps = {
   sponsorFormOpen: boolean;
   editingSponsor: Sponsor | null;
@@ -31,6 +55,25 @@ type MoneyModalsProps = {
   savingSponsor: boolean;
   onCloseSponsorForm: () => void;
   onSaveSponsor: () => void | Promise<void>;
+
+  /**
+   * Supplier / contact tracker.
+   * Used for regular suppliers such as printers, venues, insurance,
+   * entertainers, food vendors, security, equipment hire, and custom contacts.
+   */
+  supplierFormOpen?: boolean;
+  editingSupplier?: SupplierContact | null;
+  supplierForm?: SupplierFormState;
+  setSupplierForm?: Dispatch<SetStateAction<SupplierFormState>>;
+  savingSupplier?: boolean;
+  onCloseSupplierForm?: () => void;
+  onSaveSupplier?: () => void | Promise<void>;
+
+  deleteSupplierId?: string | null;
+  setDeleteSupplierId?: Dispatch<SetStateAction<string | null>>;
+  deletingSupplier?: boolean;
+  onCloseDeleteSupplier?: () => void;
+  onDeleteSupplier?: () => void | Promise<void>;
 
   deleteYearOpen: boolean;
   selectedYear: string;
@@ -73,6 +116,30 @@ type MoneyModalsProps = {
   onCloseLoanInterest: () => void;
   onSaveLoanInterest: () => void | Promise<void>;
 };
+
+const supplierCategoryOptions = [
+  "Printer",
+  "Venue",
+  "Insurance",
+  "Entertainer",
+  "Food Vendor",
+  "Security",
+  "Equipment Hire",
+  "Marketing",
+  "Accessibility",
+  "Transport",
+  "Other",
+];
+
+function isCustomSupplierCategory(category?: string | null) {
+  const cleanCategory = String(category || "").trim();
+
+  if (!cleanCategory) return false;
+
+  return !supplierCategoryOptions.some(
+    (option) => option.toLowerCase() === cleanCategory.toLowerCase(),
+  );
+}
 
 function fundingTypeLabel(type: FundingType) {
   if (type === "grant") return "Grant Money";
@@ -117,6 +184,20 @@ export default function MoneyModals({
   savingSponsor,
   onCloseSponsorForm,
   onSaveSponsor,
+
+  supplierFormOpen = false,
+  editingSupplier = null,
+  supplierForm,
+  setSupplierForm,
+  savingSupplier = false,
+  onCloseSupplierForm,
+  onSaveSupplier,
+
+  deleteSupplierId = null,
+  setDeleteSupplierId,
+  deletingSupplier = false,
+  onCloseDeleteSupplier,
+  onDeleteSupplier,
 
   deleteYearOpen,
   selectedYear,
@@ -524,6 +605,246 @@ export default function MoneyModals({
         </div>
       )}
 
+
+      {supplierFormOpen && supplierForm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-cyan-300/20 bg-[#070716] p-4 text-white shadow-2xl sm:p-5">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="break-words text-xl font-bold">
+                  {editingSupplier ? "Edit Supplier / Contact" : "Add Supplier / Contact"}
+                </h2>
+
+                <p className="text-sm leading-6 text-white/60">
+                  Store regular suppliers such as printers, venues, insurance
+                  providers, entertainers, food vendors, security, equipment
+                  hire, or custom contacts, then link payments to them.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={onCloseSupplierForm}
+                disabled={savingSupplier}
+                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
+                aria-label="Close supplier form"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                value={supplierForm.supplierName}
+                onChange={(event) =>
+                  setSupplierForm?.((prev) => ({
+                    ...prev,
+                    supplierName: event.target.value,
+                  }))
+                }
+                placeholder="Supplier / business name, e.g. Local Printer"
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-cyan-300/20 placeholder:text-white/35 focus:ring-cyan-300/40"
+              />
+
+              <input
+                value={supplierForm.contactName}
+                onChange={(event) =>
+                  setSupplierForm?.((prev) => ({
+                    ...prev,
+                    contactName: event.target.value,
+                  }))
+                }
+                placeholder="Contact name"
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+              />
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  value={supplierForm.email}
+                  onChange={(event) =>
+                    setSupplierForm?.((prev) => ({
+                      ...prev,
+                      email: event.target.value,
+                    }))
+                  }
+                  placeholder="Email"
+                  type="email"
+                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                />
+
+                <input
+                  value={supplierForm.phone}
+                  onChange={(event) =>
+                    setSupplierForm?.((prev) => ({
+                      ...prev,
+                      phone: event.target.value,
+                    }))
+                  }
+                  placeholder="Phone"
+                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                />
+              </div>
+
+              <input
+                value={supplierForm.website}
+                onChange={(event) =>
+                  setSupplierForm?.((prev) => ({
+                    ...prev,
+                    website: event.target.value,
+                  }))
+                }
+                placeholder="Website"
+                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+              />
+
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Supplier category
+                </label>
+
+                <select
+                  value={
+                    isCustomSupplierCategory(supplierForm.category)
+                      ? "__custom__"
+                      : supplierForm.category
+                  }
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+
+                    setSupplierForm?.((prev) => ({
+                      ...prev,
+                      category: nextValue === "__custom__" ? "" : nextValue,
+                    }));
+                  }}
+                  className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-cyan-300/20 focus:ring-cyan-300/40"
+                >
+                  <option className="bg-[#070716] text-white" value="">
+                    Choose category...
+                  </option>
+
+                  {supplierCategoryOptions.map((category) => (
+                    <option
+                      key={category}
+                      className="bg-[#070716] text-white"
+                      value={category}
+                    >
+                      {category}
+                    </option>
+                  ))}
+
+                  <option className="bg-[#070716] text-white" value="__custom__">
+                    Custom category...
+                  </option>
+                </select>
+
+                {(isCustomSupplierCategory(supplierForm.category) ||
+                  supplierForm.category === "") && (
+                  <div className="mt-3">
+                    <label className="mb-2 block text-xs font-bold text-cyan-100/80">
+                      Custom category
+                    </label>
+
+                    <input
+                      value={
+                        isCustomSupplierCategory(supplierForm.category)
+                          ? supplierForm.category
+                          : ""
+                      }
+                      onChange={(event) =>
+                        setSupplierForm?.((prev) => ({
+                          ...prev,
+                          category: event.target.value,
+                        }))
+                      }
+                      placeholder="Type your own category, e.g. Signage, First Aid, Toilets"
+                      className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-cyan-300/20 placeholder:text-white/35 focus:ring-cyan-300/40"
+                    />
+
+                    <p className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-cyan-100/70">
+                      Type a new category here if it is not listed above. It
+                      will be saved against this supplier and can be used for
+                      reports and searching.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <textarea
+                value={supplierForm.notes}
+                onChange={(event) =>
+                  setSupplierForm?.((prev) => ({
+                    ...prev,
+                    notes: event.target.value,
+                  }))
+                }
+                placeholder="Notes, e.g. quote details, usual service, payment terms, or contact history"
+                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+              />
+
+              <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <input
+                  type="checkbox"
+                  checked={supplierForm.isActive}
+                  onChange={(event) =>
+                    setSupplierForm?.((prev) => ({
+                      ...prev,
+                      isActive: event.target.checked,
+                    }))
+                  }
+                  className="mt-1 h-4 w-4 rounded border-white/20"
+                />
+
+                <span>
+                  <span className="block text-sm font-bold text-white">
+                    Active supplier
+                  </span>
+
+                  <span className="block text-xs leading-5 text-white/50">
+                    Turn this off to archive the supplier while keeping old
+                    linked transactions safe.
+                  </span>
+                </span>
+              </label>
+
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 text-sm leading-6 text-cyan-100">
+                This supplier can be linked to transactions so you can search,
+                filter and report payments by regular contacts.
+              </div>
+
+              <div className="flex flex-col justify-end gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onCloseSupplierForm}
+                  disabled={savingSupplier}
+                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onSaveSupplier}
+                  disabled={
+                    savingSupplier ||
+                    !supplierForm.supplierName.trim() ||
+                    !onSaveSupplier
+                  }
+                  className="rounded-xl bg-cyan-500 px-4 py-3 text-sm font-bold text-black hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingSupplier
+                    ? editingSupplier
+                      ? "Updating..."
+                      : "Saving..."
+                    : editingSupplier
+                      ? "Update Supplier"
+                      : "Save Supplier"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loanRepaymentSponsor && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-3xl border border-orange-300/20 bg-[#070716] p-6 text-white shadow-2xl">
@@ -837,6 +1158,46 @@ export default function MoneyModals({
                 className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
               >
                 {deletingSponsor ? "Deleting..." : "Delete Funding"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {deleteSupplierId && (
+        <div className="fixed inset-0 z-[75] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
+            <h2 className="text-xl font-bold">Archive supplier?</h2>
+
+            <p className="mt-3 text-sm leading-6 text-white/70">
+              This will archive the supplier/contact so it will no longer show
+              as active. Existing linked transactions will stay in the money
+              tracker.
+            </p>
+
+            <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 text-sm leading-6 text-cyan-100">
+              This is a safe archive action. It does not delete old payment
+              history.
+            </div>
+
+            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onCloseDeleteSupplier || (() => setDeleteSupplierId?.(null))}
+                disabled={deletingSupplier}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={onDeleteSupplier}
+                disabled={deletingSupplier || !onDeleteSupplier}
+                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
+              >
+                {deletingSupplier ? "Archiving..." : "Archive Supplier"}
               </button>
             </div>
           </div>

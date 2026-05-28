@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Banknote,
+  Building2,
   FileText,
+  PlusCircle,
   Loader2,
   Repeat,
   X,
@@ -71,6 +73,29 @@ type BudgetItem = {
   notes?: string | null;
 };
 
+type SupplierContact = {
+  id: string;
+  created_at?: string | null;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
+type SupplierFormFields = FormState & {
+  supplierId?: string | null;
+  supplier_id?: string | null;
+  supplierName?: string | null;
+  supplier_name?: string | null;
+  supplierCategory?: string | null;
+  supplier_category?: string | null;
+};
+
+
 const defaultBudgetItems: BudgetItem[] = [
   { category_key: "venue", category_label: "Venue" },
   { category_key: "insurance", category_label: "Insurance" },
@@ -81,6 +106,111 @@ const defaultBudgetItems: BudgetItem[] = [
   { category_key: "accessibility", category_label: "Accessibility" },
   { category_key: "other", category_label: "Other costs" },
 ];
+
+const RECEIPT_DUE_DEFAULT_DAYS = 7;
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+type ReceiptDueFormFields = FormState & {
+  receiptDueDate?: string | null;
+  receipt_due_date?: string | null;
+  receiptDueBy?: string | null;
+  receipt_due_by?: string | null;
+};
+
+function getReceiptDueDateFormValue(form: FormState) {
+  const item = form as ReceiptDueFormFields;
+
+  return (
+    item.receiptDueDate ||
+    item.receipt_due_date ||
+    item.receiptDueBy ||
+    item.receipt_due_by ||
+    ""
+  );
+}
+
+function setReceiptDueDateOnForm(prev: FormState, value: string) {
+  return {
+    ...prev,
+    receiptDueDate: value,
+    receipt_due_date: value,
+    receiptDueBy: value,
+    receipt_due_by: value,
+  } as FormState;
+}
+
+function addDaysToDateInput(value: string, days: number) {
+  if (!value) return "";
+
+  const date = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  date.setTime(date.getTime() + Math.max(1, days) * MS_PER_DAY);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function formatReceiptDueDate(value: string) {
+  if (!value) return "No receipt due date set";
+
+  return formatDate(value);
+}
+
+
+function getSupplierIdFormValue(form: FormState) {
+  const item = form as SupplierFormFields;
+
+  return item.supplierId || item.supplier_id || "";
+}
+
+function getSupplierNameFormValue(form: FormState) {
+  const item = form as SupplierFormFields;
+
+  return item.supplierName || item.supplier_name || "";
+}
+
+function getSupplierCategoryFormValue(form: FormState) {
+  const item = form as SupplierFormFields;
+
+  return item.supplierCategory || item.supplier_category || "";
+}
+
+function setSupplierOnForm(
+  prev: FormState,
+  supplier: SupplierContact | null,
+) {
+  return {
+    ...prev,
+    supplierId: supplier?.id || "",
+    supplier_id: supplier?.id || "",
+    supplierName: supplier?.supplier_name || "",
+    supplier_name: supplier?.supplier_name || "",
+    supplierCategory: supplier?.category || "",
+    supplier_category: supplier?.category || "",
+  } as FormState;
+}
+
+function supplierCategoryLabel(category?: string | null) {
+  const clean = String(category || "").trim();
+
+  return clean || "Supplier";
+}
+
+function supplierContactLine(supplier?: SupplierContact | null) {
+  if (!supplier) return "";
+
+  const parts = [
+    supplierCategoryLabel(supplier.category),
+    supplier.contact_name,
+    supplier.email,
+    supplier.phone,
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  return parts.join(" · ");
+}
 
 function getBudgetFormValue(form: FormState) {
   const item = form as FormState & {
@@ -115,6 +245,9 @@ type MoneyTransactionFormProps = {
   displaySponsors: Sponsor[];
   yearlySponsorBreakdown: YearlySponsorBreakdown[];
   budgetItems?: BudgetItem[];
+  displaySuppliers?: SupplierContact[];
+  suppliers?: SupplierContact[];
+  openNewSupplierForm?: () => void;
 
   handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
@@ -259,6 +392,9 @@ export default function MoneyTransactionForm({
   displaySponsors,
   yearlySponsorBreakdown,
   budgetItems = [],
+  displaySuppliers = [],
+  suppliers = [],
+  openNewSupplierForm,
   handleSubmit,
   cancelEditTransaction,
   fillTestTransaction,
@@ -301,6 +437,20 @@ export default function MoneyTransactionForm({
   const budgetOptions =
     budgetItems.length > 0 ? budgetItems : defaultBudgetItems;
   const selectedBudgetCategory = getBudgetFormValue(form);
+  const selectedReceiptDueDate = getReceiptDueDateFormValue(form);
+  const selectedSupplierId = getSupplierIdFormValue(form);
+  const selectedSupplierName = getSupplierNameFormValue(form);
+  const selectedSupplierCategory = getSupplierCategoryFormValue(form);
+  const supplierOptions = displaySuppliers.length > 0 ? displaySuppliers : suppliers;
+  const selectedSupplier =
+    supplierOptions.find((supplier) => supplier.id === selectedSupplierId) || null;
+  const activeSuppliers = supplierOptions.filter(
+    (supplier) => supplier.is_active !== false,
+  );
+  const suggestedReceiptDueDate = addDaysToDateInput(
+    form.transactionDate,
+    RECEIPT_DUE_DEFAULT_DAYS,
+  );
   const isPersonalFundsPayment =
     form.paymentMethod === "Personal Funds" || Boolean(form.isPersonalFunds);
 
@@ -427,6 +577,54 @@ export default function MoneyTransactionForm({
     }
   }
 
+  async function createSupplierTransactionLog() {
+    if (!selectedSupplierId && !selectedSupplierName) {
+      return;
+    }
+
+    const supplierName =
+      selectedSupplier?.supplier_name || selectedSupplierName || "Unknown supplier";
+
+    const supplierCategory =
+      selectedSupplier?.category || selectedSupplierCategory || "";
+
+    try {
+      await fetch("/api/admin/money/suppliers/logs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          supplier_id: selectedSupplierId || null,
+          supplier_name: supplierName,
+          action: "transaction_linked",
+          action_label: "Transaction linked",
+          message: `Transaction linked to supplier/contact: ${supplierName}`,
+          details: {
+            transaction_title: form.title,
+            transaction_description: form.description,
+            transaction_type: form.type,
+            transaction_amount: form.amount,
+            transaction_amount_pence: currentAmountPence,
+            transaction_date: form.transactionDate,
+            payment_method: form.paymentMethod,
+            supplier_category: supplierCategory || null,
+            funding_id: form.sponsorId || null,
+            funding_name: form.sponsorName || null,
+            finance_note_status: form.financeNoteStatus || null,
+            finance_note: form.financeNote || null,
+            receipt_due_date: selectedReceiptDueDate || null,
+            is_repeating: Boolean(form.isRepeating),
+            repeat_frequency: form.isRepeating ? form.repeatFrequency : null,
+            repeat_count: form.isRepeating ? form.repeatCount : null,
+          },
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to create supplier transaction log:", error);
+    }
+  }
+
   async function handleFormSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -470,6 +668,7 @@ export default function MoneyTransactionForm({
     setFundingOverspendWarningOpen(false);
 
     await handleSubmit(event);
+    await createSupplierTransactionLog();
   }
 
   function saveAnyway() {
@@ -1104,6 +1303,30 @@ export default function MoneyTransactionForm({
                               nextIsItemDonation || nextIsPersonalFunds
                                 ? ""
                                 : prev.sponsorName,
+                            supplierId:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplierId,
+                            supplier_id:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplier_id,
+                            supplierName:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplierName,
+                            supplier_name:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplier_name,
+                            supplierCategory:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplierCategory,
+                            supplier_category:
+                              nextIsItemDonation || nextIsPersonalFunds
+                                ? ""
+                                : (prev as any).supplier_category,
                             type: nextIsItemDonation
                               ? "income"
                               : nextIsPersonalFunds
@@ -1196,6 +1419,127 @@ export default function MoneyTransactionForm({
                       money out.
                     </span>
                   )}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!isItemDonation && !isPersonalFundsPayment && (
+            <div className="rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
+              <label className="mb-1 flex items-center gap-2 text-sm font-black text-violet-100">
+                <Building2 className="h-4 w-4" />
+                Supplier / contact
+              </label>
+
+              <p className="mb-3 text-xs leading-5 text-violet-100/70">
+                Link this payment to a regular supplier such as a printer,
+                venue, insurance provider, entertainer, food vendor, security,
+                equipment hire, or other contact.
+              </p>
+
+              <select
+                value={selectedSupplierId}
+                onChange={(event) => {
+                  const supplier =
+                    activeSuppliers.find(
+                      (item) => item.id === event.target.value,
+                    ) || null;
+
+                  setForm((prev) => setSupplierOnForm(prev, supplier));
+                }}
+                className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-violet-300/20 focus:ring-violet-300/50"
+              >
+                <option className="bg-[#11111f] text-white" value="">
+                  No supplier / contact linked
+                </option>
+
+                {activeSuppliers.map((supplier) => (
+                  <option
+                    key={supplier.id}
+                    value={supplier.id}
+                    className="bg-[#11111f] text-white"
+                  >
+                    {supplierCategoryLabel(supplier.category)} —{" "}
+                    {supplier.supplier_name}
+                  </option>
+                ))}
+              </select>
+
+              {selectedSupplier ? (
+                <div className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-violet-50">
+                  <p>
+                    Linked to{" "}
+                    <strong className="text-white">
+                      {selectedSupplier.supplier_name}
+                    </strong>
+                    .
+                  </p>
+
+                  <p className="mt-1 text-violet-100/60">
+                    When this transaction is saved, it will be recorded in
+                    Supplier Logs.
+                  </p>
+
+                  {supplierContactLine(selectedSupplier) && (
+                    <p className="mt-1 text-violet-100/70">
+                      {supplierContactLine(selectedSupplier)}
+                    </p>
+                  )}
+
+                  {selectedSupplier.notes && (
+                    <p className="mt-1 line-clamp-3 text-violet-100/60">
+                      {selectedSupplier.notes}
+                    </p>
+                  )}
+                </div>
+              ) : selectedSupplierName ? (
+                <div className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-violet-50">
+                  <p>
+                    Linked to{" "}
+                    <strong className="text-white">{selectedSupplierName}</strong>
+                    {selectedSupplierCategory
+                      ? ` · ${selectedSupplierCategory}`
+                      : ""}
+                    .
+                  </p>
+
+                  <p className="mt-1 text-violet-100/60">
+                    When this transaction is saved, it will be recorded in
+                    Supplier Logs.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-violet-100/65">
+                  Optional, but useful for reports and repeat payments.
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                {openNewSupplierForm && (
+                  <button
+                    type="button"
+                    onClick={openNewSupplierForm}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-500/20 px-4 py-2 text-xs font-black text-violet-100 ring-1 ring-violet-300/20 hover:bg-violet-500/30"
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    Add new supplier
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => setSupplierOnForm(prev, null))}
+                  disabled={!selectedSupplierId && !selectedSupplierName}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Clear supplier
+                </button>
+              </div>
+
+              {activeSuppliers.length === 0 && (
+                <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  No suppliers have been added yet. Add one first, then it will
+                  appear in this dropdown.
                 </p>
               )}
             </div>
@@ -1555,6 +1899,103 @@ export default function MoneyTransactionForm({
             </p>
           </div>
 
+          {!isItemDonation && (
+            <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
+              <label className="mb-1 block text-sm font-black text-amber-100">
+                Receipt due date
+              </label>
+
+              <p className="mb-3 text-xs leading-5 text-amber-100/70">
+                Choose the date this receipt, invoice, bank screenshot, or
+                proof needs to be uploaded by. Leave blank to use the normal
+                automatic reminder.
+              </p>
+
+              <input
+                type="date"
+                value={selectedReceiptDueDate}
+                onChange={(event) => {
+                  const nextDate = event.target.value;
+
+                  setForm((prev) => setReceiptDueDateOnForm(prev, nextDate));
+
+                  if (nextDate) {
+                    setForm((prev) => ({
+                      ...setReceiptDueDateOnForm(prev, nextDate),
+                      financeNoteStatus:
+                        prev.financeNoteStatus === "none"
+                          ? "waiting_for_receipt"
+                          : prev.financeNoteStatus,
+                    }));
+                  }
+                }}
+                className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/50"
+              />
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextDate = suggestedReceiptDueDate;
+
+                    if (!nextDate) {
+                      return;
+                    }
+
+                    setForm((prev) => ({
+                      ...setReceiptDueDateOnForm(prev, nextDate),
+                      financeNoteStatus:
+                        prev.financeNoteStatus === "none"
+                          ? "waiting_for_receipt"
+                          : prev.financeNoteStatus,
+                    }));
+                  }}
+                  disabled={!suggestedReceiptDueDate}
+                  className="rounded-xl bg-amber-500/20 px-3 py-2 text-xs font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Use suggested date
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) => setReceiptDueDateOnForm(prev, ""))
+                  }
+                  disabled={!selectedReceiptDueDate}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Clear due date
+                </button>
+              </div>
+
+              <div className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-amber-50">
+                {selectedReceiptDueDate ? (
+                  <p>
+                    Receipt due by{" "}
+                    <strong className="text-white">
+                      {formatReceiptDueDate(selectedReceiptDueDate)}
+                    </strong>
+                    .
+                  </p>
+                ) : suggestedReceiptDueDate ? (
+                  <p>
+                    Suggested date is{" "}
+                    <strong className="text-white">
+                      {formatReceiptDueDate(suggestedReceiptDueDate)}
+                    </strong>{" "}
+                    based on {RECEIPT_DUE_DEFAULT_DAYS} days after the
+                    transaction date.
+                  </p>
+                ) : (
+                  <p>
+                    Add a transaction date first, then you can choose or use a
+                    suggested receipt due date.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           <textarea
             value={form.description}
             onChange={(event) =>
@@ -1896,8 +2337,13 @@ export default function MoneyTransactionForm({
 
                 <p className="mt-3 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm leading-6 text-amber-50">
                   For accounts, it is better to upload proof before saving. You
-                  can go back and attach a file, or click OK to save without a
-                  receipt.
+                  can go back and attach a file, set a receipt due date, or click
+                  OK to save without a receipt.
+                  {selectedReceiptDueDate && (
+                    <span className="mt-2 block font-black text-white">
+                      Receipt due by {formatReceiptDueDate(selectedReceiptDueDate)}
+                    </span>
+                  )}
                 </p>
 
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">

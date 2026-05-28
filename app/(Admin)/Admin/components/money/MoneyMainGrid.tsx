@@ -29,6 +29,19 @@ type YearlySponsorBreakdown = {
   funding_type?: FundingType | null;
 };
 
+type SupplierContact = {
+  id: string;
+  created_at?: string | null;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
 type MoneyMainGridProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -39,6 +52,15 @@ type MoneyMainGridProps = {
   editingTransaction: Transaction | null;
   displaySponsors: Sponsor[];
   yearlySponsorBreakdown: YearlySponsorBreakdown[];
+
+  /**
+   * Supplier / contact tracker.
+   * These are regular people/businesses Burton Pride pays, such as printers,
+   * venues, insurance providers, entertainers, food vendors, security, etc.
+   */
+  displaySuppliers?: SupplierContact[];
+  openNewSupplierForm?: () => void;
+
   saving: boolean;
   handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
@@ -85,6 +107,15 @@ type MoneyMainGridProps = {
   financeNoteUpdatingId: string | null;
   deleting: boolean;
 
+  /**
+   * Number of days before an old expense with no receipt
+   * should show as overdue / needing a receipt check.
+   *
+   * Example:
+   * receiptReminderDays={7}
+   */
+  receiptReminderDays?: number;
+
   onPrint: () => void;
   onExportExcel: () => Promise<void>;
   onExportYearlyReport: () => Promise<void>;
@@ -119,6 +150,8 @@ export default function MoneyMainGrid({
   editingTransaction,
   displaySponsors,
   yearlySponsorBreakdown,
+  displaySuppliers = [],
+  openNewSupplierForm,
   saving,
   handleSubmit,
   cancelEditTransaction,
@@ -159,6 +192,8 @@ export default function MoneyMainGrid({
   financeNoteUpdatingId,
   deleting,
 
+  receiptReminderDays = 7,
+
   onPrint,
   onExportExcel,
   onExportYearlyReport,
@@ -181,6 +216,8 @@ export default function MoneyMainGrid({
         editingTransaction={editingTransaction}
         displaySponsors={displaySponsors}
         yearlySponsorBreakdown={yearlySponsorBreakdown}
+        displaySuppliers={displaySuppliers}
+        openNewSupplierForm={openNewSupplierForm}
         saving={saving}
         handleSubmit={handleSubmit}
         cancelEditTransaction={cancelEditTransaction}
@@ -217,6 +254,7 @@ export default function MoneyMainGrid({
         checkingId={checkingId}
         bankReconcilingId={bankReconcilingId}
         financeNoteUpdatingId={financeNoteUpdatingId}
+        receiptReminderDays={receiptReminderDays}
         onPrint={onPrint}
         onExportExcel={onExportExcel}
         onExportYearlyReport={onExportYearlyReport}

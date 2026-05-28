@@ -72,6 +72,31 @@ type BudgetItem = {
   notes?: string | null;
 };
 
+
+type Supplier = {
+  id: string;
+  created_at?: string | null;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
+type SupplierFormState = {
+  supplierName: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  website: string;
+  category: string;
+  notes: string;
+  isActive: boolean;
+};
+
 type CarryForwardNote = {
   selectedYear: string;
   previousIncome: number;
@@ -99,7 +124,7 @@ type LoanActionFunding = SponsorBreakdown & {
   loan_paid_off_at?: string | null;
 };
 
-const initialForm: FormState = {
+const initialForm = {
   title: "",
   description: "",
   type: "income",
@@ -113,6 +138,13 @@ const initialForm: FormState = {
   sponsorName: "",
   sponsorshipNote: "",
 
+  supplierId: "",
+  supplier_id: "",
+  supplierName: "",
+  supplier_name: "",
+  supplierCategory: "",
+  supplier_category: "",
+
   bankReconciliationStatus: "unmatched",
   bankReconciliationNote: "",
 
@@ -122,7 +154,7 @@ const initialForm: FormState = {
   isRepeating: false,
   repeatFrequency: "monthly",
   repeatCount: "12",
-};
+} as FormState;
 
 const initialSponsorForm: SponsorFormState = {
   fundingType: "sponsor",
@@ -139,6 +171,18 @@ const initialSponsorForm: SponsorFormState = {
   loanInterestAmount: "",
   loanDueDate: "",
   loanRepaymentTerms: "",
+};
+
+
+const initialSupplierForm: SupplierFormState = {
+  supplierName: "",
+  contactName: "",
+  email: "",
+  phone: "",
+  website: "",
+  category: "",
+  notes: "",
+  isActive: true,
 };
 
 async function readJsonResponse(res: Response) {
@@ -264,12 +308,65 @@ function getCurrentMonthKey() {
   ).padStart(2, "0")}`;
 }
 
+
+function getFormSupplierId(form: FormState) {
+  return String((form as any).supplierId || (form as any).supplier_id || "").trim();
+}
+
+function getFormSupplierName(form: FormState) {
+  return String(
+    (form as any).supplierName || (form as any).supplier_name || "",
+  ).trim();
+}
+
+function getFormSupplierCategory(form: FormState) {
+  return String(
+    (form as any).supplierCategory || (form as any).supplier_category || "",
+  ).trim();
+}
+
+function getTransactionSupplierId(item: Transaction) {
+  return String((item as any).supplier_id || (item as any).supplierId || "").trim();
+}
+
+function getTransactionSupplierName(item: Transaction) {
+  return String((item as any).supplier_name || (item as any).supplierName || "").trim();
+}
+
+function getTransactionSupplierCategory(item: Transaction) {
+  return String((item as any).supplier_category || (item as any).supplierCategory || "").trim();
+}
+
+function normaliseSupplierCategory(value?: string | null) {
+  return String(value || "").trim();
+}
+
+function setSupplierFieldsOnForm(
+  prev: FormState,
+  supplier: {
+    id?: string | null;
+    supplier_name?: string | null;
+    category?: string | null;
+  } | null,
+) {
+  return {
+    ...prev,
+    supplierId: supplier?.id || "",
+    supplier_id: supplier?.id || "",
+    supplierName: supplier?.supplier_name || "",
+    supplier_name: supplier?.supplier_name || "",
+    supplierCategory: supplier?.category || "",
+    supplier_category: supplier?.category || "",
+  } as FormState;
+}
+
 export function useMoneyTransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorBreakdown, setSponsorBreakdown] = useState<SponsorBreakdown[]>(
     []
   );
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   const [yearLocks, setYearLocks] = useState<YearLock[]>([]);
   const [yearLockPassword, setYearLockPassword] = useState("");
@@ -336,6 +433,14 @@ export function useMoneyTransactionsPage() {
 
   const [deleteSponsorId, setDeleteSponsorId] = useState<string | null>(null);
   const [deletingSponsor, setDeletingSponsor] = useState(false);
+
+  const [supplierFormOpen, setSupplierFormOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [savingSupplier, setSavingSupplier] = useState(false);
+  const [supplierForm, setSupplierForm] =
+    useState<SupplierFormState>(initialSupplierForm);
+  const [deleteSupplierId, setDeleteSupplierId] = useState<string | null>(null);
+  const [deletingSupplier, setDeletingSupplier] = useState(false);
 
   const [loanRepaymentSponsor, setLoanRepaymentSponsor] =
     useState<LoanActionFunding | null>(null);
@@ -405,9 +510,14 @@ export function useMoneyTransactionsPage() {
       }
 
       setTransactions(
-        (data.transactions || []).filter(
-          (item: Transaction) => !item.deleted_at
-        )
+        (data.transactions || [])
+          .filter((item: Transaction) => !item.deleted_at)
+          .map((item: Transaction) => ({
+            ...item,
+            supplier_id: getTransactionSupplierId(item) || null,
+            supplier_name: getTransactionSupplierName(item) || null,
+            supplier_category: getTransactionSupplierCategory(item) || null,
+          }))
       );
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
@@ -440,6 +550,35 @@ export function useMoneyTransactionsPage() {
       setSponsorBreakdown(data.breakdown || []);
     } catch (err: any) {
       setError(err?.message || "Failed to load funding records");
+      setErrorDetails(err);
+    }
+  }
+
+  async function loadSuppliers() {
+    try {
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/suppliers?includeInactive=true&t=${Date.now()}`,
+        {
+          cache: "no-store",
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to load supplier/contact records",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      setSuppliers(data.suppliers || []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load supplier/contact records");
       setErrorDetails(err);
     }
   }
@@ -594,6 +733,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
       await loadBudgetItems();
@@ -612,6 +752,7 @@ export function useMoneyTransactionsPage() {
   useEffect(() => {
     loadTransactions();
     loadSponsors();
+    loadSuppliers();
     loadYearLocks();
     loadMonthLocks();
     loadBudgetItems();
@@ -1075,6 +1216,8 @@ export function useMoneyTransactionsPage() {
           item.payment_method?.toLowerCase().includes(q) ||
           item.sponsor_name?.toLowerCase().includes(q) ||
           item.sponsorship_note?.toLowerCase().includes(q) ||
+          getTransactionSupplierName(item).toLowerCase().includes(q) ||
+          getTransactionSupplierCategory(item).toLowerCase().includes(q) ||
           item.personal_funds_name?.toLowerCase().includes(q) ||
           item.checked_by?.toLowerCase().includes(q) ||
           item.bank_reconciliation_status?.toLowerCase().includes(q) ||
@@ -1391,10 +1534,177 @@ export function useMoneyTransactionsPage() {
     }
   }
 
+
+  function openNewSupplierForm() {
+    setEditingSupplier(null);
+    setSupplierForm(initialSupplierForm);
+    setSupplierFormOpen(true);
+  }
+
+  function startEditSupplier(supplierId: string) {
+    if (selectedYearLocked) {
+      setError(
+        `${selectedYear} is locked. Unlock this year with the main admin password before editing supplier/contact records.`
+      );
+      return;
+    }
+
+    const supplier = suppliers.find((item) => item.id === supplierId);
+
+    if (!supplier) {
+      setError("Could not find supplier/contact record to edit.");
+      return;
+    }
+
+    setEditingSupplier(supplier);
+    setSupplierForm({
+      supplierName: supplier.supplier_name || "",
+      contactName: supplier.contact_name || "",
+      email: supplier.email || "",
+      phone: supplier.phone || "",
+      website: supplier.website || "",
+      category: supplier.category || "",
+      notes: supplier.notes || "",
+      isActive: supplier.is_active !== false,
+    });
+    setSupplierFormOpen(true);
+  }
+
+  function closeSupplierForm() {
+    setSupplierFormOpen(false);
+    setEditingSupplier(null);
+    setSupplierForm(initialSupplierForm);
+  }
+
+  async function saveSupplier() {
+    try {
+      setSavingSupplier(true);
+      setError("");
+      setErrorDetails(null);
+
+      if (selectedYearLocked) {
+        setError(
+          `${selectedYear} is locked. Unlock this year with the main admin password before saving supplier/contact records.`
+        );
+        setSavingSupplier(false);
+        return;
+      }
+
+      if (!supplierForm.supplierName.trim()) {
+        setError("Please enter a supplier/contact name.");
+        setSavingSupplier(false);
+        return;
+      }
+
+      const res = await fetch("/api/admin/money/suppliers", {
+        method: editingSupplier ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: editingSupplier?.id || null,
+          supplier_name: supplierForm.supplierName,
+          contact_name: supplierForm.contactName,
+          email: supplierForm.email,
+          phone: supplierForm.phone,
+          website: supplierForm.website,
+          category: supplierForm.category,
+          notes: supplierForm.notes,
+          is_active: supplierForm.isActive,
+        }),
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to save supplier/contact record",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      const savedSupplier = data.supplier || null;
+
+      if (!editingSupplier && savedSupplier?.id) {
+        setForm((prev) => setSupplierFieldsOnForm(prev, savedSupplier));
+      }
+
+      if (editingSupplier && savedSupplier?.id && getFormSupplierId(form) === savedSupplier.id) {
+        setForm((prev) => setSupplierFieldsOnForm(prev, savedSupplier));
+      }
+
+      closeSupplierForm();
+      await loadSuppliers();
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setSavingSupplier(false);
+    }
+  }
+
+  async function deleteSupplier() {
+    if (!deleteSupplierId) return;
+
+    try {
+      setDeletingSupplier(true);
+      setError("");
+      setErrorDetails(null);
+
+      if (selectedYearLocked) {
+        setError(
+          `${selectedYear} is locked. Unlock this year with the main admin password before archiving supplier/contact records.`
+        );
+        setDeletingSupplier(false);
+        return;
+      }
+
+      const res = await fetch(`/api/admin/money/suppliers?id=${deleteSupplierId}`, {
+        method: "DELETE",
+      });
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to archive supplier/contact record",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      if (getFormSupplierId(form) === deleteSupplierId) {
+        setForm((prev) =>
+          ({
+            ...prev,
+            supplierId: "",
+            supplierName: "",
+            supplierCategory: "",
+          }) as FormState
+        );
+      }
+
+      if (editingSupplier?.id === deleteSupplierId) {
+        closeSupplierForm();
+      }
+
+      setDeleteSupplierId(null);
+      await loadSuppliers();
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
+      setErrorDetails(err);
+    } finally {
+      setDeletingSupplier(false);
+    }
+  }
+
   function fillTestTransaction() {
     setEditingTransaction(null);
 
-    setForm({
+    setForm(({
       title: "Test donation",
       description: "This is a test transaction",
       type: "income",
@@ -1408,6 +1718,13 @@ export function useMoneyTransactionsPage() {
       sponsorName: "",
       sponsorshipNote: "",
 
+      supplierId: "",
+      supplier_id: "",
+      supplierName: "",
+      supplier_name: "",
+      supplierCategory: "",
+      supplier_category: "",
+
       bankReconciliationStatus: "unmatched",
       bankReconciliationNote: "",
 
@@ -1417,7 +1734,7 @@ export function useMoneyTransactionsPage() {
       isRepeating: false,
       repeatFrequency: "monthly",
       repeatCount: "12",
-    });
+    }) as FormState);
 
     setInvoiceFiles([]);
   }
@@ -1442,6 +1759,14 @@ export function useMoneyTransactionsPage() {
     const hasSponsorLinked = Boolean(
       matchingSponsor?.id || item.sponsor_id || item.sponsor_name
     );
+
+    const matchingSupplier = suppliers.find((supplier) => {
+      const supplierId = getTransactionSupplierId(item);
+      const supplierName = getTransactionSupplierName(item).toLowerCase();
+      const listName = String(supplier.supplier_name || "").trim().toLowerCase();
+
+      return supplier.id === supplierId || Boolean(supplierName && listName && supplierName === listName);
+    });
 
     const linkedFundingType =
       matchingSponsor?.funding_type ||
@@ -1476,7 +1801,7 @@ export function useMoneyTransactionsPage() {
 
     setEditingTransaction(item);
 
-    setForm({
+    setForm(({
       title: item.title || "",
       description: item.description || "",
       type: hasSponsorLinked ? "expense" : item.type,
@@ -1490,6 +1815,17 @@ export function useMoneyTransactionsPage() {
       sponsorName: matchingSponsor?.sponsor_name || item.sponsor_name || "",
       sponsorshipNote: item.sponsorship_note || "",
 
+      supplierId: matchingSupplier?.id || getTransactionSupplierId(item),
+      supplier_id: matchingSupplier?.id || getTransactionSupplierId(item),
+      supplierName:
+        matchingSupplier?.supplier_name || getTransactionSupplierName(item),
+      supplier_name:
+        matchingSupplier?.supplier_name || getTransactionSupplierName(item),
+      supplierCategory:
+        matchingSupplier?.category || getTransactionSupplierCategory(item),
+      supplier_category:
+        matchingSupplier?.category || getTransactionSupplierCategory(item),
+
       bankReconciliationStatus:
         item.bank_reconciliation_status || "unmatched",
       bankReconciliationNote: item.bank_reconciliation_note || "",
@@ -1500,7 +1836,7 @@ export function useMoneyTransactionsPage() {
       isRepeating: false,
       repeatFrequency: "monthly",
       repeatCount: "12",
-    });
+    }) as FormState);
 
     setInvoiceFiles([]);
     setError("");
@@ -1587,6 +1923,25 @@ export function useMoneyTransactionsPage() {
       const selectedSponsorForSave = form.sponsorId
         ? displaySponsors.find((sponsor) => sponsor.id === form.sponsorId)
         : null;
+
+      const selectedSupplierIdForSave = getFormSupplierId(form);
+      const selectedSupplierNameForSave = getFormSupplierName(form);
+      const selectedSupplierCategoryForSave = getFormSupplierCategory(form);
+
+      const selectedSupplierForSave = selectedSupplierIdForSave
+        ? suppliers.find((supplier) => supplier.id === selectedSupplierIdForSave)
+        : null;
+
+      const finalSupplierId =
+        selectedSupplierForSave?.id || selectedSupplierIdForSave || "";
+
+      const finalSupplierName =
+        selectedSupplierForSave?.supplier_name || selectedSupplierNameForSave || "";
+
+      const finalSupplierCategory =
+        selectedSupplierForSave?.category ||
+        normaliseSupplierCategory(selectedSupplierCategoryForSave) ||
+        "";
 
       const finalSponsorId = selectedSponsorForSave?.id || "";
       const finalSponsorName = selectedSponsorForSave?.sponsor_name || "";
@@ -1712,6 +2067,13 @@ export function useMoneyTransactionsPage() {
         uploadData.append("sponsorName", finalSponsorName);
         uploadData.append("sponsorshipNote", form.sponsorshipNote);
 
+        uploadData.append("supplierId", finalSupplierId);
+        uploadData.append("supplier_id", finalSupplierId);
+        uploadData.append("supplierName", finalSupplierName);
+        uploadData.append("supplier_name", finalSupplierName);
+        uploadData.append("supplierCategory", finalSupplierCategory);
+        uploadData.append("supplier_category", finalSupplierCategory);
+
         uploadData.append(
           "bankReconciliationStatus",
           form.bankReconciliationStatus || "unmatched"
@@ -1762,6 +2124,7 @@ export function useMoneyTransactionsPage() {
       setEditingTransaction(null);
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -1825,6 +2188,7 @@ export function useMoneyTransactionsPage() {
       }
 
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -1893,6 +2257,7 @@ export function useMoneyTransactionsPage() {
       }
 
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -1960,6 +2325,7 @@ export function useMoneyTransactionsPage() {
       }
 
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2019,6 +2385,7 @@ export function useMoneyTransactionsPage() {
       setTransactions((prev) => prev.filter((item) => item.id !== deleteId));
       setDeleteId(null);
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2245,6 +2612,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2320,6 +2688,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2382,6 +2751,7 @@ export function useMoneyTransactionsPage() {
 
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2500,6 +2870,7 @@ export function useMoneyTransactionsPage() {
       closeLoanRepaymentModal();
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2612,6 +2983,7 @@ export function useMoneyTransactionsPage() {
       closeLoanInterestModal();
       await loadTransactions();
       await loadSponsors();
+      await loadSuppliers();
       await loadYearLocks();
       await loadMonthLocks();
     } catch (err: any) {
@@ -2725,6 +3097,7 @@ export function useMoneyTransactionsPage() {
   function refreshAll() {
     loadTransactions();
     loadSponsors();
+    loadSuppliers();
     loadYearLocks();
     loadMonthLocks();
     loadBudgetItems();
@@ -2780,6 +3153,15 @@ export function useMoneyTransactionsPage() {
     checkingId,
     bankReconcilingId,
     financeNoteUpdatingId,
+    suppliers,
+    supplierFormOpen,
+    editingSupplier,
+    savingSupplier,
+    supplierForm,
+    setSupplierForm,
+    deleteSupplierId,
+    deletingSupplier,
+
     sponsorFormOpen,
     editingSponsor,
     savingSponsor,
@@ -2849,6 +3231,13 @@ export function useMoneyTransactionsPage() {
     closeSponsorForm,
     saveSponsor,
     deleteSponsor,
+
+    openNewSupplierForm,
+    startEditSupplier,
+    closeSupplierForm,
+    saveSupplier,
+    deleteSupplier,
+    setDeleteSupplierId,
 
     openLoanRepaymentModal,
     closeLoanRepaymentModal,

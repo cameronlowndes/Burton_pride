@@ -160,6 +160,7 @@ type ColumnKey =
   | "amount"
   | "funding"
   | "fundingNote"
+  | "supplier"
   | "personal"
   | "paidBy"
   | "repayment"
@@ -212,6 +213,7 @@ const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "amount", label: "Amount", locked: true },
   { key: "funding", label: "Funding" },
   { key: "fundingNote", label: "Funding Note" },
+  { key: "supplier", label: "Supplier" },
   { key: "personal", label: "Personal" },
   { key: "paidBy", label: "Paid By" },
   { key: "repayment", label: "Repayment" },
@@ -232,6 +234,7 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   amount: true,
   funding: true,
   fundingNote: false,
+  supplier: true,
   personal: true,
   paidBy: false,
   repayment: true,
@@ -275,6 +278,49 @@ function fundingBadgeClass(type?: FundingType | string | null) {
   if (type === "loan") return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
   if (type === "other") return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
   return "bg-amber-500/20 text-amber-100 ring-amber-300/20";
+}
+
+function getSupplierName(item: Transaction) {
+  const row = item as Transaction & {
+    supplier_name?: string | null;
+    supplierName?: string | null;
+  };
+
+  return cleanText(row.supplier_name || row.supplierName);
+}
+
+function getSupplierCategory(item: Transaction) {
+  const row = item as Transaction & {
+    supplier_category?: string | null;
+    supplierCategory?: string | null;
+  };
+
+  return cleanText(row.supplier_category || row.supplierCategory);
+}
+
+function getSupplierId(item: Transaction) {
+  const row = item as Transaction & {
+    supplier_id?: string | null;
+    supplierId?: string | null;
+  };
+
+  return cleanText(row.supplier_id || row.supplierId);
+}
+
+function hasSupplierLinked(item: Transaction) {
+  return Boolean(getSupplierId(item) || getSupplierName(item));
+}
+
+function supplierBadgeClass(category?: string | null) {
+  const cleanCategory = cleanText(category).toLowerCase();
+
+  if (cleanCategory.includes("venue")) return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
+  if (cleanCategory.includes("insurance")) return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
+  if (cleanCategory.includes("food")) return "bg-orange-500/20 text-orange-100 ring-orange-300/20";
+  if (cleanCategory.includes("printer") || cleanCategory.includes("print")) return "bg-pink-500/20 text-pink-100 ring-pink-300/20";
+  if (cleanCategory.includes("security")) return "bg-red-500/20 text-red-100 ring-red-300/20";
+
+  return "bg-violet-500/20 text-violet-100 ring-violet-300/20";
 }
 
 function bankReconciliationLabel(status?: string | null) {
@@ -516,6 +562,9 @@ function getRowSearchText(item: Transaction) {
     item.payment_method,
     item.sponsor_name,
     item.sponsorship_note,
+    getSupplierName(item),
+    getSupplierCategory(item),
+    hasSupplierLinked(item) ? "supplier contact linked supplier contact" : "no supplier no contact",
     item.personal_funds_name,
     item.bank_reconciliation_status,
     item.bank_reconciliation_note,
@@ -558,6 +607,8 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     "Amount",
     "Payment Method",
     "Funding",
+    "Supplier",
+    "Supplier Category",
     "Personal Funds Name",
     "Bank Status",
     "Finance Status",
@@ -573,6 +624,8 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     money(item.amount_pence),
     item.payment_method || "",
     item.sponsor_name || "",
+    getSupplierName(item),
+    getSupplierCategory(item),
     item.personal_funds_name || "",
     item.bank_reconciliation_status || "unmatched",
     item.finance_note_status || "none",
@@ -1016,9 +1069,24 @@ export default function MoneyTransactionsTable({
           <div>Date: <strong className="text-white">{none(item.transaction_date)}</strong></div>
           <div>Type: <strong className="text-white">{item.type === "income" ? "Money In" : "Money Out"}</strong></div>
           <div>Payment: <strong className="text-white">{hasFunding ? "Funding Money" : item.payment_method || "None"}</strong></div>
+          {hasSupplierLinked(item) && (
+            <div>
+              Supplier: <strong className="text-white">{getSupplierName(item) || "Supplier/contact"}</strong>
+              {getSupplierCategory(item) ? ` · ${getSupplierCategory(item)}` : ""}
+            </div>
+          )}
           <div>Status: <strong className="text-white">{item.checked_at ? "Checked" : "Not checked"}</strong></div>
           {isPersonal && <div>Personal funds: <strong className="text-white">{item.personal_funds_repaid ? "Paid back" : "Not paid back"}</strong></div>}
           {hasFunding && <div>Funding: <strong className="text-white">{item.sponsor_name || "Funding record"}</strong></div>}
+          {hasSupplierLinked(item) && (
+            <div>
+              Supplier:{" "}
+              <strong className="text-white">
+                {getSupplierName(item) || "Supplier/contact"}
+              </strong>
+              {getSupplierCategory(item) ? ` · ${getSupplierCategory(item)}` : ""}
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -1216,7 +1284,7 @@ export default function MoneyTransactionsTable({
           <div className="grid gap-3 xl:hidden">{visibleTransactions.map(renderMobileCard)}</div>
 
           <div className="hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full">
-            <table className="w-full min-w-[2100px] text-sm">
+            <table className="w-full min-w-[2250px] text-sm">
               <thead className="bg-white/10 text-white/60">
                 <tr>
                   <ColumnHeader column="select" className="p-3 text-left"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} /></ColumnHeader>
@@ -1227,6 +1295,7 @@ export default function MoneyTransactionsTable({
                   <ColumnHeader column="amount" className="p-3 text-right"><SortButton label="Amount" sortKey="amount" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
                   <ColumnHeader column="funding" className="p-3 text-left"><SortButton label="Funding" sortKey="funding" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
                   <ColumnHeader column="fundingNote" className="p-3 text-left">Funding Note</ColumnHeader>
+                  <ColumnHeader column="supplier" className="p-3 text-left">Supplier</ColumnHeader>
                   <ColumnHeader column="personal" className="p-3 text-left">Personal</ColumnHeader>
                   <ColumnHeader column="paidBy" className="p-3 text-left">Paid By</ColumnHeader>
                   <ColumnHeader column="repayment" className="p-3 text-left">Repayment</ColumnHeader>
@@ -1291,6 +1360,22 @@ export default function MoneyTransactionsTable({
                       </ColumnCell>
 
                       <ColumnCell column="fundingNote" className="max-w-[220px] p-3 align-top">{item.sponsorship_note ? <span className="line-clamp-3 break-words text-sm text-amber-100">{item.sponsorship_note}</span> : <span className="text-white/40">None</span>}</ColumnCell>
+
+                      <ColumnCell column="supplier" className="max-w-[220px] p-3 align-top">
+                        {hasSupplierLinked(item) ? (
+                          <div className="space-y-2">
+                            <Badge className={supplierBadgeClass(getSupplierCategory(item))}>
+                              {getSupplierCategory(item) || "Supplier"}
+                            </Badge>
+
+                            <p className="break-words text-xs font-semibold text-white/85">
+                              {getSupplierName(item) || "Supplier/contact"}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
+                      </ColumnCell>
 
                       <ColumnCell column="personal" className="p-3 align-top">{isPersonal ? <Badge className="bg-sky-500/20 text-sky-100 ring-sky-300/20">Personal funds</Badge> : <span className="text-white/40">None</span>}</ColumnCell>
 

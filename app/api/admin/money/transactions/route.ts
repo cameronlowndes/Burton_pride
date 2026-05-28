@@ -315,6 +315,87 @@ async function getActorLabel() {
   }
 }
 
+async function getActorDetails() {
+  try {
+    const user = await currentUser();
+
+    const actorName =
+      user?.fullName ||
+      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      null;
+
+    const actorEmail =
+      user?.primaryEmailAddress?.emailAddress ||
+      user?.emailAddresses?.[0]?.emailAddress ||
+      null;
+
+    return {
+      name: actorName || actorEmail || "Unknown admin",
+      email: actorEmail || null,
+    };
+  } catch {
+    return {
+      name: "Unknown admin",
+      email: null,
+    };
+  }
+}
+
+async function createSupplierLog({
+  supplierId,
+  supplierName,
+  action,
+  actionLabel,
+  message,
+  oldData,
+  newData,
+  details,
+}: {
+  supplierId?: string | null;
+  supplierName?: string | null;
+  action: string;
+  actionLabel: string;
+  message: string;
+  oldData?: any;
+  newData?: any;
+  details?: any;
+}) {
+  if (!supplierId && !supplierName) {
+    return;
+  }
+
+  try {
+    const actor = await getActorDetails();
+
+    const { error } = await supabaseAdmin.from("money_supplier_logs").insert({
+      supplier_id: supplierId || null,
+      supplier_name: supplierName || null,
+      action,
+      action_label: actionLabel,
+      message,
+      actor_name: actor.name,
+      actor_email: actor.email,
+      old_data: oldData || null,
+      new_data: newData || null,
+      details: details || null,
+    });
+
+    if (error) {
+      console.error("Failed to create supplier log:", error);
+    }
+  } catch (error) {
+    console.error("Supplier log create failed:", error);
+  }
+}
+
+function supplierChanged(before: any, after: any) {
+  return (
+    clean(before?.supplier_id) !== clean(after?.supplier_id) ||
+    clean(before?.supplier_name) !== clean(after?.supplier_name) ||
+    clean(before?.supplier_category) !== clean(after?.supplier_category)
+  );
+}
+
 async function checkDeletePasswordThroughSettingsApi(
   req: NextRequest,
   password: string
@@ -490,6 +571,10 @@ async function syncPaidDonationsToMoneyTracker() {
         sponsor_name: null,
         sponsorship_note: null,
 
+        supplier_id: null,
+        supplier_name: null,
+        supplier_category: null,
+
         invoice_image_url: null,
 
         stripe_session_id: sessionId,
@@ -584,6 +669,12 @@ async function createTransactionFromPayload({
     payload.sponsorshipNote || payload.sponsorship_note
   );
 
+  const supplierId = clean(payload.supplierId || payload.supplier_id);
+  const supplierName = clean(payload.supplierName || payload.supplier_name);
+  const supplierCategory = clean(
+    payload.supplierCategory || payload.supplier_category
+  );
+
   const bankReconciliationStatus = cleanBankReconciliationStatus(
     payload.bankReconciliationStatus || payload.bank_reconciliation_status
   );
@@ -615,6 +706,9 @@ async function createTransactionFromPayload({
           source,
           sponsorId,
           sponsorName,
+          supplierId,
+          supplierName,
+          supplierCategory,
         },
       },
       { status: 400 }
@@ -705,6 +799,10 @@ async function createTransactionFromPayload({
     sponsor_name: sponsorName || null,
     sponsorship_note: sponsorshipNote || null,
 
+    supplier_id: supplierId || null,
+    supplier_name: supplierName || null,
+    supplier_category: supplierCategory || null,
+
     source: isSponsorLinked ? "sponsorship" : source || "manual",
 
     stripe_session_id: cleanOrNull(clean(payload.stripe_session_id)),
@@ -786,8 +884,37 @@ async function createTransactionFromPayload({
       bank_reconciliation_status: bankReconciliationStatus,
       finance_note_status: financeNoteStatus,
       finance_note: financeNote || null,
+      supplier_id: supplierId || null,
+      supplier_name: supplierName || null,
+      supplier_category: supplierCategory || null,
     },
   });
+
+  if (supplierId || supplierName) {
+    await createSupplierLog({
+      supplierId,
+      supplierName: supplierName || "Supplier/contact",
+      action: "transaction_linked",
+      actionLabel: "Transaction linked",
+      message: `Transaction created and linked to supplier/contact: ${
+        supplierName || "Supplier/contact"
+      }`,
+      oldData: null,
+      newData: transactionWithAttachments,
+      details: {
+        transaction_id: data.id,
+        transaction_reference:
+          data?.transaction_reference || sent?.transaction_reference || null,
+        transaction_title: data.title || title,
+        transaction_type: data.type || type,
+        amount_pence: data.amount_pence || Math.round(amountPounds * 100),
+        transaction_date: data.transaction_date || finalTransactionDate,
+        payment_method: data.payment_method || null,
+        supplier_category: supplierCategory || null,
+        route: "/api/admin/money/transactions",
+      },
+    });
+  }
 
   return NextResponse.json({
     ok: true,
@@ -834,6 +961,10 @@ export async function GET() {
       finance_note: item.finance_note || null,
       finance_note_updated_at: item.finance_note_updated_at || null,
       finance_note_updated_by: item.finance_note_updated_by || null,
+
+      supplier_id: item.supplier_id || null,
+      supplier_name: item.supplier_name || null,
+      supplier_category: item.supplier_category || null,
 
       attachments: attachmentMap.get(item.id) || [],
     }));
@@ -904,9 +1035,20 @@ export async function POST(req: NextRequest) {
       isPersonalFunds: clean(formData.get("isPersonalFunds")),
       personalFundsName: clean(formData.get("personalFundsName")),
 
-      sponsorId: clean(formData.get("sponsorId")),
-      sponsorName: clean(formData.get("sponsorName")),
-      sponsorshipNote: clean(formData.get("sponsorshipNote")),
+      sponsorId: clean(formData.get("sponsorId")) || clean(formData.get("sponsor_id")),
+      sponsorName: clean(formData.get("sponsorName")) || clean(formData.get("sponsor_name")),
+      sponsorshipNote:
+        clean(formData.get("sponsorshipNote")) ||
+        clean(formData.get("sponsorship_note")),
+
+      supplierId:
+        clean(formData.get("supplierId")) || clean(formData.get("supplier_id")),
+      supplierName:
+        clean(formData.get("supplierName")) ||
+        clean(formData.get("supplier_name")),
+      supplierCategory:
+        clean(formData.get("supplierCategory")) ||
+        clean(formData.get("supplier_category")),
 
       bankReconciliationStatus:
         clean(formData.get("bankReconciliationStatus")) ||

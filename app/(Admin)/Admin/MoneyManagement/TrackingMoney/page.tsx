@@ -190,6 +190,8 @@ export default function MoneyTransactionsPage() {
             editingTransaction={money.editingTransaction}
             displaySponsors={money.displaySponsors}
             yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+            displaySuppliers={(money as any).displaySuppliers || (money as any).suppliers || []}
+            openNewSupplierForm={(money as any).openNewSupplierForm}
             saving={money.saving}
             handleSubmit={money.handleSubmit}
             cancelEditTransaction={money.cancelEditTransaction}
@@ -222,6 +224,7 @@ export default function MoneyTransactionsPage() {
             bankReconcilingId={money.bankReconcilingId}
             financeNoteUpdatingId={money.financeNoteUpdatingId}
             deleting={money.deleting}
+            receiptReminderDays={RECEIPT_REMINDER_DAYS}
             onPrint={money.printTransactions}
             onExportExcel={money.exportTransactionsToExcel}
             onExportYearlyReport={money.exportFullYearlyReport}
@@ -247,6 +250,17 @@ export default function MoneyTransactionsPage() {
         savingSponsor={money.savingSponsor}
         onCloseSponsorForm={money.closeSponsorForm}
         onSaveSponsor={money.saveSponsor}
+        supplierFormOpen={(money as any).supplierFormOpen || false}
+        editingSupplier={(money as any).editingSupplier || null}
+        supplierForm={(money as any).supplierForm}
+        setSupplierForm={(money as any).setSupplierForm}
+        savingSupplier={(money as any).savingSupplier || false}
+        onCloseSupplierForm={(money as any).closeSupplierForm}
+        onSaveSupplier={(money as any).saveSupplier}
+        deleteSupplierId={(money as any).deleteSupplierId || null}
+        deletingSupplier={(money as any).deletingSupplier || false}
+        setDeleteSupplierId={(money as any).setDeleteSupplierId}
+        onDeleteSupplier={(money as any).deleteSupplier}
         deleteYearOpen={money.deleteYearOpen}
         selectedYear={money.selectedYear}
         yearTransactionsLength={money.yearTransactions.length}

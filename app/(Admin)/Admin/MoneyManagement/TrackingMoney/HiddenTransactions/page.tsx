@@ -33,6 +33,10 @@ type Transaction = {
   sponsor_name: string | null;
   sponsorship_note: string | null;
 
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  supplier_category?: string | null;
+
   source: string | null;
   stripe_session_id: string | null;
   stripe_invoice_id: string | null;
@@ -198,6 +202,8 @@ export default function HiddenTransactionsPage() {
           item.payment_method?.toLowerCase().includes(q) ||
           item.sponsor_name?.toLowerCase().includes(q) ||
           item.sponsorship_note?.toLowerCase().includes(q) ||
+          item.supplier_name?.toLowerCase().includes(q) ||
+          item.supplier_category?.toLowerCase().includes(q) ||
           item.personal_funds_name?.toLowerCase().includes(q) ||
           displayAdminName(item.deleted_by).toLowerCase().includes(q) ||
           sourceLabel(item.source).toLowerCase().includes(q)
@@ -414,7 +420,7 @@ export default function HiddenTransactionsPage() {
             </div>
           ) : (
             <div className="w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1500px] text-sm">
+              <table className="w-full min-w-[1650px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
@@ -424,6 +430,7 @@ export default function HiddenTransactionsPage() {
                     <th className="p-3 text-left">Type</th>
                     <th className="p-3 text-left">Source</th>
                     <th className="p-3 text-left">Sponsor</th>
+                    <th className="p-3 text-left">Supplier</th>
                     <th className="p-3 text-left">Personal</th>
                     <th className="p-3 text-left">Payment</th>
                     <th className="p-3 text-left">Invoice</th>
@@ -497,6 +504,24 @@ export default function HiddenTransactionsPage() {
                             <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
                               {item.sponsor_name || "Sponsor"}
                             </span>
+                          ) : (
+                            <span className="text-white/40">—</span>
+                          )}
+                        </td>
+
+                        <td className="max-w-[200px] p-3">
+                          {item.supplier_name ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex rounded-2xl bg-cyan-500/15 px-3 py-1 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20">
+                                {item.supplier_name}
+                              </span>
+
+                              {item.supplier_category && (
+                                <p className="text-xs text-cyan-100/65">
+                                  {item.supplier_category}
+                                </p>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-white/40">—</span>
                           )}

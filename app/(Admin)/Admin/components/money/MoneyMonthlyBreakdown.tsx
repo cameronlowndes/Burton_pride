@@ -292,7 +292,7 @@ export default function MoneyMonthlyBreakdown({
   selectedYear,
   transactions,
 }: MoneyMonthlyBreakdownProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const rows = useMemo(
     () => buildMonthRows(transactions || [], selectedYear),
