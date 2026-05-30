@@ -13,6 +13,7 @@ type SponsorRow = {
   story: string | null;
   slug: string | null;
   display_order: number | null;
+  is_main_sponsor?: boolean;
 };
 
 type SponsorForm = {
@@ -31,6 +32,7 @@ type SponsorForm = {
   county: string;
   postcode: string;
   country: string;
+  is_main_sponsor?: boolean;
 };
 
 type SponsorPayload = {
@@ -46,6 +48,7 @@ type SponsorPayload = {
   notes?: string | null;
   slug?: string | null;
   display_order?: number | null;
+  is_main_sponsor?: boolean | null;
   address_line1?: string | null;
   address_line2?: string | null;
   city?: string | null;
@@ -110,6 +113,7 @@ function getEmptySponsorForm(): SponsorForm {
     county: "",
     postcode: "",
     country: "United Kingdom",
+    is_main_sponsor: false,
   };
 }
 
@@ -168,6 +172,7 @@ function sponsorPayloadToForm(sponsor?: SponsorPayload | null): SponsorForm {
     county: sponsor?.county ?? "",
     postcode: sponsor?.postcode ?? "",
     country: sponsor?.country ?? "United Kingdom",
+    is_main_sponsor: Boolean(sponsor?.is_main_sponsor),
   };
 }
 
@@ -192,6 +197,7 @@ function getSponsorTypeLabel(value?: string | null) {
   if (normalizedType === SPONSOR_TYPE_NORMAL) return "Normal Sponsorship";
   if (normalizedType === SPONSOR_TYPE_KIND) return "Sponsorship in Kind";
   if (normalizedType === SPONSOR_TYPE_STORY) return "Story";
+
   return value ?? "";
 }
 
@@ -203,7 +209,9 @@ export default function AdminSponsorsPage() {
 
   const [creating, setCreating] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState<SponsorForm>(getEmptySponsorForm());
+  const [createForm, setCreateForm] = useState<SponsorForm>(
+    getEmptySponsorForm()
+  );
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
@@ -227,8 +235,14 @@ export default function AdminSponsorsPage() {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  const isStoryType = isStorySponsorType(createForm.sponsorship_type);
-  const isEditStoryType = isStorySponsorType(editForm.sponsorship_type);
+  const createIsStorySponsor = isStorySponsorType(createForm.sponsorship_type);
+  const editIsStorySponsor = isStorySponsorType(editForm.sponsorship_type);
+
+  const showCreateStoryBox =
+    createIsStorySponsor || Boolean(createForm.is_main_sponsor);
+
+  const showEditStoryBox =
+    editIsStorySponsor || Boolean(editForm.is_main_sponsor);
 
   useEffect(() => {
     async function loadSponsors() {
@@ -249,7 +263,13 @@ export default function AdminSponsorsPage() {
         setSponsors(
           (data.sponsors ?? []).map((sponsor) => ({
             ...sponsor,
+            sponsor_name: sponsor.sponsor_name ?? "",
             sponsorship_type: normalizeSponsorType(sponsor.sponsorship_type),
+            logo_link: sponsor.logo_link ?? null,
+            story: sponsor.story ?? null,
+            slug: sponsor.slug ?? null,
+            display_order: sponsor.display_order ?? null,
+            is_main_sponsor: Boolean(sponsor.is_main_sponsor),
           }))
         );
       } catch (err) {
@@ -378,10 +398,11 @@ export default function AdminSponsorsPage() {
     value: SponsorForm[K]
   ) {
     setCreateForm((current) => {
-      const next = { ...current, [key]: value };
+      const next = { ...getEmptySponsorForm(), ...current, [key]: value };
 
       if (key === "sponsorship_type") {
         next.sponsorship_type = normalizeSponsorType(String(value));
+
         if (normalizeSponsorType(String(value)) !== SPONSOR_TYPE_STORY) {
           next.slug = "";
         } else if (!next.slug.trim() && next.sponsor_name.trim()) {
@@ -391,6 +412,7 @@ export default function AdminSponsorsPage() {
 
       if (key === "sponsor_name") {
         const nextName = String(value);
+
         if (isStorySponsorType(next.sponsorship_type) && !current.slug.trim()) {
           next.slug = slugify(nextName);
         }
@@ -405,10 +427,11 @@ export default function AdminSponsorsPage() {
     value: SponsorForm[K]
   ) {
     setEditForm((current) => {
-      const next = { ...current, [key]: value };
+      const next = { ...getEmptySponsorForm(), ...current, [key]: value };
 
       if (key === "sponsorship_type") {
         next.sponsorship_type = normalizeSponsorType(String(value));
+
         if (normalizeSponsorType(String(value)) !== SPONSOR_TYPE_STORY) {
           next.slug = "";
         } else if (!next.slug.trim() && next.sponsor_name.trim()) {
@@ -418,6 +441,7 @@ export default function AdminSponsorsPage() {
 
       if (key === "sponsor_name") {
         const nextName = String(value);
+
         if (isStorySponsorType(next.sponsorship_type) && !current.slug.trim()) {
           next.slug = slugify(nextName);
         }
@@ -435,23 +459,25 @@ export default function AdminSponsorsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const sponsorName = createForm.sponsor_name.trim();
-      const contactName = createForm.contact_name.trim();
-      const email = createForm.email.trim().toLowerCase();
-      const phone = createForm.phone.trim();
+      const sponsorName = (createForm.sponsor_name ?? "").trim();
+      const contactName = (createForm.contact_name ?? "").trim();
+      const email = (createForm.email ?? "").trim().toLowerCase();
+      const phone = (createForm.phone ?? "").trim();
       const sponsorType = normalizeSponsorType(createForm.sponsorship_type);
-      const website = createForm.website.trim();
-      const story = createForm.story.trim();
-      const notes = createForm.notes.trim();
-      const addressLine1 = createForm.address_line1.trim();
-      const addressLine2 = createForm.address_line2.trim();
-      const city = createForm.city.trim();
-      const county = createForm.county.trim();
-      const postcode = createForm.postcode.trim();
-      const country = createForm.country.trim();
+      const website = (createForm.website ?? "").trim();
+      const story = (createForm.story ?? "").trim();
+      const notes = (createForm.notes ?? "").trim();
+      const addressLine1 = (createForm.address_line1 ?? "").trim();
+      const addressLine2 = (createForm.address_line2 ?? "").trim();
+      const city = (createForm.city ?? "").trim();
+      const county = (createForm.county ?? "").trim();
+      const postcode = (createForm.postcode ?? "").trim();
+      const country = (createForm.country ?? "").trim();
+      const isMainSponsor = Boolean(createForm.is_main_sponsor);
+
       const slug =
-        sponsorType === SPONSOR_TYPE_STORY && createForm.slug.trim()
-          ? createForm.slug.trim()
+        sponsorType === SPONSOR_TYPE_STORY && (createForm.slug ?? "").trim()
+          ? (createForm.slug ?? "").trim()
           : sponsorType === SPONSOR_TYPE_STORY
             ? slugify(sponsorName)
             : "";
@@ -480,6 +506,7 @@ export default function AdminSponsorsPage() {
       formData.append("county", county);
       formData.append("postcode", postcode);
       formData.append("country", country);
+      formData.append("is_main_sponsor", isMainSponsor ? "true" : "false");
 
       if (logoFile) {
         formData.append("logo", logoFile);
@@ -510,6 +537,10 @@ export default function AdminSponsorsPage() {
               typeof data.sponsor.display_order === "number"
                 ? data.sponsor.display_order
                 : sponsors.length + 1,
+            is_main_sponsor:
+              typeof data.sponsor.is_main_sponsor === "boolean"
+                ? data.sponsor.is_main_sponsor
+                : isMainSponsor,
           }
         : {
             id: crypto.randomUUID(),
@@ -519,14 +550,24 @@ export default function AdminSponsorsPage() {
             story: story || null,
             slug: slug || null,
             display_order: sponsors.length + 1,
+            is_main_sponsor: isMainSponsor,
           };
 
-      setSponsors((current) => [...current, createdSponsor]);
+      setSponsors((current) =>
+        createdSponsor.is_main_sponsor
+          ? [createdSponsor, ...current]
+          : [...current, createdSponsor]
+      );
+
       setShowCreateModal(false);
       setLogoFile(null);
       setLogoPreview(null);
       setCreateForm(getEmptySponsorForm());
-      setSuccessMessage("Sponsor created successfully.");
+      setSuccessMessage(
+        createdSponsor.is_main_sponsor
+          ? "Main sponsor created successfully."
+          : "Sponsor created successfully."
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create sponsor");
     } finally {
@@ -552,9 +593,7 @@ export default function AdminSponsorsPage() {
         throw new Error(data.error || "Failed to load sponsor details");
       }
 
-      const mappedForm = sponsorPayloadToForm(data.sponsor);
-
-      setEditForm(mappedForm);
+      setEditForm(sponsorPayloadToForm(data.sponsor));
       setEditLogoFile(null);
       setEditLogoPreview(data.sponsor.logo_link ?? null);
     } catch (err) {
@@ -581,23 +620,25 @@ export default function AdminSponsorsPage() {
       setError(null);
       setSuccessMessage(null);
 
-      const sponsorName = editForm.sponsor_name.trim();
-      const contactName = editForm.contact_name.trim();
-      const email = editForm.email.trim().toLowerCase();
-      const phone = editForm.phone.trim();
+      const sponsorName = (editForm.sponsor_name ?? "").trim();
+      const contactName = (editForm.contact_name ?? "").trim();
+      const email = (editForm.email ?? "").trim().toLowerCase();
+      const phone = (editForm.phone ?? "").trim();
       const sponsorType = normalizeSponsorType(editForm.sponsorship_type);
-      const website = editForm.website.trim();
-      const story = editForm.story.trim();
-      const notes = editForm.notes.trim();
-      const addressLine1 = editForm.address_line1.trim();
-      const addressLine2 = editForm.address_line2.trim();
-      const city = editForm.city.trim();
-      const county = editForm.county.trim();
-      const postcode = editForm.postcode.trim();
-      const country = editForm.country.trim();
+      const website = (editForm.website ?? "").trim();
+      const story = (editForm.story ?? "").trim();
+      const notes = (editForm.notes ?? "").trim();
+      const addressLine1 = (editForm.address_line1 ?? "").trim();
+      const addressLine2 = (editForm.address_line2 ?? "").trim();
+      const city = (editForm.city ?? "").trim();
+      const county = (editForm.county ?? "").trim();
+      const postcode = (editForm.postcode ?? "").trim();
+      const country = (editForm.country ?? "").trim();
+      const isMainSponsor = Boolean(editForm.is_main_sponsor);
+
       const slug =
-        sponsorType === SPONSOR_TYPE_STORY && editForm.slug.trim()
-          ? editForm.slug.trim()
+        sponsorType === SPONSOR_TYPE_STORY && (editForm.slug ?? "").trim()
+          ? (editForm.slug ?? "").trim()
           : sponsorType === SPONSOR_TYPE_STORY
             ? slugify(sponsorName)
             : "";
@@ -626,6 +667,7 @@ export default function AdminSponsorsPage() {
       formData.append("county", county);
       formData.append("postcode", postcode);
       formData.append("country", country);
+      formData.append("is_main_sponsor", isMainSponsor ? "true" : "false");
 
       if (editLogoFile) {
         formData.append("logo", editLogoFile);
@@ -658,6 +700,10 @@ export default function AdminSponsorsPage() {
                   (editLogoFile ? editLogoPreview : item.logo_link),
                 story: returned?.story ?? (story || null),
                 slug: returned?.slug ?? (slug || null),
+                is_main_sponsor:
+                  typeof returned?.is_main_sponsor === "boolean"
+                    ? returned.is_main_sponsor
+                    : isMainSponsor,
               }
             : item
         )
@@ -668,7 +714,11 @@ export default function AdminSponsorsPage() {
       setEditForm(getEmptySponsorForm());
       setEditLogoFile(null);
       setEditLogoPreview(null);
-      setSuccessMessage("Sponsor updated successfully.");
+      setSuccessMessage(
+        isMainSponsor
+          ? "Main sponsor updated successfully."
+          : "Sponsor updated successfully."
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update sponsor");
     } finally {
@@ -801,38 +851,15 @@ export default function AdminSponsorsPage() {
 
             const data: ApiResponse = await parseJsonResponse(res);
 
-            if (!res.ok || !data.ok || !data.sponsor) {
-              return {
-                submitted_at: "",
-                sponsor_name: sponsor.sponsor_name ?? "",
-                contact_name: "",
-                email: "",
-                phone: "",
-                sponsorship_type: getSponsorTypeLabel(sponsor.sponsorship_type),
-                story: sponsor.story ?? "",
-                address_line1: "",
-                address_line2: "",
-                city: "",
-                county: "",
-                postcode: "",
-                country: "",
-                google_maps: "",
-                logo_link: sponsor.logo_link ?? "",
-                website: "",
-                slug: sponsor.slug ?? "",
-                display_order: sponsor.display_order ?? index + 1,
-              };
-            }
-
             const full = data.sponsor;
 
             const addressParts = [
-              full.address_line1 ?? "",
-              full.address_line2 ?? "",
-              full.city ?? "",
-              full.county ?? "",
-              full.postcode ?? "",
-              full.country ?? "",
+              full?.address_line1 ?? "",
+              full?.address_line2 ?? "",
+              full?.city ?? "",
+              full?.county ?? "",
+              full?.postcode ?? "",
+              full?.country ?? "",
             ]
               .map((part) => String(part).trim())
               .filter(Boolean);
@@ -845,27 +872,31 @@ export default function AdminSponsorsPage() {
                 : "";
 
             return {
-              submitted_at: formatSubmittedAt(full.created_at),
-              sponsor_name: full.sponsor_name ?? "",
-              contact_name: full.contact_name ?? "",
-              email: full.email ?? "",
-              phone: full.phone ?? "",
-              sponsorship_type: getSponsorTypeLabel(full.sponsorship_type),
-              story: full.story ?? "",
-              address_line1: full.address_line1 ?? "",
-              address_line2: full.address_line2 ?? "",
-              city: full.city ?? "",
-              county: full.county ?? "",
-              postcode: full.postcode ?? "",
-              country: full.country ?? "",
+              submitted_at: formatSubmittedAt(full?.created_at),
+              sponsor_name: full?.sponsor_name ?? sponsor.sponsor_name ?? "",
+              contact_name: full?.contact_name ?? "",
+              email: full?.email ?? "",
+              phone: full?.phone ?? "",
+              sponsorship_type: getSponsorTypeLabel(
+                full?.sponsorship_type ?? sponsor.sponsorship_type
+              ),
+              story: full?.story ?? sponsor.story ?? "",
+              address_line1: full?.address_line1 ?? "",
+              address_line2: full?.address_line2 ?? "",
+              city: full?.city ?? "",
+              county: full?.county ?? "",
+              postcode: full?.postcode ?? "",
+              country: full?.country ?? "",
               google_maps: googleMaps,
-              logo_link: full.logo_link ?? "",
-              website: full.website ?? "",
-              slug: full.slug ?? "",
+              logo_link: full?.logo_link ?? sponsor.logo_link ?? "",
+              website: full?.website ?? "",
+              slug: full?.slug ?? sponsor.slug ?? "",
+              is_main_sponsor:
+                full?.is_main_sponsor ?? sponsor.is_main_sponsor ? "Yes" : "No",
               display_order:
-                typeof full.display_order === "number"
+                typeof full?.display_order === "number"
                   ? full.display_order
-                  : index + 1,
+                  : sponsor.display_order ?? index + 1,
             };
           } catch {
             return {
@@ -886,6 +917,7 @@ export default function AdminSponsorsPage() {
               logo_link: sponsor.logo_link ?? "",
               website: "",
               slug: sponsor.slug ?? "",
+              is_main_sponsor: sponsor.is_main_sponsor ? "Yes" : "No",
               display_order: sponsor.display_order ?? index + 1,
             };
           }
@@ -910,6 +942,7 @@ export default function AdminSponsorsPage() {
         "Logo Link",
         "Website",
         "Slug",
+        "Main Sponsor",
         "Display Order",
       ];
 
@@ -931,6 +964,7 @@ export default function AdminSponsorsPage() {
         item.logo_link,
         item.website,
         item.slug,
+        item.is_main_sponsor,
         item.display_order,
       ]);
 
@@ -954,143 +988,13 @@ export default function AdminSponsorsPage() {
         { wch: 44 },
         { wch: 28 },
         { wch: 22 },
+        { wch: 16 },
         { wch: 14 },
       ];
 
-      worksheet["!rows"] = [{ hpt: 24 }, ...rows.map(() => ({ hpt: 22 }))];
-
       worksheet["!autofilter"] = {
-        ref: `A1:R${rows.length + 1}`,
+        ref: `A1:S${rows.length + 1}`,
       };
-
-      (worksheet as any)["!freeze"] = {
-        xSplit: 0,
-        ySplit: 1,
-        topLeftCell: "A2",
-        activePane: "bottomLeft",
-        state: "frozen",
-      };
-
-      const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1");
-
-      const headerStyle = {
-        fill: {
-          patternType: "solid",
-          fgColor: { rgb: "7C3AED" },
-          bgColor: { rgb: "7C3AED" },
-        },
-        font: {
-          bold: true,
-          color: { rgb: "FFFFFF" },
-          sz: 11,
-          name: "Calibri",
-        },
-        alignment: {
-          horizontal: "center",
-          vertical: "center",
-          wrapText: true,
-        },
-        border: {
-          top: { style: "thin", color: { rgb: "D8B4FE" } },
-          bottom: { style: "thin", color: { rgb: "D8B4FE" } },
-          left: { style: "thin", color: { rgb: "D8B4FE" } },
-          right: { style: "thin", color: { rgb: "D8B4FE" } },
-        },
-      };
-
-      const bodyStyle = {
-        font: {
-          sz: 10,
-          color: { rgb: "111827" },
-          name: "Calibri",
-        },
-        alignment: {
-          vertical: "top",
-          horizontal: "left",
-          wrapText: true,
-        },
-        border: {
-          top: { style: "thin", color: { rgb: "E5E7EB" } },
-          bottom: { style: "thin", color: { rgb: "E5E7EB" } },
-          left: { style: "thin", color: { rgb: "E5E7EB" } },
-          right: { style: "thin", color: { rgb: "E5E7EB" } },
-        },
-      };
-
-      const linkStyle = {
-        font: {
-          sz: 10,
-          color: { rgb: "2563EB" },
-          underline: true,
-          name: "Calibri",
-        },
-        alignment: {
-          vertical: "top",
-          horizontal: "left",
-          wrapText: true,
-        },
-        border: {
-          top: { style: "thin", color: { rgb: "E5E7EB" } },
-          bottom: { style: "thin", color: { rgb: "E5E7EB" } },
-          left: { style: "thin", color: { rgb: "E5E7EB" } },
-          right: { style: "thin", color: { rgb: "E5E7EB" } },
-        },
-      };
-
-      const centerStyle = {
-        font: {
-          sz: 10,
-          color: { rgb: "111827" },
-          name: "Calibri",
-        },
-        alignment: {
-          vertical: "center",
-          horizontal: "center",
-          wrapText: true,
-        },
-        border: {
-          top: { style: "thin", color: { rgb: "E5E7EB" } },
-          bottom: { style: "thin", color: { rgb: "E5E7EB" } },
-          left: { style: "thin", color: { rgb: "E5E7EB" } },
-          right: { style: "thin", color: { rgb: "E5E7EB" } },
-        },
-      };
-
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
-        if (worksheet[cellRef]) {
-          worksheet[cellRef].s = headerStyle;
-        }
-      }
-
-      for (let row = 1; row <= range.e.r; row++) {
-        for (let col = range.s.c; col <= range.e.c; col++) {
-          const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
-          if (!worksheet[cellRef]) continue;
-
-          if (col === 17) {
-            worksheet[cellRef].s = centerStyle;
-          } else {
-            worksheet[cellRef].s = bodyStyle;
-          }
-        }
-      }
-
-      const linkColumns = [13, 14, 15];
-
-      for (let row = 1; row <= range.e.r; row++) {
-        for (const col of linkColumns) {
-          const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
-          const cell = worksheet[cellRef];
-          if (!cell || !cell.v) continue;
-
-          const value = String(cell.v).trim();
-          if (!value) continue;
-
-          cell.l = { Target: value, Tooltip: value };
-          cell.s = linkStyle;
-        }
-      }
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Sponsors");
@@ -1207,16 +1111,28 @@ export default function AdminSponsorsPage() {
                     onDragOver={(e) => handleDragOver(e, index)}
                     onDrop={() => handleDrop(index)}
                     onDragEnd={handleDragEnd}
-                    className={`flex cursor-grab flex-col gap-4 rounded-3xl border bg-white/10 p-4 shadow-lg backdrop-blur-md transition md:flex-row md:items-center md:justify-between ${
+                    className={`flex cursor-grab flex-col gap-4 rounded-3xl border p-4 shadow-lg backdrop-blur-md transition md:flex-row md:items-center md:justify-between ${
+                      sponsor.is_main_sponsor
+                        ? "border-yellow-300/50 bg-yellow-500/15 shadow-yellow-500/10"
+                        : "bg-white/10"
+                    } ${
                       isDragging
                         ? "scale-[0.99] border-pink-300/40 opacity-60"
                         : isDragOver
                           ? "border-yellow-300/50 bg-white/15"
-                          : "border-white/10"
+                          : sponsor.is_main_sponsor
+                            ? "border-yellow-300/50"
+                            : "border-white/10"
                     }`}
                   >
                     <div className="flex min-w-0 items-center gap-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-sm font-bold text-white/80">
+                      <div
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
+                          sponsor.is_main_sponsor
+                            ? "bg-yellow-400 text-yellow-950"
+                            : "bg-white/10 text-white/80"
+                        }`}
+                      >
                         {index + 1}
                       </div>
 
@@ -1224,7 +1140,11 @@ export default function AdminSponsorsPage() {
                         ⋮⋮
                       </div>
 
-                      <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-white">
+                      <div
+                        className={`relative shrink-0 overflow-hidden rounded-2xl bg-white ${
+                          sponsor.is_main_sponsor ? "h-24 w-24" : "h-20 w-20"
+                        }`}
+                      >
                         {sponsor.logo_link ? (
                           <Image
                             src={sponsor.logo_link}
@@ -1241,12 +1161,35 @@ export default function AdminSponsorsPage() {
                       </div>
 
                       <div className="min-w-0">
-                        <h2 className="truncate text-lg font-bold text-white">
-                          {sponsor.sponsor_name}
-                        </h2>
-                        <p className="truncate text-sm text-white/70">
-                          {getSponsorTypeLabel(sponsor.sponsorship_type) || "Sponsor"}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2
+                            className={`truncate font-bold text-white ${
+                              sponsor.is_main_sponsor ? "text-xl" : "text-lg"
+                            }`}
+                          >
+                            {sponsor.sponsor_name}
+                          </h2>
+
+                          {sponsor.is_main_sponsor && (
+                            <span className="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold uppercase tracking-wide text-yellow-950">
+                              Main Sponsor
+                            </span>
+                          )}
+                        </div>
+
+                        <p
+                          className={`truncate text-sm font-semibold ${
+                            sponsor.is_main_sponsor
+                              ? "text-yellow-200"
+                              : "text-white/70"
+                          }`}
+                        >
+                          {sponsor.is_main_sponsor
+                            ? "Main Sponsor"
+                            : getSponsorTypeLabel(sponsor.sponsorship_type) ||
+                              "Sponsor"}
                         </p>
+
                         <p className="mt-1 text-xs text-white/50">
                           Drag to reorder
                         </p>
@@ -1299,7 +1242,9 @@ export default function AdminSponsorsPage() {
           <div className="max-h-[95vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-white/10 bg-[#140727] p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-white">Create Sponsor</h2>
+                <h2 className="text-2xl font-bold text-white">
+                  Create Sponsor
+                </h2>
                 <p className="mt-1 text-sm text-white/70">
                   Add a sponsor directly from the admin portal.
                 </p>
@@ -1323,7 +1268,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.sponsor_name}
+                    value={createForm.sponsor_name ?? ""}
                     onChange={(e) =>
                       updateCreateForm("sponsor_name", e.target.value)
                     }
@@ -1339,7 +1284,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.contact_name}
+                    value={createForm.contact_name ?? ""}
                     onChange={(e) =>
                       updateCreateForm("contact_name", e.target.value)
                     }
@@ -1357,7 +1302,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="email"
-                    value={createForm.email}
+                    value={createForm.email ?? ""}
                     onChange={(e) => updateCreateForm("email", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="name@example.com"
@@ -1371,7 +1316,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.phone}
+                    value={createForm.phone ?? ""}
                     onChange={(e) => updateCreateForm("phone", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="Optional"
@@ -1381,22 +1326,30 @@ export default function AdminSponsorsPage() {
 
               <div
                 className={`grid gap-4 ${
-                  isStoryType ? "sm:grid-cols-2" : "sm:grid-cols-1"
+                  createIsStorySponsor ? "sm:grid-cols-2" : "sm:grid-cols-1"
                 }`}
               >
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-white/80">
-                    Sponsor Type
+                    {Boolean(createForm.is_main_sponsor)
+                      ? "Main Sponsor"
+                      : "Sponsor Type"}
                   </label>
                   <select
-                    value={createForm.sponsorship_type}
+                    value={createForm.sponsorship_type ?? SPONSOR_TYPE_NORMAL}
                     onChange={(e) =>
                       updateCreateForm("sponsorship_type", e.target.value)
                     }
-                    className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none"
+                    className={`w-full rounded-2xl border px-4 py-3 text-white outline-none ${
+                      Boolean(createForm.is_main_sponsor)
+                        ? "border-yellow-300/60 bg-yellow-500/20 font-bold text-yellow-100"
+                        : "border-white/10 bg-white/10"
+                    }`}
                   >
                     <option value={SPONSOR_TYPE_NORMAL} className="text-black">
-                      Normal Sponsorship
+                      {Boolean(createForm.is_main_sponsor)
+                        ? "Main Sponsor"
+                        : "Normal Sponsorship"}
                     </option>
                     <option value={SPONSOR_TYPE_KIND} className="text-black">
                       Sponsorship in Kind
@@ -1407,22 +1360,42 @@ export default function AdminSponsorsPage() {
                   </select>
                 </div>
 
-                {isStoryType && (
+                {createIsStorySponsor && (
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-white/80">
                       Slug
                     </label>
                     <input
                       type="text"
-                      value={createForm.slug}
+                      value={createForm.slug ?? ""}
                       onChange={(e) => updateCreateForm("slug", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="burton-pride-sponsor"
-                      required={isStoryType}
+                      required={createIsStorySponsor}
                     />
                   </div>
                 )}
               </div>
+
+              <label className="flex cursor-pointer items-start gap-4 rounded-2xl border border-yellow-300/30 bg-yellow-500/10 p-4 text-white transition hover:bg-yellow-500/15">
+                <input
+                  type="checkbox"
+                  checked={Boolean(createForm.is_main_sponsor)}
+                  onChange={(e) =>
+                    updateCreateForm("is_main_sponsor", e.target.checked)
+                  }
+                  className="mt-1 h-5 w-5 rounded border-yellow-300 bg-white/10 accent-yellow-400"
+                />
+
+                <span>
+                  <span className="block text-sm font-bold text-yellow-100">
+                    Main Sponsor
+                  </span>
+                  <span className="mt-1 block text-xs text-yellow-100/80">
+                    This sponsor will stand out more on the website and appear above normal sponsors.
+                  </span>
+                </span>
+              </label>
 
               <div className="space-y-3">
                 <label className="block text-sm font-semibold text-white/80">
@@ -1462,7 +1435,7 @@ export default function AdminSponsorsPage() {
                 </label>
                 <input
                   type="url"
-                  value={createForm.website}
+                  value={createForm.website ?? ""}
                   onChange={(e) => updateCreateForm("website", e.target.value)}
                   className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                   placeholder="https://..."
@@ -1476,7 +1449,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.address_line1}
+                    value={createForm.address_line1 ?? ""}
                     onChange={(e) =>
                       updateCreateForm("address_line1", e.target.value)
                     }
@@ -1491,7 +1464,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.address_line2}
+                    value={createForm.address_line2 ?? ""}
                     onChange={(e) =>
                       updateCreateForm("address_line2", e.target.value)
                     }
@@ -1508,7 +1481,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.city}
+                    value={createForm.city ?? ""}
                     onChange={(e) => updateCreateForm("city", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="Town or city"
@@ -1521,7 +1494,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.county}
+                    value={createForm.county ?? ""}
                     onChange={(e) => updateCreateForm("county", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="County"
@@ -1536,7 +1509,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.postcode}
+                    value={createForm.postcode ?? ""}
                     onChange={(e) => updateCreateForm("postcode", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="Postcode"
@@ -1549,7 +1522,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="text"
-                    value={createForm.country}
+                    value={createForm.country ?? ""}
                     onChange={(e) => updateCreateForm("country", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="Country"
@@ -1557,24 +1530,31 @@ export default function AdminSponsorsPage() {
                 </div>
               </div>
 
-              {isStoryType && (
+              {showCreateStoryBox && (
                 <div className="rounded-2xl border border-pink-300/30 bg-pink-500/10 p-4">
                   <label className="mb-2 block text-sm font-semibold text-white/80">
-                    Sponsor Story
+                    {Boolean(createForm.is_main_sponsor)
+                      ? "Main Sponsor Story / Message"
+                      : "Sponsor Story"}
                   </label>
 
                   <textarea
-                    value={createForm.story}
+                    value={createForm.story ?? ""}
                     onChange={(e) => updateCreateForm("story", e.target.value)}
                     rows={6}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
-                    placeholder="Write the sponsor story here..."
-                    required={isStoryType}
+                    placeholder={
+                      Boolean(createForm.is_main_sponsor)
+                        ? "Optional. Add a short story or message for this main sponsor..."
+                        : "Write the sponsor story here..."
+                    }
+                    required={createIsStorySponsor}
                   />
 
                   <p className="mt-2 text-xs text-pink-100/80">
-                    This story will be used for the sponsor story page and public
-                    display.
+                    {Boolean(createForm.is_main_sponsor)
+                      ? "Optional. If you add text here, the public sponsors page can show a story button for this main sponsor."
+                      : "This story will be used for the sponsor story page and public display."}
                   </p>
                 </div>
               )}
@@ -1585,7 +1565,7 @@ export default function AdminSponsorsPage() {
                 </label>
 
                 <textarea
-                  value={createForm.notes}
+                  value={createForm.notes ?? ""}
                   onChange={(e) => updateCreateForm("notes", e.target.value)}
                   rows={3}
                   className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
@@ -1650,7 +1630,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.sponsor_name}
+                      value={editForm.sponsor_name ?? ""}
                       onChange={(e) =>
                         updateEditForm("sponsor_name", e.target.value)
                       }
@@ -1666,7 +1646,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.contact_name}
+                      value={editForm.contact_name ?? ""}
                       onChange={(e) =>
                         updateEditForm("contact_name", e.target.value)
                       }
@@ -1684,7 +1664,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="email"
-                      value={editForm.email}
+                      value={editForm.email ?? ""}
                       onChange={(e) => updateEditForm("email", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="name@example.com"
@@ -1698,7 +1678,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.phone}
+                      value={editForm.phone ?? ""}
                       onChange={(e) => updateEditForm("phone", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="Optional"
@@ -1708,22 +1688,30 @@ export default function AdminSponsorsPage() {
 
                 <div
                   className={`grid gap-4 ${
-                    isEditStoryType ? "sm:grid-cols-2" : "sm:grid-cols-1"
+                    editIsStorySponsor ? "sm:grid-cols-2" : "sm:grid-cols-1"
                   }`}
                 >
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-white/80">
-                      Sponsor Type
+                      {Boolean(editForm.is_main_sponsor)
+                        ? "Main Sponsor"
+                        : "Sponsor Type"}
                     </label>
                     <select
-                      value={editForm.sponsorship_type}
+                      value={editForm.sponsorship_type ?? SPONSOR_TYPE_NORMAL}
                       onChange={(e) =>
                         updateEditForm("sponsorship_type", e.target.value)
                       }
-                      className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none"
+                      className={`w-full rounded-2xl border px-4 py-3 text-white outline-none ${
+                        Boolean(editForm.is_main_sponsor)
+                          ? "border-yellow-300/60 bg-yellow-500/20 font-bold text-yellow-100"
+                          : "border-white/10 bg-white/10"
+                      }`}
                     >
                       <option value={SPONSOR_TYPE_NORMAL} className="text-black">
-                        Normal Sponsorship
+                        {Boolean(editForm.is_main_sponsor)
+                          ? "Main Sponsor"
+                          : "Normal Sponsorship"}
                       </option>
                       <option value={SPONSOR_TYPE_KIND} className="text-black">
                         Sponsorship in Kind
@@ -1734,22 +1722,42 @@ export default function AdminSponsorsPage() {
                     </select>
                   </div>
 
-                  {isEditStoryType && (
+                  {editIsStorySponsor && (
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-white/80">
                         Slug
                       </label>
                       <input
                         type="text"
-                        value={editForm.slug}
+                        value={editForm.slug ?? ""}
                         onChange={(e) => updateEditForm("slug", e.target.value)}
                         className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                         placeholder="burton-pride-sponsor"
-                        required={isEditStoryType}
+                        required={editIsStorySponsor}
                       />
                     </div>
                   )}
                 </div>
+
+                <label className="flex cursor-pointer items-start gap-4 rounded-2xl border border-yellow-300/30 bg-yellow-500/10 p-4 text-white transition hover:bg-yellow-500/15">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editForm.is_main_sponsor)}
+                    onChange={(e) =>
+                      updateEditForm("is_main_sponsor", e.target.checked)
+                    }
+                    className="mt-1 h-5 w-5 rounded border-yellow-300 bg-white/10 accent-yellow-400"
+                  />
+
+                  <span>
+                    <span className="block text-sm font-bold text-yellow-100">
+                      Main Sponsor
+                    </span>
+                    <span className="mt-1 block text-xs text-yellow-100/80">
+                      This sponsor will stand out more on the website and appear above normal sponsors.
+                    </span>
+                  </span>
+                </label>
 
                 <div className="space-y-3">
                   <label className="block text-sm font-semibold text-white/80">
@@ -1789,7 +1797,7 @@ export default function AdminSponsorsPage() {
                   </label>
                   <input
                     type="url"
-                    value={editForm.website}
+                    value={editForm.website ?? ""}
                     onChange={(e) => updateEditForm("website", e.target.value)}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                     placeholder="https://..."
@@ -1803,7 +1811,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.address_line1}
+                      value={editForm.address_line1 ?? ""}
                       onChange={(e) =>
                         updateEditForm("address_line1", e.target.value)
                       }
@@ -1818,7 +1826,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.address_line2}
+                      value={editForm.address_line2 ?? ""}
                       onChange={(e) =>
                         updateEditForm("address_line2", e.target.value)
                       }
@@ -1835,7 +1843,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.city}
+                      value={editForm.city ?? ""}
                       onChange={(e) => updateEditForm("city", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="Town or city"
@@ -1848,7 +1856,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.county}
+                      value={editForm.county ?? ""}
                       onChange={(e) => updateEditForm("county", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="County"
@@ -1863,7 +1871,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.postcode}
+                      value={editForm.postcode ?? ""}
                       onChange={(e) => updateEditForm("postcode", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="Postcode"
@@ -1876,7 +1884,7 @@ export default function AdminSponsorsPage() {
                     </label>
                     <input
                       type="text"
-                      value={editForm.country}
+                      value={editForm.country ?? ""}
                       onChange={(e) => updateEditForm("country", e.target.value)}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
                       placeholder="Country"
@@ -1884,24 +1892,31 @@ export default function AdminSponsorsPage() {
                   </div>
                 </div>
 
-                {isEditStoryType && (
+                {showEditStoryBox && (
                   <div className="rounded-2xl border border-pink-300/30 bg-pink-500/10 p-4">
                     <label className="mb-2 block text-sm font-semibold text-white/80">
-                      Sponsor Story
+                      {Boolean(editForm.is_main_sponsor)
+                        ? "Main Sponsor Story / Message"
+                        : "Sponsor Story"}
                     </label>
 
                     <textarea
-                      value={editForm.story}
+                      value={editForm.story ?? ""}
                       onChange={(e) => updateEditForm("story", e.target.value)}
                       rows={6}
                       className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
-                      placeholder="Write the sponsor story here..."
-                      required={isEditStoryType}
+                      placeholder={
+                        Boolean(editForm.is_main_sponsor)
+                          ? "Optional. Add a short story or message for this main sponsor..."
+                          : "Write the sponsor story here..."
+                      }
+                      required={editIsStorySponsor}
                     />
 
                     <p className="mt-2 text-xs text-pink-100/80">
-                      This story will be used for the sponsor story page and public
-                      display.
+                      {Boolean(editForm.is_main_sponsor)
+                        ? "Optional. If you add text here, the public sponsors page can show a story button for this main sponsor."
+                        : "This story will be used for the sponsor story page and public display."}
                     </p>
                   </div>
                 )}
@@ -1912,7 +1927,7 @@ export default function AdminSponsorsPage() {
                   </label>
 
                   <textarea
-                    value={editForm.notes}
+                    value={editForm.notes ?? ""}
                     onChange={(e) => updateEditForm("notes", e.target.value)}
                     rows={3}
                     className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
@@ -1988,7 +2003,9 @@ export default function AdminSponsorsPage() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-3xl border border-red-400/20 bg-[#140727] p-6 shadow-2xl">
             <div className="mb-5">
-              <h2 className="text-2xl font-bold text-white">Delete All Sponsors</h2>
+              <h2 className="text-2xl font-bold text-white">
+                Delete All Sponsors
+              </h2>
               <p className="mt-2 text-sm text-white/70">
                 Are you sure you want to delete all sponsors?
               </p>

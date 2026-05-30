@@ -197,7 +197,7 @@ export default function BurtonPrideClient2026() {
 
           <div className="mt-8 flex justify-center">
             <a
-              href="/BurtronPride2026/Terms"
+              href="/BurtonPride2026/Terms"
               className="bg-white text-purple-700 px-8 py-4 rounded-full font-bold text-lg hover:bg-gray-200 transition transform hover:scale-105 shadow-lg"
             >
               View Terms &amp; Conditions

@@ -20,9 +20,12 @@ import {
   Filter,
   Mail,
   Layers3,
+  Loader2,
+  MessageSquare,
   RefreshCcw,
   RotateCcw,
   Search,
+  Save,
   ShieldCheck,
   Target,
   Trash2,
@@ -46,6 +49,10 @@ type MoneyAuditLog = {
   after_data: any;
   changed_fields: any;
   metadata: any;
+  admin_comment?: string | null;
+  admin_comment_updated_at?: string | null;
+  admin_comment_updated_by?: string | null;
+  admin_comment_updated_by_email?: string | null;
 };
 
 type SortMode = "newest" | "oldest" | "action" | "transaction";
@@ -663,6 +670,18 @@ function getTransactionTitle(log: MoneyAuditLog) {
   );
 }
 
+function getAuditComment(log: MoneyAuditLog) {
+  return cleanLogValue(log.admin_comment);
+}
+
+function getAuditCommentUpdatedBy(log: MoneyAuditLog) {
+  return (
+    cleanLogValue(log.admin_comment_updated_by) ||
+    nameFromEmail(log.admin_comment_updated_by_email) ||
+    "Main admin"
+  );
+}
+
 function safeJson(value: any) {
   if (value === null || value === undefined) return "";
 
@@ -989,6 +1008,10 @@ export default function MoneyAuditLogsPage() {
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
+  const [commentSaveError, setCommentSaveError] = useState("");
+  const [commentSaved, setCommentSaved] = useState(false);
 
   async function loadLogs() {
     try {
@@ -1048,6 +1071,12 @@ export default function MoneyAuditLogsPage() {
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAction, selectedYear]);
+
+  useEffect(() => {
+    setCommentDraft(selectedLog ? getAuditComment(selectedLog) : "");
+    setCommentSaveError("");
+    setCommentSaved(false);
+  }, [selectedLog]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1113,6 +1142,7 @@ export default function MoneyAuditLogsPage() {
           getAuditArea(log).toLowerCase().includes(q) ||
           getRiskLevel(log).toLowerCase().includes(q) ||
           getSourceLabel(log).toLowerCase().includes(q) ||
+          getAuditComment(log).toLowerCase().includes(q) ||
           JSON.stringify(log.changed_fields || {})
             .toLowerCase()
             .includes(q) ||
@@ -1216,6 +1246,7 @@ export default function MoneyAuditLogsPage() {
       budgetPlanning: logs.filter((log) => isBudgetPlanningAuditLog(log)).length,
       automated: logs.filter((log) => isWebsiteGeneratedLog(log)).length,
       highRisk: logs.filter((log) => getRiskLevel(log) === "High").length,
+      comments: logs.filter((log) => Boolean(getAuditComment(log))).length,
       uniqueUsers: new Set(
         logs
           .map(
@@ -1445,6 +1476,68 @@ export default function MoneyAuditLogsPage() {
     }, 1600);
   }
 
+  async function saveSelectedLogComment() {
+    if (!selectedLog || savingComment) return;
+
+    try {
+      setSavingComment(true);
+      setCommentSaveError("");
+      setCommentSaved(false);
+
+      const comment = commentDraft.trim();
+      const res = await fetch("/api/admin/money/audit-logs", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          logId: selectedLog.id,
+          comment,
+        }),
+      });
+
+      const text = await res.text();
+      let data: any = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save audit log comment");
+      }
+
+      const updatedLog: MoneyAuditLog = data.log || {
+        ...selectedLog,
+        admin_comment: comment || null,
+        admin_comment_updated_at: new Date().toISOString(),
+      };
+
+      setLogs((currentLogs) =>
+        currentLogs.map((log) =>
+          log.id === updatedLog.id ? { ...log, ...updatedLog } : log,
+        ),
+      );
+      setSelectedLog((currentLog) =>
+        currentLog && currentLog.id === updatedLog.id
+          ? { ...currentLog, ...updatedLog }
+          : currentLog,
+      );
+      setCommentDraft(getAuditComment(updatedLog));
+      setCommentSaved(true);
+
+      setTimeout(() => {
+        setCommentSaved(false);
+      }, 2200);
+    } catch (err: any) {
+      setCommentSaveError(err?.message || "Failed to save audit log comment");
+    } finally {
+      setSavingComment(false);
+    }
+  }
+
   return (
     <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
       <div className="w-full max-w-none min-w-0 space-y-6">
@@ -1468,7 +1561,7 @@ export default function MoneyAuditLogsPage() {
                   View every money tracker action, including creates, edits,
                   checks, hidden soft-deletes, saving target changes, budget
                   tracker updates, restore actions, selected-year deletes,
-                  delete-all actions, and personal funds paid-back changes.
+                  delete-all actions, personal funds paid-back changes, and main-admin comments explaining why changes were made.
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -1581,6 +1674,7 @@ export default function MoneyAuditLogsPage() {
           <StatCard label="Budget Logs" value={stats.budgetPlanning} tone="purple" />
           <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
           <StatCard label="Auto Website" value={stats.automated} tone="emerald" />
+          <StatCard label="Comments" value={stats.comments} tone="amber" />
           <StatCard label="Users" value={stats.uniqueUsers} tone="white" />
         </section>
 
@@ -1627,7 +1721,7 @@ export default function MoneyAuditLogsPage() {
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by transaction, user, email, action, changed field, route, or raw data..."
+                placeholder="Search by transaction, user, email, action, comment, changed field, route, or raw data..."
                 className="w-full rounded-2xl bg-black/30 py-3 pl-11 pr-4 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-purple-300/40"
               />
             </div>
@@ -1919,6 +2013,7 @@ export default function MoneyAuditLogsPage() {
                       <th className="p-3 text-left">Area</th>
                       <th className="p-3 text-left">Risk</th>
                       <th className="p-3 text-left">Changed Fields</th>
+                      <th className="p-3 text-left">Comment</th>
                       <th className="p-3 text-left">Source</th>
                       <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
                         View
@@ -2018,6 +2113,18 @@ export default function MoneyAuditLogsPage() {
                             )}
                           </td>
 
+                          <td className="max-w-[300px] p-3">
+                            {getAuditComment(log) ? (
+                              <div className="rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-300/15">
+                                <p className="line-clamp-4 break-words text-xs leading-5 text-amber-50">
+                                  {getAuditComment(log)}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-white/35">—</span>
+                            )}
+                          </td>
+
                           <td className="max-w-[240px] p-3">
                             <p className="break-words text-xs font-semibold text-white/60">
                               {source}
@@ -2103,6 +2210,18 @@ export default function MoneyAuditLogsPage() {
                               {cleanFieldName(name)}
                             </span>
                           ))}
+                        </div>
+                      )}
+
+                      {getAuditComment(log) && (
+                        <div className="mt-3 rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-300/15">
+                          <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-100">
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Main admin comment
+                          </div>
+                          <p className="break-words text-sm leading-6 text-amber-50/90">
+                            {getAuditComment(log)}
+                          </p>
                         </div>
                       )}
                     </article>
@@ -2200,13 +2319,14 @@ export default function MoneyAuditLogsPage() {
               <th>Transaction</th>
               <th>Who</th>
               <th>Changed Fields</th>
+              <th>Main Admin Comment</th>
               <th>Source / Route</th>
             </tr>
           </thead>
           <tbody>
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   No audit logs found for the current filters.
                 </td>
               </tr>
@@ -2237,6 +2357,7 @@ export default function MoneyAuditLogsPage() {
                         ? changedNames.map(cleanFieldName).join(", ")
                         : "—"}
                     </td>
+                    <td>{getAuditComment(log) || "—"}</td>
                     <td>
                       <strong>{getSourceLabel(log)}</strong>
                       {log.metadata?.route && (
@@ -2621,6 +2742,81 @@ export default function MoneyAuditLogsPage() {
                   subtitle={selectedLog.metadata?.route || "No route saved"}
                   icon={<Activity className="h-5 w-5" />}
                 />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5 text-amber-100" />
+                      <h3 className="font-black text-amber-50">Main Admin Comment</h3>
+                    </div>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-50/70">
+                      Add a clear explanation for why this record was changed, deleted, checked, restored, or imported. Saving an empty comment removes the existing comment.
+                    </p>
+                  </div>
+
+                  {selectedLog.admin_comment_updated_at && (
+                    <div className="rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-amber-50/65 ring-1 ring-amber-300/10">
+                      Last updated {formatDateTime(selectedLog.admin_comment_updated_at)}
+                      <br />
+                      by {getAuditCommentUpdatedBy(selectedLog)}
+                    </div>
+                  )}
+                </div>
+
+                <textarea
+                  value={commentDraft}
+                  onChange={(event) => {
+                    setCommentDraft(event.target.value);
+                    setCommentSaveError("");
+                    setCommentSaved(false);
+                  }}
+                  rows={5}
+                  maxLength={2000}
+                  placeholder="Example: Hidden because this was entered twice, or checked against the bank statement on 30 May 2026."
+                  className="mt-4 w-full resize-y rounded-2xl bg-black/30 p-4 text-sm leading-6 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs text-amber-50/60">
+                    {commentDraft.length}/2000 characters
+                    {commentSaved && (
+                      <span className="ml-3 font-bold text-emerald-200">Comment saved.</span>
+                    )}
+                    {commentSaveError && (
+                      <span className="ml-3 font-bold text-red-200">{commentSaveError}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    {commentDraft && (
+                      <button
+                        type="button"
+                        onClick={() => setCommentDraft("")}
+                        disabled={savingComment}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Clear comment
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={saveSelectedLogComment}
+                      disabled={savingComment}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-black text-black hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingComment ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      {savingComment ? "Saving..." : "Save Comment"}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
