@@ -201,7 +201,7 @@ export default function PageStatusCard({
           </Link>
 
           <Link
-            href="/Contact"
+            href="/ContactUS"
             prefetch={false}
             className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white/5 px-5 py-3 text-sm font-semibold text-white/90 transition hover:bg-white/10"
           >
