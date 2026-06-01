@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   PiggyBank,
   PlusCircle,
   RefreshCcw,
+  RotateCcw,
   ReceiptText,
   ShieldCheck,
   Sparkles,
@@ -30,17 +31,205 @@ import MoneyDashboardCharts from "../../../components/money/MoneyDashboardCharts
 import MoneyTransactionForm from "../../../components/money/MoneyTransactionForm";
 import MoneyTransactionsTable from "../../../components/money/MoneyTransactionsTable";
 import MoneyPageModals from "../../../components/money/MoneyPageModals";
+import ManualBankBalanceCheck from "../../../components/money/ManualBankBalanceCheck";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 import { money } from "@/lib/money/helpers";
 
+
+type RefundType = "money_received_back" | "money_sent_back";
+type RefundStatus = "pending" | "completed" | "cancelled";
+
+type DashboardRefund = {
+  id: string;
+  year: number;
+  refund_date: string;
+  refund_type: RefundType;
+  amount_pence: number;
+  title: string;
+  notes?: string | null;
+  reference_number?: string | null;
+  status: RefundStatus;
+  is_hidden?: boolean | null;
+  created_at?: string | null;
+};
+
+type RefundApiResponse = {
+  refunds?: DashboardRefund[];
+  message?: string;
+  error?: string;
+  details?: unknown;
+};
+
+async function readJsonResponse(response: Response) {
+  const rawBody = await response.text();
+
+  if (!rawBody) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return {
+      rawResponse: rawBody,
+    };
+  }
+}
+
+function getRefundTimestamp(refund: DashboardRefund) {
+  const value = refund.refund_date || refund.created_at || "";
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function getRefundMonthKey(refund: DashboardRefund) {
+  return String(refund.refund_date || refund.created_at || "").slice(0, 7);
+}
+
 export default function MoneyDashboardPage() {
   const moneyPage = useMoneyTransactionsPage();
+
+  const [refunds, setRefunds] = useState<DashboardRefund[]>([]);
+  const [refundsLoading, setRefundsLoading] = useState(false);
+  const [refundsError, setRefundsError] = useState("");
+  const [refundsErrorDetails, setRefundsErrorDetails] =
+    useState<unknown>(null);
 
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const [transactionsWindowOpen, setTransactionsWindowOpen] = useState(false);
   const [sponsorWindowOpen, setSponsorWindowOpen] = useState(false);
   const [reportsWindowOpen, setReportsWindowOpen] = useState(false);
+
+  const loadRefunds = useCallback(async () => {
+    setRefundsLoading(true);
+    setRefundsError("");
+    setRefundsErrorDetails(null);
+
+    try {
+      const response = await fetch(
+        `/api/admin/money/refunds?year=${encodeURIComponent(
+          moneyPage.selectedYear
+        )}&limit=500`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const payload = (await readJsonResponse(response)) as RefundApiResponse;
+
+      if (!response.ok) {
+        throw {
+          message:
+            payload.message ||
+            payload.error ||
+            "Refund records could not be loaded.",
+          details: payload,
+          status: response.status,
+        };
+      }
+
+      setRefunds(
+        Array.isArray(payload.refunds)
+          ? payload.refunds.filter((refund) => !refund.is_hidden)
+          : []
+      );
+    } catch (error: any) {
+      setRefunds([]);
+
+      setRefundsError(
+        error?.message || "Refund records could not be loaded."
+      );
+
+      setRefundsErrorDetails(error);
+    } finally {
+      setRefundsLoading(false);
+    }
+  }, [moneyPage.selectedYear]);
+
+  useEffect(() => {
+    void loadRefunds();
+  }, [loadRefunds]);
+
+  const visibleRefunds = useMemo(() => {
+    if (moneyPage.selectedViewMonth === "all") {
+      return refunds;
+    }
+
+    return refunds.filter(
+      (refund) => getRefundMonthKey(refund) === moneyPage.selectedViewMonth
+    );
+  }, [moneyPage.selectedViewMonth, refunds]);
+
+  const completedRefunds = useMemo(() => {
+    return refunds.filter((refund) => refund.status === "completed");
+  }, [refunds]);
+
+  const completedVisibleRefunds = useMemo(() => {
+    return visibleRefunds.filter((refund) => refund.status === "completed");
+  }, [visibleRefunds]);
+
+  const refundTotals = useMemo(() => {
+    return completedRefunds.reduce(
+      (acc, refund) => {
+        if (refund.refund_type === "money_received_back") {
+          acc.receivedBack += Number(refund.amount_pence || 0);
+        }
+
+        if (refund.refund_type === "money_sent_back") {
+          acc.sentBack += Number(refund.amount_pence || 0);
+        }
+
+        return acc;
+      },
+      {
+        receivedBack: 0,
+        sentBack: 0,
+      }
+    );
+  }, [completedRefunds]);
+
+  const visibleRefundTotals = useMemo(() => {
+    return completedVisibleRefunds.reduce(
+      (acc, refund) => {
+        if (refund.refund_type === "money_received_back") {
+          acc.receivedBack += Number(refund.amount_pence || 0);
+        }
+
+        if (refund.refund_type === "money_sent_back") {
+          acc.sentBack += Number(refund.amount_pence || 0);
+        }
+
+        return acc;
+      },
+      {
+        receivedBack: 0,
+        sentBack: 0,
+      }
+    );
+  }, [completedVisibleRefunds]);
+
+  const dashboardTotals = useMemo(() => {
+    return {
+      ...moneyPage.totals,
+      income: moneyPage.totals.income + refundTotals.receivedBack,
+      expense: moneyPage.totals.expense + refundTotals.sentBack,
+      balance:
+        moneyPage.totals.balance +
+        refundTotals.receivedBack -
+        refundTotals.sentBack,
+      refundsReceivedBack: refundTotals.receivedBack,
+      refundsSentBack: refundTotals.sentBack,
+    };
+  }, [moneyPage.totals, refundTotals]);
+
+  const refreshDashboard = useCallback(() => {
+    moneyPage.refreshAll();
+    void loadRefunds();
+  }, [loadRefunds, moneyPage]);
 
   async function writeMoneyAuditLog(
     action: string,
@@ -61,6 +250,10 @@ export default function MoneyDashboardPage() {
           selectedPrintMonth: moneyPage.selectedPrintMonth,
           transactionCount: moneyPage.filteredTransactions.length,
           yearTransactionCount: moneyPage.yearTransactions.length,
+          refundCount: refunds.length,
+          completedRefundCount: completedRefunds.length,
+          refundsReceivedBack: refundTotals.receivedBack,
+          refundsSentBack: refundTotals.sentBack,
           extra: extra || {},
         }),
       });
@@ -128,6 +321,10 @@ export default function MoneyDashboardPage() {
         printMonth: moneyPage.selectedPrintMonth,
         filteredTransactions: moneyPage.filteredTransactions.length,
         printTransactions: moneyPage.printTransactionsList.length,
+        refunds: visibleRefunds.length,
+        completedRefunds: completedVisibleRefunds.length,
+        refundsReceivedBack: visibleRefundTotals.receivedBack,
+        refundsSentBack: visibleRefundTotals.sentBack,
       }
     );
 
@@ -141,6 +338,10 @@ export default function MoneyDashboardPage() {
       {
         selectedViewMonth: moneyPage.selectedViewMonth,
         filteredTransactions: moneyPage.filteredTransactions.length,
+        refunds: visibleRefunds.length,
+        completedRefunds: completedVisibleRefunds.length,
+        refundsReceivedBack: visibleRefundTotals.receivedBack,
+        refundsSentBack: visibleRefundTotals.sentBack,
       }
     );
 
@@ -160,6 +361,11 @@ export default function MoneyDashboardPage() {
         sponsorshipIncome: moneyPage.totals.sponsorshipIncome,
         sponsorshipSpent: moneyPage.totals.sponsorshipSpent,
         sponsorshipRemaining: moneyPage.totals.sponsorshipRemaining,
+        refunds: refunds.length,
+        completedRefunds: completedRefunds.length,
+        refundsReceivedBack: refundTotals.receivedBack,
+        refundsSentBack: refundTotals.sentBack,
+        availableBalanceIncludingRefunds: dashboardTotals.balance,
       }
     );
 
@@ -177,14 +383,44 @@ export default function MoneyDashboardPage() {
       sponsor.remaining_pence <= sponsor.received_pence * 0.2
   );
 
-  const recentTransactions = [...moneyPage.yearTransactions]
-    .sort((a, b) => {
-      const aDate = new Date(a.transaction_date || a.created_at).getTime();
-      const bDate = new Date(b.transaction_date || b.created_at).getTime();
+  const recentActivity = useMemo(() => {
+    const transactionActivity = moneyPage.yearTransactions.map((item) => ({
+      id: `transaction-${item.id}`,
+      recordType: "transaction" as const,
+      title: item.title,
+      date: item.transaction_date || item.created_at || "",
+      amountPence: Number(item.amount_pence || 0),
+      direction: item.type === "income" ? ("in" as const) : ("out" as const),
+      label: item.sponsor_name || "",
+    }));
 
-      return bDate - aDate;
-    })
-    .slice(0, 6);
+    const refundActivity = refunds.map((refund) => ({
+      id: `refund-${refund.id}`,
+      recordType: "refund" as const,
+      title: refund.title,
+      date: refund.refund_date || refund.created_at || "",
+      amountPence: Number(refund.amount_pence || 0),
+      direction:
+        refund.refund_type === "money_received_back"
+          ? ("in" as const)
+          : ("out" as const),
+      label:
+        refund.status === "completed"
+          ? refund.refund_type === "money_received_back"
+            ? "Completed refund received back"
+            : "Completed refund sent back"
+          : `${refund.status} refund`,
+    }));
+
+    return [...transactionActivity, ...refundActivity]
+      .sort((a, b) => {
+        const aDate = new Date(a.date).getTime();
+        const bDate = new Date(b.date).getTime();
+
+        return bDate - aDate;
+      })
+      .slice(0, 6);
+  }, [moneyPage.yearTransactions, refunds]);
 
   return (
     <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
@@ -193,7 +429,7 @@ export default function MoneyDashboardPage() {
           selectedYear={moneyPage.selectedYear}
           yearOptions={moneyPage.yearOptions}
           onYearChange={moneyPage.handleYearChange}
-          onRefresh={moneyPage.refreshAll}
+          onRefresh={refreshDashboard}
         />
 
         <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/[0.08] via-white/[0.04] to-white/[0.02] p-5 shadow-2xl sm:p-6 lg:p-8">
@@ -209,9 +445,9 @@ export default function MoneyDashboardPage() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65 sm:text-base">
-                A clear yearly view of income, spending, donations, sponsor
-                balances, monthly movement, and warnings for anything that needs
-                checking.
+                A clear yearly view of income, spending, completed refunds,
+                donations, sponsor balances, monthly movement, and warnings for
+                anything that needs checking.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-3">
@@ -234,7 +470,7 @@ export default function MoneyDashboardPage() {
 
                 <button
                   type="button"
-                  onClick={moneyPage.refreshAll}
+                  onClick={refreshDashboard}
                   className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
                 >
                   <RefreshCcw className="h-4 w-4" />
@@ -243,49 +479,100 @@ export default function MoneyDashboardPage() {
               </div>
             </div>
 
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[860px] xl:grid-cols-5">
               <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
                 <div className="mb-3 flex items-center gap-2 text-emerald-100">
                   <Banknote className="h-4 w-4" />
+
                   <p className="text-xs font-bold uppercase tracking-wide">
                     Money in
                   </p>
                 </div>
 
                 <p className="break-words text-2xl font-black text-white">
-                  {money(moneyPage.totals.income)}
+                  {money(dashboardTotals.income)}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-emerald-100/65">
+                  Includes completed refunds received back.
                 </p>
               </div>
 
               <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
                 <div className="mb-3 flex items-center gap-2 text-red-100">
                   <Wallet className="h-4 w-4" />
+
                   <p className="text-xs font-bold uppercase tracking-wide">
                     Money out
                   </p>
                 </div>
 
                 <p className="break-words text-2xl font-black text-white">
-                  {money(moneyPage.totals.expense)}
+                  {money(dashboardTotals.expense)}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-red-100/65">
+                  Includes completed refunds sent back.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4">
+                <div className="mb-3 flex items-center gap-2 text-cyan-100">
+                  <RefreshCcw className="h-4 w-4" />
+
+                  <p className="text-xs font-bold uppercase tracking-wide">
+                    Refunds received
+                  </p>
+                </div>
+
+                <p className="break-words text-2xl font-black text-white">
+                  {money(refundTotals.receivedBack)}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-cyan-100/65">
+                  Added into Money In when completed.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4">
+                <div className="mb-3 flex items-center gap-2 text-purple-100">
+                  <RotateCcw className="h-4 w-4" />
+
+                  <p className="text-xs font-bold uppercase tracking-wide">
+                    Refunds sent
+                  </p>
+                </div>
+
+                <p className="break-words text-2xl font-black text-white">
+                  {money(refundTotals.sentBack)}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-purple-100/65">
+                  Added into Money Out when completed.
                 </p>
               </div>
 
               <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4">
                 <div className="mb-3 flex items-center gap-2 text-sky-100">
                   <ShieldCheck className="h-4 w-4" />
+
                   <p className="text-xs font-bold uppercase tracking-wide">
-                    Balance
+                    Available balance
                   </p>
                 </div>
 
                 <p
                   className={`break-words text-2xl font-black ${
-                    moneyPage.totals.balance >= 0
+                    dashboardTotals.balance >= 0
                       ? "text-emerald-200"
                       : "text-red-200"
                   }`}
                 >
-                  {money(moneyPage.totals.balance)}
+                  {money(dashboardTotals.balance)}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-sky-100/65">
+                  Includes completed refund adjustments.
                 </p>
               </div>
             </div>
@@ -299,6 +586,12 @@ export default function MoneyDashboardPage() {
           selectedViewMonth={moneyPage.selectedViewMonth}
           filteredTransactionsLength={moneyPage.filteredTransactions.length}
           yearTransactionsLength={moneyPage.yearTransactions.length}
+          filteredRefundsLength={visibleRefunds.length}
+          yearRefundsLength={refunds.length}
+          completedRefundsLength={completedRefunds.length}
+          refundsLoading={refundsLoading}
+          refundsError={refundsError}
+          refundsErrorDetails={refundsErrorDetails}
         />
 
         <MoneyDashboardAlerts
@@ -311,7 +604,11 @@ export default function MoneyDashboardPage() {
           onMarkTransactionChecked={moneyPage.markTransactionChecked}
         />
 
-        <MoneyStatsCards totals={moneyPage.totals} />
+        <MoneyStatsCards totals={dashboardTotals as any} />
+
+        <ManualBankBalanceCheck
+          selectedYear={moneyPage.selectedYear}
+        />
 
         {(overspentSponsors.length > 0 || lowSponsorBalances.length > 0) && (
           <section className="rounded-3xl border border-red-300/20 bg-red-500/10 p-4 sm:p-5">
@@ -391,7 +688,7 @@ export default function MoneyDashboardPage() {
           </button>
 
           <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Transactions"
+            href="/Admin/MoneyManagement/TrackingMoney"
             className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-sky-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -520,7 +817,7 @@ export default function MoneyDashboardPage() {
           </button>
 
           <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Reports"
+            href="/Admin/MoneyManagement/TrackingMoney/Exports"
             className="group rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-emerald-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -537,7 +834,7 @@ export default function MoneyDashboardPage() {
               Use the reports area to print reports and export Excel files.
             </p>
 
-            <p className="mt-4 text-sm font-black">Create report</p>
+            <p className="mt-4 text-sm font-black">Create Report</p>
           </Link>
 
           <Link
@@ -584,6 +881,40 @@ export default function MoneyDashboardPage() {
 
             <p className="mt-4 text-sm font-black">Open budget planner</p>
           </Link>
+
+          <Link
+            href="/Admin/MoneyManagement/TrackingMoney/Refunds"
+            className="group rounded-3xl border border-cyan-300/20 bg-cyan-500/10 p-5 text-cyan-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="rounded-2xl bg-black/20 p-3">
+                <RotateCcw className="h-5 w-5" />
+              </div>
+
+              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+            </div>
+
+            <h2 className="text-lg font-black text-white">Refund Tracker</h2>
+
+            <p className="mt-2 text-sm leading-6 text-white/60">
+              Track money returned to Burton Pride and money sent back to other
+              people separately from ordinary transactions. Completed refunds
+              automatically adjust Money In, Money Out, and the available
+              balance.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-xs font-black">
+              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-100 ring-1 ring-emerald-300/20">
+                Received: {money(refundTotals.receivedBack)}
+              </span>
+
+              <span className="rounded-full bg-purple-500/10 px-3 py-1 text-purple-100 ring-1 ring-purple-300/20">
+                Sent: {money(refundTotals.sentBack)}
+              </span>
+            </div>
+
+            <p className="mt-4 text-sm font-black">Open refund tracker</p>
+          </Link>
         </section>
 
         <section className="min-w-0 space-y-6">
@@ -613,7 +944,7 @@ export default function MoneyDashboardPage() {
                   </h2>
 
                   <p className="text-sm text-white/50">
-                    Latest transactions in {moneyPage.selectedYear}.
+                    Latest transactions and refunds in {moneyPage.selectedYear}.
                   </p>
                 </div>
               </div>
@@ -622,13 +953,13 @@ export default function MoneyDashboardPage() {
                 <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
                   Loading recent activity...
                 </div>
-              ) : recentTransactions.length === 0 ? (
+              ) : recentActivity.length === 0 ? (
                 <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-                  No transactions found for {moneyPage.selectedYear}.
+                  No transactions or refunds found for {moneyPage.selectedYear}.
                 </div>
               ) : (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {recentTransactions.map((item) => (
+                  {recentActivity.map((item) => (
                     <div
                       key={item.id}
                       className="rounded-2xl border border-white/10 bg-black/20 p-4"
@@ -640,25 +971,31 @@ export default function MoneyDashboardPage() {
                           </p>
 
                           <p className="mt-1 text-xs text-white/45">
-                            {item.transaction_date || item.created_at}
+                            {item.date}
                           </p>
 
-                          {item.sponsor_name && (
-                            <p className="mt-2 inline-flex rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
-                              {item.sponsor_name}
+                          {item.label ? (
+                            <p
+                              className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ring-1 ${
+                                item.recordType === "refund"
+                                  ? "bg-cyan-500/10 text-cyan-100 ring-cyan-300/20"
+                                  : "bg-amber-500/10 text-amber-100 ring-amber-300/20"
+                              }`}
+                            >
+                              {item.label}
                             </p>
-                          )}
+                          ) : null}
                         </div>
 
                         <p
                           className={`shrink-0 text-sm font-black ${
-                            item.type === "income"
+                            item.direction === "in"
                               ? "text-emerald-300"
                               : "text-red-300"
                           }`}
                         >
-                          {item.type === "income" ? "+" : "-"}
-                          {money(item.amount_pence)}
+                          {item.direction === "in" ? "+" : "-"}
+                          {money(item.amountPence)}
                         </p>
                       </div>
                     </div>
@@ -710,6 +1047,34 @@ export default function MoneyDashboardPage() {
 
                     <strong className="text-white">
                       {moneyPage.yearTransactions.length}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-black/20 p-4">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-white/60">Refunds this year</span>
+
+                    <strong className="text-cyan-200">{refunds.length}</strong>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-black/20 p-4">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-white/60">
+                      Net completed refund adjustment
+                    </span>
+
+                    <strong
+                      className={
+                        refundTotals.receivedBack - refundTotals.sentBack >= 0
+                          ? "text-emerald-300"
+                          : "text-red-300"
+                      }
+                    >
+                      {money(
+                        refundTotals.receivedBack - refundTotals.sentBack
+                      )}
                     </strong>
                   </div>
                 </div>
@@ -778,7 +1143,9 @@ export default function MoneyDashboardPage() {
 
                 <p className="text-xs text-white/50">
                   Print reports, export Excel files, and check monthly
-                  breakdowns. These actions are saved to audit logs.
+                  breakdowns. Completed refunds are included in report totals
+                  and exported in a separate Refunds section. These actions are
+                  saved to audit logs.
                 </p>
               </div>
 
@@ -795,14 +1162,15 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handlePrintReport}
-                disabled={moneyPage.printTransactionsList.length === 0}
+                disabled={moneyPage.printTransactionsList.length === 0 && visibleRefunds.length === 0}
                 className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-left text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
                 <h3 className="text-lg font-black text-white">Print report</h3>
                 <p className="mt-2 text-sm text-white/60">
-                  Print the selected year or selected month using your report
-                  layout.
+                  Print the selected year or selected month. Refunds are
+                  included in a separate section and completed refunds adjust
+                  the printed totals.
                 </p>
                 <p className="mt-4 text-sm font-black">Print now</p>
               </button>
@@ -810,13 +1178,14 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handleExportExcelReport}
-                disabled={moneyPage.filteredTransactions.length === 0}
+                disabled={moneyPage.filteredTransactions.length === 0 && visibleRefunds.length === 0}
                 className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-left text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
                 <h3 className="text-lg font-black text-white">Export Excel</h3>
                 <p className="mt-2 text-sm text-white/60">
-                  Export the current filtered transaction view to Excel.
+                  Export the current transaction view to Excel with a
+                  separate Refunds worksheet and refund-adjusted summary.
                 </p>
                 <p className="mt-4 text-sm font-black">Export transactions</p>
               </button>
@@ -824,14 +1193,15 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handleExportYearlyReport}
-                disabled={moneyPage.yearTransactions.length === 0}
+                disabled={moneyPage.yearTransactions.length === 0 && refunds.length === 0}
                 className="rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-left text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
                 <h3 className="text-lg font-black text-white">Yearly report</h3>
                 <p className="mt-2 text-sm text-white/60">
-                  Export the full yearly report with totals and sponsor
-                  breakdown.
+                  Export the full yearly report with refund-adjusted totals,
+                  sponsor breakdown, ordinary transactions, and a Refunds
+                  worksheet.
                 </p>
                 <p className="mt-4 text-sm font-black">Export yearly report</p>
               </button>
@@ -937,6 +1307,7 @@ export default function MoneyDashboardPage() {
               bankReconcilingId={moneyPage.bankReconcilingId}
               financeNoteUpdatingId={moneyPage.financeNoteUpdatingId}
               deleting={moneyPage.deleting}
+              openingBalancePence={moneyPage.totals.openingBalance}
               onPrint={moneyPage.printTransactions}
               onExportExcel={moneyPage.exportTransactionsToExcel}
               onExportYearlyReport={moneyPage.exportFullYearlyReport}

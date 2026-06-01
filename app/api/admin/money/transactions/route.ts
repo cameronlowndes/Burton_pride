@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@clerk/nextjs/server";
+
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
 import {
@@ -39,32 +40,58 @@ function isStripeKeyTest() {
 }
 
 function sessionMatchesCurrentStripeMode(sessionId: string) {
-  if (isStripeKeyLive()) return sessionId.startsWith("cs_live_");
-  if (isStripeKeyTest()) return sessionId.startsWith("cs_test_");
+  if (isStripeKeyLive()) {
+    return sessionId.startsWith("cs_live_");
+  }
+
+  if (isStripeKeyTest()) {
+    return sessionId.startsWith("cs_test_");
+  }
+
   return false;
 }
 
 function clean(
-  value: FormDataEntryValue | string | number | boolean | null | undefined
+  value:
+    | FormDataEntryValue
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
 ) {
   const text = String(value || "").trim();
+
   return text.length > 0 ? text : "";
 }
 
 function cleanOrNull(value: string) {
   const text = String(value || "").trim();
+
   return text.length > 0 ? text : null;
 }
 
-function toBoolean(value: string | boolean | null | undefined) {
-  if (typeof value === "boolean") return value;
+function toBoolean(
+  value: string | boolean | null | undefined
+) {
+  if (typeof value === "boolean") {
+    return value;
+  }
 
-  const text = String(value || "").toLowerCase().trim();
+  const text = String(value || "")
+    .toLowerCase()
+    .trim();
 
-  return text === "true" || text === "1" || text === "yes";
+  return (
+    text === "true" ||
+    text === "1" ||
+    text === "yes"
+  );
 }
 
-function getTransactionYearFromDate(dateValue: string | null | undefined) {
+function getTransactionYearFromDate(
+  dateValue: string | null | undefined
+) {
   if (!dateValue) {
     return new Date().getFullYear().toString();
   }
@@ -109,7 +136,9 @@ function cleanFinanceNoteStatus(value: unknown) {
 function numberToPounds(value: unknown) {
   const amount = Number(value || 0);
 
-  if (!Number.isFinite(amount)) return 0;
+  if (!Number.isFinite(amount)) {
+    return 0;
+  }
 
   return amount;
 }
@@ -117,38 +146,102 @@ function numberToPounds(value: unknown) {
 function penceToPounds(value: unknown) {
   const pence = Number(value || 0);
 
-  if (!Number.isFinite(pence)) return 0;
+  if (!Number.isFinite(pence)) {
+    return 0;
+  }
 
   return pence / 100;
 }
 
+function parseBooleanQueryParam(
+  value: string | null,
+  fallback = false
+) {
+  if (value === null) {
+    return fallback;
+  }
+
+  const cleaned = value.toLowerCase().trim();
+
+  if (
+    cleaned === "true" ||
+    cleaned === "1" ||
+    cleaned === "yes"
+  ) {
+    return true;
+  }
+
+  if (
+    cleaned === "false" ||
+    cleaned === "0" ||
+    cleaned === "no"
+  ) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function parseSafeLimit(value: string | null) {
+  const parsed = Number(value || 0);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return Math.min(Math.floor(parsed), 1000);
+}
+
+function isValidYear(value: string) {
+  if (!/^\d{4}$/.test(value)) {
+    return false;
+  }
+
+  const year = Number(value);
+
+  return year >= 2000 && year <= 2200;
+}
+
 async function createTransactionReference(year: string) {
-  const cleanYear = String(year || new Date().getFullYear()).trim();
+  const cleanYear = String(
+    year || new Date().getFullYear()
+  ).trim();
+
   const prefix = `BP-${cleanYear}-`;
 
   const { data, error } = await supabaseAdmin
     .from("money_transactions")
     .select("transaction_reference")
     .like("transaction_reference", `${prefix}%`)
-    .order("transaction_reference", { ascending: false })
+    .order("transaction_reference", {
+      ascending: false,
+    })
     .limit(1);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const latestReference = data?.[0]?.transaction_reference || "";
-  const latestNumber = Number(latestReference.replace(prefix, "")) || 0;
+  const latestReference =
+    data?.[0]?.transaction_reference || "";
+
+  const latestNumber =
+    Number(latestReference.replace(prefix, "")) || 0;
+
   const nextNumber = latestNumber + 1;
 
   return `${prefix}${String(nextNumber).padStart(3, "0")}`;
 }
 
-async function insertTransactionWithReference(insertData: Record<string, any>) {
+async function insertTransactionWithReference(
+  insertData: Record<string, any>
+) {
   const transactionDate =
-    insertData.transaction_date || new Date().toISOString().slice(0, 10);
+    insertData.transaction_date ||
+    new Date().toISOString().slice(0, 10);
 
-  const transactionYear = getTransactionYearFromDate(transactionDate);
+  const transactionYear =
+    getTransactionYearFromDate(transactionDate);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const transactionReference =
@@ -174,7 +267,10 @@ async function insertTransactionWithReference(insertData: Record<string, any>) {
       };
     }
 
-    const errorMessage = String(error.message || "").toLowerCase();
+    const errorMessage = String(
+      error.message || ""
+    ).toLowerCase();
+
     const isDuplicateReference =
       error.code === "23505" ||
       errorMessage.includes("duplicate") ||
@@ -194,7 +290,8 @@ async function insertTransactionWithReference(insertData: Record<string, any>) {
   return {
     data: null,
     error: {
-      message: "Failed to create a unique transaction reference.",
+      message:
+        "Failed to create a unique transaction reference.",
     },
     sent: insertData,
   };
@@ -210,43 +307,65 @@ async function uploadTransactionAttachments({
   const uploadedAttachments: any[] = [];
 
   for (const file of files) {
-    if (!file || file.size <= 0) continue;
+    if (!file || file.size <= 0) {
+      continue;
+    }
 
-    const fileExt = file.name.split(".").pop() || "file";
+    const fileExt =
+      file.name.split(".").pop() || "file";
+
     const cleanName = safeFileName(file.name);
+
     const fileName = `${Date.now()}-${Math.random()
       .toString(36)
       .slice(2)}-${cleanName || `attachment.${fileExt}`}`;
 
-    const filePath = `transactions/${transactionId}/${fileName}`;
+    const filePath =
+      `transactions/${transactionId}/${fileName}`;
 
     const arrayBuffer = await file.arrayBuffer();
+
     const buffer = Buffer.from(arrayBuffer);
 
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from("money-invoices")
-      .upload(filePath, buffer, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false,
-      });
+    const { error: uploadError } =
+      await supabaseAdmin.storage
+        .from("money-invoices")
+        .upload(filePath, buffer, {
+          contentType:
+            file.type || "application/octet-stream",
+
+          upsert: false,
+        });
 
     if (uploadError) {
       throw uploadError;
     }
 
-    const { data: publicUrlData } = supabaseAdmin.storage
-      .from("money-invoices")
-      .getPublicUrl(filePath);
+    const { data: publicUrlData } =
+      supabaseAdmin.storage
+        .from("money-invoices")
+        .getPublicUrl(filePath);
 
     const attachmentInsert = {
       transaction_id: transactionId,
-      file_name: file.name || fileName,
-      file_url: publicUrlData.publicUrl,
-      file_type: file.type || null,
-      file_size: file.size || null,
+
+      file_name:
+        file.name || fileName,
+
+      file_url:
+        publicUrlData.publicUrl,
+
+      file_type:
+        file.type || null,
+
+      file_size:
+        file.size || null,
     };
 
-    const { data: attachment, error: attachmentError } = await supabaseAdmin
+    const {
+      data: attachment,
+      error: attachmentError,
+    } = await supabaseAdmin
       .from("money_transaction_attachments")
       .insert(attachmentInsert)
       .select("*")
@@ -262,24 +381,35 @@ async function uploadTransactionAttachments({
   return uploadedAttachments;
 }
 
-async function loadAttachmentsForTransactions(transactionIds: string[]) {
-  if (transactionIds.length === 0) return new Map<string, any[]>();
+async function loadAttachmentsForTransactions(
+  transactionIds: string[]
+) {
+  if (transactionIds.length === 0) {
+    return new Map<string, any[]>();
+  }
 
   const { data, error } = await supabaseAdmin
     .from("money_transaction_attachments")
     .select("*")
     .in("transaction_id", transactionIds)
-    .order("created_at", { ascending: true });
+    .order("created_at", {
+      ascending: true,
+    });
 
   if (error) {
-    console.error("Failed to load money transaction attachments:", error);
+    console.error(
+      "Failed to load money transaction attachments:",
+      error
+    );
+
     return new Map<string, any[]>();
   }
 
   const map = new Map<string, any[]>();
 
   for (const attachment of data || []) {
-    const transactionId = attachment.transaction_id;
+    const transactionId =
+      attachment.transaction_id;
 
     if (!map.has(transactionId)) {
       map.set(transactionId, []);
@@ -297,7 +427,9 @@ async function getActorLabel() {
 
     const actorName =
       user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      [user?.firstName, user?.lastName]
+        .filter(Boolean)
+        .join(" ") ||
       null;
 
     const actorEmail =
@@ -305,9 +437,17 @@ async function getActorLabel() {
       user?.emailAddresses?.[0]?.emailAddress ||
       null;
 
-    if (actorName && actorEmail) return `${actorName} (${actorEmail})`;
-    if (actorName) return actorName;
-    if (actorEmail) return actorEmail;
+    if (actorName && actorEmail) {
+      return `${actorName} (${actorEmail})`;
+    }
+
+    if (actorName) {
+      return actorName;
+    }
+
+    if (actorEmail) {
+      return actorEmail;
+    }
 
     return "Unknown admin";
   } catch {
@@ -321,7 +461,9 @@ async function getActorDetails() {
 
     const actorName =
       user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      [user?.firstName, user?.lastName]
+        .filter(Boolean)
+        .join(" ") ||
       null;
 
     const actorEmail =
@@ -330,8 +472,13 @@ async function getActorDetails() {
       null;
 
     return {
-      name: actorName || actorEmail || "Unknown admin",
-      email: actorEmail || null,
+      name:
+        actorName ||
+        actorEmail ||
+        "Unknown admin",
+
+      email:
+        actorEmail || null,
     };
   } catch {
     return {
@@ -367,32 +514,62 @@ async function createSupplierLog({
   try {
     const actor = await getActorDetails();
 
-    const { error } = await supabaseAdmin.from("money_supplier_logs").insert({
-      supplier_id: supplierId || null,
-      supplier_name: supplierName || null,
-      action,
-      action_label: actionLabel,
-      message,
-      actor_name: actor.name,
-      actor_email: actor.email,
-      old_data: oldData || null,
-      new_data: newData || null,
-      details: details || null,
-    });
+    const { error } = await supabaseAdmin
+      .from("money_supplier_logs")
+      .insert({
+        supplier_id:
+          supplierId || null,
+
+        supplier_name:
+          supplierName || null,
+
+        action,
+
+        action_label:
+          actionLabel,
+
+        message,
+
+        actor_name:
+          actor.name,
+
+        actor_email:
+          actor.email,
+
+        old_data:
+          oldData || null,
+
+        new_data:
+          newData || null,
+
+        details:
+          details || null,
+      });
 
     if (error) {
-      console.error("Failed to create supplier log:", error);
+      console.error(
+        "Failed to create supplier log:",
+        error
+      );
     }
   } catch (error) {
-    console.error("Supplier log create failed:", error);
+    console.error(
+      "Supplier log create failed:",
+      error
+    );
   }
 }
 
 function supplierChanged(before: any, after: any) {
   return (
-    clean(before?.supplier_id) !== clean(after?.supplier_id) ||
-    clean(before?.supplier_name) !== clean(after?.supplier_name) ||
-    clean(before?.supplier_category) !== clean(after?.supplier_category)
+    clean(before?.supplier_id) !==
+      clean(after?.supplier_id) ||
+
+    clean(before?.supplier_name) !==
+      clean(after?.supplier_name) ||
+
+    clean(before?.supplier_category) !==
+      clean(after?.supplier_category)
   );
 }
 
@@ -404,28 +581,47 @@ async function checkDeletePasswordThroughSettingsApi(
     `${req.nextUrl.origin}/api/admin/settings/delete-password`,
     {
       method: "POST",
+
       headers: {
         "Content-Type": "application/json",
-        cookie: req.headers.get("cookie") || "",
+
+        cookie:
+          req.headers.get("cookie") || "",
       },
+
       body: JSON.stringify({
         password,
       }),
     }
   );
 
-  const passwordData = await passwordCheck.json().catch(() => ({}));
+  const passwordData =
+    await passwordCheck
+      .json()
+      .catch(() => ({}));
 
-  if (!passwordCheck.ok || !passwordData.ok) {
+  if (
+    !passwordCheck.ok ||
+    !passwordData.ok
+  ) {
     return {
       ok: false,
+
       response: NextResponse.json(
         {
           ok: false,
-          error: passwordData.error || "Main admin password check failed.",
-          details: passwordData,
+
+          error:
+            passwordData.error ||
+            "Main admin password check failed.",
+
+          details:
+            passwordData,
         },
-        { status: passwordCheck.status || 500 }
+        {
+          status:
+            passwordCheck.status || 500,
+        }
       ),
     };
   }
@@ -438,64 +634,132 @@ async function checkDeletePasswordThroughSettingsApi(
 
 async function syncPaidDonationsToMoneyTracker() {
   try {
-    const { data: donations, error: donationError } = await supabaseAdmin
+    const {
+      data: donations,
+      error: donationError,
+    } = await supabaseAdmin
       .from("donations")
       .select(
-        "id, full_name, email, message, donation_type, amount_pence, currency, stripe_checkout_session_id, status, created_at"
+        `
+          id,
+          full_name,
+          email,
+          message,
+          donation_type,
+          amount_pence,
+          currency,
+          stripe_checkout_session_id,
+          status,
+          created_at
+        `
       )
-      .not("stripe_checkout_session_id", "is", null)
-      .order("created_at", { ascending: false })
+      .not(
+        "stripe_checkout_session_id",
+        "is",
+        null
+      )
+      .order("created_at", {
+        ascending: false,
+      })
       .limit(50);
 
     if (donationError) {
-      console.error("Failed to load donations for money sync:", donationError);
+      console.error(
+        "Failed to load donations for money sync:",
+        donationError
+      );
+
       return;
     }
 
-    if (!donations?.length) return;
+    if (!donations?.length) {
+      return;
+    }
 
     for (const donation of donations) {
-      const sessionId = donation.stripe_checkout_session_id;
+      const sessionId =
+        donation.stripe_checkout_session_id;
 
-      if (!sessionId) continue;
-
-      if (!sessionMatchesCurrentStripeMode(sessionId)) {
+      if (!sessionId) {
         continue;
       }
 
-      const { data: existing, error: existingError } = await supabaseAdmin
+      if (
+        !sessionMatchesCurrentStripeMode(
+          sessionId
+        )
+      ) {
+        continue;
+      }
+
+      const {
+        data: existing,
+        error: existingError,
+      } = await supabaseAdmin
         .from("money_transactions")
         .select("id, deleted_at")
-        .eq("stripe_session_id", sessionId)
+        .eq(
+          "stripe_session_id",
+          sessionId
+        )
         .maybeSingle();
 
       if (existingError) {
-        console.error("Failed to check existing money transaction:", {
-          error: existingError,
-          sessionId,
-        });
+        console.error(
+          "Failed to check existing money transaction:",
+          {
+            error:
+              existingError,
+
+            sessionId,
+          }
+        );
+
         continue;
       }
 
-      if (existing) continue;
+      if (existing) {
+        continue;
+      }
 
-      let session: Stripe.Checkout.Session | null = null;
+      let session:
+        | Stripe.Checkout.Session
+        | null = null;
 
       try {
-        session = await stripe.checkout.sessions.retrieve(sessionId);
+        session =
+          await stripe.checkout.sessions.retrieve(
+            sessionId
+          );
       } catch (err) {
-        console.error("Failed to retrieve Stripe session:", sessionId, err);
+        console.error(
+          "Failed to retrieve Stripe session:",
+          sessionId,
+          err
+        );
+
         continue;
       }
 
       const isPaid =
-        session.payment_status === "paid" || session.status === "complete";
+        session.payment_status === "paid" ||
+        session.status === "complete";
 
-      if (!isPaid) continue;
+      if (!isPaid) {
+        continue;
+      }
 
-      const amountPence = session.amount_total || donation.amount_pence || 0;
+      const amountPence =
+        session.amount_total ||
+        donation.amount_pence ||
+        0;
 
-      if (!amountPence || amountPence <= 0) continue;
+      if (
+        !amountPence ||
+        amountPence <= 0
+      ) {
+        continue;
+      }
 
       const donorName =
         session.metadata?.fullName ||
@@ -509,122 +773,242 @@ async function syncPaidDonationsToMoneyTracker() {
         donation.email ||
         "";
 
-      const donorMessage = session.metadata?.message || donation.message || "";
+      const donorMessage =
+        session.metadata?.message ||
+        donation.message ||
+        "";
 
       const donationType =
-        session.mode === "subscription" || donation.donation_type === "monthly"
+        session.mode === "subscription" ||
+        donation.donation_type === "monthly"
           ? "Monthly donation"
           : "One-time donation";
 
       const stripeInvoiceId =
-        typeof session.invoice === "string" ? session.invoice : null;
+        typeof session.invoice === "string"
+          ? session.invoice
+          : null;
 
       const stripeCustomerId =
-        typeof session.customer === "string" ? session.customer : null;
+        typeof session.customer === "string"
+          ? session.customer
+          : null;
 
       const stripePaymentIntentId =
         typeof session.payment_intent === "string"
           ? session.payment_intent
           : null;
 
-      const transactionDate = session.created
-        ? new Date(session.created * 1000).toISOString().slice(0, 10)
-        : new Date(donation.created_at || Date.now())
-            .toISOString()
-            .slice(0, 10);
+      const transactionDate =
+        session.created
+          ? new Date(
+              session.created * 1000
+            )
+              .toISOString()
+              .slice(0, 10)
+
+          : new Date(
+              donation.created_at ||
+                Date.now()
+            )
+              .toISOString()
+              .slice(0, 10);
 
       const descriptionParts = [
-        donorEmail ? `Email: ${donorEmail}` : "",
-        donorMessage ? `Message: ${donorMessage}` : "",
+        donorEmail
+          ? `Email: ${donorEmail}`
+          : "",
+
+        donorMessage
+          ? `Message: ${donorMessage}`
+          : "",
+
         session.payment_status
           ? `Payment status: ${session.payment_status}`
           : "",
-        session.mode ? `Stripe mode: ${session.mode}` : "",
-        sessionId ? `Stripe session: ${sessionId}` : "",
+
+        session.mode
+          ? `Stripe mode: ${session.mode}`
+          : "",
+
+        sessionId
+          ? `Stripe session: ${sessionId}`
+          : "",
       ].filter(Boolean);
 
       const insertData = {
-        title: `${donationType} - ${donorName}`,
-        description: descriptionParts.join("\n") || null,
-        type: "income",
-        category: "Donation",
-        amount_pence: amountPence,
-        payment_method: "Stripe",
-        transaction_date: transactionDate,
+        title:
+          `${donationType} - ${donorName}`,
 
-        bank_reconciliation_status: "unmatched",
-        bank_reconciled_at: null,
-        bank_reconciled_by: null,
-        bank_reconciliation_note: null,
+        description:
+          descriptionParts.join("\n") ||
+          null,
 
-        finance_note_status: "none",
-        finance_note: null,
-        finance_note_updated_at: null,
-        finance_note_updated_by: null,
+        type:
+          "income",
 
-        is_personal_funds: false,
-        personal_funds_name: null,
-        personal_funds_repaid: false,
-        personal_funds_repaid_at: null,
+        category:
+          "Donation",
 
-        sponsor_id: null,
-        sponsor_name: null,
-        sponsorship_note: null,
+        amount_pence:
+          amountPence,
 
-        supplier_id: null,
-        supplier_name: null,
-        supplier_category: null,
+        payment_method:
+          "Stripe",
 
-        invoice_image_url: null,
+        transaction_date:
+          transactionDate,
 
-        stripe_session_id: sessionId,
-        stripe_invoice_id: stripeInvoiceId,
-        stripe_customer_id: stripeCustomerId,
-        stripe_payment_intent_id: stripePaymentIntentId,
+        bank_reconciliation_status:
+          "unmatched",
+
+        bank_reconciled_at:
+          null,
+
+        bank_reconciled_by:
+          null,
+
+        bank_reconciliation_note:
+          null,
+
+        finance_note_status:
+          "none",
+
+        finance_note:
+          null,
+
+        finance_note_updated_at:
+          null,
+
+        finance_note_updated_by:
+          null,
+
+        is_personal_funds:
+          false,
+
+        personal_funds_name:
+          null,
+
+        personal_funds_repaid:
+          false,
+
+        personal_funds_repaid_at:
+          null,
+
+        sponsor_id:
+          null,
+
+        sponsor_name:
+          null,
+
+        sponsorship_note:
+          null,
+
+        supplier_id:
+          null,
+
+        supplier_name:
+          null,
+
+        supplier_category:
+          null,
+
+        invoice_image_url:
+          null,
+
+        stripe_session_id:
+          sessionId,
+
+        stripe_invoice_id:
+          stripeInvoiceId,
+
+        stripe_customer_id:
+          stripeCustomerId,
+
+        stripe_payment_intent_id:
+          stripePaymentIntentId,
 
         source:
           donation.donation_type === "monthly"
             ? "website_monthly_donation"
             : "website_donation",
 
-        deleted_at: null,
-        deleted_by: null,
+        deleted_at:
+          null,
+
+        deleted_by:
+          null,
       };
 
       const {
         data: inserted,
         error: insertError,
         sent,
-      } = await insertTransactionWithReference(insertData);
+      } =
+        await insertTransactionWithReference(
+          insertData
+        );
 
       if (insertError) {
-        console.error("Failed to sync donation into money tracker:", {
-          error: insertError,
-          sessionId,
-          donationId: donation.id,
-          sent,
-        });
+        console.error(
+          "Failed to sync donation into money tracker:",
+          {
+            error:
+              insertError,
+
+            sessionId,
+
+            donationId:
+              donation.id,
+
+            sent,
+          }
+        );
+
         continue;
       }
 
       await createMoneyAuditLog({
-        action: "create",
-        transactionId: inserted?.id || null,
-        transactionTitle: inserted?.title || insertData.title,
-        beforeData: null,
-        afterData: inserted,
+        action:
+          "create",
+
+        transactionId:
+          inserted?.id || null,
+
+        transactionTitle:
+          inserted?.title ||
+          insertData.title,
+
+        beforeData:
+          null,
+
+        afterData:
+          inserted,
+
         metadata: {
-          source: "stripe_donation_sync",
-          route: "/api/admin/money/transactions",
-          stripe_session_id: sessionId,
-          donation_id: donation.id,
+          source:
+            "stripe_donation_sync",
+
+          route:
+            "/api/admin/money/transactions",
+
+          stripe_session_id:
+            sessionId,
+
+          donation_id:
+            donation.id,
+
           transaction_reference:
-            inserted?.transaction_reference || sent?.transaction_reference,
+            inserted?.transaction_reference ||
+            sent?.transaction_reference,
         },
       });
     }
   } catch (err) {
-    console.error("Money tracker donation sync failed:", err);
+    console.error(
+      "Money tracker donation sync failed:",
+      err
+    );
   }
 }
 
@@ -635,198 +1019,421 @@ async function createTransactionFromPayload({
   payload: Record<string, any>;
   invoiceFiles: File[];
 }) {
-  const title = clean(payload.title);
-  const description = clean(payload.description);
-  const type = clean(payload.type);
-  const category = clean(payload.category);
+  const title =
+    clean(payload.title);
+
+  const description =
+    clean(payload.description);
+
+  const type =
+    clean(payload.type);
+
+  const category =
+    clean(payload.category);
 
   const amountPounds =
     payload.amount_pence !== undefined
-      ? penceToPounds(payload.amount_pence)
-      : numberToPounds(payload.amount);
+      ? penceToPounds(
+          payload.amount_pence
+        )
+      : numberToPounds(
+          payload.amount
+        );
 
-  const paymentMethod = clean(
-    payload.paymentMethod || payload.payment_method
-  );
+  const paymentMethod =
+    clean(
+      payload.paymentMethod ||
+      payload.payment_method
+    );
 
-  const transactionDate = clean(
-    payload.transactionDate || payload.transaction_date
-  );
+  const transactionDate =
+    clean(
+      payload.transactionDate ||
+      payload.transaction_date
+    );
 
-  const source = clean(payload.source) || "manual";
+  const source =
+    clean(payload.source) ||
+    "manual";
 
-  const isPersonalFunds = toBoolean(
-    payload.isPersonalFunds ?? payload.is_personal_funds
-  );
+  const isPersonalFunds =
+    toBoolean(
+      payload.isPersonalFunds ??
+      payload.is_personal_funds
+    );
 
-  const personalFundsName = clean(
-    payload.personalFundsName || payload.personal_funds_name
-  );
+  const personalFundsName =
+    clean(
+      payload.personalFundsName ||
+      payload.personal_funds_name
+    );
 
-  const sponsorId = clean(payload.sponsorId || payload.sponsor_id);
-  const sponsorName = clean(payload.sponsorName || payload.sponsor_name);
-  const sponsorshipNote = clean(
-    payload.sponsorshipNote || payload.sponsorship_note
-  );
+  const sponsorId =
+    clean(
+      payload.sponsorId ||
+      payload.sponsor_id
+    );
 
-  const supplierId = clean(payload.supplierId || payload.supplier_id);
-  const supplierName = clean(payload.supplierName || payload.supplier_name);
-  const supplierCategory = clean(
-    payload.supplierCategory || payload.supplier_category
-  );
+  const sponsorName =
+    clean(
+      payload.sponsorName ||
+      payload.sponsor_name
+    );
 
-  const bankReconciliationStatus = cleanBankReconciliationStatus(
-    payload.bankReconciliationStatus || payload.bank_reconciliation_status
-  );
+  const sponsorshipNote =
+    clean(
+      payload.sponsorshipNote ||
+      payload.sponsorship_note
+    );
 
-  const bankReconciliationNote = clean(
-    payload.bankReconciliationNote || payload.bank_reconciliation_note
-  );
+  const supplierId =
+    clean(
+      payload.supplierId ||
+      payload.supplier_id
+    );
 
-  const financeNoteStatus = cleanFinanceNoteStatus(
-    payload.financeNoteStatus || payload.finance_note_status
-  );
+  const supplierName =
+    clean(
+      payload.supplierName ||
+      payload.supplier_name
+    );
 
-  const financeNote = clean(payload.financeNote || payload.finance_note);
+  const supplierCategory =
+    clean(
+      payload.supplierCategory ||
+      payload.supplier_category
+    );
 
-  const isSponsorLinked = Boolean(sponsorId || sponsorName);
+  const bankReconciliationStatus =
+    cleanBankReconciliationStatus(
+      payload.bankReconciliationStatus ||
+      payload.bank_reconciliation_status
+    );
 
-  if (!title || !type || amountPounds <= 0) {
+  const bankReconciliationNote =
+    clean(
+      payload.bankReconciliationNote ||
+      payload.bank_reconciliation_note
+    );
+
+  const financeNoteStatus =
+    cleanFinanceNoteStatus(
+      payload.financeNoteStatus ||
+      payload.finance_note_status
+    );
+
+  const financeNote =
+    clean(
+      payload.financeNote ||
+      payload.finance_note
+    );
+
+  const isSponsorLinked =
+    Boolean(
+      sponsorId ||
+      sponsorName
+    );
+
+  if (
+    !title ||
+    !type ||
+    amountPounds <= 0
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Title, type and amount are required",
+
+        error:
+          "Title, type and amount are required",
+
         received: {
           title,
           type,
-          amount: amountPounds,
+          amount:
+            amountPounds,
+
           category,
+
           paymentMethod,
+
           transactionDate,
+
           source,
+
           sponsorId,
+
           sponsorName,
+
           supplierId,
+
           supplierName,
+
           supplierCategory,
         },
       },
-      { status: 400 }
+      {
+        status: 400,
+      }
     );
   }
 
-  if (type !== "income" && type !== "expense") {
+  if (
+    type !== "income" &&
+    type !== "expense"
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Type must be income or expense",
-        received: type,
+
+        error:
+          "Type must be income or expense",
+
+        received:
+          type,
       },
-      { status: 400 }
+      {
+        status: 400,
+      }
     );
   }
 
-  if (!paymentMethod && !isSponsorLinked) {
+  if (
+    !paymentMethod &&
+    !isSponsorLinked
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Please choose a payment method.",
+
+        error:
+          "Please choose a payment method.",
       },
-      { status: 400 }
+      {
+        status: 400,
+      }
     );
   }
 
-  if (isPersonalFunds && !personalFundsName) {
+  if (
+    isPersonalFunds &&
+    !personalFundsName
+  ) {
     return NextResponse.json(
       {
         ok: false,
+
         error:
           "Please enter the name of the person who paid with personal funds.",
       },
-      { status: 400 }
+      {
+        status: 400,
+      }
     );
   }
 
   const finalTransactionDate =
-    transactionDate || new Date().toISOString().slice(0, 10);
+    transactionDate ||
+    new Date()
+      .toISOString()
+      .slice(0, 10);
 
-  const actorLabel = await getActorLabel();
+  const actorLabel =
+    await getActorLabel();
 
   const matchedAt =
-    bankReconciliationStatus === "matched" ? new Date().toISOString() : null;
+    bankReconciliationStatus === "matched"
+      ? new Date().toISOString()
+      : null;
 
-  const matchedBy = bankReconciliationStatus === "matched" ? actorLabel : null;
+  const matchedBy =
+    bankReconciliationStatus === "matched"
+      ? actorLabel
+      : null;
 
   const hasFinanceQuery =
-    financeNoteStatus !== "none" || financeNote.trim().length > 0;
+    financeNoteStatus !== "none" ||
+    financeNote
+      .trim()
+      .length > 0;
 
   const insertData = {
     title,
-    description: cleanOrNull(description),
+
+    description:
+      cleanOrNull(description),
+
     type,
-    category: isSponsorLinked ? "Sponsorship" : cleanOrNull(category),
-    amount_pence: Math.round(amountPounds * 100),
-    payment_method: isSponsorLinked
-      ? "Sponsorship Money"
-      : cleanOrNull(paymentMethod),
-    transaction_date: finalTransactionDate,
 
-    bank_reconciliation_status: bankReconciliationStatus,
-    bank_reconciled_at: matchedAt,
-    bank_reconciled_by: matchedBy,
-    bank_reconciliation_note: cleanOrNull(bankReconciliationNote),
+    category:
+      isSponsorLinked
+        ? "Sponsorship"
+        : cleanOrNull(category),
 
-    finance_note_status: financeNoteStatus,
-    finance_note: cleanOrNull(financeNote),
-    finance_note_updated_at: hasFinanceQuery ? new Date().toISOString() : null,
-    finance_note_updated_by: hasFinanceQuery ? actorLabel : null,
+    amount_pence:
+      Math.round(
+        amountPounds * 100
+      ),
 
-    invoice_image_url: cleanOrNull(payload.invoice_image_url || ""),
+    payment_method:
+      isSponsorLinked
+        ? "Sponsorship Money"
+        : cleanOrNull(paymentMethod),
 
-    is_personal_funds: isSponsorLinked ? false : isPersonalFunds,
+    transaction_date:
+      finalTransactionDate,
+
+    bank_reconciliation_status:
+      bankReconciliationStatus,
+
+    bank_reconciled_at:
+      matchedAt,
+
+    bank_reconciled_by:
+      matchedBy,
+
+    bank_reconciliation_note:
+      cleanOrNull(
+        bankReconciliationNote
+      ),
+
+    finance_note_status:
+      financeNoteStatus,
+
+    finance_note:
+      cleanOrNull(
+        financeNote
+      ),
+
+    finance_note_updated_at:
+      hasFinanceQuery
+        ? new Date().toISOString()
+        : null,
+
+    finance_note_updated_by:
+      hasFinanceQuery
+        ? actorLabel
+        : null,
+
+    invoice_image_url:
+      cleanOrNull(
+        payload.invoice_image_url ||
+        ""
+      ),
+
+    is_personal_funds:
+      isSponsorLinked
+        ? false
+        : isPersonalFunds,
+
     personal_funds_name:
-      isSponsorLinked || !isPersonalFunds
+      isSponsorLinked ||
+      !isPersonalFunds
         ? null
-        : cleanOrNull(personalFundsName),
-    personal_funds_repaid: toBoolean(
-      payload.personalFundsRepaid ?? payload.personal_funds_repaid
-    ),
-    personal_funds_repaid_at: cleanOrNull(
-      clean(payload.personalFundsRepaidAt || payload.personal_funds_repaid_at)
-    ),
+        : cleanOrNull(
+            personalFundsName
+          ),
 
-    sponsor_id: sponsorId || null,
-    sponsor_name: sponsorName || null,
-    sponsorship_note: sponsorshipNote || null,
+    personal_funds_repaid:
+      toBoolean(
+        payload.personalFundsRepaid ??
+        payload.personal_funds_repaid
+      ),
 
-    supplier_id: supplierId || null,
-    supplier_name: supplierName || null,
-    supplier_category: supplierCategory || null,
+    personal_funds_repaid_at:
+      cleanOrNull(
+        clean(
+          payload.personalFundsRepaidAt ||
+          payload.personal_funds_repaid_at
+        )
+      ),
 
-    source: isSponsorLinked ? "sponsorship" : source || "manual",
+    sponsor_id:
+      sponsorId || null,
 
-    stripe_session_id: cleanOrNull(clean(payload.stripe_session_id)),
-    stripe_invoice_id: cleanOrNull(clean(payload.stripe_invoice_id)),
-    stripe_customer_id: cleanOrNull(clean(payload.stripe_customer_id)),
-    stripe_payment_intent_id: cleanOrNull(
-      clean(payload.stripe_payment_intent_id)
-    ),
+    sponsor_name:
+      sponsorName || null,
 
-    deleted_at: null,
-    deleted_by: null,
+    sponsorship_note:
+      sponsorshipNote || null,
+
+    supplier_id:
+      supplierId || null,
+
+    supplier_name:
+      supplierName || null,
+
+    supplier_category:
+      supplierCategory || null,
+
+    source:
+      isSponsorLinked
+        ? "sponsorship"
+        : source || "manual",
+
+    stripe_session_id:
+      cleanOrNull(
+        clean(
+          payload.stripe_session_id
+        )
+      ),
+
+    stripe_invoice_id:
+      cleanOrNull(
+        clean(
+          payload.stripe_invoice_id
+        )
+      ),
+
+    stripe_customer_id:
+      cleanOrNull(
+        clean(
+          payload.stripe_customer_id
+        )
+      ),
+
+    stripe_payment_intent_id:
+      cleanOrNull(
+        clean(
+          payload.stripe_payment_intent_id
+        )
+      ),
+
+    deleted_at:
+      null,
+
+    deleted_by:
+      null,
   };
 
-  const { data, error, sent } = await insertTransactionWithReference(insertData);
+  const {
+    data,
+    error,
+    sent,
+  } =
+    await insertTransactionWithReference(
+      insertData
+    );
 
-  if (error || !data?.id) {
+  if (
+    error ||
+    !data?.id
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error: error?.message || "Failed to create transaction.",
-        details: error,
+
+        error:
+          error?.message ||
+          "Failed to create transaction.",
+
+        details:
+          error,
+
         sent,
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 
@@ -834,32 +1441,50 @@ async function createTransactionFromPayload({
 
   if (invoiceFiles.length > 0) {
     try {
-      attachments = await uploadTransactionAttachments({
-        transactionId: data.id,
-        files: invoiceFiles,
-      });
+      attachments =
+        await uploadTransactionAttachments({
+          transactionId:
+            data.id,
 
-      if (attachments[0]?.file_url) {
+          files:
+            invoiceFiles,
+        });
+
+      if (
+        attachments[0]?.file_url
+      ) {
         await supabaseAdmin
           .from("money_transactions")
           .update({
-            invoice_image_url: attachments[0].file_url,
+            invoice_image_url:
+              attachments[0].file_url,
           })
-          .eq("id", data.id);
+          .eq(
+            "id",
+            data.id
+          );
 
-        data.invoice_image_url = attachments[0].file_url;
+        data.invoice_image_url =
+          attachments[0].file_url;
       }
     } catch (attachmentError: any) {
       return NextResponse.json(
         {
           ok: false,
+
           error:
             attachmentError?.message ||
             "Transaction was created but one or more attachments failed to upload.",
-          details: attachmentError,
-          transaction: data,
+
+          details:
+            attachmentError,
+
+          transaction:
+            data,
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
   }
@@ -870,218 +1495,658 @@ async function createTransactionFromPayload({
   };
 
   await createMoneyAuditLog({
-    action: "create",
-    transactionId: data?.id || null,
-    transactionTitle: data?.title || title,
-    beforeData: null,
-    afterData: transactionWithAttachments,
+    action:
+      "create",
+
+    transactionId:
+      data?.id || null,
+
+    transactionTitle:
+      data?.title || title,
+
+    beforeData:
+      null,
+
+    afterData:
+      transactionWithAttachments,
+
     metadata: {
-      source: "money_tracker",
-      route: "/api/admin/money/transactions",
+      source:
+        "money_tracker",
+
+      route:
+        "/api/admin/money/transactions",
+
       transaction_reference:
-        data?.transaction_reference || sent?.transaction_reference,
-      attachment_count: attachments.length,
-      bank_reconciliation_status: bankReconciliationStatus,
-      finance_note_status: financeNoteStatus,
-      finance_note: financeNote || null,
-      supplier_id: supplierId || null,
-      supplier_name: supplierName || null,
-      supplier_category: supplierCategory || null,
+        data?.transaction_reference ||
+        sent?.transaction_reference,
+
+      attachment_count:
+        attachments.length,
+
+      bank_reconciliation_status:
+        bankReconciliationStatus,
+
+      finance_note_status:
+        financeNoteStatus,
+
+      finance_note:
+        financeNote || null,
+
+      supplier_id:
+        supplierId || null,
+
+      supplier_name:
+        supplierName || null,
+
+      supplier_category:
+        supplierCategory || null,
     },
   });
 
-  if (supplierId || supplierName) {
+  if (
+    supplierId ||
+    supplierName
+  ) {
     await createSupplierLog({
       supplierId,
-      supplierName: supplierName || "Supplier/contact",
-      action: "transaction_linked",
-      actionLabel: "Transaction linked",
-      message: `Transaction created and linked to supplier/contact: ${
-        supplierName || "Supplier/contact"
-      }`,
-      oldData: null,
-      newData: transactionWithAttachments,
+
+      supplierName:
+        supplierName ||
+        "Supplier/contact",
+
+      action:
+        "transaction_linked",
+
+      actionLabel:
+        "Transaction linked",
+
+      message:
+        `Transaction created and linked to supplier/contact: ${
+          supplierName ||
+          "Supplier/contact"
+        }`,
+
+      oldData:
+        null,
+
+      newData:
+        transactionWithAttachments,
+
       details: {
-        transaction_id: data.id,
+        transaction_id:
+          data.id,
+
         transaction_reference:
-          data?.transaction_reference || sent?.transaction_reference || null,
-        transaction_title: data.title || title,
-        transaction_type: data.type || type,
-        amount_pence: data.amount_pence || Math.round(amountPounds * 100),
-        transaction_date: data.transaction_date || finalTransactionDate,
-        payment_method: data.payment_method || null,
-        supplier_category: supplierCategory || null,
-        route: "/api/admin/money/transactions",
+          data?.transaction_reference ||
+          sent?.transaction_reference ||
+          null,
+
+        transaction_title:
+          data.title ||
+          title,
+
+        transaction_type:
+          data.type ||
+          type,
+
+        amount_pence:
+          data.amount_pence ||
+          Math.round(
+            amountPounds * 100
+          ),
+
+        transaction_date:
+          data.transaction_date ||
+          finalTransactionDate,
+
+        payment_method:
+          data.payment_method ||
+          null,
+
+        supplier_category:
+          supplierCategory ||
+          null,
+
+        route:
+          "/api/admin/money/transactions",
       },
     });
   }
 
   return NextResponse.json({
     ok: true,
-    transaction: transactionWithAttachments,
+
+    transaction:
+      transactionWithAttachments,
   });
 }
 
-export async function GET() {
+/**
+ * GET /api/admin/money/transactions
+ *
+ * Supported query parameters:
+ *
+ * ?year=2026
+ * ?limit=500
+ * ?includeDeleted=false
+ * ?activeOnly=true
+ *
+ * Existing pages that do not pass query parameters keep their original
+ * behaviour and continue receiving all rows, including deleted records.
+ *
+ * The Refund Tracker can request only active transactions from one year:
+ *
+ * /api/admin/money/transactions?year=2026&limit=500&includeDeleted=false
+ */
+export async function GET(req: NextRequest) {
   try {
     await syncPaidDonationsToMoneyTracker();
 
-    const { data, error } = await supabaseAdmin
+    const yearParam =
+      String(
+        req.nextUrl.searchParams.get(
+          "year"
+        ) || ""
+      ).trim();
+
+    const safeLimit =
+      parseSafeLimit(
+        req.nextUrl.searchParams.get(
+          "limit"
+        )
+      );
+
+    const includeDeleted =
+      parseBooleanQueryParam(
+        req.nextUrl.searchParams.get(
+          "includeDeleted"
+        ),
+        true
+      );
+
+    const activeOnly =
+      parseBooleanQueryParam(
+        req.nextUrl.searchParams.get(
+          "activeOnly"
+        ),
+        false
+      );
+
+    const shouldOnlyShowActive =
+      activeOnly ||
+      !includeDeleted;
+
+    let query = supabaseAdmin
       .from("money_transactions")
       .select("*")
-      .order("deleted_at", { ascending: true, nullsFirst: true })
-      .order("transaction_date", { ascending: false })
-      .order("created_at", { ascending: false });
+      .order("deleted_at", {
+        ascending: true,
+        nullsFirst: true,
+      })
+      .order("transaction_date", {
+        ascending: false,
+      })
+      .order("created_at", {
+        ascending: false,
+      });
+
+    if (shouldOnlyShowActive) {
+      query =
+        query.is(
+          "deleted_at",
+          null
+        );
+    }
+
+    if (
+      yearParam &&
+      isValidYear(yearParam)
+    ) {
+      query =
+        query
+          .gte(
+            "transaction_date",
+            `${yearParam}-01-01`
+          )
+          .lte(
+            "transaction_date",
+            `${yearParam}-12-31`
+          );
+    }
+
+    if (safeLimit) {
+      query =
+        query.limit(
+          safeLimit
+        );
+    }
+
+    const {
+      data,
+      error,
+    } =
+      await query;
 
     if (error) {
       return NextResponse.json(
         {
           ok: false,
-          error: error.message,
-          details: error,
+
+          error:
+            error.message,
+
+          details:
+            error,
+
+          likelyFix:
+            "Check the public.money_transactions table and confirm that transaction_date, deleted_at and created_at exist.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    const rows = data || [];
-    const attachmentMap = await loadAttachmentsForTransactions(
-      rows.map((item) => item.id)
-    );
+    const rows =
+      data || [];
 
-    const transactionsWithAttachments = rows.map((item) => ({
-      ...item,
-      bank_reconciliation_status:
-        item.bank_reconciliation_status || "unmatched",
-      bank_reconciled_at: item.bank_reconciled_at || null,
-      bank_reconciled_by: item.bank_reconciled_by || null,
-      bank_reconciliation_note: item.bank_reconciliation_note || null,
+    const attachmentMap =
+      await loadAttachmentsForTransactions(
+        rows.map(
+          (item) =>
+            item.id
+        )
+      );
 
-      finance_note_status: item.finance_note_status || "none",
-      finance_note: item.finance_note || null,
-      finance_note_updated_at: item.finance_note_updated_at || null,
-      finance_note_updated_by: item.finance_note_updated_by || null,
+    const transactionsWithAttachments =
+      rows.map((item) => ({
+        ...item,
 
-      supplier_id: item.supplier_id || null,
-      supplier_name: item.supplier_name || null,
-      supplier_category: item.supplier_category || null,
+        bank_reconciliation_status:
+          item.bank_reconciliation_status ||
+          "unmatched",
 
-      attachments: attachmentMap.get(item.id) || [],
-    }));
+        bank_reconciled_at:
+          item.bank_reconciled_at ||
+          null,
+
+        bank_reconciled_by:
+          item.bank_reconciled_by ||
+          null,
+
+        bank_reconciliation_note:
+          item.bank_reconciliation_note ||
+          null,
+
+        finance_note_status:
+          item.finance_note_status ||
+          "none",
+
+        finance_note:
+          item.finance_note ||
+          null,
+
+        finance_note_updated_at:
+          item.finance_note_updated_at ||
+          null,
+
+        finance_note_updated_by:
+          item.finance_note_updated_by ||
+          null,
+
+        supplier_id:
+          item.supplier_id ||
+          null,
+
+        supplier_name:
+          item.supplier_name ||
+          null,
+
+        supplier_category:
+          item.supplier_category ||
+          null,
+
+        attachments:
+          attachmentMap.get(
+            item.id
+          ) || [],
+      }));
 
     return NextResponse.json(
       {
         ok: true,
-        transactions: transactionsWithAttachments,
+
+        transactions:
+          transactionsWithAttachments,
+
+        filters: {
+          year:
+            yearParam &&
+            isValidYear(yearParam)
+              ? yearParam
+              : null,
+
+          include_deleted:
+            !shouldOnlyShowActive,
+
+          active_only:
+            shouldOnlyShowActive,
+
+          limit:
+            safeLimit,
+
+          returned_count:
+            transactionsWithAttachments.length,
+        },
       },
       {
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control":
+            "no-store",
         },
       }
     );
   } catch (err) {
-    console.error("Money transactions GET error:", err);
+    console.error(
+      "Money transactions GET error:",
+      err
+    );
 
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+
+        error:
+          err instanceof Error
+            ? err.message
+            : "Server error",
+
+        details:
+          err,
+
+        likelyFix:
+          "Check the terminal or Vercel logs. Confirm that the money_transactions table and Stripe environment settings are available.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const contentType = req.headers.get("content-type") || "";
+    const contentType =
+      req.headers.get(
+        "content-type"
+      ) || "";
 
-    if (contentType.includes("application/json")) {
-      const payload = await req.json();
+    if (
+      contentType.includes(
+        "application/json"
+      )
+    ) {
+      const payload =
+        await req.json();
 
       return await createTransactionFromPayload({
         payload,
-        invoiceFiles: [],
+
+        invoiceFiles:
+          [],
       });
     }
 
-    const formData = await req.formData();
+    const formData =
+      await req.formData();
 
-    const invoiceFiles = formData
-      .getAll("invoiceFiles")
-      .filter((file): file is File => file instanceof File && file.size > 0);
+    const invoiceFiles =
+      formData
+        .getAll("invoiceFiles")
+        .filter(
+          (
+            file
+          ): file is File =>
+            file instanceof File &&
+            file.size > 0
+        );
 
-    const oldSingleInvoiceFile = formData.get("invoiceFile");
+    const oldSingleInvoiceFile =
+      formData.get(
+        "invoiceFile"
+      );
 
     if (
       oldSingleInvoiceFile instanceof File &&
       oldSingleInvoiceFile.size > 0 &&
       invoiceFiles.length === 0
     ) {
-      invoiceFiles.push(oldSingleInvoiceFile);
+      invoiceFiles.push(
+        oldSingleInvoiceFile
+      );
     }
 
     const payload = {
-      title: clean(formData.get("title")),
-      description: clean(formData.get("description")),
-      type: clean(formData.get("type")),
-      category: clean(formData.get("category")),
-      amount: clean(formData.get("amount")),
-      paymentMethod: clean(formData.get("paymentMethod")),
-      transactionDate: clean(formData.get("transactionDate")),
-      source: clean(formData.get("source")) || "manual",
+      title:
+        clean(
+          formData.get(
+            "title"
+          )
+        ),
 
-      isPersonalFunds: clean(formData.get("isPersonalFunds")),
-      personalFundsName: clean(formData.get("personalFundsName")),
+      description:
+        clean(
+          formData.get(
+            "description"
+          )
+        ),
 
-      sponsorId: clean(formData.get("sponsorId")) || clean(formData.get("sponsor_id")),
-      sponsorName: clean(formData.get("sponsorName")) || clean(formData.get("sponsor_name")),
+      type:
+        clean(
+          formData.get(
+            "type"
+          )
+        ),
+
+      category:
+        clean(
+          formData.get(
+            "category"
+          )
+        ),
+
+      amount:
+        clean(
+          formData.get(
+            "amount"
+          )
+        ),
+
+      paymentMethod:
+        clean(
+          formData.get(
+            "paymentMethod"
+          )
+        ),
+
+      transactionDate:
+        clean(
+          formData.get(
+            "transactionDate"
+          )
+        ),
+
+      source:
+        clean(
+          formData.get(
+            "source"
+          )
+        ) ||
+        "manual",
+
+      isPersonalFunds:
+        clean(
+          formData.get(
+            "isPersonalFunds"
+          )
+        ),
+
+      personalFundsName:
+        clean(
+          formData.get(
+            "personalFundsName"
+          )
+        ),
+
+      sponsorId:
+        clean(
+          formData.get(
+            "sponsorId"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "sponsor_id"
+          )
+        ),
+
+      sponsorName:
+        clean(
+          formData.get(
+            "sponsorName"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "sponsor_name"
+          )
+        ),
+
       sponsorshipNote:
-        clean(formData.get("sponsorshipNote")) ||
-        clean(formData.get("sponsorship_note")),
+        clean(
+          formData.get(
+            "sponsorshipNote"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "sponsorship_note"
+          )
+        ),
 
       supplierId:
-        clean(formData.get("supplierId")) || clean(formData.get("supplier_id")),
+        clean(
+          formData.get(
+            "supplierId"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "supplier_id"
+          )
+        ),
+
       supplierName:
-        clean(formData.get("supplierName")) ||
-        clean(formData.get("supplier_name")),
+        clean(
+          formData.get(
+            "supplierName"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "supplier_name"
+          )
+        ),
+
       supplierCategory:
-        clean(formData.get("supplierCategory")) ||
-        clean(formData.get("supplier_category")),
+        clean(
+          formData.get(
+            "supplierCategory"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "supplier_category"
+          )
+        ),
 
       bankReconciliationStatus:
-        clean(formData.get("bankReconciliationStatus")) ||
-        clean(formData.get("bank_reconciliation_status")) ||
+        clean(
+          formData.get(
+            "bankReconciliationStatus"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "bank_reconciliation_status"
+          )
+        ) ||
         "unmatched",
+
       bankReconciliationNote:
-        clean(formData.get("bankReconciliationNote")) ||
-        clean(formData.get("bank_reconciliation_note")) ||
+        clean(
+          formData.get(
+            "bankReconciliationNote"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "bank_reconciliation_note"
+          )
+        ) ||
         "",
 
       financeNoteStatus:
-        clean(formData.get("financeNoteStatus")) ||
-        clean(formData.get("finance_note_status")) ||
+        clean(
+          formData.get(
+            "financeNoteStatus"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "finance_note_status"
+          )
+        ) ||
         "none",
+
       financeNote:
-        clean(formData.get("financeNote")) ||
-        clean(formData.get("finance_note")) ||
+        clean(
+          formData.get(
+            "financeNote"
+          )
+        ) ||
+        clean(
+          formData.get(
+            "finance_note"
+          )
+        ) ||
         "",
     };
 
     return await createTransactionFromPayload({
       payload,
+
       invoiceFiles,
     });
   } catch (err) {
-    console.error("Money transactions POST error:", err);
+    console.error(
+      "Money transactions POST error:",
+      err
+    );
 
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+
+        error:
+          err instanceof Error
+            ? err.message
+            : "Server error",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
@@ -1090,144 +2155,278 @@ export async function DELETE(req: NextRequest) {
   try {
     await requireMainAdmin();
 
-    const body = await req.json().catch(() => ({}));
-    const password = String(body.password || "").trim();
+    const body =
+      await req
+        .json()
+        .catch(() => ({}));
+
+    const password =
+      String(
+        body.password || ""
+      ).trim();
 
     if (!password) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Main admin password is required.",
+
+          error:
+            "Main admin password is required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const passwordCheck = await checkDeletePasswordThroughSettingsApi(
-      req,
-      password
-    );
+    const passwordCheck =
+      await checkDeletePasswordThroughSettingsApi(
+        req,
+        password
+      );
 
-    if (!passwordCheck.ok && passwordCheck.response) {
+    if (
+      !passwordCheck.ok &&
+      passwordCheck.response
+    ) {
       return passwordCheck.response;
     }
 
-    const { data: transactions, error: loadError } = await supabaseAdmin
+    const {
+      data: transactions,
+      error: loadError,
+    } = await supabaseAdmin
       .from("money_transactions")
       .select("*")
-      .is("deleted_at", null);
+      .is(
+        "deleted_at",
+        null
+      );
 
     if (loadError) {
       return NextResponse.json(
         {
           ok: false,
-          error: loadError.message,
-          details: loadError,
+
+          error:
+            loadError.message,
+
+          details:
+            loadError,
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    const rows = transactions || [];
-    const ids = rows.map((item) => item.id);
+    const rows =
+      transactions || [];
 
-    if (ids.length === 0) {
+    const ids =
+      rows.map(
+        (item) =>
+          item.id
+      );
+
+    if (
+      ids.length === 0
+    ) {
       return NextResponse.json({
         ok: true,
-        deletedCount: 0,
-        message: "No active transactions to move to deleted area",
+
+        deletedCount:
+          0,
+
+        message:
+          "No active transactions to move to deleted area",
       });
     }
 
-    const deletedAt = new Date().toISOString();
-    const deletedBy = await getActorLabel();
+    const deletedAt =
+      new Date()
+        .toISOString();
 
-    const { data: deletedRows, error: deleteError } = await supabaseAdmin
+    const deletedBy =
+      await getActorLabel();
+
+    const {
+      data: deletedRows,
+      error: deleteError,
+    } = await supabaseAdmin
       .from("money_transactions")
       .update({
-        deleted_at: deletedAt,
-        deleted_by: deletedBy,
-        updated_at: deletedAt,
+        deleted_at:
+          deletedAt,
+
+        deleted_by:
+          deletedBy,
+
+        updated_at:
+          deletedAt,
       })
-      .in("id", ids)
-      .is("deleted_at", null)
+      .in(
+        "id",
+        ids
+      )
+      .is(
+        "deleted_at",
+        null
+      )
       .select("*");
 
     if (deleteError) {
-      console.error("Soft delete all money transactions error:", deleteError);
+      console.error(
+        "Soft delete all money transactions error:",
+        deleteError
+      );
 
       return NextResponse.json(
         {
           ok: false,
-          error: deleteError.message,
-          details: deleteError,
+
+          error:
+            deleteError.message,
+
+          details:
+            deleteError,
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
     await createMoneyAuditLog({
-      action: "delete_all",
-      transactionId: null,
-      transactionTitle: "Delete all transactions",
-      beforeData: null,
-      afterData: null,
+      action:
+        "delete_all",
+
+      transactionId:
+        null,
+
+      transactionTitle:
+        "Delete all transactions",
+
+      beforeData:
+        null,
+
+      afterData:
+        null,
+
       changedFields: {
         deleted_at: {
-          before: null,
-          after: deletedAt,
+          before:
+            null,
+
+          after:
+            deletedAt,
         },
+
         deleted_by: {
-          before: null,
-          after: deletedBy,
+          before:
+            null,
+
+          after:
+            deletedBy,
         },
       },
+
       metadata: {
-        source: "money_tracker",
-        route: "/api/admin/money/transactions",
-        delete_type: "soft_delete_all",
-        deleted_count: ids.length,
-        deleted_ids: ids,
+        source:
+          "money_tracker",
+
+        route:
+          "/api/admin/money/transactions",
+
+        delete_type:
+          "soft_delete_all",
+
+        deleted_count:
+          ids.length,
+
+        deleted_ids:
+          ids,
       },
     });
 
     await createBulkMoneyAuditLogs(
-      rows.map((beforeRow) => {
-        const afterRow =
-          deletedRows?.find((item) => item.id === beforeRow.id) || null;
+      rows.map(
+        (beforeRow) => {
+          const afterRow =
+            deletedRows?.find(
+              (item) =>
+                item.id ===
+                beforeRow.id
+            ) || null;
 
-        return {
-          action: "delete",
-          transactionId: beforeRow.id,
-          transactionTitle: beforeRow.title || null,
-          beforeData: beforeRow,
-          afterData: afterRow,
-          metadata: {
-            source: "money_tracker",
-            route: "/api/admin/money/transactions",
-            delete_type: "soft_delete_from_delete_all",
-            parent_action: "delete_all",
-            deleted_at: deletedAt,
-            deleted_by: deletedBy,
-          },
-        };
-      })
+          return {
+            action:
+              "delete",
+
+            transactionId:
+              beforeRow.id,
+
+            transactionTitle:
+              beforeRow.title ||
+              null,
+
+            beforeData:
+              beforeRow,
+
+            afterData:
+              afterRow,
+
+            metadata: {
+              source:
+                "money_tracker",
+
+              route:
+                "/api/admin/money/transactions",
+
+              delete_type:
+                "soft_delete_from_delete_all",
+
+              parent_action:
+                "delete_all",
+
+              deleted_at:
+                deletedAt,
+
+              deleted_by:
+                deletedBy,
+            },
+          };
+        }
+      )
     );
 
     return NextResponse.json({
       ok: true,
-      deletedCount: ids.length,
-      message: "All active transactions moved to deleted area successfully",
+
+      deletedCount:
+        ids.length,
+
+      message:
+        "All active transactions moved to deleted area successfully",
     });
   } catch (err) {
-    console.error("Unexpected soft delete all transactions error:", err);
+    console.error(
+      "Unexpected soft delete all transactions error:",
+      err
+    );
 
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+
+        error:
+          err instanceof Error
+            ? err.message
+            : "Server error",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

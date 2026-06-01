@@ -74,6 +74,44 @@ type BankBalanceCheck = {
   created_by_name?: string | null;
 };
 
+type RefundType = "money_received_back" | "money_sent_back";
+type RefundStatus = "pending" | "completed" | "cancelled";
+
+type MoneyRefund = {
+  id: string;
+  year?: number | null;
+  refund_date?: string | null;
+  refund_type?: RefundType | string | null;
+  amount_pence?: number | null;
+  title?: string | null;
+  notes?: string | null;
+  reference_number?: string | null;
+  status?: RefundStatus | string | null;
+  supplier_id?: string | null;
+  original_transaction_id?: string | null;
+  created_by_name?: string | null;
+  created_by_email?: string | null;
+  updated_by_name?: string | null;
+  updated_by_email?: string | null;
+  is_hidden?: boolean | null;
+  hidden_at?: string | null;
+  hidden_by_name?: string | null;
+  hidden_by_email?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type MoneySupplier = {
+  id: string;
+  supplier_name?: string | null;
+  name?: string | null;
+};
+
+type HydratedRefund = MoneyRefund & {
+  supplier_name: string;
+  original_transaction_title: string;
+};
+
 function escapeHtml(value: any) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -173,6 +211,12 @@ function normaliseExportKey(value: string) {
     "bank-balance-checks": "bank-balance-checks",
     "bank-balance-checks-export": "bank-balance-checks",
     "bank-checks": "bank-balance-checks",
+
+    refunds: "refunds",
+    refund: "refunds",
+    "refunds-export": "refunds",
+    "refund-tracker": "refunds",
+    "refund-tracker-export": "refunds",
   };
 
   return aliases[key] || key;
@@ -189,6 +233,7 @@ function getReportTitle(report: string) {
   if (report === "personal-funds") return "Personal Funds Report";
   if (report === "csv-import-history") return "CSV Import History";
   if (report === "bank-balance-checks") return "Bank Balance Checks";
+  if (report === "refunds") return "Refund Tracker Export";
 
   return "Money Export Print Report";
 }
@@ -364,6 +409,48 @@ function htmlPage({
         margin: 14px 0;
       }
 
+      .refund-rules {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 14px 0;
+      }
+
+      .refund-rule {
+        border: 1px solid #bae6fd;
+        background: #f0f9ff;
+        border-radius: 10px;
+        padding: 10px;
+      }
+
+      .refund-rule strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .refund-received {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .refund-sent {
+        background: #f3e8ff;
+        color: #6b21a8;
+      }
+
+      .refund-deleted {
+        background: #fff1f2;
+        color: #9f1239;
+      }
+
+      .pill {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 3px 7px;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
       pre {
         white-space: pre-wrap;
         word-break: break-word;
@@ -408,6 +495,10 @@ function htmlPage({
         }
 
         .summary-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .refund-rules {
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
@@ -544,6 +635,89 @@ async function tryGetBankBalanceChecks(year: number) {
     tableName: "",
     rows: [] as BankBalanceCheck[],
   };
+}
+
+async function getRefunds(year: number) {
+  const { data, error } = await supabaseAdmin
+    .from("money_refunds")
+    .select("*")
+    .eq("year", year)
+    .order("refund_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if (error) throw error;
+
+  const refunds = (data || []) as MoneyRefund[];
+
+  const supplierIds = Array.from(
+    new Set(
+      refunds
+        .map((refund) => refund.supplier_id)
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+
+  const transactionIds = Array.from(
+    new Set(
+      refunds
+        .map((refund) => refund.original_transaction_id)
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+
+  const supplierMap = new Map<string, MoneySupplier>();
+  const transactionMap = new Map<string, MoneyTransaction>();
+
+  if (supplierIds.length > 0) {
+    const { data: suppliers, error: supplierError } = await supabaseAdmin
+      .from("money_suppliers")
+      .select("id, supplier_name, name")
+      .in("id", supplierIds);
+
+    if (!supplierError) {
+      (suppliers || []).forEach((supplier) => {
+        supplierMap.set(supplier.id, supplier as MoneySupplier);
+      });
+    }
+  }
+
+  if (transactionIds.length > 0) {
+    const { data: transactions, error: transactionError } =
+      await supabaseAdmin
+        .from("money_transactions")
+        .select("id, title")
+        .in("id", transactionIds);
+
+    if (!transactionError) {
+      (transactions || []).forEach((transaction) => {
+        transactionMap.set(transaction.id, transaction as MoneyTransaction);
+      });
+    }
+  }
+
+  return refunds.map<HydratedRefund>((refund) => {
+    const supplier = refund.supplier_id
+      ? supplierMap.get(refund.supplier_id)
+      : null;
+
+    const transaction = refund.original_transaction_id
+      ? transactionMap.get(refund.original_transaction_id)
+      : null;
+
+    return {
+      ...refund,
+      supplier_name:
+        supplier?.supplier_name ||
+        supplier?.name ||
+        (refund.supplier_id ? "Linked supplier could not be loaded" : "Not linked"),
+      original_transaction_title:
+        transaction?.title ||
+        (refund.original_transaction_id
+          ? "Linked transaction could not be loaded"
+          : "Not linked"),
+    };
+  });
 }
 
 function summaryCards(transactions: MoneyTransaction[]) {
@@ -1010,6 +1184,223 @@ function bankBalanceTable(result: {
   `;
 }
 
+function refundTypeLabel(value: string | null | undefined) {
+  return value === "money_sent_back"
+    ? "Refund Sent Back"
+    : "Refund Received Back";
+}
+
+function refundStatusLabel(value: string | null | undefined) {
+  if (value === "completed") return "Completed";
+  if (value === "pending") return "Pending";
+  if (value === "cancelled") return "Cancelled";
+  return value || "Unknown";
+}
+
+function refundReference(refund: MoneyRefund) {
+  const savedReference = String(refund.reference_number || "").trim();
+
+  if (savedReference) return savedReference;
+
+  return `REFUND-${refund.year || "YEAR"}-${String(refund.id)
+    .slice(0, 8)
+    .toUpperCase()}`;
+}
+
+function refundBalanceEffect(refund: MoneyRefund) {
+  if (refund.is_hidden) return "No effect while deleted";
+
+  if (refund.status !== "completed") {
+    return `No effect while ${refund.status || "not completed"}`;
+  }
+
+  if (refund.refund_type === "money_sent_back") {
+    return `Added into Money Out: ${money(refund.amount_pence)}`;
+  }
+
+  return `Added into Money In: ${money(refund.amount_pence)}`;
+}
+
+function refundSummaryCards(refunds: HydratedRefund[]) {
+  const active = refunds.filter((refund) => !refund.is_hidden);
+  const deleted = refunds.filter((refund) => refund.is_hidden);
+  const completed = active.filter((refund) => refund.status === "completed");
+
+  const receivedBack = completed
+    .filter((refund) => refund.refund_type === "money_received_back")
+    .reduce((total, refund) => total + Number(refund.amount_pence || 0), 0);
+
+  const sentBack = completed
+    .filter((refund) => refund.refund_type === "money_sent_back")
+    .reduce((total, refund) => total + Number(refund.amount_pence || 0), 0);
+
+  const net = receivedBack - sentBack;
+
+  return `
+    <div class="refund-rules">
+      <div class="refund-rule">
+        <strong>Refund received back</strong>
+        Completed refunds returned to Burton Pride are added into Money In.
+      </div>
+
+      <div class="refund-rule">
+        <strong>Refund sent back</strong>
+        Completed refunds paid back to another person or organisation are added into Money Out.
+      </div>
+
+      <div class="refund-rule">
+        <strong>Pending, cancelled or deleted</strong>
+        These records remain visible for tracking but do not affect totals.
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">Active refunds</div>
+        <div class="summary-value">${active.length}</div>
+      </div>
+
+      <div class="summary-card">
+        <div class="summary-label">Deleted refunds</div>
+        <div class="summary-value">${deleted.length}</div>
+      </div>
+
+      <div class="summary-card">
+        <div class="summary-label">Completed active refunds</div>
+        <div class="summary-value">${completed.length}</div>
+      </div>
+
+      <div class="summary-card refund-received">
+        <div class="summary-label">Money received back</div>
+        <div class="summary-value">${escapeHtml(money(receivedBack))}</div>
+      </div>
+
+      <div class="summary-card refund-sent">
+        <div class="summary-label">Money sent back</div>
+        <div class="summary-value">${escapeHtml(money(sentBack))}</div>
+      </div>
+
+      <div class="summary-card">
+        <div class="summary-label">Net refund adjustment</div>
+        <div class="summary-value">${escapeHtml(money(net))}</div>
+      </div>
+    </div>
+  `;
+}
+
+function refundsTable(
+  refunds: HydratedRefund[],
+  options?: {
+    includeDeleted?: boolean;
+  }
+) {
+  const includeDeleted = options?.includeDeleted ?? false;
+
+  const rows = refunds.filter((refund) =>
+    includeDeleted ? Boolean(refund.is_hidden) : !refund.is_hidden
+  );
+
+  if (!rows.length) {
+    return `<p class="muted">${
+      includeDeleted
+        ? "No deleted refunds found for this year."
+        : "No active refunds found for this year."
+    }</p>`;
+  }
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Date</th>
+          <th>Title</th>
+          <th>Refund type</th>
+          <th>Status</th>
+          <th>Supplier</th>
+          <th>Original transaction</th>
+          <th>Balance effect</th>
+          <th>Created by</th>
+          <th>Deleted by</th>
+          <th>Deleted at</th>
+          <th class="amount">Amount</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        ${rows
+          .map((refund) => {
+            const typeClass =
+              refund.refund_type === "money_sent_back"
+                ? "refund-sent"
+                : "refund-received";
+
+            const deletedClass = refund.is_hidden ? "refund-deleted" : "";
+
+            return `
+              <tr>
+                <td><strong>${escapeHtml(refundReference(refund))}</strong></td>
+                <td>${escapeHtml(
+                  formatDate(refund.refund_date || refund.created_at)
+                )}</td>
+                <td>
+                  <strong>${escapeHtml(refund.title || "-")}</strong>
+                  ${
+                    refund.notes
+                      ? `<div class="muted">${escapeHtml(refund.notes)}</div>`
+                      : ""
+                  }
+                </td>
+                <td>
+                  <span class="pill ${typeClass}">
+                    ${escapeHtml(refundTypeLabel(refund.refund_type))}
+                  </span>
+                </td>
+                <td>
+                  <span class="pill ${deletedClass}">
+                    ${escapeHtml(refundStatusLabel(refund.status))}
+                  </span>
+                </td>
+                <td>${escapeHtml(refund.supplier_name)}</td>
+                <td>${escapeHtml(refund.original_transaction_title)}</td>
+                <td>${escapeHtml(refundBalanceEffect(refund))}</td>
+                <td>${escapeHtml(
+                  refund.created_by_name ||
+                    refund.created_by_email ||
+                    "Unknown user"
+                )}</td>
+                <td>${escapeHtml(
+                  refund.hidden_by_name ||
+                    refund.hidden_by_email ||
+                    "-"
+                )}</td>
+                <td>${escapeHtml(formatDateTime(refund.hidden_at))}</td>
+                <td class="amount">${escapeHtml(money(refund.amount_pence))}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function refundPrintSections(year: number) {
+  const refunds = await getRefunds(year);
+
+  return `
+    ${refundSummaryCards(refunds)}
+
+    ${await safeSection("Active Refunds", () =>
+      refundsTable(refunds)
+    )}
+
+    ${await safeSection("Deleted Refunds", () =>
+      refundsTable(refunds, { includeDeleted: true })
+    )}
+  `;
+}
+
 async function safeSection(
   title: string,
   callback: () => Promise<string> | string
@@ -1063,6 +1454,10 @@ async function buildReportBody(report: string, year: number) {
     body += await safeSection("Bank Balance Checks", async () => {
       const result = await tryGetBankBalanceChecks(year);
       return bankBalanceTable(result);
+    });
+
+    body += await safeSection("Refund Tracker", async () => {
+      return refundPrintSections(year);
     });
 
     return body;
@@ -1127,6 +1522,10 @@ async function buildReportBody(report: string, year: number) {
     });
   }
 
+  if (report === "refunds") {
+    return await refundPrintSections(year);
+  }
+
   return "";
 }
 
@@ -1163,6 +1562,7 @@ export async function GET(
     "personal-funds",
     "csv-import-history",
     "bank-balance-checks",
+    "refunds",
   ];
 
   if (!allowedReports.includes(exportKey)) {

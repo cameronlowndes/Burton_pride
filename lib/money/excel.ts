@@ -14,6 +14,178 @@ import {
   sourceLabel,
 } from "@/lib/money/utils";
 
+
+type RefundType = "money_received_back" | "money_sent_back";
+type RefundStatus = "pending" | "completed" | "cancelled";
+
+export type MoneyRefundExportRecord = {
+  id: string;
+  year: number;
+  refund_date: string;
+  refund_type: RefundType;
+  amount_pence: number;
+  title: string;
+  notes?: string | null;
+  reference_number?: string | null;
+  supplier_id?: string | null;
+  original_transaction_id?: string | null;
+  status: RefundStatus;
+  is_hidden?: boolean | null;
+  created_at?: string | null;
+
+  supplier?: {
+    id: string;
+    supplier_name: string;
+  } | null;
+
+  original_transaction?: {
+    id: string;
+    title: string;
+    amount_pence: number;
+    transaction_type: string;
+    transaction_date: string;
+  } | null;
+};
+
+type CompletedRefundTotals = {
+  receivedBack: number;
+  sentBack: number;
+};
+
+async function readJsonResponse(response: Response) {
+  const rawBody = await response.text();
+
+  if (!rawBody) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return {
+      rawResponse: rawBody,
+    };
+  }
+}
+
+async function loadRefundsForExcelExport(selectedYear: string) {
+  const response = await fetch(
+    `/api/admin/money/refunds?year=${encodeURIComponent(
+      selectedYear
+    )}&limit=500`,
+    {
+      method: "GET",
+      cache: "no-store",
+    }
+  );
+
+  const payload = await readJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(
+      payload.message ||
+        payload.error ||
+        "Refunds could not be loaded for the Excel export."
+    );
+  }
+
+  return (
+    Array.isArray(payload.refunds)
+      ? payload.refunds.filter(
+          (refund: MoneyRefundExportRecord) => !refund.is_hidden
+        )
+      : []
+  ) as MoneyRefundExportRecord[];
+}
+
+function refundMonthKey(refund: MoneyRefundExportRecord) {
+  return String(refund.refund_date || refund.created_at || "").slice(0, 7);
+}
+
+function refundMatchesView({
+  refund,
+  selectedYear,
+  selectedMonth,
+}: {
+  refund: MoneyRefundExportRecord;
+  selectedYear: string;
+  selectedMonth: string;
+}) {
+  if (refund.is_hidden) {
+    return false;
+  }
+
+  if (String(refund.year) !== String(selectedYear)) {
+    return false;
+  }
+
+  if (selectedMonth === "all") {
+    return true;
+  }
+
+  return refundMonthKey(refund) === selectedMonth;
+}
+
+function calculateCompletedRefundTotals(
+  refunds: MoneyRefundExportRecord[]
+): CompletedRefundTotals {
+  return refunds.reduce(
+    (acc, refund) => {
+      if (refund.status !== "completed" || refund.is_hidden) {
+        return acc;
+      }
+
+      if (refund.refund_type === "money_received_back") {
+        acc.receivedBack += Number(refund.amount_pence || 0);
+      }
+
+      if (refund.refund_type === "money_sent_back") {
+        acc.sentBack += Number(refund.amount_pence || 0);
+      }
+
+      return acc;
+    },
+    {
+      receivedBack: 0,
+      sentBack: 0,
+    }
+  );
+}
+
+function refundReference(refund: MoneyRefundExportRecord) {
+  const savedReference = String(refund.reference_number || "").trim();
+
+  if (savedReference) {
+    return savedReference;
+  }
+
+  return `REFUND-${refund.year}-${String(refund.id || "")
+    .slice(0, 8)
+    .toUpperCase()}`;
+}
+
+function refundTypeLabel(refund: MoneyRefundExportRecord) {
+  return refund.refund_type === "money_received_back"
+    ? "Refund Received Back"
+    : "Refund Sent Back";
+}
+
+function refundStatusLabel(status: RefundStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "pending") return "Pending";
+  return "Cancelled";
+}
+
+function refundBalanceEffect(refund: MoneyRefundExportRecord) {
+  if (refund.status !== "completed") {
+    return "No balance change until completed";
+  }
+
+  return refund.refund_type === "money_received_back"
+    ? "Added into Money In"
+    : "Added into Money Out";
+}
+
 async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: string) {
   const buffer = await workbook.xlsx.writeBuffer();
 
@@ -619,6 +791,312 @@ function addTransactionRow(
   styleTransactionRow(row, item);
 }
 
+
+function refundColumns() {
+  return [
+    { key: "reference", width: 24 },
+    { key: "year", width: 12 },
+    { key: "date", width: 16 },
+    { key: "title", width: 34 },
+    { key: "notes", width: 46 },
+    { key: "refundType", width: 24 },
+    { key: "amount", width: 16 },
+    { key: "status", width: 16 },
+    { key: "supplier", width: 28 },
+    { key: "originalTransaction", width: 36 },
+    { key: "enteredReference", width: 28 },
+    { key: "balanceEffect", width: 34 },
+  ];
+}
+
+function refundHeaderLabels() {
+  return [
+    "Reference",
+    "Year",
+    "Date",
+    "Title",
+    "Notes",
+    "Refund Type",
+    "Amount",
+    "Status",
+    "Supplier",
+    "Original Transaction",
+    "Entered Reference",
+    "Balance Effect",
+  ];
+}
+
+function styleRefundRow(
+  row: ExcelJS.Row,
+  refund: MoneyRefundExportRecord
+) {
+  styleBodyRow(row);
+  styleCurrencyCell(row.getCell("amount"), true);
+
+  row.getCell("reference").font = {
+    bold: true,
+    color: { argb: "FF155E75" },
+  };
+
+  row.getCell("refundType").font = {
+    bold: true,
+    color: {
+      argb:
+        refund.refund_type === "money_received_back"
+          ? "FF155E75"
+          : "FF6B21A8",
+    },
+  };
+
+  row.getCell("refundType").fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: {
+      argb:
+        refund.refund_type === "money_received_back"
+          ? "FFCFFAFE"
+          : "FFF3E8FF",
+    },
+  };
+
+  row.getCell("status").font = {
+    bold: true,
+    color: {
+      argb:
+        refund.status === "completed"
+          ? "FF166534"
+          : refund.status === "pending"
+            ? "FF92400E"
+            : "FF6B7280",
+    },
+  };
+
+  row.getCell("status").fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: {
+      argb:
+        refund.status === "completed"
+          ? "FFDCFCE7"
+          : refund.status === "pending"
+            ? "FFFEF3C7"
+            : "FFF3F4F6",
+    },
+  };
+
+  row.getCell("balanceEffect").font = {
+    bold: true,
+    color: {
+      argb:
+        refund.status !== "completed"
+          ? "FF6B7280"
+          : refund.refund_type === "money_received_back"
+            ? "FF166534"
+            : "FF991B1B",
+    },
+  };
+}
+
+function addRefundRow(
+  sheet: ExcelJS.Worksheet,
+  refund: MoneyRefundExportRecord
+) {
+  const row = sheet.addRow({
+    reference: refundReference(refund),
+    year: String(refund.year),
+    date: formatDate(refund.refund_date || refund.created_at),
+    title: refund.title,
+    notes: refund.notes || "None",
+    refundType: refundTypeLabel(refund),
+    amount: pounds(refund.amount_pence),
+    status: refundStatusLabel(refund.status),
+    supplier: refund.supplier?.supplier_name || "None",
+    originalTransaction:
+      refund.original_transaction?.title || "Not linked",
+    enteredReference: refund.reference_number || "None",
+    balanceEffect: refundBalanceEffect(refund),
+  });
+
+  styleRefundRow(row, refund);
+}
+
+function addRefundWorksheet({
+  workbook,
+  sheetName,
+  title,
+  subtitle,
+  refunds,
+}: {
+  workbook: ExcelJS.Workbook;
+  sheetName: string;
+  title: string;
+  subtitle: string;
+  refunds: MoneyRefundExportRecord[];
+}) {
+  const sheet = workbook.addWorksheet(sheetName, {
+    views: [{ state: "frozen", ySplit: 4 }],
+    pageSetup: {
+      paperSize: 9,
+      orientation: "landscape",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    },
+  });
+
+  sheet.columns = refundColumns();
+
+  addMergedTitle(sheet, title, "A1", "L1");
+  addMergedSubtitle(sheet, subtitle, "A2", "L2");
+
+  sheet.addRow([]);
+
+  const refundHeader = sheet.addRow(refundHeaderLabels());
+  styleHeaderRow(refundHeader, "FF0E7490");
+
+  if (refunds.length === 0) {
+    const row = sheet.addRow(["No refunds saved for this export view."]);
+    styleBodyRow(row);
+  } else {
+    refunds.forEach((refund) => {
+      addRefundRow(sheet, refund);
+    });
+  }
+
+  sheet.autoFilter = {
+    from: "A4",
+    to: "L4",
+  };
+
+  return sheet;
+}
+
+function addFilteredExportSummaryWorksheet({
+  workbook,
+  selectedYear,
+  selectedViewMonth,
+  filteredTransactions,
+  refunds,
+}: {
+  workbook: ExcelJS.Workbook;
+  selectedYear: string;
+  selectedViewMonth: string;
+  filteredTransactions: Transaction[];
+  refunds: MoneyRefundExportRecord[];
+}) {
+  const sheet = workbook.addWorksheet("Export Summary", {
+    views: [{ state: "frozen", ySplit: 5 }],
+    pageSetup: {
+      paperSize: 9,
+      orientation: "landscape",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+    },
+  });
+
+  sheet.columns = [
+    { key: "label", width: 40 },
+    { key: "amount", width: 20 },
+    { key: "notes", width: 72 },
+  ];
+
+  const scopeLabel =
+    selectedViewMonth === "all"
+      ? `Jan to Dec ${selectedYear}`
+      : monthNameFromKey(selectedViewMonth);
+
+  const ordinaryMoneyIn = filteredTransactions
+    .filter((item) => item.type === "income")
+    .reduce((sum, item) => sum + Number(item.amount_pence || 0), 0);
+
+  const ordinaryMoneyOut = filteredTransactions
+    .filter((item) => item.type === "expense")
+    .reduce((sum, item) => sum + Number(item.amount_pence || 0), 0);
+
+  const refundTotals = calculateCompletedRefundTotals(refunds);
+
+  const moneyInIncludingRefunds =
+    ordinaryMoneyIn + refundTotals.receivedBack;
+
+  const moneyOutIncludingRefunds =
+    ordinaryMoneyOut + refundTotals.sentBack;
+
+  const availableBalance =
+    moneyInIncludingRefunds - moneyOutIncludingRefunds;
+
+  addMergedTitle(
+    sheet,
+    "Burton Pride C.I.C - Filtered Money Export Summary",
+    "A1",
+    "C1"
+  );
+
+  addMergedSubtitle(
+    sheet,
+    `View: ${scopeLabel} | Ordinary transactions: ${
+      filteredTransactions.length
+    } | Refunds: ${refunds.length} | Exported: ${new Date().toLocaleString(
+      "en-GB"
+    )}`,
+    "A2",
+    "C2"
+  );
+
+  sheet.addRow([]);
+  addMergedSection(sheet, "Export Summary", "A4", "C4", "FF0E7490");
+
+  const header = sheet.addRow(["Item", "Amount", "Notes"]);
+  styleHeaderRow(header, "FF111827");
+
+  const rows: Array<[string, number, string]> = [
+    [
+      "Ordinary Money In",
+      pounds(ordinaryMoneyIn),
+      "Normal transaction income before refund adjustments.",
+    ],
+    [
+      "Refunds Received Back",
+      pounds(refundTotals.receivedBack),
+      "Completed refunds returned to Burton Pride. Added into Money In.",
+    ],
+    [
+      "Money In Including Completed Refunds",
+      pounds(moneyInIncludingRefunds),
+      "Ordinary Money In plus completed refunds received back.",
+    ],
+    [
+      "Ordinary Money Out",
+      pounds(ordinaryMoneyOut),
+      "Normal transaction spending before refund adjustments.",
+    ],
+    [
+      "Refunds Sent Back",
+      pounds(refundTotals.sentBack),
+      "Completed refunds returned to other people or organisations. Added into Money Out.",
+    ],
+    [
+      "Money Out Including Completed Refunds",
+      pounds(moneyOutIncludingRefunds),
+      "Ordinary Money Out plus completed refunds sent back.",
+    ],
+    [
+      "Balance In Export View",
+      pounds(availableBalance),
+      "Money In including completed refunds minus Money Out including completed refunds.",
+    ],
+  ];
+
+  rows.forEach(([label, amount, notes]) => {
+    const row = sheet.addRow([label, amount, notes]);
+    styleBodyRow(row);
+    row.getCell(1).font = { bold: true };
+    styleCurrencyCell(row.getCell(2), true);
+  });
+
+  return sheet;
+}
+
 type ExportTransactionsArgs = {
   selectedYear: string;
   selectedViewMonth: string;
@@ -635,6 +1113,24 @@ export async function exportTransactionsToExcelFile({
 
   workbook.creator = "Burton Pride C.I.C";
   workbook.created = new Date();
+
+  const allYearRefunds = await loadRefundsForExcelExport(selectedYear);
+
+  const filteredRefunds = allYearRefunds.filter((refund) =>
+    refundMatchesView({
+      refund,
+      selectedYear,
+      selectedMonth: selectedViewMonth,
+    })
+  );
+
+  addFilteredExportSummaryWorksheet({
+    workbook,
+    selectedYear,
+    selectedViewMonth,
+    filteredTransactions,
+    refunds: filteredRefunds,
+  });
 
   const sheet = workbook.addWorksheet("Filtered Transactions", {
     views: [{ state: "frozen", ySplit: 5 }],
@@ -662,9 +1158,9 @@ export async function exportTransactionsToExcelFile({
       selectedViewMonth === "all"
         ? `Jan to Dec ${selectedYear}`
         : monthNameFromKey(selectedViewMonth)
-    } | Exported: ${new Date().toLocaleString("en-GB")} | Rows: ${
+    } | Exported: ${new Date().toLocaleString("en-GB")} | Ordinary transaction rows: ${
       filteredTransactions.length
-    }`,
+    } | Refund rows: ${filteredRefunds.length}`,
     "A2",
     "AA2"
   );
@@ -684,6 +1180,18 @@ export async function exportTransactionsToExcelFile({
     to: "AA4",
   };
 
+  addRefundWorksheet({
+    workbook,
+    sheetName: "Refunds",
+    title: "Burton Pride C.I.C - Refunds",
+    subtitle: `View: ${
+      selectedViewMonth === "all"
+        ? `Jan to Dec ${selectedYear}`
+        : monthNameFromKey(selectedViewMonth)
+    } | Rows: ${filteredRefunds.length}`,
+    refunds: filteredRefunds,
+  });
+
   await downloadWorkbook(
     workbook,
     `burton-pride-money-transactions-${selectedYear}-${fileDate}.xlsx`
@@ -701,6 +1209,14 @@ type FullYearlyReportTotals = {
   sponsorshipSpent: number;
   sponsorshipRemaining: number;
   balance: number;
+
+  /**
+   * These values are optional so the export stays compatible with the
+   * existing hook. Refund records are loaded directly from the Refund Tracker
+   * API below, so the Excel report always uses the latest completed refunds.
+   */
+  refundsReceivedBack?: number;
+  refundsSentBack?: number;
 };
 
 type ExportFullYearlyReportArgs = {
@@ -722,6 +1238,29 @@ export async function exportFullYearlyReportFile({
   workbook.creator = "Burton Pride C.I.C";
   workbook.created = new Date();
 
+  const yearRefunds = (
+    await loadRefundsForExcelExport(selectedYear)
+  ).filter((refund) =>
+    refundMatchesView({
+      refund,
+      selectedYear,
+      selectedMonth: "all",
+    })
+  );
+
+  const refundTotals = calculateCompletedRefundTotals(yearRefunds);
+
+  const moneyInIncludingRefunds =
+    Number(totals.income || 0) + refundTotals.receivedBack;
+
+  const moneyOutIncludingRefunds =
+    Number(totals.expense || 0) + refundTotals.sentBack;
+
+  const closingBalanceIncludingRefunds =
+    Number(totals.balance || 0) +
+    refundTotals.receivedBack -
+    refundTotals.sentBack;
+
   const summarySheet = workbook.addWorksheet("Year Summary", {
     views: [{ state: "frozen", ySplit: 5 }],
     pageSetup: {
@@ -734,9 +1273,9 @@ export async function exportFullYearlyReportFile({
   });
 
   summarySheet.columns = [
-    { key: "label", width: 36 },
+    { key: "label", width: 42 },
     { key: "amount", width: 20 },
-    { key: "notes", width: 60 },
+    { key: "notes", width: 76 },
   ];
 
   addMergedTitle(
@@ -748,7 +1287,9 @@ export async function exportFullYearlyReportFile({
 
   addMergedSubtitle(
     summarySheet,
-    `Year: Jan to Dec ${selectedYear} | Generated: ${new Date().toLocaleString(
+    `Year: Jan to Dec ${selectedYear} | Ordinary transactions: ${
+      yearTransactions.length
+    } | Refunds: ${yearRefunds.length} | Generated: ${new Date().toLocaleString(
       "en-GB"
     )}`,
     "A2",
@@ -767,11 +1308,35 @@ export async function exportFullYearlyReportFile({
       pounds(totals.openingBalance || 0),
       "Money carried forward from previous years.",
     ],
-    ["Money In", pounds(totals.income), "All income in the selected year."],
     [
-      "Money Out",
+      "Ordinary Money In",
+      pounds(totals.income),
+      "Normal income transactions before completed refund adjustments.",
+    ],
+    [
+      "Refunds Received Back",
+      pounds(refundTotals.receivedBack),
+      "Completed refunds returned to Burton Pride. Added into Money In.",
+    ],
+    [
+      "Money In Including Completed Refunds",
+      pounds(moneyInIncludingRefunds),
+      "Ordinary Money In plus completed refunds received back.",
+    ],
+    [
+      "Ordinary Money Out",
       pounds(totals.expense),
-      "Burton Pride money out, including personal funds only once marked paid back.",
+      "Burton Pride money out before completed refund adjustments. Personal funds are included only once marked paid back.",
+    ],
+    [
+      "Refunds Sent Back",
+      pounds(refundTotals.sentBack),
+      "Completed refunds returned to other people or organisations. Added into Money Out.",
+    ],
+    [
+      "Money Out Including Completed Refunds",
+      pounds(moneyOutIncludingRefunds),
+      "Ordinary Money Out plus completed refunds sent back.",
     ],
     [
       "Personal Funds Paid",
@@ -804,9 +1369,9 @@ export async function exportFullYearlyReportFile({
       "Restricted funding remaining after linked spending.",
     ],
     [
-      "Closing Balance",
-      pounds(totals.balance),
-      "Opening balance plus income minus eligible expenses.",
+      "Closing Available Balance",
+      pounds(closingBalanceIncludingRefunds),
+      "Opening balance plus ordinary income plus completed refunds received back, minus eligible expenses and completed refunds sent back.",
     ],
   ];
 
@@ -849,7 +1414,12 @@ export async function exportFullYearlyReportFile({
     "K1"
   );
 
-  addMergedSubtitle(sponsorSheet, `Year: Jan to Dec ${selectedYear}`, "A2", "K2");
+  addMergedSubtitle(
+    sponsorSheet,
+    `Year: Jan to Dec ${selectedYear}`,
+    "A2",
+    "K2"
+  );
 
   sponsorSheet.addRow([]);
 
@@ -940,14 +1510,16 @@ export async function exportFullYearlyReportFile({
 
   addMergedTitle(
     transactionSheet,
-    "Burton Pride C.I.C - All Transactions",
+    "Burton Pride C.I.C - All Ordinary Transactions",
     "A1",
     "AA1"
   );
 
   addMergedSubtitle(
     transactionSheet,
-    `Year: Jan to Dec ${selectedYear} | Rows: ${yearTransactions.length}`,
+    `Year: Jan to Dec ${selectedYear} | Ordinary transaction rows: ${
+      yearTransactions.length
+    }`,
     "A2",
     "AA2"
   );
@@ -960,7 +1532,7 @@ export async function exportFullYearlyReportFile({
 
   if (yearTransactions.length === 0) {
     const row = transactionSheet.addRow([
-      `No transactions saved for ${selectedYear}`,
+      `No ordinary transactions saved for ${selectedYear}`,
     ]);
     styleBodyRow(row);
   } else {
@@ -974,8 +1546,19 @@ export async function exportFullYearlyReportFile({
     to: "AA4",
   };
 
+  addRefundWorksheet({
+    workbook,
+    sheetName: "Refunds",
+    title: "Burton Pride C.I.C - All Refunds",
+    subtitle: `Year: Jan to Dec ${selectedYear} | Refund rows: ${
+      yearRefunds.length
+    }`,
+    refunds: yearRefunds,
+  });
+
   await downloadWorkbook(
     workbook,
     `burton-pride-full-yearly-report-${selectedYear}-${fileDate}.xlsx`
   );
 }
+

@@ -3027,10 +3027,54 @@ export function useMoneyTransactionsPage() {
     }
   }
 
-  const printTransactions = useCallback(() => {
+  const printTransactions = useCallback(async () => {
     try {
       setError("");
       setErrorDetails(null);
+
+      /**
+       * Refunds are stored separately from ordinary transactions.
+       *
+       * Load them at print time so the printed report always includes the
+       * latest refund records. The print helper filters the selected month
+       * again and excludes hidden refunds as an additional safety check.
+       */
+      const refundResponse = await fetch(
+        `/api/admin/money/refunds?year=${encodeURIComponent(
+          selectedYear
+        )}&limit=500`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const refundPayload = await readJsonResponse(refundResponse);
+
+      if (!refundResponse.ok) {
+        throw {
+          message:
+            refundPayload.message ||
+            refundPayload.error ||
+            "Refunds could not be loaded for printing.",
+          details: refundPayload,
+          status: refundResponse.status,
+        };
+      }
+
+      const printRefundsList = Array.isArray(refundPayload.refunds)
+        ? refundPayload.refunds.filter((refund: any) => !refund.is_hidden)
+        : [];
+
+      if (
+        printTransactionsList.length === 0 &&
+        printRefundsList.length === 0
+      ) {
+        setError(
+          "There are no transactions or refunds to print for the selected period."
+        );
+        return;
+      }
 
       printMoneyReport({
         selectedYear,
@@ -3039,6 +3083,7 @@ export function useMoneyTransactionsPage() {
         filteredTotals,
         yearlySponsorBreakdown,
         printTransactionsList,
+        printRefundsList,
         onPopupBlocked: () => {
           setError("Popup blocked. Please allow popups to print this report.");
         },
@@ -3066,12 +3111,12 @@ export function useMoneyTransactionsPage() {
       event.preventDefault();
       event.stopPropagation();
 
-      if (printTransactionsList.length === 0) {
-        setError("There are no transactions to print.");
-        return;
-      }
-
-      printTransactions();
+      /**
+       * Do not stop printing just because there are no ordinary transactions.
+       * The selected period may still contain refunds. printTransactions loads
+       * refunds and performs the combined empty-state check.
+       */
+      void printTransactions();
     }
 
     window.addEventListener("keydown", handlePrintShortcut);
@@ -3079,7 +3124,8 @@ export function useMoneyTransactionsPage() {
     return () => {
       window.removeEventListener("keydown", handlePrintShortcut);
     };
-  }, [printTransactions, printTransactionsList.length]);
+  }, [printTransactions]);
+
 
   function handleYearChange(year: string) {
     setSelectedYear(year);

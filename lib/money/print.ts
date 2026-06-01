@@ -26,10 +26,49 @@ type PrintFilteredTotals = {
   balance: number;
 };
 
+type RefundType = "money_received_back" | "money_sent_back";
+type RefundStatus = "pending" | "completed" | "cancelled";
+
+export type PrintTrackingRefund = {
+  id: string;
+  year: number;
+  refund_date: string;
+  refund_type: RefundType;
+  amount_pence: number;
+  title: string;
+  notes?: string | null;
+  reference_number?: string | null;
+  supplier_id?: string | null;
+  original_transaction_id?: string | null;
+  status: RefundStatus;
+  is_hidden?: boolean | null;
+  created_at?: string | null;
+
+  supplier?: {
+    id: string;
+    supplier_name: string;
+  } | null;
+
+  original_transaction?: {
+    id: string;
+    title: string;
+    amount_pence: number;
+    transaction_type: string;
+    transaction_date: string;
+  } | null;
+};
+
 type PrintMoneyReportArgs = {
   selectedYear: string;
   selectedPrintMonth: string;
   printTransactionsList: Transaction[];
+
+  /**
+   * Pass the active refunds loaded for the selected year.
+   * The print helper filters them again by the selected print month.
+   */
+  printRefundsList?: PrintTrackingRefund[];
+
   yearlySponsorBreakdown: SponsorBreakdown[];
   totals: PrintTotals;
   filteredTotals: PrintFilteredTotals;
@@ -236,10 +275,109 @@ function financePrintHtml(item: Transaction) {
   `;
 }
 
+function refundReference(refund: PrintTrackingRefund) {
+  const suppliedReference = String(refund.reference_number || "").trim();
+
+  if (suppliedReference) {
+    return suppliedReference;
+  }
+
+  return `REFUND-${refund.year}-${String(refund.id || "")
+    .slice(0, 8)
+    .toUpperCase()}`;
+}
+
+function refundTypeLabel(refund: PrintTrackingRefund) {
+  return refund.refund_type === "money_received_back"
+    ? "Refund Received Back"
+    : "Refund Sent Back";
+}
+
+function refundTypeBadgeClass(refund: PrintTrackingRefund) {
+  return refund.refund_type === "money_received_back"
+    ? "refund-received"
+    : "refund-sent";
+}
+
+function refundStatusLabel(status: RefundStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "pending") return "Pending";
+  return "Cancelled";
+}
+
+function refundStatusBadgeClass(status: RefundStatus) {
+  if (status === "completed") return "refund-completed";
+  if (status === "pending") return "refund-pending";
+  return "refund-cancelled";
+}
+
+function refundMonthKey(refund: PrintTrackingRefund) {
+  return String(refund.refund_date || refund.created_at || "").slice(0, 7);
+}
+
+function refundMatchesPrintScope({
+  refund,
+  selectedYear,
+  selectedPrintMonth,
+}: {
+  refund: PrintTrackingRefund;
+  selectedYear: string;
+  selectedPrintMonth: string;
+}) {
+  if (refund.is_hidden) {
+    return false;
+  }
+
+  if (String(refund.year) !== String(selectedYear)) {
+    return false;
+  }
+
+  if (selectedPrintMonth === "all") {
+    return true;
+  }
+
+  return refundMonthKey(refund) === selectedPrintMonth;
+}
+
+function completedRefundTotals(refunds: PrintTrackingRefund[]) {
+  return refunds.reduce(
+    (acc, refund) => {
+      if (refund.status !== "completed" || refund.is_hidden) {
+        return acc;
+      }
+
+      if (refund.refund_type === "money_received_back") {
+        acc.receivedBack += Number(refund.amount_pence || 0);
+      }
+
+      if (refund.refund_type === "money_sent_back") {
+        acc.sentBack += Number(refund.amount_pence || 0);
+      }
+
+      return acc;
+    },
+    {
+      receivedBack: 0,
+      sentBack: 0,
+    }
+  );
+}
+
+function refundBalanceEffectLabel(refund: PrintTrackingRefund) {
+  if (refund.status !== "completed") {
+    return "No balance change until completed";
+  }
+
+  return refund.refund_type === "money_received_back"
+    ? "Added into Money In"
+    : "Added into Money Out";
+}
+
 export function printMoneyReport({
   selectedYear,
   selectedPrintMonth,
   printTransactionsList,
+  printRefundsList = [],
   yearlySponsorBreakdown,
   totals,
   filteredTotals,
@@ -251,6 +389,27 @@ export function printMoneyReport({
     selectedPrintMonth === "all"
       ? `Jan to Dec ${selectedYear}`
       : monthNameFromKey(selectedPrintMonth);
+
+  const scopedRefunds = printRefundsList.filter((refund) =>
+    refundMatchesPrintScope({
+      refund,
+      selectedYear,
+      selectedPrintMonth,
+    })
+  );
+
+  const refundTotals = completedRefundTotals(scopedRefunds);
+
+  const moneyInIncludingRefunds =
+    Number(filteredTotals.income || 0) + refundTotals.receivedBack;
+
+  const moneyOutIncludingRefunds =
+    Number(filteredTotals.expense || 0) + refundTotals.sentBack;
+
+  const balanceIncludingRefunds =
+    Number(filteredTotals.balance || 0) +
+    refundTotals.receivedBack -
+    refundTotals.sentBack;
 
   const sponsorRows =
     yearlySponsorBreakdown.length === 0
@@ -311,7 +470,7 @@ export function printMoneyReport({
 
   const transactionRows =
     printTransactionsList.length === 0
-      ? `<tr><td colspan="16" class="empty">No transactions to print for ${escapeHtml(
+      ? `<tr><td colspan="16" class="empty">No ordinary transactions to print for ${escapeHtml(
           printScopeLabel
         )}.</td></tr>`
       : printTransactionsList
@@ -388,6 +547,68 @@ export function printMoneyReport({
           })
           .join("");
 
+  const refundRows =
+    scopedRefunds.length === 0
+      ? `<tr><td colspan="10" class="empty">No refunds to print for ${escapeHtml(
+          printScopeLabel
+        )}.</td></tr>`
+      : scopedRefunds
+          .map((refund) => {
+            return `
+              <tr>
+                <td>
+                  <span class="reference refund-reference">
+                    ${escapeHtml(refundReference(refund))}
+                  </span>
+                </td>
+
+                <td>${escapeHtml(formatDate(refund.refund_date))}</td>
+
+                <td>
+                  <strong>${escapeHtml(refund.title)}</strong>
+                  ${
+                    refund.notes
+                      ? `<div class="muted">${escapeHtml(refund.notes)}</div>`
+                      : ""
+                  }
+                </td>
+
+                <td>
+                  <span class="badge ${refundTypeBadgeClass(refund)}">
+                    ${escapeHtml(refundTypeLabel(refund))}
+                  </span>
+                </td>
+
+                <td class="amount">
+                  <strong>${escapeHtml(money(refund.amount_pence))}</strong>
+                </td>
+
+                <td>
+                  <span class="badge ${refundStatusBadgeClass(refund.status)}">
+                    ${escapeHtml(refundStatusLabel(refund.status))}
+                  </span>
+                </td>
+
+                <td>${escapeHtml(
+                  refund.supplier?.supplier_name || "None"
+                )}</td>
+
+                <td>${escapeHtml(
+                  refund.original_transaction?.title || "Not linked"
+                )}</td>
+
+                <td>${escapeHtml(
+                  refund.reference_number || "None"
+                )}</td>
+
+                <td>
+                  <strong>${escapeHtml(refundBalanceEffectLabel(refund))}</strong>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+
   const printHtml = `
     <!doctype html>
     <html>
@@ -436,27 +657,34 @@ export function printMoneyReport({
 
           .summary {
             display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            gap: 10px;
+            grid-template-columns: repeat(9, minmax(0, 1fr));
+            gap: 8px;
             margin: 18px 0;
           }
 
           .card {
             border: 1px solid #d1d5db;
             border-radius: 12px;
-            padding: 12px;
+            padding: 10px;
           }
 
           .card span {
             display: block;
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 800;
             text-transform: uppercase;
             margin-bottom: 6px;
           }
 
           .card strong {
-            font-size: 16px;
+            font-size: 15px;
+          }
+
+          .card small {
+            display: block;
+            margin-top: 5px;
+            font-size: 8px;
+            line-height: 1.35;
           }
 
           .opening-card {
@@ -492,6 +720,16 @@ export function printMoneyReport({
           .balance-card {
             background: #dbeafe;
             color: #1e40af;
+          }
+
+          .refund-received-card {
+            background: #cffafe;
+            color: #155e75;
+          }
+
+          .refund-sent-card {
+            background: #f3e8ff;
+            color: #6b21a8;
           }
 
           h2 {
@@ -554,6 +792,11 @@ export function printMoneyReport({
             white-space: nowrap;
           }
 
+          .refund-reference {
+            background: #cffafe;
+            color: #155e75;
+          }
+
           .badge {
             display: inline-block;
             border-radius: 999px;
@@ -591,6 +834,31 @@ export function printMoneyReport({
           .badge.other {
             background: #f3e8ff;
             color: #6b21a8;
+          }
+
+          .badge.refund-received {
+            background: #cffafe;
+            color: #155e75;
+          }
+
+          .badge.refund-sent {
+            background: #f3e8ff;
+            color: #6b21a8;
+          }
+
+          .badge.refund-completed {
+            background: #dcfce7;
+            color: #166534;
+          }
+
+          .badge.refund-pending {
+            background: #fef3c7;
+            color: #92400e;
+          }
+
+          .badge.refund-cancelled {
+            background: #f3f4f6;
+            color: #6b7280;
           }
 
           .status-box,
@@ -729,7 +997,9 @@ export function printMoneyReport({
         <div class="meta">
           Report period: ${escapeHtml(printScopeLabel)} • Printed on ${escapeHtml(
             printedAt
-          )} • Rows: ${printTransactionsList.length}
+          )} • Ordinary transactions: ${printTransactionsList.length} • Refunds: ${
+            scopedRefunds.length
+          }
         </div>
 
         <div class="summary">
@@ -740,12 +1010,26 @@ export function printMoneyReport({
 
           <div class="card income-card">
             <span>Money In</span>
-            <strong>${escapeHtml(money(filteredTotals.income))}</strong>
+            <strong>${escapeHtml(money(moneyInIncludingRefunds))}</strong>
+            <small>Includes completed refunds received back</small>
           </div>
 
           <div class="card expense-card">
             <span>Money Out</span>
-            <strong>${escapeHtml(money(filteredTotals.expense))}</strong>
+            <strong>${escapeHtml(money(moneyOutIncludingRefunds))}</strong>
+            <small>Includes completed refunds sent back</small>
+          </div>
+
+          <div class="card refund-received-card">
+            <span>Refunds Received Back</span>
+            <strong>${escapeHtml(money(refundTotals.receivedBack))}</strong>
+            <small>Added into Money In when completed</small>
+          </div>
+
+          <div class="card refund-sent-card">
+            <span>Refunds Sent Back</span>
+            <strong>${escapeHtml(money(refundTotals.sentBack))}</strong>
+            <small>Added into Money Out when completed</small>
           </div>
 
           <div class="card personal-card">
@@ -766,8 +1050,9 @@ export function printMoneyReport({
           </div>
 
           <div class="card balance-card">
-            <span>Balance</span>
-            <strong>${escapeHtml(money(filteredTotals.balance))}</strong>
+            <span>Available Balance</span>
+            <strong>${escapeHtml(money(balanceIncludingRefunds))}</strong>
+            <small>Includes completed refund adjustments</small>
           </div>
         </div>
 
@@ -790,7 +1075,7 @@ export function printMoneyReport({
           <tbody>${sponsorRows}</tbody>
         </table>
 
-        <h2>Transactions — ${escapeHtml(printScopeLabel)}</h2>
+        <h2>Ordinary Transactions — ${escapeHtml(printScopeLabel)}</h2>
 
         <table>
           <thead>
@@ -817,7 +1102,30 @@ export function printMoneyReport({
           <tbody>${transactionRows}</tbody>
         </table>
 
-        <div class="footer">Burton Pride Money Management App</div>
+        <h2>Refunds — ${escapeHtml(printScopeLabel)}</h2>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Date</th>
+              <th>Title</th>
+              <th>Refund Type</th>
+              <th>Amount</th>
+              <th>Status</th>
+              <th>Supplier</th>
+              <th>Original Transaction</th>
+              <th>Entered Reference</th>
+              <th>Balance Effect</th>
+            </tr>
+          </thead>
+
+          <tbody>${refundRows}</tbody>
+        </table>
+
+        <div class="footer">
+          Burton Pride Money Management App • Completed refunds received back are added into Money In • Completed refunds sent back are added into Money Out
+        </div>
 
         <script>
           window.onload = function () {
@@ -831,7 +1139,7 @@ export function printMoneyReport({
     </html>
   `;
 
-  const printWindow = window.open("", "_blank", "width=1200,height=800");
+  const printWindow = window.open("", "_blank", "width=1400,height=900");
 
   if (!printWindow) {
     onPopupBlocked();

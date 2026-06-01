@@ -57,7 +57,7 @@ export default function AddTransactionPage() {
               </Link>
 
               <Link
-                href="/Admin/Money/Transactions"
+                href="/Admin/MoneyManagement/TrackingMoney"
                 className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
               >
                 <ArrowLeft className="h-4 w-4" />

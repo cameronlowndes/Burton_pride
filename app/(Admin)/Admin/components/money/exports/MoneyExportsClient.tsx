@@ -23,6 +23,7 @@ import {
   Printer,
   ReceiptText,
   RefreshCcw,
+  RotateCcw,
   ScrollText,
   Search,
   ShieldCheck,
@@ -41,7 +42,8 @@ type IconKey =
   | "history"
   | "personal"
   | "upload"
-  | "bank";
+  | "bank"
+  | "refund";
 
 type ExportCategory =
   | "all"
@@ -93,6 +95,7 @@ const ICONS: Record<IconKey, ElementType> = {
   personal: PiggyBank,
   upload: UploadCloud,
   bank: WalletCards,
+  refund: RotateCcw,
 };
 
 const CATEGORY_LABELS: Record<ExportCategory, string> = {
@@ -123,7 +126,8 @@ function getCategory(item: ExportItem): ExportCategory {
   if (
     item.key === "yearly-report" ||
     item.key === "transaction-list" ||
-    item.key === "personal-funds"
+    item.key === "personal-funds" ||
+    item.key === "refunds"
   ) {
     return "finance";
   }
@@ -172,6 +176,10 @@ function getSimpleUse(item: ExportItem) {
     return "Use this to compare the tracker balance with the real bank statement.";
   }
 
+  if (item.key === "refunds") {
+    return "Use this to review refunds separately from ordinary income and expenses.";
+  }
+
   return "Use this to export this report.";
 }
 
@@ -185,6 +193,7 @@ function getExportContents(item: ExportItem) {
       "Funding breakdown",
       "Personal funds report",
       "CSV import history",
+      "Refund tracker report",
     ];
   }
 
@@ -255,6 +264,19 @@ function getExportContents(item: ExportItem) {
       "Tracker balance",
       "Difference",
       "Check notes",
+    ];
+  }
+
+  if (item.key === "refunds") {
+    return [
+      "Refund reference",
+      "Refund date",
+      "Refund type",
+      "Amount",
+      "Status",
+      "Supplier",
+      "Original transaction",
+      "Deleted refund records",
     ];
   }
 
@@ -1203,8 +1225,8 @@ export default function MoneyExportsClient({
               <p className="mt-3 max-w-5xl text-sm leading-6 text-white/75 sm:text-base">
                 The Accountant Export Pack is the easiest option. It creates one
                 ZIP file with the yearly report, transaction list, receipts
-                index, audit logs, funding breakdown, personal funds report, and
-                CSV import history.
+                index, audit logs, funding breakdown, personal funds report, CSV
+                import history, and refund tracker report.
               </p>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -1304,7 +1326,7 @@ export default function MoneyExportsClient({
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search accountant, receipts, audit logs, funding, personal funds..."
+                placeholder="Search accountant, receipts, refunds, audit logs, funding, personal funds..."
                 className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-blue-300/30 placeholder:text-white/35 focus:ring-4"
               />
             </label>

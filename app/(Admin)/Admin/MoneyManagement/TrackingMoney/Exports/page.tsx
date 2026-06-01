@@ -22,7 +22,8 @@ type ExportIconKey =
   | "history"
   | "personal"
   | "upload"
-  | "bank";
+  | "bank"
+  | "refund";
 
 type ExportItem = {
   key: string;
@@ -131,7 +132,7 @@ export default async function MoneyExportsPage() {
       key: "accountant-pack",
       title: "Accountant Export Pack",
       description:
-        "Best option for your accountant. Downloads one ZIP file with yearly report, transactions, receipts index, audit logs, personal funds report, CSV import history, and bank checks.",
+        "Best option for your accountant. Downloads one ZIP file with yearly report, transactions, receipts index, audit logs, personal funds report, CSV import history, bank checks, and the refund tracker report.",
       buttonText: "Download Accountant Pack",
       url: `/api/admin/money/export/accountant-export-pack?year=${currentYear}`,
       fileName: `burton-pride-accountant-export-pack-${currentYear}.zip`,
@@ -231,6 +232,20 @@ export default async function MoneyExportsPage() {
       colour:
         "border-teal-400/30 bg-teal-500/10 text-teal-100 shadow-teal-950/20",
       buttonColour: "bg-teal-400 text-teal-950 hover:bg-teal-300",
+    },
+    {
+      key: "refunds",
+      title: "Refund Tracker Export",
+      description:
+        "Exports active and deleted refunds separately so refunds do not get mixed up with ordinary income and expenses. Includes completed, pending and cancelled refund records.",
+      buttonText: "Download Refund Tracker",
+      url: `/api/admin/money/export/refunds-export?year=${currentYear}`,
+      fileName: `burton-pride-refund-tracker-${currentYear}.xlsx`,
+      iconKey: "refund",
+      colour:
+        "border-violet-400/30 bg-violet-500/10 text-violet-100 shadow-violet-950/20",
+      buttonColour:
+        "bg-violet-400 text-violet-950 hover:bg-violet-300",
     },
   ];
 

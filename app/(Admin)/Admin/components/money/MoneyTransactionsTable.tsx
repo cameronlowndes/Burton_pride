@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import {
   AlertTriangle,
@@ -119,6 +120,15 @@ type MoneyTransactionsTableProps = {
   onUpdateFinanceNote: (item: Transaction, status: FinanceNoteStatus, note?: string) => void | Promise<void>;
 
   /**
+   * Opening balance carried forward into the selected year.
+   *
+   * This is used when the full-year table view is open so the table's
+   * available balance matches the main money tracker and the manual bank
+   * balance check.
+   */
+  openingBalancePence?: number;
+
+  /**
    * Receipt expiry/check reminder.
    * Expenses with no receipt older than this number of days will be flagged.
    * Default is 7 days.
@@ -149,7 +159,8 @@ type QuickFilter =
   | "finance_queries"
   | "bank_unmatched"
   | "personal_unpaid"
-  | "funding";
+  | "funding"
+  | "refunds";
 
 type ColumnKey =
   | "select"
@@ -175,6 +186,52 @@ type ToastState = {
   type: "success" | "error";
   message: string;
 } | null;
+
+type RefundType = "money_received_back" | "money_sent_back";
+type RefundStatus = "pending" | "completed" | "cancelled";
+
+type TrackingRefund = {
+  id: string;
+  year: number;
+  refund_date: string;
+  refund_type: RefundType;
+  amount_pence: number;
+  title: string;
+  notes: string | null;
+  reference_number: string | null;
+  supplier_id: string | null;
+  original_transaction_id: string | null;
+  status: RefundStatus;
+  is_hidden: boolean;
+  created_at: string;
+  supplier?: {
+    id: string;
+    supplier_name: string;
+  } | null;
+  original_transaction?: {
+    id: string;
+    title: string;
+    amount_pence: number;
+    transaction_type: string;
+    transaction_date: string;
+  } | null;
+};
+
+type RefundListResponse = {
+  success?: boolean;
+  message?: string;
+  refunds?: TrackingRefund[];
+};
+
+type TrackingRow =
+  | {
+      kind: "transaction";
+      item: Transaction;
+    }
+  | {
+      kind: "refund";
+      item: TrackingRefund;
+    };
 
 const paymentMethodFilterOptions = [
   "all",
@@ -550,6 +607,97 @@ function compareText(a: unknown, b: unknown) {
   return cleanText(a).localeCompare(cleanText(b), "en-GB", { sensitivity: "base" });
 }
 
+function refundMonthKey(refund: TrackingRefund) {
+  return String(refund.refund_date || refund.created_at || "").slice(0, 7);
+}
+
+function refundReference(refund: TrackingRefund) {
+  const suppliedReference = cleanText(refund.reference_number);
+
+  if (suppliedReference) {
+    return suppliedReference;
+  }
+
+  return `REFUND-${refund.year}-${String(refund.id || "").slice(0, 8).toUpperCase()}`;
+}
+
+function refundTypeLabel(refund: TrackingRefund) {
+  return refund.refund_type === "money_received_back"
+    ? "Refund Received Back"
+    : "Refund Sent Back";
+}
+
+function refundStatusLabel(status: RefundStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "pending") return "Pending";
+  return "Cancelled";
+}
+
+function refundStatusBadgeClass(status: RefundStatus) {
+  if (status === "completed") return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  if (status === "pending") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  return "bg-white/10 text-white/60 ring-white/10";
+}
+
+function refundTypeBadgeClass(refund: TrackingRefund) {
+  return refund.refund_type === "money_received_back"
+    ? "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20"
+    : "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+}
+
+function getRefundSearchText(refund: TrackingRefund) {
+  return [
+    "refund",
+    refundReference(refund),
+    refund.title,
+    refund.notes,
+    refundTypeLabel(refund),
+    refund.status,
+    refund.supplier?.supplier_name,
+    refund.original_transaction?.title,
+    String(refund.amount_pence || ""),
+    money(refund.amount_pence),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function trackingRowSortText(row: TrackingRow, sortKey: SortKey) {
+  if (row.kind === "transaction") {
+    const item = row.item;
+
+    if (sortKey === "date") return item.transaction_date || item.created_at;
+    if (sortKey === "title") return item.title;
+    if (sortKey === "type") return item.type;
+    if (sortKey === "funding") return item.sponsor_name;
+    if (sortKey === "payment") return item.payment_method;
+    if (sortKey === "checked") return item.checked_at ? "checked" : "unchecked";
+    if (sortKey === "bank") return item.bank_reconciliation_status || "unmatched";
+    if (sortKey === "receipt") return hasMissingReceiptWarning(item) ? "missing" : "uploaded";
+    if (sortKey === "finance") return item.finance_note_status || "none";
+
+    return "";
+  }
+
+  const refund = row.item;
+
+  if (sortKey === "date") return refund.refund_date || refund.created_at;
+  if (sortKey === "title") return refund.title;
+  if (sortKey === "type") return refundTypeLabel(refund);
+  if (sortKey === "payment") return "refund";
+  if (sortKey === "checked") return refund.status;
+  if (sortKey === "bank") return "refund";
+  if (sortKey === "receipt") return "refund";
+  if (sortKey === "finance") return "refund";
+
+  return "";
+}
+
+function trackingRowSortAmount(row: TrackingRow) {
+  return numberValue(row.item.amount_pence);
+}
+
 function getRowSearchText(item: Transaction) {
   const files = getTransactionFiles(item);
   const missingReceipt = hasMissingReceiptWarning(item);
@@ -595,6 +743,7 @@ function transactionMatchesQuickFilter(item: Transaction, quickFilter: QuickFilt
   if (quickFilter === "bank_unmatched") return !item.bank_reconciliation_status || item.bank_reconciliation_status === "unmatched";
   if (quickFilter === "personal_unpaid") return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
   if (quickFilter === "funding") return isSponsorshipTransaction(item);
+  if (quickFilter === "refunds") return false;
   return true;
 }
 
@@ -778,6 +927,7 @@ export default function MoneyTransactionsTable({
   onMarkTransactionChecked,
   onUpdateBankReconciliationStatus,
   onUpdateFinanceNote,
+  openingBalancePence = 0,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
 }: MoneyTransactionsTableProps) {
   const { user } = useUser();
@@ -801,11 +951,65 @@ export default function MoneyTransactionsTable({
   const [toast, setToast] = useState<ToastState>(null);
   const [detailsItem, setDetailsItem] = useState<Transaction | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(defaultVisibleColumns);
+  const [refunds, setRefunds] = useState<TrackingRefund[]>([]);
+  const [refundsLoading, setRefundsLoading] = useState(false);
+  const [refundsError, setRefundsError] = useState("");
 
   const topActionButtonBase =
     "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none";
 
   const activeReceiptReminderDays = Math.max(1, Number(localReceiptReminderDays || receiptReminderDaysSafe));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRefundsForTrackingTable() {
+      setRefundsLoading(true);
+      setRefundsError("");
+
+      try {
+        const response = await fetch(
+          `/api/admin/money/refunds?year=${encodeURIComponent(selectedYear)}&limit=500`,
+          {
+            cache: "no-store",
+          }
+        );
+
+        const payload = (await response.json()) as RefundListResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.message || "Refunds could not be loaded.");
+        }
+
+        if (!cancelled) {
+          setRefunds(
+            Array.isArray(payload.refunds)
+              ? payload.refunds.filter((refund) => !refund.is_hidden)
+              : []
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setRefunds([]);
+          setRefundsError(
+            error instanceof Error
+              ? error.message
+              : "Refunds could not be loaded."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setRefundsLoading(false);
+        }
+      }
+    }
+
+    void loadRefundsForTrackingTable();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedYear]);
 
   function getFundingForTransaction(item: Transaction) {
     if (!isSponsorshipTransaction(item)) return null;
@@ -931,6 +1135,93 @@ export default function MoneyTransactionsTable({
     activeReceiptReminderDays,
   ]);
 
+  const visibleRefunds = useMemo(() => {
+    const cleanSearch = searchTerm.trim().toLowerCase();
+
+    const canShowRefunds =
+      filter === "all" &&
+      selectedPaymentMethod === "all" &&
+      selectedSponsorId === "all" &&
+      (quickFilter === "all" || quickFilter === "refunds");
+
+    if (!canShowRefunds) {
+      return [];
+    }
+
+    return refunds.filter((refund) => {
+      const matchesMonth =
+        selectedViewMonth === "all" ||
+        refundMonthKey(refund) === selectedViewMonth;
+
+      const matchesTextSearch =
+        !cleanSearch || getRefundSearchText(refund).includes(cleanSearch);
+
+      return matchesMonth && matchesTextSearch;
+    });
+  }, [
+    refunds,
+    searchTerm,
+    selectedViewMonth,
+    filter,
+    selectedPaymentMethod,
+    selectedSponsorId,
+    quickFilter,
+  ]);
+
+  const visibleTrackingRows = useMemo(() => {
+    const rows: TrackingRow[] = [
+      ...visibleTransactions.map(
+        (item): TrackingRow => ({
+          kind: "transaction",
+          item,
+        })
+      ),
+
+      ...visibleRefunds.map(
+        (item): TrackingRow => ({
+          kind: "refund",
+          item,
+        })
+      ),
+    ];
+
+    return rows.sort((a, b) => {
+      const result =
+        sortKey === "amount"
+          ? trackingRowSortAmount(a) - trackingRowSortAmount(b)
+          : compareText(
+              trackingRowSortText(a, sortKey),
+              trackingRowSortText(b, sortKey)
+            );
+
+      return sortDirection === "asc" ? result : result * -1;
+    });
+  }, [visibleTransactions, visibleRefunds, sortKey, sortDirection]);
+
+  const refundTotals = useMemo(() => {
+    return refunds.reduce(
+      (acc, refund) => {
+        if (refund.status !== "completed" || refund.is_hidden) {
+          return acc;
+        }
+
+        if (refund.refund_type === "money_received_back") {
+          acc.receivedBack += Number(refund.amount_pence || 0);
+        }
+
+        if (refund.refund_type === "money_sent_back") {
+          acc.sentBack += Number(refund.amount_pence || 0);
+        }
+
+        return acc;
+      },
+      {
+        receivedBack: 0,
+        sentBack: 0,
+      }
+    );
+  }, [refunds]);
+
   const visibleIds = useMemo(() => visibleTransactions.map((item) => item.id).filter(Boolean), [visibleTransactions]);
   const selectedTransactions = useMemo(() => visibleTransactions.filter((item) => selectedIds.has(item.id)), [visibleTransactions, selectedIds]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
@@ -938,17 +1229,102 @@ export default function MoneyTransactionsTable({
   const totals = useMemo(() => {
     return visibleTransactions.reduce(
       (acc, item) => {
-        if (item.type === "income") acc.income += Number(item.amount_pence || 0);
-        if (item.type === "expense") acc.expense += Number(item.amount_pence || 0);
-        if (!item.checked_at) acc.unchecked += 1;
-        if (hasMissingReceiptWarning(item)) acc.missingReceipts += 1;
-        if (isReceiptOverdue(item, activeReceiptReminderDays)) acc.overdueReceipts += 1;
-        if (isPersonalFundsTransaction(item) && !item.personal_funds_repaid) acc.unpaidPersonal += Number(item.amount_pence || 0);
+        const amount = Number(item.amount_pence || 0);
+        const personalFunds = isPersonalFundsTransaction(item);
+        const fundingLinked = isSponsorshipTransaction(item);
+
+        /**
+         * Use the same money rules as the main tracker:
+         *
+         * - General income counts as available Money In.
+         * - Restricted funding stays separate.
+         * - Normal Burton Pride spending counts as Money Out.
+         * - Personal-funds spending only counts after it is paid back.
+         */
+        if (item.type === "income" && !fundingLinked) {
+          acc.availableIncome += amount;
+        }
+
+        if (
+          item.type === "expense" &&
+          !fundingLinked &&
+          !personalFunds
+        ) {
+          acc.availableExpense += amount;
+        }
+
+        if (
+          item.type === "expense" &&
+          personalFunds &&
+          item.personal_funds_repaid === true
+        ) {
+          acc.availableExpense += amount;
+        }
+
+        if (item.type === "income") {
+          acc.rawIncome += amount;
+        }
+
+        if (item.type === "expense") {
+          acc.rawExpense += amount;
+        }
+
+        if (!item.checked_at) {
+          acc.unchecked += 1;
+        }
+
+        if (hasMissingReceiptWarning(item)) {
+          acc.missingReceipts += 1;
+        }
+
+        if (isReceiptOverdue(item, activeReceiptReminderDays)) {
+          acc.overdueReceipts += 1;
+        }
+
+        if (personalFunds && !item.personal_funds_repaid) {
+          acc.unpaidPersonal += amount;
+        }
+
         return acc;
       },
-      { income: 0, expense: 0, unchecked: 0, missingReceipts: 0, overdueReceipts: 0, unpaidPersonal: 0 }
+      {
+        availableIncome: 0,
+        availableExpense: 0,
+        rawIncome: 0,
+        rawExpense: 0,
+        unchecked: 0,
+        missingReceipts: 0,
+        overdueReceipts: 0,
+        unpaidPersonal: 0,
+      }
     );
   }, [visibleTransactions, activeReceiptReminderDays]);
+
+  /**
+   * Completed refunds remain clearly labelled as refunds, but they adjust the
+   * usable Burton Pride money totals.
+   *
+   * Refund received back -> added into Money In.
+   * Refund sent back -> added into Money Out.
+   */
+  const moneyInIncludingCompletedRefunds =
+    totals.availableIncome + refundTotals.receivedBack;
+
+  const moneyOutIncludingCompletedRefunds =
+    totals.availableExpense + refundTotals.sentBack;
+
+  /**
+   * Only add the opening balance when the full-year view is open.
+   * A selected month shows that month's movement instead of pretending the
+   * opening balance happened again inside the selected month.
+   */
+  const openingBalanceForView =
+    selectedViewMonth === "all" ? Number(openingBalancePence || 0) : 0;
+
+  const availableBalanceInView =
+    openingBalanceForView +
+    moneyInIncludingCompletedRefunds -
+    moneyOutIncludingCompletedRefunds;
 
   function toggleSelect(id: string) {
     setSelectedIds((prev) => {
@@ -1104,15 +1480,99 @@ export default function MoneyTransactionsTable({
     );
   }
 
+
+  function renderMobileRefundCard(refund: TrackingRefund) {
+    return (
+      <div
+        key={`refund-${refund.id}`}
+        className="rounded-2xl border border-cyan-300/20 bg-cyan-500/[0.06] p-4"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className={refundTypeBadgeClass(refund)}>
+                {refundTypeLabel(refund)}
+              </Badge>
+
+              <Badge className={refundStatusBadgeClass(refund.status)}>
+                {refundStatusLabel(refund.status)}
+              </Badge>
+            </div>
+
+            <p className="mt-3 break-words font-black text-white">
+              {refund.title}
+            </p>
+
+            <p className="mt-1 text-xs text-white/45">
+              {refundReference(refund)}
+            </p>
+          </div>
+
+          <div className="shrink-0 rounded-xl bg-cyan-500/15 px-3 py-2 text-sm font-black text-cyan-100 ring-1 ring-cyan-300/20">
+            {money(refund.amount_pence)}
+          </div>
+        </div>
+
+        {refund.notes ? (
+          <p className="mt-3 text-xs leading-5 text-white/55">
+            {refund.notes}
+          </p>
+        ) : null}
+
+        <div className="mt-4 grid gap-2 text-sm text-white/65 sm:grid-cols-2">
+          <div>
+            Date:{" "}
+            <strong className="text-white">
+              {none(refund.refund_date)}
+            </strong>
+          </div>
+
+          <div>
+            Supplier:{" "}
+            <strong className="text-white">
+              {refund.supplier?.supplier_name || "None"}
+            </strong>
+          </div>
+
+          <div>
+            Original transaction:{" "}
+            <strong className="text-white">
+              {refund.original_transaction?.title || "Not linked"}
+            </strong>
+          </div>
+
+          <div>
+            Totals:{" "}
+            <strong className="text-cyan-100">
+              Kept separate from Money In / Money Out
+            </strong>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <Link
+            href="/admin/money/refunds"
+            className="inline-flex items-center gap-2 rounded-xl bg-cyan-500/15 px-3 py-2 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20 transition hover:bg-cyan-500/25"
+          >
+            <Eye className="h-3 w-3" />
+            Open Refund Tracker
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <h2 className="text-xl font-bold">Transactions</h2>
           <p className="text-sm text-white/50">
-            {visibleTransactions.length} transaction{visibleTransactions.length === 1 ? "" : "s"} showing for {selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)}
+            {visibleTrackingRows.length} entr{visibleTrackingRows.length === 1 ? "y" : "ies"} showing for {selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)}
           </p>
-          <p className="mt-1 text-xs text-white/40">Sorted by {sortKey} ({sortDirection}). Selected: {selectedTransactions.length}</p>
+          <p className="mt-1 text-xs text-white/40">
+            Sorted by {sortKey} ({sortDirection}). Selected: {selectedTransactions.length}. Transactions: {visibleTransactions.length}. Refunds: {visibleRefunds.length}.
+          </p>
         </div>
 
         <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-3 2xl:flex 2xl:flex-wrap 2xl:justify-end">
@@ -1147,6 +1607,12 @@ export default function MoneyTransactionsTable({
       {toast && (
         <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${toast.type === "success" ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-100" : "border-red-300/20 bg-red-500/10 text-red-100"}`}>
           {toast.message}
+        </div>
+      )}
+
+      {refundsError && (
+        <div className="mb-4 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100">
+          Refund rows could not be loaded: {refundsError}
         </div>
       )}
 
@@ -1188,6 +1654,7 @@ export default function MoneyTransactionsTable({
                   <option className="bg-[#11111f] text-white" value="bank_unmatched">Bank unmatched</option>
                   <option className="bg-[#11111f] text-white" value="personal_unpaid">Personal funds unpaid</option>
                   <option className="bg-[#11111f] text-white" value="funding">Funding linked</option>
+                  <option className="bg-[#11111f] text-white" value="refunds">Refunds only</option>
                 </select>
 
                 <select
@@ -1244,13 +1711,117 @@ export default function MoneyTransactionsTable({
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20"><p className="text-xs font-black text-emerald-100/70">Money In</p><p className="mt-1 text-lg font-black text-white">{money(totals.income)}</p></div>
-        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20"><p className="text-xs font-black text-red-100/70">Money Out</p><p className="mt-1 text-lg font-black text-white">{money(totals.expense)}</p></div>
-        <div className="rounded-2xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20"><p className="text-xs font-black text-sky-100/70">Balance in view</p><p className="mt-1 text-lg font-black text-white">{money(totals.income - totals.expense)}</p></div>
-        <div className="rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20"><p className="text-xs font-black text-amber-100/70">Unchecked</p><p className="mt-1 text-lg font-black text-white">{totals.unchecked}</p></div>
-        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20"><p className="text-xs font-black text-red-100/70">Receipt overdue</p><p className="mt-1 text-lg font-black text-white">{totals.overdueReceipts}</p><p className="mt-1 text-[11px] font-bold text-red-100/55">after {activeReceiptReminderDays} days</p></div>
-        <div className="rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20"><p className="text-xs font-black text-orange-100/70">Unpaid personal</p><p className="mt-1 text-lg font-black text-white">{money(totals.unpaidPersonal)}</p></div>
+      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-8">
+        <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20">
+          <p className="text-xs font-black text-emerald-100/70">
+            Money In
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(moneyInIncludingCompletedRefunds)}
+          </p>
+
+          {refundTotals.receivedBack > 0 ? (
+            <p className="mt-1 text-[11px] font-bold text-emerald-100/55">
+              Includes {money(refundTotals.receivedBack)} completed refund
+              {refundTotals.receivedBack === 1 ? "" : "s"} received back
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20">
+          <p className="text-xs font-black text-red-100/70">
+            Money Out
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(moneyOutIncludingCompletedRefunds)}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-red-100/55">
+            Excludes personal funds until paid back
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20">
+          <p className="text-xs font-black text-sky-100/70">
+            Available balance in view
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(availableBalanceInView)}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-sky-100/55">
+            Matches tracker rules and includes completed refunds
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-cyan-500/10 p-3 ring-1 ring-cyan-300/20">
+          <p className="text-xs font-black text-cyan-100/70">
+            Refunds received back
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(refundTotals.receivedBack)}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-cyan-100/55">
+            Added into Money In when completed
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-purple-500/10 p-3 ring-1 ring-purple-300/20">
+          <p className="text-xs font-black text-purple-100/70">
+            Refunds sent back
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(refundTotals.sentBack)}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-purple-100/55">
+            Added into Money Out when completed
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20">
+          <p className="text-xs font-black text-amber-100/70">
+            Unchecked
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {totals.unchecked}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20">
+          <p className="text-xs font-black text-red-100/70">
+            Receipt overdue
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {totals.overdueReceipts}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-red-100/55">
+            after {activeReceiptReminderDays} days
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20">
+          <p className="text-xs font-black text-orange-100/70">
+            Unpaid personal
+          </p>
+
+          <p className="mt-1 text-lg font-black text-white">
+            {money(totals.unpaidPersonal)}
+          </p>
+
+          <p className="mt-1 text-[11px] font-bold text-orange-100/55">
+            Not removed from available balance yet
+          </p>
+        </div>
       </div>
 
       {selectedTransactions.length > 0 && (
@@ -1270,18 +1841,24 @@ export default function MoneyTransactionsTable({
         </div>
       )}
 
-      {loading ? (
+      {loading || refundsLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-white/10" />)}
         </div>
-      ) : visibleTransactions.length === 0 ? (
+      ) : visibleTrackingRows.length === 0 ? (
         <div className="rounded-2xl bg-black/20 p-8 text-center text-sm text-white/60">
           <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-white/35" />
           No transactions found for {selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)}.
         </div>
       ) : (
         <>
-          <div className="grid gap-3 xl:hidden">{visibleTransactions.map(renderMobileCard)}</div>
+          <div className="grid gap-3 xl:hidden">
+            {visibleTrackingRows.map((row) =>
+              row.kind === "transaction"
+                ? renderMobileCard(row.item)
+                : renderMobileRefundCard(row.item)
+            )}
+          </div>
 
           <div className="hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full">
             <table className="w-full min-w-[2250px] text-sm">
@@ -1309,7 +1886,141 @@ export default function MoneyTransactionsTable({
               </thead>
 
               <tbody>
-                {visibleTransactions.map((item) => {
+                {visibleTrackingRows.map((row) => {
+                  if (row.kind === "refund") {
+                    const refund = row.item;
+
+                    return (
+                      <tr
+                        key={`refund-${refund.id}`}
+                        className="border-t border-cyan-300/20 bg-cyan-500/[0.06]"
+                      >
+                        <ColumnCell column="select" className="p-3 align-top">
+                          <span className="text-white/25">—</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="reference" className="whitespace-nowrap p-3 align-top">
+                          <span className="inline-flex rounded-xl bg-cyan-500/15 px-3 py-1 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20">
+                            {refundReference(refund)}
+                          </span>
+                        </ColumnCell>
+
+                        <ColumnCell column="date" className="whitespace-nowrap p-3 align-top">
+                          {none(refund.refund_date)}
+                        </ColumnCell>
+
+                        <ColumnCell column="title" className="max-w-[240px] p-3 align-top">
+                          <p className="break-words font-semibold text-white">
+                            {refund.title}
+                          </p>
+
+                          {refund.notes ? (
+                            <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
+                              {refund.notes}
+                            </p>
+                          ) : null}
+
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            <Badge className={refundTypeBadgeClass(refund)}>
+                              {refundTypeLabel(refund)}
+                            </Badge>
+
+                            <Badge className={refundStatusBadgeClass(refund.status)}>
+                              {refundStatusLabel(refund.status)}
+                            </Badge>
+                          </div>
+                        </ColumnCell>
+
+                        <ColumnCell column="type" className="whitespace-nowrap p-3 align-top">
+                          <span className="font-bold text-cyan-100">
+                            {refundTypeLabel(refund)}
+                          </span>
+                        </ColumnCell>
+
+                        <ColumnCell column="amount" className="whitespace-nowrap p-3 text-right align-top font-bold text-cyan-100">
+                          <div>{money(refund.amount_pence)}</div>
+                          <div className="mt-1 text-xs font-semibold text-cyan-200/70">
+                            Separate refund total
+                          </div>
+                        </ColumnCell>
+
+                        <ColumnCell column="funding" className="p-3 align-top">
+                          <span className="text-white/40">None</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="fundingNote" className="p-3 align-top">
+                          <span className="text-white/40">None</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="supplier" className="max-w-[220px] p-3 align-top">
+                          {refund.supplier?.supplier_name ? (
+                            <p className="break-words text-xs font-semibold text-white/85">
+                              {refund.supplier.supplier_name}
+                            </p>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
+                        </ColumnCell>
+
+                        <ColumnCell column="personal" className="p-3 align-top">
+                          <span className="text-white/40">None</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="paidBy" className="p-3 align-top">
+                          <span className="text-white/40">None</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="repayment" className="p-3 align-top">
+                          <span className="text-white/40">Not applicable</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="payment" className="whitespace-nowrap p-3 align-top">
+                          Refund
+                        </ColumnCell>
+
+                        <ColumnCell column="bank" className="p-3 align-top">
+                          <span className="text-white/40">Managed in Refund Tracker</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="receipt" className="p-3 align-top">
+                          <span className="text-white/40">Not applicable</span>
+                        </ColumnCell>
+
+                        <ColumnCell column="finance" className="p-3 align-top">
+                          {refund.original_transaction?.title ? (
+                            <div>
+                              <p className="text-xs font-bold text-cyan-100">
+                                Linked transaction
+                              </p>
+                              <p className="mt-1 max-w-[220px] break-words text-xs text-white/55">
+                                {refund.original_transaction.title}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-white/40">No linked transaction</span>
+                          )}
+                        </ColumnCell>
+
+                        <ColumnCell column="checked" className="p-3 align-top">
+                          <Badge className={refundStatusBadgeClass(refund.status)}>
+                            {refundStatusLabel(refund.status)}
+                          </Badge>
+                        </ColumnCell>
+
+                        <ColumnCell column="actions" className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">
+                          <Link
+                            href="/admin/money/refunds"
+                            className="inline-flex items-center justify-center rounded-xl bg-cyan-500/15 p-2 text-cyan-100 transition hover:bg-cyan-500/25"
+                            title="Open Refund Tracker"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Link>
+                        </ColumnCell>
+                      </tr>
+                    );
+                  }
+
+                  const item = row.item;
                   const isPersonal = isPersonalFundsTransaction(item);
                   const hasFunding = isSponsorshipTransaction(item);
                   const fundingRecord = getFundingForTransaction(item);

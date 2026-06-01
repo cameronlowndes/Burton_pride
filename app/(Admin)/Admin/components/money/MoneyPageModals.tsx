@@ -1,6 +1,11 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import {
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import type {
   LoanInterestFormState,
@@ -88,6 +93,21 @@ type MoneyPageModalsProps = {
   setDeleteId: Dispatch<SetStateAction<string | null>>;
   onHidePayment: () => Promise<void>;
 
+  /**
+   * Optional refund soft-delete popup.
+   *
+   * These props allow the main Tracking Money table to open a matching
+   * custom popup when a refund row is moved to Deleted Refunds.
+   *
+   * They are optional so the page will continue compiling before the
+   * refund wiring is added to useMoneyTransactionsPage.ts.
+   */
+  deleteRefundId?: string | null;
+  deleteRefundTitle?: string | null;
+  deletingRefund?: boolean;
+  setDeleteRefundId?: Dispatch<SetStateAction<string | null>>;
+  onHideRefund?: () => Promise<void>;
+
   deleteAllOpen: boolean;
   transactionsLength: number;
   deletingAll: boolean;
@@ -110,6 +130,102 @@ type MoneyPageModalsProps = {
   onCloseLoanInterest: () => void;
   onSaveLoanInterest: () => Promise<void>;
 };
+
+function RefundSoftDeleteModal({
+  refundId,
+  refundTitle,
+  deleting,
+  onClose,
+  onConfirm,
+}: {
+  refundId: string | null;
+  refundTitle: string | null;
+  deleting: boolean;
+  onClose: () => void;
+  onConfirm?: () => Promise<void>;
+}) {
+  if (!refundId) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
+      <section className="w-full max-w-lg overflow-hidden rounded-[22px] border border-white/10 bg-[#10101f] shadow-2xl shadow-black/50">
+        <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 text-rose-200">
+              <Trash2 className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
+                Refund Tracker
+              </p>
+
+              <h2 className="mt-1 text-lg font-bold text-white">
+                Move refund to Deleted Refunds?
+              </h2>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={deleting}
+            className="rounded-lg border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Close refund deletion popup"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        <div className="px-5 py-5">
+          <p className="text-sm leading-6 text-slate-300">
+            Move{" "}
+            <span className="font-bold text-white">
+              {refundTitle || "this refund"}
+            </span>{" "}
+            to Deleted Refunds?
+          </p>
+
+          <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
+            This is a soft delete. The refund will stop affecting the
+            available Burton Pride balance, but it can be restored later
+            from the Deleted Refunds page.
+          </div>
+
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={deleting}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Keep Refund
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void onConfirm?.()}
+              disabled={deleting || !onConfirm}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RotateCcw
+                className={`h-4 w-4 ${
+                  deleting ? "animate-spin" : ""
+                }`}
+              />
+
+              {deleting
+                ? "Moving Refund..."
+                : "Move to Deleted Refunds"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 export default function MoneyPageModals({
   sponsorFormOpen,
@@ -152,6 +268,12 @@ export default function MoneyPageModals({
   setDeleteId,
   onHidePayment,
 
+  deleteRefundId = null,
+  deleteRefundTitle = null,
+  deletingRefund = false,
+  setDeleteRefundId,
+  onHideRefund,
+
   deleteAllOpen,
   transactionsLength,
   deletingAll,
@@ -175,61 +297,71 @@ export default function MoneyPageModals({
   onSaveLoanInterest,
 }: MoneyPageModalsProps) {
   return (
-    <MoneyModals
-      sponsorFormOpen={sponsorFormOpen}
-      editingSponsor={editingSponsor}
-      sponsorForm={sponsorForm}
-      setSponsorForm={setSponsorForm}
-      savingSponsor={savingSponsor}
-      onCloseSponsorForm={onCloseSponsorForm}
-      onSaveSponsor={onSaveSponsor}
-      supplierFormOpen={supplierFormOpen}
-      editingSupplier={editingSupplier}
-      supplierForm={supplierForm}
-      setSupplierForm={setSupplierForm}
-      savingSupplier={savingSupplier}
-      onCloseSupplierForm={onCloseSupplierForm}
-      onSaveSupplier={onSaveSupplier}
-      deleteSupplierId={deleteSupplierId}
-      setDeleteSupplierId={setDeleteSupplierId}
-      deletingSupplier={deletingSupplier}
-      onCloseDeleteSupplier={() => setDeleteSupplierId?.(null)}
-      onDeleteSupplier={onDeleteSupplier}
-      deleteYearOpen={deleteYearOpen}
-      selectedYear={selectedYear}
-      yearTransactionsLength={yearTransactionsLength}
-      deletingYear={deletingYear}
-      deleteYearPassword={deleteYearPassword}
-      setDeleteYearPassword={setDeleteYearPassword}
-      onCloseDeleteYear={onCloseDeleteYear}
-      onDeleteYear={onDeleteYear}
-      deleteSponsorId={deleteSponsorId}
-      deletingSponsor={deletingSponsor}
-      onCloseDeleteSponsor={() => setDeleteSponsorId(null)}
-      onDeleteSponsor={onDeleteSponsor}
-      deleteId={deleteId}
-      deleting={deleting}
-      onCloseHidePayment={() => setDeleteId(null)}
-      onHidePayment={onHidePayment}
-      deleteAllOpen={deleteAllOpen}
-      transactionsLength={transactionsLength}
-      deletingAll={deletingAll}
-      deleteAllPassword={deleteAllPassword}
-      setDeleteAllPassword={setDeleteAllPassword}
-      onCloseDeleteAll={onCloseDeleteAll}
-      onDeleteAll={onDeleteAll}
-      loanRepaymentSponsor={loanRepaymentSponsor}
-      loanRepaymentForm={loanRepaymentForm}
-      setLoanRepaymentForm={setLoanRepaymentForm}
-      savingLoanRepayment={savingLoanRepayment}
-      onCloseLoanRepayment={onCloseLoanRepayment}
-      onSaveLoanRepayment={onSaveLoanRepayment}
-      loanInterestSponsor={loanInterestSponsor}
-      loanInterestForm={loanInterestForm}
-      setLoanInterestForm={setLoanInterestForm}
-      savingLoanInterest={savingLoanInterest}
-      onCloseLoanInterest={onCloseLoanInterest}
-      onSaveLoanInterest={onSaveLoanInterest}
-    />
+    <>
+      <MoneyModals
+        sponsorFormOpen={sponsorFormOpen}
+        editingSponsor={editingSponsor}
+        sponsorForm={sponsorForm}
+        setSponsorForm={setSponsorForm}
+        savingSponsor={savingSponsor}
+        onCloseSponsorForm={onCloseSponsorForm}
+        onSaveSponsor={onSaveSponsor}
+        supplierFormOpen={supplierFormOpen}
+        editingSupplier={editingSupplier}
+        supplierForm={supplierForm}
+        setSupplierForm={setSupplierForm}
+        savingSupplier={savingSupplier}
+        onCloseSupplierForm={onCloseSupplierForm}
+        onSaveSupplier={onSaveSupplier}
+        deleteSupplierId={deleteSupplierId}
+        setDeleteSupplierId={setDeleteSupplierId}
+        deletingSupplier={deletingSupplier}
+        onCloseDeleteSupplier={() => setDeleteSupplierId?.(null)}
+        onDeleteSupplier={onDeleteSupplier}
+        deleteYearOpen={deleteYearOpen}
+        selectedYear={selectedYear}
+        yearTransactionsLength={yearTransactionsLength}
+        deletingYear={deletingYear}
+        deleteYearPassword={deleteYearPassword}
+        setDeleteYearPassword={setDeleteYearPassword}
+        onCloseDeleteYear={onCloseDeleteYear}
+        onDeleteYear={onDeleteYear}
+        deleteSponsorId={deleteSponsorId}
+        deletingSponsor={deletingSponsor}
+        onCloseDeleteSponsor={() => setDeleteSponsorId(null)}
+        onDeleteSponsor={onDeleteSponsor}
+        deleteId={deleteId}
+        deleting={deleting}
+        onCloseHidePayment={() => setDeleteId(null)}
+        onHidePayment={onHidePayment}
+        deleteAllOpen={deleteAllOpen}
+        transactionsLength={transactionsLength}
+        deletingAll={deletingAll}
+        deleteAllPassword={deleteAllPassword}
+        setDeleteAllPassword={setDeleteAllPassword}
+        onCloseDeleteAll={onCloseDeleteAll}
+        onDeleteAll={onDeleteAll}
+        loanRepaymentSponsor={loanRepaymentSponsor}
+        loanRepaymentForm={loanRepaymentForm}
+        setLoanRepaymentForm={setLoanRepaymentForm}
+        savingLoanRepayment={savingLoanRepayment}
+        onCloseLoanRepayment={onCloseLoanRepayment}
+        onSaveLoanRepayment={onSaveLoanRepayment}
+        loanInterestSponsor={loanInterestSponsor}
+        loanInterestForm={loanInterestForm}
+        setLoanInterestForm={setLoanInterestForm}
+        savingLoanInterest={savingLoanInterest}
+        onCloseLoanInterest={onCloseLoanInterest}
+        onSaveLoanInterest={onSaveLoanInterest}
+      />
+
+      <RefundSoftDeleteModal
+        refundId={deleteRefundId}
+        refundTitle={deleteRefundTitle}
+        deleting={deletingRefund}
+        onClose={() => setDeleteRefundId?.(null)}
+        onConfirm={onHideRefund}
+      />
+    </>
   );
 }

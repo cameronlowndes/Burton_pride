@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Coins, RefreshCcw } from "lucide-react";
+import {
+  ArrowRight,
+  Banknote,
+  Coins,
+  RefreshCcw,
+  RotateCcw,
+} from "lucide-react";
 
 import MoneyHeader from "../../components/money/MoneyHeader";
 import MoneyStatsCards from "../../components/money/MoneySummaryCards";
@@ -13,7 +19,6 @@ import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown"
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
-import ManualBankBalanceCheck from "../../components/money/ManualBankBalanceCheck";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
@@ -43,7 +48,7 @@ export default function MoneyTransactionsPage() {
                 Website payments are not synced automatically when this page
                 loads. Use this button when you want to pull Stripe website
                 payments into the money tracker, including donations, raffle,
-                Windows of Hope, vendor fees, sponsorship, and future payment
+                Windows of Hope, vendor fees, sponsorship and future payment
                 types. Manual entries will stay separate.
               </p>
             </div>
@@ -66,17 +71,17 @@ export default function MoneyTransactionsPage() {
             </button>
           </div>
 
-          {money.stripeSyncMessage && (
+          {money.stripeSyncMessage ? (
             <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
               {money.stripeSyncMessage}
             </div>
-          )}
+          ) : null}
 
-          {money.stripeSyncError && (
+          {money.stripeSyncError ? (
             <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100">
               {money.stripeSyncError}
             </div>
-          )}
+          ) : null}
         </section>
 
         <MoneyPageStatus
@@ -106,12 +111,12 @@ export default function MoneyTransactionsPage() {
             </h2>
 
             <p className="max-w-3xl text-sm leading-6 text-white/60">
-              Extra tools for tracking cash fundraising and keeping Burton
-              Pride accounts clear.
+              Extra tools for tracking cash fundraising, refunds and Burton
+              Pride accounts clearly.
             </p>
           </div>
 
-          <div className="grid gap-4">
+          <div className="grid gap-4 lg:grid-cols-2">
             <Link
               href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
               className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
@@ -126,11 +131,64 @@ export default function MoneyTransactionsPage() {
 
               <p className="mt-2 text-sm leading-6 text-white/60">
                 Track cash fundraising days, starting cash, money received,
-                money banked, cash spent, who counted it, and any difference.
+                money banked, cash spent, who counted it and any difference.
               </p>
 
               <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-amber-100">
                 Open cash tracker
+
+                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/Refunds"
+              className="group rounded-3xl border border-violet-300/20 bg-violet-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-violet-500/20"
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/20 text-violet-100 ring-1 ring-violet-300/20">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+
+              <h3 className="text-xl font-black text-white">
+                Refund Tracker
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Track money returned to Burton Pride and money refunded back
+                to other people separately from ordinary income and expenses.
+                Money received back is added into the available Burton Pride
+                balance without being counted as new income.
+              </p>
+
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-100">
+                Open refund tracker
+
+                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/BankBalanceCheck"
+              className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-sky-500/20"
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20">
+                <Banknote className="h-6 w-6" />
+              </div>
+
+              <h3 className="text-xl font-black text-white">
+                Manual Bank Balance Check
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Open the dedicated page to compare the real bank statement
+                balance with Burton Pride Money In, including completed
+                refunds received back. Save each check with the person who
+                completed it.
+              </p>
+
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-sky-100">
+                Open bank balance check
+
                 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
             </Link>
@@ -157,11 +215,6 @@ export default function MoneyTransactionsPage() {
         />
 
         <MoneyStatsCards totals={money.totals} />
-
-        <ManualBankBalanceCheck
-          selectedYear={money.selectedYear}
-          trackerBalancePence={money.totals.balance}
-        />
 
         <MoneyCarryForwardNote
           selectedYear={money.selectedYear}
@@ -190,7 +243,11 @@ export default function MoneyTransactionsPage() {
             editingTransaction={money.editingTransaction}
             displaySponsors={money.displaySponsors}
             yearlySponsorBreakdown={money.yearlySponsorBreakdown}
-            displaySuppliers={(money as any).displaySuppliers || (money as any).suppliers || []}
+            displaySuppliers={
+              (money as any).displaySuppliers ||
+              (money as any).suppliers ||
+              []
+            }
             openNewSupplierForm={(money as any).openNewSupplierForm}
             saving={money.saving}
             handleSubmit={money.handleSubmit}

@@ -81,6 +81,18 @@ const actionOptions = [
   { value: "saving_target_restore", label: "Saving target restored" },
   { value: "mark_paid_back", label: "Marked paid back" },
   { value: "mark_not_paid_back", label: "Marked not paid back" },
+
+  { value: "refund_created", label: "Refund created" },
+  { value: "refund_update", label: "Refund updated" },
+  { value: "refund_hide", label: "Refund hidden" },
+  { value: "refund_restore", label: "Refund restored" },
+  { value: "refund_cancel", label: "Refund cancelled" },
+  { value: "refund_mark_completed", label: "Refund completed" },
+  { value: "refund_mark_pending", label: "Refund pending" },
+  {
+    value: "refund_permanently_deleted",
+    label: "Refund permanently deleted",
+  },
 ];
 
 function formatDateTime(value: string | null | undefined) {
@@ -243,11 +255,31 @@ function isCheckedAuditLog(log: MoneyAuditLog) {
 }
 
 
+function isRefundAuditLog(log: MoneyAuditLog) {
+  const action = normaliseText(log.action);
+  const area = normaliseText(log.metadata?.area);
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+  const entityType = normaliseText(log.metadata?.entity_type);
+  const recordType = normaliseText(log.metadata?.record_type);
+
+  return (
+    action.startsWith("refund_") ||
+    area.includes("refund") ||
+    source.includes("refund") ||
+    route.includes("/refunds") ||
+    entityType === "refund" ||
+    recordType === "refund" ||
+    Boolean(log.metadata?.refund_id) ||
+    Boolean(log.metadata?.deleted_refund)
+  );
+}
+
 function isSavingTargetAuditLog(log: MoneyAuditLog) {
   const action = normaliseText(log.action);
   const area = normaliseText(log.metadata?.area);
   const source = normaliseText(log.metadata?.source);
-  const title = normaliseText(getTransactionTitle(log));
+  const title = normaliseText(getRecordTitle(log));
 
   return (
     action.startsWith("saving_target") ||
@@ -263,7 +295,7 @@ function isBudgetPlanningAuditLog(log: MoneyAuditLog) {
   const area = normaliseText(log.metadata?.area);
   const source = normaliseText(log.metadata?.source);
   const route = normaliseText(log.metadata?.route);
-  const title = normaliseText(getTransactionTitle(log));
+  const title = normaliseText(getRecordTitle(log));
 
   return (
     action.startsWith("budget") ||
@@ -288,6 +320,7 @@ function isDeletedAreaAuditLog(log: MoneyAuditLog) {
 }
 
 function getAuditArea(log: MoneyAuditLog) {
+  if (isRefundAuditLog(log)) return "Refund Tracker";
   if (isSavingTargetAuditLog(log)) return "Saving Targets";
   if (isBudgetPlanningAuditLog(log)) return "Budget Planning";
   if (isDeletedAreaAuditLog(log)) return "Deleted Area";
@@ -303,6 +336,26 @@ function getAuditArea(log: MoneyAuditLog) {
 
 function getRiskLevel(log: MoneyAuditLog) {
   const action = normaliseText(log.action);
+
+  if (action === "refund_permanently_deleted") {
+    return "High";
+  }
+
+  if (
+    action === "refund_hide" ||
+    action === "refund_restore" ||
+    action === "refund_cancel"
+  ) {
+    return "Medium";
+  }
+
+  if (
+    action === "refund_mark_completed" ||
+    action === "refund_mark_pending" ||
+    action === "refund_update"
+  ) {
+    return "Medium";
+  }
 
   if (
     action.includes("delete_all") ||
@@ -359,6 +412,15 @@ function actionLabel(action: string, log?: MoneyAuditLog) {
     saving_target_restore: "Saving Target Restored",
     mark_paid_back: "Marked Paid Back",
     mark_not_paid_back: "Marked Not Paid Back",
+
+    refund_created: "Refund Created",
+    refund_update: "Refund Updated",
+    refund_hide: "Refund Hidden",
+    refund_restore: "Refund Restored",
+    refund_cancel: "Refund Cancelled",
+    refund_mark_completed: "Refund Completed",
+    refund_mark_pending: "Refund Pending",
+    refund_permanently_deleted: "Refund Permanently Deleted",
   };
 
   return labels[action] || action.replaceAll("_", " ");
@@ -375,6 +437,30 @@ function actionClass(action: string, log?: MoneyAuditLog) {
   }
 
   if (log && isCheckedAuditLog(log)) {
+    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
+  }
+
+  if (action.startsWith("refund_")) {
+    if (action === "refund_permanently_deleted") {
+      return "bg-red-500/15 text-red-100 ring-red-300/20";
+    }
+
+    if (action === "refund_hide") {
+      return "bg-orange-500/15 text-orange-100 ring-orange-300/20";
+    }
+
+    if (action === "refund_restore") {
+      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+    }
+
+    if (action === "refund_cancel" || action === "refund_mark_pending") {
+      return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+    }
+
+    if (action === "refund_created" || action === "refund_mark_completed") {
+      return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+    }
+
     return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
   }
 
@@ -439,6 +525,19 @@ function actionExcelColour(action: string, log?: MoneyAuditLog) {
   if (log && isUncheckedAuditLog(log)) return "FFD97706";
   if (log && isCheckedAuditLog(log)) return "FF0891B2";
 
+  if (action.startsWith("refund_")) {
+    if (action === "refund_permanently_deleted") return "FFB91C1C";
+    if (action === "refund_hide") return "FFEA580C";
+    if (action === "refund_restore") return "FF7C3AED";
+    if (action === "refund_cancel" || action === "refund_mark_pending") {
+      return "FFD97706";
+    }
+    if (action === "refund_created" || action === "refund_mark_completed") {
+      return "FF047857";
+    }
+    return "FF0891B2";
+  }
+
   if (action.includes("saving_target")) {
     if (action.includes("delete") || action.includes("soft_delete")) return "FFB91C1C";
     if (action.includes("restore")) return "FF7C3AED";
@@ -471,6 +570,22 @@ function actionIcon(action: string, log?: MoneyAuditLog) {
   if (log && isHiddenAuditLog(log)) return Eye;
   if (log && isUncheckedAuditLog(log)) return RotateCcw;
   if (log && isCheckedAuditLog(log)) return ShieldCheck;
+
+  if (action.startsWith("refund_")) {
+    if (
+      action === "refund_permanently_deleted" ||
+      action === "refund_hide"
+    ) {
+      return Trash2;
+    }
+
+    if (action === "refund_restore") return RotateCcw;
+    if (action === "refund_cancel") return AlertTriangle;
+    if (action === "refund_mark_completed") return CheckCircle2;
+    if (action === "refund_mark_pending") return Clock3;
+
+    return Activity;
+  }
 
   if (action.includes("saving_target")) return Target;
   if (action.includes("budget")) return BarChart3;
@@ -542,7 +657,7 @@ function isWebsiteGeneratedLog(log: MoneyAuditLog) {
   const route = normaliseText(log.metadata?.route);
   const createdFrom = normaliseText(log.metadata?.created_from);
   const auditEvent = normaliseText(log.metadata?.audit_event);
-  const title = normaliseText(getTransactionTitle(log));
+  const title = normaliseText(getRecordTitle(log));
 
   return (
     source.includes("stripe donation sync") ||
@@ -654,6 +769,7 @@ function getSourceLabel(log: MoneyAuditLog) {
   const source = log.metadata?.source;
   const route = log.metadata?.route;
 
+  if (isRefundAuditLog(log)) return "Refund Tracker";
   if (source === "money_tracker") return "Money Tracker";
   if (source) return String(source).replaceAll("_", " ");
   if (route) return String(route);
@@ -661,12 +777,34 @@ function getSourceLabel(log: MoneyAuditLog) {
   return "—";
 }
 
-function getTransactionTitle(log: MoneyAuditLog) {
+function getRecordTitle(log: MoneyAuditLog) {
+  const metadataRefund =
+    log.metadata?.deleted_refund ||
+    log.metadata?.refund ||
+    log.metadata?.record ||
+    null;
+
   return (
-    log.transaction_title ||
-    log.after_data?.title ||
-    log.before_data?.title ||
-    "Untitled transaction"
+    cleanLogValue(log.transaction_title) ||
+    cleanLogValue(log.metadata?.refund_description) ||
+    cleanLogValue(metadataRefund?.title) ||
+    cleanLogValue(log.after_data?.title) ||
+    cleanLogValue(log.before_data?.title) ||
+    (isRefundAuditLog(log) ? "Refund record" : "Untitled record")
+  );
+}
+
+function getRecordId(log: MoneyAuditLog) {
+  return (
+    cleanLogValue(log.transaction_id) ||
+    getMetadataValue(log, [
+      "refund_id",
+      "entity_id",
+      "record_id",
+      "transaction_id",
+      "budget_item_id",
+      "saving_target_id",
+    ])
   );
 }
 
@@ -912,7 +1050,17 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       !isHiddenAuditLog(log) &&
       (log.action === "delete" ||
         log.action === "delete_year" ||
-        log.action === "delete_all"),
+        log.action === "delete_all" ||
+        log.action === "refund_permanently_deleted"),
+  ).length;
+
+  const refundLogs = logs.filter((log) => isRefundAuditLog(log)).length;
+  const refundHidden = logs.filter((log) => log.action === "refund_hide").length;
+  const refundDeleted = logs.filter(
+    (log) => log.action === "refund_permanently_deleted",
+  ).length;
+  const refundRestored = logs.filter(
+    (log) => log.action === "refund_restore",
   ).length;
 
   return [
@@ -969,6 +1117,26 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
           log.action === "mark_not_paid_back",
       ).length,
       notes: "Personal funds repayment status changes.",
+    },
+    {
+      label: "Refund logs",
+      value: refundLogs,
+      notes: "All refund tracker actions.",
+    },
+    {
+      label: "Refunds hidden",
+      value: refundHidden,
+      notes: "Refunds moved into Deleted Refunds.",
+    },
+    {
+      label: "Refunds permanently deleted",
+      value: refundDeleted,
+      notes: "Refund records permanently removed from Supabase.",
+    },
+    {
+      label: "Refunds restored",
+      value: refundRestored,
+      notes: "Refunds returned to the active Refund Tracker.",
     },
     {
       label: "Unique users",
@@ -1135,7 +1303,7 @@ export default function MoneyAuditLogsPage() {
         return (
           log.action?.toLowerCase().includes(q) ||
           actionLabel(log.action, log).toLowerCase().includes(q) ||
-          getTransactionTitle(log).toLowerCase().includes(q) ||
+          getRecordTitle(log).toLowerCase().includes(q) ||
           log.transaction_id?.toLowerCase().includes(q) ||
           getActorDisplayName(log).toLowerCase().includes(q) ||
           getActorEmailDisplay(log).toLowerCase().includes(q) ||
@@ -1191,7 +1359,7 @@ export default function MoneyAuditLogsPage() {
       }
 
       if (sortMode === "transaction") {
-        return getTransactionTitle(a).localeCompare(getTransactionTitle(b));
+        return getRecordTitle(a).localeCompare(getRecordTitle(b));
       }
 
       return 0;
@@ -1219,7 +1387,8 @@ export default function MoneyAuditLogsPage() {
         !isHiddenAuditLog(log) &&
         (log.action === "delete" ||
           log.action === "delete_year" ||
-          log.action === "delete_all"),
+          log.action === "delete_all" ||
+          log.action === "refund_permanently_deleted"),
     ).length;
 
     return {
@@ -1236,7 +1405,17 @@ export default function MoneyAuditLogsPage() {
       unchecked: logs.filter((log) => isUncheckedAuditLog(log)).length,
       hidden,
       deleted,
-      restored: logs.filter((log) => log.action === "restore").length,
+      restored: logs.filter(
+        (log) => log.action === "restore" || log.action === "refund_restore",
+      ).length,
+      refundLogs: logs.filter((log) => isRefundAuditLog(log)).length,
+      refundsHidden: logs.filter((log) => log.action === "refund_hide").length,
+      refundsDeleted: logs.filter(
+        (log) => log.action === "refund_permanently_deleted",
+      ).length,
+      refundsRestored: logs.filter(
+        (log) => log.action === "refund_restore",
+      ).length,
       paidBack: logs.filter(
         (log) =>
           log.action === "mark_paid_back" ||
@@ -1561,7 +1740,9 @@ export default function MoneyAuditLogsPage() {
                   View every money tracker action, including creates, edits,
                   checks, hidden soft-deletes, saving target changes, budget
                   tracker updates, restore actions, selected-year deletes,
-                  delete-all actions, personal funds paid-back changes, and main-admin comments explaining why changes were made.
+                  delete-all actions, refund tracker actions, permanent refund
+                  deletions, personal funds paid-back changes, and main-admin
+                  comments explaining why changes were made.
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -1673,6 +1854,22 @@ export default function MoneyAuditLogsPage() {
           <StatCard label="Saving Targets" value={stats.savingTargets} tone="sky" />
           <StatCard label="Budget Logs" value={stats.budgetPlanning} tone="purple" />
           <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
+          <StatCard label="Refund Logs" value={stats.refundLogs} tone="cyan" />
+          <StatCard
+            label="Refunds Hidden"
+            value={stats.refundsHidden}
+            tone="orange"
+          />
+          <StatCard
+            label="Refunds Deleted"
+            value={stats.refundsDeleted}
+            tone="red"
+          />
+          <StatCard
+            label="Refunds Restored"
+            value={stats.refundsRestored}
+            tone="purple"
+          />
           <StatCard label="Auto Website" value={stats.automated} tone="emerald" />
           <StatCard label="Comments" value={stats.comments} tone="amber" />
           <StatCard label="Users" value={stats.uniqueUsers} tone="white" />
@@ -1686,7 +1883,8 @@ export default function MoneyAuditLogsPage() {
             </div>
             <p className="text-3xl font-black text-white">{stats.highRisk}</p>
             <p className="mt-2 text-sm leading-6 text-red-100/75">
-              High-risk actions include deletes, soft-deletes, delete-year and delete-all records.
+              High-risk actions include deletes, permanent refund deletions,
+              soft-deletes, delete-year and delete-all records.
             </p>
           </div>
 
@@ -1721,7 +1919,7 @@ export default function MoneyAuditLogsPage() {
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by transaction, user, email, action, comment, changed field, route, or raw data..."
+                placeholder="Search by record, refund, transaction, user, email, action, comment, changed field, route, or raw data..."
                 className="w-full rounded-2xl bg-black/30 py-3 pl-11 pr-4 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-purple-300/40"
               />
             </div>
@@ -1774,7 +1972,7 @@ export default function MoneyAuditLogsPage() {
                   Sort by action
                 </option>
                 <option className="bg-[#11111f] text-white" value="transaction">
-                  Sort by transaction
+                  Sort by record
                 </option>
               </select>
 
@@ -1962,6 +2160,15 @@ export default function MoneyAuditLogsPage() {
 
             <button
               type="button"
+              onClick={() => setSelectedArea("Refund Tracker")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/20"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Refund logs
+            </button>
+
+            <button
+              type="button"
               onClick={clearFilters}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
             >
@@ -2008,7 +2215,7 @@ export default function MoneyAuditLogsPage() {
                     <tr>
                       <th className="p-3 text-left">When</th>
                       <th className="p-3 text-left">Action</th>
-                      <th className="p-3 text-left">Transaction</th>
+                      <th className="p-3 text-left">Record</th>
                       <th className="p-3 text-left">Who</th>
                       <th className="p-3 text-left">Area</th>
                       <th className="p-3 text-left">Risk</th>
@@ -2053,12 +2260,12 @@ export default function MoneyAuditLogsPage() {
 
                           <td className="max-w-[280px] p-3">
                             <p className="break-words font-bold text-white">
-                              {getTransactionTitle(log)}
+                              {getRecordTitle(log)}
                             </p>
 
-                            {log.transaction_id && (
+                            {getRecordId(log) && (
                               <p className="mt-1 break-all text-xs text-white/35">
-                                {log.transaction_id}
+                                {getRecordId(log)}
                               </p>
                             )}
                           </td>
@@ -2184,7 +2391,7 @@ export default function MoneyAuditLogsPage() {
                       </div>
 
                       <h3 className="break-words font-bold">
-                        {getTransactionTitle(log)}
+                        {getRecordTitle(log)}
                       </h3>
 
                       <p className="mt-1 text-xs text-white/45">
@@ -2306,6 +2513,14 @@ export default function MoneyAuditLogsPage() {
             <strong>{stats.paidBack}</strong>
           </div>
           <div>
+            <span>Refund Logs</span>
+            <strong>{stats.refundLogs}</strong>
+          </div>
+          <div>
+            <span>Refunds Deleted</span>
+            <strong>{stats.refundsDeleted}</strong>
+          </div>
+          <div>
             <span>Users</span>
             <strong>{stats.uniqueUsers}</strong>
           </div>
@@ -2316,7 +2531,7 @@ export default function MoneyAuditLogsPage() {
             <tr>
               <th>When</th>
               <th>Action</th>
-              <th>Transaction</th>
+              <th>Record</th>
               <th>Who</th>
               <th>Changed Fields</th>
               <th>Main Admin Comment</th>
@@ -2343,9 +2558,9 @@ export default function MoneyAuditLogsPage() {
                       </span>
                     </td>
                     <td>
-                      <strong>{getTransactionTitle(log)}</strong>
-                      {log.transaction_id && (
-                        <small>{log.transaction_id}</small>
+                      <strong>{getRecordTitle(log)}</strong>
+                      {getRecordId(log) && (
+                        <small>{getRecordId(log)}</small>
                       )}
                     </td>
                     <td>
@@ -2690,7 +2905,7 @@ export default function MoneyAuditLogsPage() {
                   </div>
 
                   <h2 className="break-words text-2xl font-black">
-                    {getTransactionTitle(selectedLog)}
+                    {getRecordTitle(selectedLog)}
                   </h2>
 
                   <p className="mt-1 text-sm text-white/50">
@@ -2730,9 +2945,9 @@ export default function MoneyAuditLogsPage() {
                 />
 
                 <InfoCard
-                  label="Transaction"
-                  title={getTransactionTitle(selectedLog)}
-                  subtitle={selectedLog.transaction_id || "No transaction ID"}
+                  label="Record"
+                  title={getRecordTitle(selectedLog)}
+                  subtitle={getRecordId(selectedLog) || "No record ID saved"}
                   icon={<FileText className="h-5 w-5" />}
                 />
 
