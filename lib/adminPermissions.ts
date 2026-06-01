@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type AdminRole = "main_admin" | "admin" | "editor";
@@ -27,6 +27,7 @@ export type AdminPermissionKey =
   | "money:sync_website_payments"
   | "money:print_reports"
   | "money:export_reports"
+  | "money:manage_refunds"
   | "donations:view"
   | "donations:manage"
   | "raffle:view"
@@ -59,6 +60,7 @@ export type AdminPermissions = {
   canSyncWebsitePayments: boolean;
   canPrintReports: boolean;
   canExportReports: boolean;
+  canManageRefunds: boolean;
 
   canViewDonations: boolean;
   canManageDonations: boolean;
@@ -90,6 +92,33 @@ type PermissionRow = {
     | null;
 };
 
+type AdminLookupReason =
+  | "ok"
+  | "missing_clerk_session"
+  | "admin_users_query_failed"
+  | "admin_record_missing"
+  | "admin_record_inactive"
+  | "admin_record_duplicate"
+  | "admin_role_invalid";
+
+export type AdminLookupResult =
+  | {
+      ok: true;
+      reason: "ok";
+      userId: string;
+      sessionId: string;
+      admin: CurrentAdmin;
+    }
+  | {
+      ok: false;
+      reason: Exclude<AdminLookupReason, "ok">;
+      userId: string | null;
+      sessionId: string | null;
+      message: string;
+      likelyFix: string;
+      details?: Record<string, unknown>;
+    };
+
 export const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
   "admin:users:manage",
@@ -107,6 +136,7 @@ export const ALL_PERMISSION_KEYS = [
   "money:sync_website_payments",
   "money:print_reports",
   "money:export_reports",
+  "money:manage_refunds",
 
   "donations:view",
   "donations:manage",
@@ -138,6 +168,7 @@ const PERMISSION_KEYS = {
   canSyncWebsitePayments: "money:sync_website_payments",
   canPrintReports: "money:print_reports",
   canExportReports: "money:export_reports",
+  canManageRefunds: "money:manage_refunds",
 
   canViewDonations: "donations:view",
   canManageDonations: "donations:manage",
@@ -169,6 +200,7 @@ const NORMAL_ADMIN_DEFAULTS: AdminPermissions = {
   canSyncWebsitePayments: false,
   canPrintReports: false,
   canExportReports: false,
+  canManageRefunds: false,
 
   canViewDonations: false,
   canManageDonations: false,
@@ -222,27 +254,240 @@ function isAdminPermissionKey(value: string): value is AdminPermissionKey {
   return (ALL_PERMISSION_KEYS as readonly string[]).includes(value);
 }
 
-export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
-  const { userId } = await auth();
+function isAdminRole(value: unknown): value is AdminRole {
+  return value === "main_admin" || value === "admin" || value === "editor";
+}
 
-  if (!userId) return null;
+function maskClerkUserId(value: string | null | undefined) {
+  if (!value) return null;
+
+  if (value.length <= 12) {
+    return `${value.slice(0, 4)}…`;
+  }
+
+  return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
+async function getSignedInEmail() {
+  try {
+    const user = await currentUser();
+
+    return (
+      user?.primaryEmailAddress?.emailAddress ||
+      user?.emailAddresses?.[0]?.emailAddress ||
+      null
+    );
+  } catch (error) {
+    console.warn("Could not load Clerk user email for admin diagnostics:", error);
+    return null;
+  }
+}
+
+/**
+ * Load the current signed-in admin with detailed failure information.
+ *
+ * This is deliberately stricter than the old helper:
+ * - A missing Clerk session is reported separately.
+ * - A Supabase query problem is reported separately.
+ * - Missing and inactive admin rows are reported separately.
+ * - A matching email with a different Clerk user ID is reported as a likely
+ *   development-to-production Clerk migration issue.
+ *
+ * Never automatically grant access by email. The Clerk user ID remains the
+ * security boundary.
+ */
+export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
+  const { userId, sessionId } = await auth();
+
+  if (!userId || !sessionId) {
+    return {
+      ok: false,
+      reason: "missing_clerk_session",
+      userId: userId || null,
+      sessionId: sessionId || null,
+      message: "No active Clerk login session was received.",
+      likelyFix:
+        "Sign out and sign back in. If this only fails on one device, check Clerk production keys, the Clerk production domain and browser session cookies.",
+    };
+  }
 
   const { data, error } = await supabaseAdmin
     .from("admin_users")
     .select("id, clerk_user_id, email, role, is_active")
     .eq("clerk_user_id", userId)
-    .maybeSingle();
+    .limit(2);
 
   if (error) {
-    console.error("getCurrentAdmin error:", error);
+    console.error("getCurrentAdminLookup admin_users query failed:", error);
+
+    return {
+      ok: false,
+      reason: "admin_users_query_failed",
+      userId,
+      sessionId,
+      message: "The admin user lookup failed in Supabase.",
+      likelyFix:
+        "Check that public.admin_users exists and includes id, clerk_user_id, email, role and is_active.",
+      details: {
+        supabaseMessage: error.message,
+        supabaseCode: error.code || null,
+        maskedClerkUserId: maskClerkUserId(userId),
+      },
+    };
+  }
+
+  const rows = (data || []) as CurrentAdmin[];
+
+  if (rows.length > 1) {
+    console.error("Duplicate admin_users rows found for Clerk user ID:", {
+      maskedClerkUserId: maskClerkUserId(userId),
+      count: rows.length,
+    });
+
+    return {
+      ok: false,
+      reason: "admin_record_duplicate",
+      userId,
+      sessionId,
+      message: "More than one admin record exists for this Clerk user ID.",
+      likelyFix:
+        "Remove duplicate rows from public.admin_users and add a unique constraint to clerk_user_id.",
+      details: {
+        maskedClerkUserId: maskClerkUserId(userId),
+        matchingRows: rows.length,
+      },
+    };
+  }
+
+  const admin = rows[0];
+
+  if (!admin) {
+    const signedInEmail = await getSignedInEmail();
+
+    let matchingEmailRow:
+      | {
+          id: string;
+          clerk_user_id: string;
+          email: string | null;
+          role: string;
+          is_active: boolean;
+        }
+      | undefined;
+
+    if (signedInEmail) {
+      const { data: emailMatches, error: emailLookupError } =
+        await supabaseAdmin
+          .from("admin_users")
+          .select("id, clerk_user_id, email, role, is_active")
+          .ilike("email", signedInEmail)
+          .limit(1);
+
+      if (emailLookupError) {
+        console.warn(
+          "Could not check whether an admin_users row matches the signed-in email:",
+          emailLookupError
+        );
+      } else {
+        matchingEmailRow = (emailMatches || [])[0] as
+          | {
+              id: string;
+              clerk_user_id: string;
+              email: string | null;
+              role: string;
+              is_active: boolean;
+            }
+          | undefined;
+      }
+    }
+
+    const hasDifferentClerkId =
+      Boolean(matchingEmailRow?.clerk_user_id) &&
+      matchingEmailRow?.clerk_user_id !== userId;
+
+    return {
+      ok: false,
+      reason: "admin_record_missing",
+      userId,
+      sessionId,
+      message: hasDifferentClerkId
+        ? "You are signed in, but the Supabase admin row still uses a different Clerk user ID."
+        : "You are signed in, but no matching admin record exists in Supabase.",
+      likelyFix: hasDifferentClerkId
+        ? "Update public.admin_users.clerk_user_id to the Clerk production user ID for this account. Do not grant access by email alone."
+        : "Create or update the public.admin_users row so clerk_user_id matches the current Clerk production user ID and is_active is true.",
+      details: {
+        signedInEmail: signedInEmail || null,
+        maskedCurrentClerkUserId: maskClerkUserId(userId),
+        hasEmailMatchWithDifferentClerkId: hasDifferentClerkId,
+        maskedStoredClerkUserId: matchingEmailRow
+          ? maskClerkUserId(matchingEmailRow.clerk_user_id)
+          : null,
+        matchingEmailRowIsActive: matchingEmailRow?.is_active ?? null,
+      },
+    };
+  }
+
+  if (admin.is_active !== true) {
+    return {
+      ok: false,
+      reason: "admin_record_inactive",
+      userId,
+      sessionId,
+      message: "Your admin record exists but is inactive.",
+      likelyFix:
+        "Set public.admin_users.is_active to true for this Clerk production user ID.",
+      details: {
+        adminId: admin.id,
+        maskedClerkUserId: maskClerkUserId(userId),
+      },
+    };
+  }
+
+  if (!isAdminRole(admin.role)) {
+    return {
+      ok: false,
+      reason: "admin_role_invalid",
+      userId,
+      sessionId,
+      message: "Your admin record has an invalid role value.",
+      likelyFix:
+        'Set public.admin_users.role to "main_admin", "admin" or "editor".',
+      details: {
+        adminId: admin.id,
+        receivedRole: admin.role,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    reason: "ok",
+    userId,
+    sessionId,
+    admin,
+  };
+}
+
+/**
+ * Backwards-compatible helper used by existing files.
+ *
+ * Existing pages and API routes can keep importing getCurrentAdmin().
+ * New diagnostic API routes should prefer getCurrentAdminLookup().
+ */
+export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
+  const result = await getCurrentAdminLookup();
+
+  if (!result.ok) {
+    console.warn("getCurrentAdmin denied access:", {
+      reason: result.reason,
+      message: result.message,
+      details: result.details || null,
+    });
+
     return null;
   }
 
-  if (!data || data.is_active !== true) {
-    return null;
-  }
-
-  return data as CurrentAdmin;
+  return result.admin;
 }
 
 export async function hasPermission(
@@ -318,7 +563,6 @@ export async function getCurrentAdminPermissions(): Promise<CurrentAdminWithPerm
   }
 
   const rows = (data || []) as PermissionRow[];
-
   const permissionKeys = new Set<AdminPermissionKey>();
 
   /**
@@ -396,6 +640,7 @@ export async function requirePermission(permissionKey: keyof AdminPermissions) {
  * - requireAdminPermission("site_pages:manage")
  * - requireAdminPermission("raffle:view")
  * - requireAdminPermission("money:delete_all")
+ * - requireAdminPermission("money:manage_refunds")
  */
 export async function requireAdminPermission(permissionKey: AdminPermissionKey) {
   const admin = await requireAdmin();
