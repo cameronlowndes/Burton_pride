@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { auth } from "@clerk/nextjs/server";
+import {
+  requireAdmin,
+  requireAdminPermission,
+} from "@/lib/adminPermissions";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
- * Helper: normalize href (fix missing / issue)
+ * Helper: normalize href
  */
 function normalizeHref(value: unknown) {
   if (!value) return null;
@@ -25,98 +31,155 @@ function normalizeHref(value: unknown) {
   return `/${href}`;
 }
 
+function cleanBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase().trim();
+
+    if (lowered === "true") return true;
+    if (lowered === "false") return false;
+  }
+
+  return fallback;
+}
+
+function cleanNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 /**
  * GET sidebar items
+ *
+ * Any active admin can load sidebar items.
+ * The sidebar component then hides links based on permissions.
  */
 export async function GET() {
-  const { userId } = await auth();
+  try {
+    await requireAdmin();
 
-  if (!userId) {
+    const { data, error } = await supabaseAdmin
+      .from("admin_sidebar_items")
+      .select("*")
+      .order("parent_id", { ascending: true, nullsFirst: true })
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message || "Failed to load sidebar items",
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      items: data || [],
+    });
+  } catch (error: any) {
+    console.error("GET /api/admin/sidebar error:", error);
+
     return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 }
+      {
+        ok: false,
+        error:
+          error?.message === "Unauthorized"
+            ? "Unauthorized"
+            : error?.message || "Forbidden",
+      },
+      { status: error?.message === "Unauthorized" ? 401 : 403 }
     );
   }
-
-  const supabase = supabaseAdmin; // ✅ FIXED
-
-  const { data, error } = await supabase
-    .from("admin_sidebar_items")
-    .select("*")
-    .order("parent_id", { ascending: true, nullsFirst: true })
-    .order("sort_order", { ascending: true });
-
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true, items: data });
 }
 
 /**
  * CREATE sidebar item
+ *
+ * Only admins with Manage Site Pages can change sidebar/navigation.
  */
 export async function POST(req: Request) {
-  const { userId } = await auth();
+  try {
+    await requireAdminPermission("site_pages:manage");
 
-  if (!userId) {
+    const body = await req.json().catch(() => ({}));
+
+    const label = String(body.label || "").trim();
+    const href = normalizeHref(body.href);
+    const item_type = body.item_type === "group" ? "group" : "link";
+    const parent_id =
+      body.parent_id && String(body.parent_id).trim().length > 0
+        ? String(body.parent_id)
+        : null;
+
+    const sort_order = cleanNumber(body.sort_order, 0);
+    const is_enabled = cleanBoolean(body.is_enabled, true);
+    const open_in_new_tab = cleanBoolean(body.open_in_new_tab, false);
+    const icon = body.icon ? String(body.icon).trim() : null;
+
+    if (!label) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Label is required",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (item_type === "link" && !href) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Link must have a URL",
+        },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("admin_sidebar_items")
+      .insert({
+        label,
+        href,
+        item_type,
+        parent_id,
+        sort_order,
+        is_enabled,
+        open_in_new_tab,
+        icon,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message || "Failed to create sidebar item",
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      item: data,
+    });
+  } catch (error: any) {
+    console.error("POST /api/admin/sidebar error:", error);
+
     return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 }
+      {
+        ok: false,
+        error:
+          error?.message === "Unauthorized"
+            ? "Unauthorized"
+            : error?.message || "Forbidden",
+      },
+      { status: error?.message === "Unauthorized" ? 401 : 403 }
     );
   }
-
-  const body = await req.json();
-  const supabase = supabaseAdmin; // ✅ FIXED
-
-  const label = String(body.label || "").trim();
-  const href = normalizeHref(body.href);
-  const item_type = body.item_type === "group" ? "group" : "link";
-  const parent_id =
-    body.parent_id && String(body.parent_id).trim().length > 0
-      ? String(body.parent_id)
-      : null;
-  const sort_order = Number(body.sort_order ?? 0);
-  const is_enabled = Boolean(body.is_enabled ?? true);
-  const icon = body.icon || null;
-
-  if (!label) {
-    return NextResponse.json(
-      { ok: false, error: "Label is required" },
-      { status: 400 }
-    );
-  }
-
-  if (item_type === "link" && !href) {
-    return NextResponse.json(
-      { ok: false, error: "Link must have a URL" },
-      { status: 400 }
-    );
-  }
-
-  const { data, error } = await supabase
-    .from("admin_sidebar_items")
-    .insert({
-      label,
-      href,
-      item_type,
-      parent_id,
-      sort_order,
-      is_enabled,
-      icon,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true, item: data });
 }

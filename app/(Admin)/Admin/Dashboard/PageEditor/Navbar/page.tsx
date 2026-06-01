@@ -1,13 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Mail, ShieldAlert } from "lucide-react";
-import NavbarManagerClient from "./NavbarManagerClient"; // ✅ FIXED
-import { requireMainAdmin } from "@/lib/isMainAdmin";
+
+import NavbarManagerClient from "./NavbarManagerClient";
+import { requireAdminPermission } from "@/lib/adminPermissions";
+
+export const dynamic = "force-dynamic";
 
 export default async function NavbarManagerPage() {
   const { userId } = await auth();
 
-  // ❌ Not logged in
   if (!userId) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
@@ -21,16 +23,16 @@ export default async function NavbarManagerPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-7 text-white/85 sm:text-base">
-            You need to be signed in with the correct admin account to access the
-            navbar manager.
+            You need to be signed in with an authorised admin account to access
+            the navbar manager.
           </p>
 
           <div className="mt-8">
             <Link
-              href="/Admin/Dashboard"
+              href="/Admin/Login"
               className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
             >
-              Go to dashboard
+              Go to login
             </Link>
           </div>
         </div>
@@ -38,9 +40,14 @@ export default async function NavbarManagerPage() {
     );
   }
 
-  // ✅ Check main admin
   try {
-    await requireMainAdmin();
+    /*
+      New permissions system:
+      - Main admins automatically pass this check.
+      - Other admins must have site_pages:manage enabled in Admin Users.
+      - This replaces the old hardcoded main-admin-only check.
+    */
+    await requireAdminPermission("site_pages:manage");
   } catch {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
@@ -52,14 +59,14 @@ export default async function NavbarManagerPage() {
             </div>
 
             <h1 className="mt-5 text-3xl font-bold tracking-tight sm:text-5xl">
-              Main admin only
+              Permission required
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85 sm:text-base">
-              This section is restricted to the main admin of the website.
-              Changes made here directly affect the website navigation (navbar).
-              If you need a link added, removed, or updated, please contact
-              Cameron with the details and reason.
+              This section controls the public website navigation bar. You need
+              the{" "}
+              <span className="font-bold text-white">Manage Site Pages</span>{" "}
+              permission to access it.
             </p>
           </div>
 
@@ -68,12 +75,13 @@ export default async function NavbarManagerPage() {
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/10">
                 <ShieldAlert className="h-5 w-5 text-white/90" />
               </div>
+
               <h2 className="text-lg font-semibold">Why access is limited</h2>
+
               <p className="mt-2 text-sm leading-6 text-white/75">
-                This page is restricted to prevent accidental or unauthorised
-                changes to the navbar. If everyone had access, navigation links
-                could be changed or removed without proper reason, causing issues
-                for users and the team.
+                Navbar manager access is controlled through Admin Users &
+                Permissions because changes here affect public website
+                navigation.
               </p>
             </div>
 
@@ -81,11 +89,12 @@ export default async function NavbarManagerPage() {
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/10">
                 <Mail className="h-5 w-5 text-white/90" />
               </div>
-              <h2 className="text-lg font-semibold">Need a change made?</h2>
+
+              <h2 className="text-lg font-semibold">Need access?</h2>
+
               <p className="mt-2 text-sm leading-6 text-white/75">
-                Please contact Cameron with full details of the navbar change,
-                including what links need to be added, removed, or updated, and
-                the reason behind it.
+                Ask a main admin to open Admin Users & Permissions and tick
+                Manage Site Pages for your account.
               </p>
             </div>
           </div>
@@ -101,11 +110,11 @@ export default async function NavbarManagerPage() {
               </Link>
 
               <a
-                href="mailto:info@burtonpride.co.uk"
+                href="mailto:cameronlowndes@burtonpride.co.uk?subject=Navbar%20manager%20permission%20request"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-yellow-300/30 bg-yellow-400/15 px-5 py-3 text-sm font-semibold text-yellow-50 transition hover:bg-yellow-400/20"
               >
                 <Mail className="h-4 w-4" />
-                Contact team
+                Contact Cameron
               </a>
             </div>
           </div>
@@ -114,6 +123,5 @@ export default async function NavbarManagerPage() {
     );
   }
 
-  // ✅ Allowed
   return <NavbarManagerClient />;
 }

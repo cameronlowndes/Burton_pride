@@ -1,26 +1,33 @@
+
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ExcelJS from "exceljs";
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Bug,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   Clipboard,
   Clock3,
-  Download,
+  Database,
   Eye,
   FileSpreadsheet,
   FileText,
   Filter,
   Mail,
+  Layers3,
+  Loader2,
+  MessageSquare,
   RefreshCcw,
   RotateCcw,
   Search,
+  Save,
   ShieldCheck,
+  Target,
   Trash2,
   UserRound,
   X,
@@ -35,24 +42,57 @@ type MoneyAuditLog = {
   actor_user_id: string | null;
   actor_name: string | null;
   actor_email: string | null;
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_user_id?: string | null;
   before_data: any;
   after_data: any;
   changed_fields: any;
   metadata: any;
+  admin_comment?: string | null;
+  admin_comment_updated_at?: string | null;
+  admin_comment_updated_by?: string | null;
+  admin_comment_updated_by_email?: string | null;
 };
 
 type SortMode = "newest" | "oldest" | "action" | "transaction";
+type YearFilter = "all" | string;
+type RiskFilter = "all" | "High" | "Medium" | "Low";
+type AreaFilter = "all" | string;
 
 const actionOptions = [
   { value: "all", label: "All actions" },
   { value: "create", label: "Created" },
   { value: "edit", label: "Edited" },
-  { value: "delete", label: "Deleted one" },
+  { value: "checked", label: "Checked" },
+  { value: "unchecked", label: "Unchecked" },
+  { value: "delete", label: "Hidden / deleted" },
   { value: "delete_year", label: "Deleted year" },
   { value: "delete_all", label: "Deleted all" },
   { value: "restore", label: "Restored" },
+  { value: "budget_update", label: "Budget updated" },
+  { value: "budget_item_soft_delete", label: "Budget item soft deleted" },
+  { value: "budget_item_delete", label: "Budget item deleted" },
+  { value: "budget_item_restore", label: "Budget item restored" },
+  { value: "saving_target_create", label: "Saving target created" },
+  { value: "saving_target_update", label: "Saving target updated" },
+  { value: "saving_target_soft_delete", label: "Saving target soft deleted" },
+  { value: "saving_target_delete", label: "Saving target deleted" },
+  { value: "saving_target_restore", label: "Saving target restored" },
   { value: "mark_paid_back", label: "Marked paid back" },
   { value: "mark_not_paid_back", label: "Marked not paid back" },
+
+  { value: "refund_created", label: "Refund created" },
+  { value: "refund_update", label: "Refund updated" },
+  { value: "refund_hide", label: "Refund hidden" },
+  { value: "refund_restore", label: "Refund restored" },
+  { value: "refund_cancel", label: "Refund cancelled" },
+  { value: "refund_mark_completed", label: "Refund completed" },
+  { value: "refund_mark_pending", label: "Refund pending" },
+  {
+    value: "refund_permanently_deleted",
+    label: "Refund permanently deleted",
+  },
 ];
 
 function formatDateTime(value: string | null | undefined) {
@@ -88,20 +128,366 @@ function formatDateOnly(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
-function actionLabel(action: string) {
-  if (action === "create") return "Created";
-  if (action === "edit") return "Edited";
-  if (action === "delete") return "Deleted";
-  if (action === "delete_year") return "Deleted Year";
-  if (action === "delete_all") return "Deleted All";
-  if (action === "restore") return "Restored";
-  if (action === "mark_paid_back") return "Marked Paid Back";
-  if (action === "mark_not_paid_back") return "Marked Not Paid Back";
+function getYearOnly(value: string | null | undefined) {
+  if (!value) return "";
 
-  return action.replaceAll("_", " ");
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return String(date.getFullYear());
 }
 
-function actionClass(action: string) {
+function isHiddenAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
+
+  if (action !== "delete") return false;
+
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const source = String(log.metadata?.source || "").toLowerCase();
+
+  const isMoneyTransactionRoute =
+    route.includes("/api/admin/money/transactions") ||
+    route.includes("/admin/money/transactions");
+
+  const isPermanentDelete =
+    route.includes("/permanent") ||
+    log.metadata?.permanentDelete === true ||
+    log.metadata?.permanent_delete === true;
+
+  const hasSoftDeleteFlag =
+    log.metadata?.softDelete === true ||
+    log.metadata?.soft_delete === true ||
+    log.after_data?.deleted_at ||
+    log.after_data?.deleted_by ||
+    log.changed_fields?.deleted_at ||
+    log.changed_fields?.deleted_by;
+
+  if (isPermanentDelete) return false;
+
+  return (
+    source === "money_tracker" || isMoneyTransactionRoute || hasSoftDeleteFlag
+  );
+}
+
+function isUncheckedAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
+
+  if (action !== "edit") return false;
+
+  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const changedFields = log.changed_fields || {};
+
+  const checkedAtChange = changedFields.checked_at;
+  const checkedByChange = changedFields.checked_by;
+  const afterCheckedAt = checkedAtChange?.after;
+  const beforeCheckedAt = checkedAtChange?.before;
+
+  const hasCheckedRoute =
+    route.includes("/checked") ||
+    route.includes("/check") ||
+    route.includes("checked");
+
+  const hasUncheckedMetadata =
+    auditEvent === "unchecked" ||
+    auditEvent === "uncheck" ||
+    log.metadata?.unchecked === true ||
+    Boolean(log.metadata?.unchecked_at);
+
+  const hasUncheckedFields =
+    Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
+    Boolean(beforeCheckedAt) &&
+    (afterCheckedAt === null || afterCheckedAt === undefined || afterCheckedAt === "");
+
+  const hasClearedCheckedBy =
+    Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
+    Boolean(checkedByChange?.before) &&
+    (checkedByChange?.after === null ||
+      checkedByChange?.after === undefined ||
+      checkedByChange?.after === "");
+
+  return hasUncheckedMetadata || (hasCheckedRoute && (hasUncheckedFields || hasClearedCheckedBy));
+}
+
+function isCheckedAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "")
+    .toLowerCase()
+    .trim();
+
+  if (action !== "edit") return false;
+  if (isUncheckedAuditLog(log)) return false;
+
+  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
+  const metadataAction = String(log.metadata?.action || "").toLowerCase();
+  const route = String(log.metadata?.route || "").toLowerCase();
+  const changedFields = log.changed_fields || {};
+
+  const checkedAtChange = changedFields.checked_at;
+  const afterCheckedAt = checkedAtChange?.after;
+
+  const hasCheckedRoute =
+    route.includes("/checked") ||
+    route.includes("/check") ||
+    route.includes("checked");
+
+  const hasCheckedMetadata =
+    auditEvent === "checked" ||
+    metadataAction.includes("checked") ||
+    log.metadata?.checked === true ||
+    log.metadata?.mark_checked === true ||
+    Boolean(log.metadata?.checked_at);
+
+  const hasCheckedFields =
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
+      Boolean(afterCheckedAt)) ||
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
+      Boolean(changedFields.checked_by?.after)) ||
+    (Object.prototype.hasOwnProperty.call(changedFields, "checked") &&
+      Boolean(changedFields.checked?.after)) ||
+    Boolean(log.after_data?.checked_at) ||
+    Boolean(log.after_data?.checked_by);
+
+  return hasCheckedMetadata || (hasCheckedRoute && hasCheckedFields);
+}
+
+
+function isRefundAuditLog(log: MoneyAuditLog) {
+  const action = normaliseText(log.action);
+  const area = normaliseText(log.metadata?.area);
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+  const entityType = normaliseText(log.metadata?.entity_type);
+  const recordType = normaliseText(log.metadata?.record_type);
+
+  return (
+    action.startsWith("refund_") ||
+    area.includes("refund") ||
+    source.includes("refund") ||
+    route.includes("/refunds") ||
+    entityType === "refund" ||
+    recordType === "refund" ||
+    Boolean(log.metadata?.refund_id) ||
+    Boolean(log.metadata?.deleted_refund)
+  );
+}
+
+function isSavingTargetAuditLog(log: MoneyAuditLog) {
+  const action = normaliseText(log.action);
+  const area = normaliseText(log.metadata?.area);
+  const source = normaliseText(log.metadata?.source);
+  const title = normaliseText(getRecordTitle(log));
+
+  return (
+    action.startsWith("saving_target") ||
+    area.includes("saving") ||
+    source.includes("saving_targets") ||
+    source.includes("saving target") ||
+    title.includes("saving target")
+  );
+}
+
+function isBudgetPlanningAuditLog(log: MoneyAuditLog) {
+  const action = normaliseText(log.action);
+  const area = normaliseText(log.metadata?.area);
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+  const title = normaliseText(getRecordTitle(log));
+
+  return (
+    action.startsWith("budget") ||
+    area.includes("budget") ||
+    source.includes("budget") ||
+    route.includes("budget") ||
+    title.includes("budget planning") ||
+    title.includes("budget item")
+  );
+}
+
+function isDeletedAreaAuditLog(log: MoneyAuditLog) {
+  const area = normaliseText(log.metadata?.area);
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+
+  return (
+    area.includes("deleted_items") ||
+    source.includes("deleted_items") ||
+    route.includes("deleted-items")
+  );
+}
+
+function getAuditArea(log: MoneyAuditLog) {
+  if (isRefundAuditLog(log)) return "Refund Tracker";
+  if (isSavingTargetAuditLog(log)) return "Saving Targets";
+  if (isBudgetPlanningAuditLog(log)) return "Budget Planning";
+  if (isDeletedAreaAuditLog(log)) return "Deleted Area";
+  if (isWebsiteGeneratedLog(log)) return "Website / Stripe";
+  if (normaliseText(log.metadata?.area)) {
+    return String(log.metadata.area).replaceAll("_", " ");
+  }
+  if (normaliseText(log.metadata?.source)) {
+    return String(log.metadata.source).replaceAll("_", " ");
+  }
+  return "Money Tracker";
+}
+
+function getRiskLevel(log: MoneyAuditLog) {
+  const action = normaliseText(log.action);
+
+  if (action === "refund_permanently_deleted") {
+    return "High";
+  }
+
+  if (
+    action === "refund_hide" ||
+    action === "refund_restore" ||
+    action === "refund_cancel"
+  ) {
+    return "Medium";
+  }
+
+  if (
+    action === "refund_mark_completed" ||
+    action === "refund_mark_pending" ||
+    action === "refund_update"
+  ) {
+    return "Medium";
+  }
+
+  if (
+    action.includes("delete_all") ||
+    action.includes("delete_year") ||
+    action.includes("soft_delete") ||
+    action.includes("delete")
+  ) {
+    return "High";
+  }
+
+  if (
+    action.includes("restore") ||
+    action.includes("budget") ||
+    action.includes("saving_target") ||
+    action.includes("mark_paid_back") ||
+    action.includes("mark_not_paid_back")
+  ) {
+    return "Medium";
+  }
+
+  if (isCheckedAuditLog(log) || isUncheckedAuditLog(log)) {
+    return "Medium";
+  }
+
+  return "Low";
+}
+
+function riskClass(level: string) {
+  if (level === "High") return "bg-red-500/15 text-red-100 ring-red-300/20";
+  if (level === "Medium") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+}
+
+function actionLabel(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return "Hidden";
+  if (log && isUncheckedAuditLog(log)) return "Unchecked";
+  if (log && isCheckedAuditLog(log)) return "Checked";
+
+  const labels: Record<string, string> = {
+    create: "Created",
+    edit: "Edited",
+    delete: "Deleted",
+    delete_year: "Deleted Year",
+    delete_all: "Deleted All",
+    restore: "Restored",
+    budget_update: "Budget Updated",
+    budget_item_soft_delete: "Budget Item Hidden",
+    budget_item_delete: "Budget Item Hidden",
+    budget_item_restore: "Budget Item Restored",
+    saving_target_create: "Saving Target Created",
+    saving_target_update: "Saving Target Updated",
+    saving_target_soft_delete: "Saving Target Hidden",
+    saving_target_delete: "Saving Target Deleted",
+    saving_target_restore: "Saving Target Restored",
+    mark_paid_back: "Marked Paid Back",
+    mark_not_paid_back: "Marked Not Paid Back",
+
+    refund_created: "Refund Created",
+    refund_update: "Refund Updated",
+    refund_hide: "Refund Hidden",
+    refund_restore: "Refund Restored",
+    refund_cancel: "Refund Cancelled",
+    refund_mark_completed: "Refund Completed",
+    refund_mark_pending: "Refund Pending",
+    refund_permanently_deleted: "Refund Permanently Deleted",
+  };
+
+  return labels[action] || action.replaceAll("_", " ");
+}
+
+
+function actionClass(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) {
+    return "bg-orange-500/15 text-orange-200 ring-orange-300/20";
+  }
+
+  if (log && isUncheckedAuditLog(log)) {
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  }
+
+  if (log && isCheckedAuditLog(log)) {
+    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
+  }
+
+  if (action.startsWith("refund_")) {
+    if (action === "refund_permanently_deleted") {
+      return "bg-red-500/15 text-red-100 ring-red-300/20";
+    }
+
+    if (action === "refund_hide") {
+      return "bg-orange-500/15 text-orange-100 ring-orange-300/20";
+    }
+
+    if (action === "refund_restore") {
+      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+    }
+
+    if (action === "refund_cancel" || action === "refund_mark_pending") {
+      return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+    }
+
+    if (action === "refund_created" || action === "refund_mark_completed") {
+      return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+    }
+
+    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
+  }
+
+  if (action.includes("saving_target")) {
+    if (action.includes("delete") || action.includes("soft_delete")) {
+      return "bg-red-500/15 text-red-100 ring-red-300/20";
+    }
+
+    if (action.includes("restore")) {
+      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+    }
+
+    return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
+  }
+
+  if (action.includes("budget")) {
+    if (action.includes("delete") || action.includes("soft_delete")) {
+      return "bg-red-500/15 text-red-100 ring-red-300/20";
+    }
+
+    if (action.includes("restore")) {
+      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+    }
+
+    return "bg-indigo-500/15 text-indigo-100 ring-indigo-300/20";
+  }
+
   if (action === "create") {
     return "bg-emerald-500/15 text-emerald-200 ring-emerald-300/20";
   }
@@ -110,7 +496,11 @@ function actionClass(action: string) {
     return "bg-sky-500/15 text-sky-200 ring-sky-300/20";
   }
 
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return "bg-red-500/15 text-red-200 ring-red-300/20";
   }
 
@@ -129,10 +519,44 @@ function actionClass(action: string) {
   return "bg-white/10 text-white ring-white/10";
 }
 
-function actionExcelColour(action: string) {
+
+function actionExcelColour(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return "FFEA580C";
+  if (log && isUncheckedAuditLog(log)) return "FFD97706";
+  if (log && isCheckedAuditLog(log)) return "FF0891B2";
+
+  if (action.startsWith("refund_")) {
+    if (action === "refund_permanently_deleted") return "FFB91C1C";
+    if (action === "refund_hide") return "FFEA580C";
+    if (action === "refund_restore") return "FF7C3AED";
+    if (action === "refund_cancel" || action === "refund_mark_pending") {
+      return "FFD97706";
+    }
+    if (action === "refund_created" || action === "refund_mark_completed") {
+      return "FF047857";
+    }
+    return "FF0891B2";
+  }
+
+  if (action.includes("saving_target")) {
+    if (action.includes("delete") || action.includes("soft_delete")) return "FFB91C1C";
+    if (action.includes("restore")) return "FF7C3AED";
+    return "FF0284C7";
+  }
+
+  if (action.includes("budget")) {
+    if (action.includes("delete") || action.includes("soft_delete")) return "FFB91C1C";
+    if (action.includes("restore")) return "FF7C3AED";
+    return "FF4F46E5";
+  }
+
   if (action === "create") return "FF047857";
   if (action === "edit") return "FF0284C7";
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return "FFB91C1C";
   }
   if (action === "restore") return "FF7C3AED";
@@ -141,10 +565,38 @@ function actionExcelColour(action: string) {
   return "FF374151";
 }
 
-function actionIcon(action: string) {
+
+function actionIcon(action: string, log?: MoneyAuditLog) {
+  if (log && isHiddenAuditLog(log)) return Eye;
+  if (log && isUncheckedAuditLog(log)) return RotateCcw;
+  if (log && isCheckedAuditLog(log)) return ShieldCheck;
+
+  if (action.startsWith("refund_")) {
+    if (
+      action === "refund_permanently_deleted" ||
+      action === "refund_hide"
+    ) {
+      return Trash2;
+    }
+
+    if (action === "refund_restore") return RotateCcw;
+    if (action === "refund_cancel") return AlertTriangle;
+    if (action === "refund_mark_completed") return CheckCircle2;
+    if (action === "refund_mark_pending") return Clock3;
+
+    return Activity;
+  }
+
+  if (action.includes("saving_target")) return Target;
+  if (action.includes("budget")) return BarChart3;
+
   if (action === "create") return CheckCircle2;
   if (action === "edit") return FileText;
-  if (action === "delete" || action === "delete_year" || action === "delete_all") {
+  if (
+    action === "delete" ||
+    action === "delete_year" ||
+    action === "delete_all"
+  ) {
     return Trash2;
   }
   if (action === "restore") return RotateCcw;
@@ -153,6 +605,7 @@ function actionIcon(action: string) {
 
   return Activity;
 }
+
 
 function getChangedFieldNames(changedFields: any) {
   if (!changedFields || typeof changedFields !== "object") return [];
@@ -190,14 +643,133 @@ function nameFromEmail(email: string | null | undefined) {
     .trim();
 }
 
+function cleanLogValue(value: unknown) {
+  const text = String(value || "").trim();
+  return text || "";
+}
+
+function normaliseText(value: unknown) {
+  return cleanLogValue(value).toLowerCase();
+}
+
+function isWebsiteGeneratedLog(log: MoneyAuditLog) {
+  const source = normaliseText(log.metadata?.source);
+  const route = normaliseText(log.metadata?.route);
+  const createdFrom = normaliseText(log.metadata?.created_from);
+  const auditEvent = normaliseText(log.metadata?.audit_event);
+  const title = normaliseText(getRecordTitle(log));
+
+  return (
+    source.includes("stripe donation sync") ||
+    source.includes("stripe_sync") ||
+    source.includes("sync_stripe") ||
+    source.includes("website donation") ||
+    source.includes("website_donation") ||
+    source.includes("website_monthly_donation") ||
+    source.includes("donation sync") ||
+    route.includes("sync-stripe") ||
+    route.includes("stripe") ||
+    createdFrom.includes("sync-stripe") ||
+    auditEvent.includes("stripe") ||
+    (log.action === "create" && title.includes("donation"))
+  );
+}
+
+function getMetadataValue(log: MoneyAuditLog, keys: string[]) {
+  for (const key of keys) {
+    const value = cleanLogValue(log.metadata?.[key]);
+
+    if (value) return value;
+  }
+
+  return "";
+}
+
 function getActorDisplayName(log: MoneyAuditLog) {
-  return log.actor_name || nameFromEmail(log.actor_email) || "Unknown user";
+  if (isWebsiteGeneratedLog(log)) {
+    return "Website / Stripe Sync";
+  }
+
+  const directName =
+    cleanLogValue(log.actor_name) ||
+    cleanLogValue(log.created_by) ||
+    getMetadataValue(log, [
+      "actor_name",
+      "created_by",
+      "updated_by",
+      "createdBy",
+      "updatedBy",
+      "admin_name",
+      "user_name",
+    ]);
+
+  const directEmail =
+    cleanLogValue(log.actor_email) ||
+    cleanLogValue(log.created_by_email) ||
+    getMetadataValue(log, [
+      "actor_email",
+      "created_by_email",
+      "updated_by_email",
+      "createdByEmail",
+      "updatedByEmail",
+      "admin_email",
+      "user_email",
+    ]);
+
+  return directName || nameFromEmail(directEmail) || "Unknown user";
+}
+
+function getActorEmailDisplay(log: MoneyAuditLog) {
+  if (isWebsiteGeneratedLog(log)) {
+    return "Created automatically from the website / Stripe";
+  }
+
+  return (
+    cleanLogValue(log.actor_email) ||
+    cleanLogValue(log.created_by_email) ||
+    getMetadataValue(log, [
+      "actor_email",
+      "created_by_email",
+      "updated_by_email",
+      "createdByEmail",
+      "updatedByEmail",
+      "admin_email",
+      "user_email",
+    ])
+  );
+}
+
+function getActorUserIdDisplay(log: MoneyAuditLog) {
+  if (isWebsiteGeneratedLog(log)) {
+    return "website_automated_sync";
+  }
+
+  return (
+    cleanLogValue(log.actor_user_id) ||
+    cleanLogValue(log.created_by_user_id) ||
+    getMetadataValue(log, [
+      "actor_id",
+      "created_by_user_id",
+      "updated_by_user_id",
+      "user_id",
+      "admin_id",
+    ])
+  );
+}
+
+function getActorUniqueKey(log: MoneyAuditLog) {
+  return (
+    getActorEmailDisplay(log) ||
+    getActorUserIdDisplay(log) ||
+    getActorDisplayName(log)
+  );
 }
 
 function getSourceLabel(log: MoneyAuditLog) {
   const source = log.metadata?.source;
   const route = log.metadata?.route;
 
+  if (isRefundAuditLog(log)) return "Refund Tracker";
   if (source === "money_tracker") return "Money Tracker";
   if (source) return String(source).replaceAll("_", " ");
   if (route) return String(route);
@@ -205,12 +777,46 @@ function getSourceLabel(log: MoneyAuditLog) {
   return "—";
 }
 
-function getTransactionTitle(log: MoneyAuditLog) {
+function getRecordTitle(log: MoneyAuditLog) {
+  const metadataRefund =
+    log.metadata?.deleted_refund ||
+    log.metadata?.refund ||
+    log.metadata?.record ||
+    null;
+
   return (
-    log.transaction_title ||
-    log.after_data?.title ||
-    log.before_data?.title ||
-    "Untitled transaction"
+    cleanLogValue(log.transaction_title) ||
+    cleanLogValue(log.metadata?.refund_description) ||
+    cleanLogValue(metadataRefund?.title) ||
+    cleanLogValue(log.after_data?.title) ||
+    cleanLogValue(log.before_data?.title) ||
+    (isRefundAuditLog(log) ? "Refund record" : "Untitled record")
+  );
+}
+
+function getRecordId(log: MoneyAuditLog) {
+  return (
+    cleanLogValue(log.transaction_id) ||
+    getMetadataValue(log, [
+      "refund_id",
+      "entity_id",
+      "record_id",
+      "transaction_id",
+      "budget_item_id",
+      "saving_target_id",
+    ])
+  );
+}
+
+function getAuditComment(log: MoneyAuditLog) {
+  return cleanLogValue(log.admin_comment);
+}
+
+function getAuditCommentUpdatedBy(log: MoneyAuditLog) {
+  return (
+    cleanLogValue(log.admin_comment_updated_by) ||
+    nameFromEmail(log.admin_comment_updated_by_email) ||
+    "Main admin"
   );
 }
 
@@ -290,7 +896,7 @@ function styleSubtitleCell(cell: ExcelJS.Cell) {
   };
 }
 
-function styleSectionCell(cell: ExcelJS.Cell, colour = "FF7C3AED") {
+function styleSectionCell(cell: ExcelJS.Cell, colour = "FF334155") {
   cell.font = {
     bold: true,
     size: 13,
@@ -349,7 +955,7 @@ function addMergedTitle(
   worksheet: ExcelJS.Worksheet,
   text: string,
   fromCell: string,
-  toCell: string
+  toCell: string,
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -361,7 +967,7 @@ function addMergedSubtitle(
   worksheet: ExcelJS.Worksheet,
   text: string,
   fromCell: string,
-  toCell: string
+  toCell: string,
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -374,7 +980,7 @@ function addMergedSection(
   text: string,
   fromCell: string,
   toCell: string,
-  colour = "FF7C3AED"
+  colour = "FF7C3AED",
 ) {
   worksheet.mergeCells(`${fromCell}:${toCell}`);
   const cell = worksheet.getCell(fromCell);
@@ -382,7 +988,11 @@ function addMergedSection(
   styleSectionCell(cell, colour);
 }
 
-function styleActionCell(cell: ExcelJS.Cell, action: string) {
+function styleActionCell(
+  cell: ExcelJS.Cell,
+  action: string,
+  log?: MoneyAuditLog,
+) {
   cell.font = {
     bold: true,
     color: { argb: "FFFFFFFF" },
@@ -391,7 +1001,7 @@ function styleActionCell(cell: ExcelJS.Cell, action: string) {
   cell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: actionExcelColour(action) },
+    fgColor: { argb: actionExcelColour(action, log) },
   };
 
   cell.alignment = {
@@ -434,6 +1044,25 @@ function styleDangerCell(cell: ExcelJS.Cell) {
 }
 
 function makeSummaryRows(logs: MoneyAuditLog[]) {
+  const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
+  const deleted = logs.filter(
+    (log) =>
+      !isHiddenAuditLog(log) &&
+      (log.action === "delete" ||
+        log.action === "delete_year" ||
+        log.action === "delete_all" ||
+        log.action === "refund_permanently_deleted"),
+  ).length;
+
+  const refundLogs = logs.filter((log) => isRefundAuditLog(log)).length;
+  const refundHidden = logs.filter((log) => log.action === "refund_hide").length;
+  const refundDeleted = logs.filter(
+    (log) => log.action === "refund_permanently_deleted",
+  ).length;
+  const refundRestored = logs.filter(
+    (log) => log.action === "refund_restore",
+  ).length;
+
   return [
     {
       label: "Total logs",
@@ -447,18 +1076,33 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
     },
     {
       label: "Edited",
-      value: logs.filter((log) => log.action === "edit").length,
+      value: logs.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      ).length,
       notes: "Transactions or records edited.",
     },
     {
+      label: "Checked",
+      value: logs.filter((log) => isCheckedAuditLog(log)).length,
+      notes: "Transactions marked as checked.",
+    },
+    {
+      label: "Unchecked",
+      value: logs.filter((log) => isUncheckedAuditLog(log)).length,
+      notes: "Transactions where checked status was undone.",
+    },
+    {
+      label: "Hidden",
+      value: hidden,
+      notes: "Single money tracker transactions soft-deleted and hidden.",
+    },
+    {
       label: "Deleted",
-      value: logs.filter(
-        (log) =>
-          log.action === "delete" ||
-          log.action === "delete_year" ||
-          log.action === "delete_all"
-      ).length,
-      notes: "Single, selected-year, or full delete actions.",
+      value: deleted,
+      notes: "Permanent, selected-year, or full delete actions.",
     },
     {
       label: "Restored",
@@ -470,16 +1114,39 @@ function makeSummaryRows(logs: MoneyAuditLog[]) {
       value: logs.filter(
         (log) =>
           log.action === "mark_paid_back" ||
-          log.action === "mark_not_paid_back"
+          log.action === "mark_not_paid_back",
       ).length,
       notes: "Personal funds repayment status changes.",
+    },
+    {
+      label: "Refund logs",
+      value: refundLogs,
+      notes: "All refund tracker actions.",
+    },
+    {
+      label: "Refunds hidden",
+      value: refundHidden,
+      notes: "Refunds moved into Deleted Refunds.",
+    },
+    {
+      label: "Refunds permanently deleted",
+      value: refundDeleted,
+      notes: "Refund records permanently removed from Supabase.",
+    },
+    {
+      label: "Refunds restored",
+      value: refundRestored,
+      notes: "Refunds returned to the active Refund Tracker.",
     },
     {
       label: "Unique users",
       value: new Set(
         logs
-          .map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log))
-          .filter(Boolean)
+          .map(
+            (log) =>
+              getActorUniqueKey(log),
+          )
+          .filter(Boolean),
       ).size,
       notes: "Unique actors based on email, user ID, or display name.",
     },
@@ -492,14 +1159,27 @@ export default function MoneyAuditLogsPage() {
   const [selectedAction, setSelectedAction] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
+  const [selectedYear, setSelectedYear] = useState<YearFilter>(
+    () => String(new Date().getFullYear()),
+  );
+  const [selectedRisk, setSelectedRisk] = useState<RiskFilter>("all");
+  const [selectedArea, setSelectedArea] = useState<AreaFilter>("all");
+  const [selectedActor, setSelectedActor] = useState("all");
+  const [pageSize, setPageSize] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedLog, setSelectedLog] = useState<MoneyAuditLog | null>(null);
   const [copied, setCopied] = useState(false);
   const [showRawData, setShowRawData] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [savingComment, setSavingComment] = useState(false);
+  const [commentSaveError, setCommentSaveError] = useState("");
+  const [commentSaved, setCommentSaved] = useState(false);
 
   async function loadLogs() {
     try {
@@ -508,15 +1188,25 @@ export default function MoneyAuditLogsPage() {
       setErrorDetails(null);
 
       const params = new URLSearchParams();
-      params.set("limit", "500");
+      params.set("limit", "2000");
 
       if (selectedAction !== "all") {
-        params.set("action", selectedAction);
+        params.set(
+          "action",
+          (selectedAction === "checked" || selectedAction === "unchecked") ? "edit" : selectedAction,
+        );
       }
 
-      const res = await fetch(`/api/admin/money/audit-logs?${params.toString()}`, {
-        cache: "no-store",
-      });
+      if (selectedYear !== "all") {
+        params.set("year", selectedYear);
+      }
+
+      const res = await fetch(
+        `/api/admin/money/audit-logs?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
 
       const text = await res.text();
 
@@ -535,7 +1225,8 @@ export default function MoneyAuditLogsPage() {
         };
       }
 
-      setLogs(data.logs || []);
+      setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setLastRefreshed(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -547,10 +1238,63 @@ export default function MoneyAuditLogsPage() {
   useEffect(() => {
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAction]);
+  }, [selectedAction, selectedYear]);
+
+  useEffect(() => {
+    setCommentDraft(selectedLog ? getAuditComment(selectedLog) : "");
+    setCommentSaveError("");
+    setCommentSaved(false);
+  }, [selectedLog]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    selectedAction,
+    selectedYear,
+    selectedRisk,
+    selectedArea,
+    selectedActor,
+    searchTerm,
+    dateFrom,
+    dateTo,
+    sortMode,
+  ]);
 
   const filteredLogs = useMemo(() => {
     let rows = [...logs];
+
+    if (selectedAction === "checked") {
+      rows = rows.filter((log) => isCheckedAuditLog(log));
+    }
+
+    if (selectedAction === "unchecked") {
+      rows = rows.filter((log) => isUncheckedAuditLog(log));
+    }
+
+    if (selectedAction === "edit") {
+      rows = rows.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      );
+    }
+
+    if (selectedYear !== "all") {
+      rows = rows.filter((log) => getYearOnly(log.created_at) === selectedYear);
+    }
+
+    if (selectedRisk !== "all") {
+      rows = rows.filter((log) => getRiskLevel(log) === selectedRisk);
+    }
+
+    if (selectedArea !== "all") {
+      rows = rows.filter((log) => getAuditArea(log) === selectedArea);
+    }
+
+    if (selectedActor !== "all") {
+      rows = rows.filter((log) => getActorUniqueKey(log) === selectedActor);
+    }
 
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase().trim();
@@ -558,15 +1302,27 @@ export default function MoneyAuditLogsPage() {
       rows = rows.filter((log) => {
         return (
           log.action?.toLowerCase().includes(q) ||
-          actionLabel(log.action).toLowerCase().includes(q) ||
-          getTransactionTitle(log).toLowerCase().includes(q) ||
+          actionLabel(log.action, log).toLowerCase().includes(q) ||
+          getRecordTitle(log).toLowerCase().includes(q) ||
           log.transaction_id?.toLowerCase().includes(q) ||
           getActorDisplayName(log).toLowerCase().includes(q) ||
-          log.actor_email?.toLowerCase().includes(q) ||
-          JSON.stringify(log.changed_fields || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.metadata || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.before_data || {}).toLowerCase().includes(q) ||
-          JSON.stringify(log.after_data || {}).toLowerCase().includes(q)
+          getActorEmailDisplay(log).toLowerCase().includes(q) ||
+          getAuditArea(log).toLowerCase().includes(q) ||
+          getRiskLevel(log).toLowerCase().includes(q) ||
+          getSourceLabel(log).toLowerCase().includes(q) ||
+          getAuditComment(log).toLowerCase().includes(q) ||
+          JSON.stringify(log.changed_fields || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.metadata || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.before_data || {})
+            .toLowerCase()
+            .includes(q) ||
+          JSON.stringify(log.after_data || {})
+            .toLowerCase()
+            .includes(q)
         );
       });
     }
@@ -587,63 +1343,214 @@ export default function MoneyAuditLogsPage() {
 
     rows.sort((a, b) => {
       if (sortMode === "newest") {
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return (
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
       }
 
       if (sortMode === "oldest") {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
       }
 
       if (sortMode === "action") {
-        return actionLabel(a.action).localeCompare(actionLabel(b.action));
+        return actionLabel(a.action, a).localeCompare(actionLabel(b.action, b));
       }
 
       if (sortMode === "transaction") {
-        return getTransactionTitle(a).localeCompare(getTransactionTitle(b));
+        return getRecordTitle(a).localeCompare(getRecordTitle(b));
       }
 
       return 0;
     });
 
     return rows;
-  }, [logs, searchTerm, dateFrom, dateTo, sortMode]);
+  }, [
+    logs,
+    selectedAction,
+    selectedYear,
+    selectedRisk,
+    selectedArea,
+    selectedActor,
+    searchTerm,
+    dateFrom,
+    dateTo,
+    sortMode,
+  ]);
 
   const stats = useMemo(() => {
+    const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
+
     const deleted = logs.filter(
       (log) =>
-        log.action === "delete" ||
-        log.action === "delete_year" ||
-        log.action === "delete_all"
+        !isHiddenAuditLog(log) &&
+        (log.action === "delete" ||
+          log.action === "delete_year" ||
+          log.action === "delete_all" ||
+          log.action === "refund_permanently_deleted"),
     ).length;
 
     return {
       total: logs.length,
       visible: filteredLogs.length,
       created: logs.filter((log) => log.action === "create").length,
-      edited: logs.filter((log) => log.action === "edit").length,
+      edited: logs.filter(
+        (log) =>
+          log.action === "edit" &&
+          !isCheckedAuditLog(log) &&
+          !isUncheckedAuditLog(log),
+      ).length,
+      checked: logs.filter((log) => isCheckedAuditLog(log)).length,
+      unchecked: logs.filter((log) => isUncheckedAuditLog(log)).length,
+      hidden,
       deleted,
-      restored: logs.filter((log) => log.action === "restore").length,
+      restored: logs.filter(
+        (log) => log.action === "restore" || log.action === "refund_restore",
+      ).length,
+      refundLogs: logs.filter((log) => isRefundAuditLog(log)).length,
+      refundsHidden: logs.filter((log) => log.action === "refund_hide").length,
+      refundsDeleted: logs.filter(
+        (log) => log.action === "refund_permanently_deleted",
+      ).length,
+      refundsRestored: logs.filter(
+        (log) => log.action === "refund_restore",
+      ).length,
       paidBack: logs.filter(
         (log) =>
           log.action === "mark_paid_back" ||
-          log.action === "mark_not_paid_back"
+          log.action === "mark_not_paid_back",
       ).length,
+      savingTargets: logs.filter((log) => isSavingTargetAuditLog(log)).length,
+      budgetPlanning: logs.filter((log) => isBudgetPlanningAuditLog(log)).length,
+      automated: logs.filter((log) => isWebsiteGeneratedLog(log)).length,
+      highRisk: logs.filter((log) => getRiskLevel(log) === "High").length,
+      comments: logs.filter((log) => Boolean(getAuditComment(log))).length,
       uniqueUsers: new Set(
         logs
-          .map((log) => log.actor_email || log.actor_user_id || getActorDisplayName(log))
-          .filter(Boolean)
+          .map(
+            (log) =>
+              getActorUniqueKey(log),
+          )
+          .filter(Boolean),
       ).size,
     };
   }, [logs, filteredLogs.length]);
+
+  const yearOptions = useMemo(() => {
+    const years = new Set<string>();
+
+    logs.forEach((log) => {
+      const year = getYearOnly(log.created_at);
+      if (year) years.add(year);
+    });
+
+    const currentYear = String(new Date().getFullYear());
+    years.add(currentYear);
+    years.add(String(Number(currentYear) + 1));
+    years.add(String(Number(currentYear) - 1));
+
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [logs]);
+
+  const areaOptions = useMemo(() => {
+    return Array.from(new Set(logs.map((log) => getAuditArea(log)).filter(Boolean))).sort();
+  }, [logs]);
+
+  const actorOptions = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; email: string }>();
+
+    logs.forEach((log) => {
+      const key = getActorUniqueKey(log);
+      if (!key) return;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          label: getActorDisplayName(log),
+          email: getActorEmailDisplay(log),
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [logs]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStartIndex = (safeCurrentPage - 1) * pageSize;
+  const pageEndIndex = pageStartIndex + pageSize;
+  const visiblePageLogs = filteredLogs.slice(pageStartIndex, pageEndIndex);
 
   const latestLog = filteredLogs[0] || null;
 
   function clearFilters() {
     setSearchTerm("");
     setSelectedAction("all");
+    setSelectedYear(String(new Date().getFullYear()));
+    setSelectedRisk("all");
+    setSelectedArea("all");
+    setSelectedActor("all");
+    setCurrentPage(1);
     setDateFrom("");
     setDateTo("");
     setSortMode("newest");
+  }
+
+  function setQuickDateRange(range: "today" | "7days" | "30days" | "year" | "clear") {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+
+    if (range === "clear") {
+      setDateFrom("");
+      setDateTo("");
+      return;
+    }
+
+    if (range === "year") {
+      const year = selectedYear === "all" ? String(yyyy) : selectedYear;
+      setDateFrom(`${year}-01-01`);
+      setDateTo(`${year}-12-31`);
+      return;
+    }
+
+    const end = now.toISOString().slice(0, 10);
+    const startDate = new Date(now);
+
+    if (range === "today") {
+      setDateFrom(end);
+      setDateTo(end);
+      return;
+    }
+
+    startDate.setDate(now.getDate() - (range === "7days" ? 7 : 30));
+    setDateFrom(startDate.toISOString().slice(0, 10));
+    setDateTo(end);
+  }
+
+  async function exportRawJson() {
+    try {
+      const blob = new Blob([JSON.stringify(filteredLogs, null, 2)], {
+        type: "application/json",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = `burton-pride-money-audit-logs-${selectedYear}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err?.message || "Failed to export JSON file");
+      setErrorDetails(err);
+    }
   }
 
   async function exportFormattedExcel() {
@@ -652,506 +1559,89 @@ export default function MoneyAuditLogsPage() {
       setError("");
       setErrorDetails(null);
 
-      const workbook = new ExcelJS.Workbook();
-      const now = new Date();
-      const fileDate = now.toISOString().slice(0, 10);
+      const params = new URLSearchParams();
 
-      workbook.creator = "Burton Pride C.I.C";
-      workbook.created = now;
-      workbook.modified = now;
-      workbook.subject = "Money audit logs";
-      workbook.title = "Burton Pride Money Audit Logs";
-      workbook.company = "Burton Pride C.I.C";
-
-      const summarySheet = workbook.addWorksheet("Summary", {
-        views: [{ state: "frozen", ySplit: 6 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      summarySheet.properties.defaultRowHeight = 22;
-      summarySheet.columns = [
-        { key: "label", width: 32 },
-        { key: "value", width: 18 },
-        { key: "notes", width: 78 },
-      ];
-
-      addMergedTitle(summarySheet, "Burton Pride C.I.C - Money Audit Logs", "A1", "C1");
-      addMergedSubtitle(
-        summarySheet,
-        `Formatted Excel report generated ${now.toLocaleString("en-GB")} | Showing ${filteredLogs.length} of ${logs.length} loaded logs`,
-        "A2",
-        "C2"
-      );
-
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Export Summary", "A4", "C4", "FF7C3AED");
-
-      const summaryHeader = summarySheet.addRow(["Item", "Value", "Notes"]);
-      styleHeaderRow(summaryHeader, "FF111827");
-
-      makeSummaryRows(filteredLogs).forEach((item) => {
-        const row = summarySheet.addRow([item.label, item.value, item.notes]);
-        styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
-        row.getCell(2).font = { bold: true, color: { argb: "FF111827" } };
-        row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-      });
-
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Filters Used", "A14", "C14", "FF4F46E5");
-
-      const filterHeader = summarySheet.addRow(["Filter", "Value", "Notes"]);
-      styleHeaderRow(filterHeader, "FF111827");
-
-      const filterRows = [
-        ["Action", selectedAction === "all" ? "All actions" : actionLabel(selectedAction), "Action filter selected on page."],
-        ["Search", searchTerm || "No search", "Text search applied before export."],
-        ["Date from", dateFrom || "No start date", "Start date filter."],
-        ["Date to", dateTo || "No end date", "End date filter."],
-        ["Sort", sortMode, "Sort mode applied before export."],
-      ];
-
-      filterRows.forEach((item) => {
-        const row = summarySheet.addRow(item);
-        styleBodyRow(row);
-        row.getCell(1).font = { bold: true };
-      });
-
-      summarySheet.addRow([]);
-      addMergedSection(summarySheet, "Action Breakdown", "A22", "C22", "FF9333EA");
-
-      const actionBreakdownHeader = summarySheet.addRow(["Action", "Count", "Notes"]);
-      styleHeaderRow(actionBreakdownHeader, "FF111827");
-
-      actionOptions
-        .filter((item) => item.value !== "all")
-        .forEach((item) => {
-          const count = filteredLogs.filter((log) => log.action === item.value).length;
-          const row = summarySheet.addRow([item.label, count, `Count of ${item.label.toLowerCase()} audit logs.`]);
-          styleBodyRow(row);
-          row.getCell(1).font = { bold: true };
-          row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
-          row.getCell(2).font = { bold: true };
-        });
-
-      const logsSheet = workbook.addWorksheet("Audit Logs", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      logsSheet.properties.defaultRowHeight = 28;
-
-      logsSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "transactionId", width: 38 },
-        { key: "actorName", width: 26 },
-        { key: "actorEmail", width: 34 },
-        { key: "actorUserId", width: 34 },
-        { key: "changedFields", width: 46 },
-        { key: "changedCount", width: 14 },
-        { key: "source", width: 22 },
-        { key: "route", width: 44 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(logsSheet, "Burton Pride C.I.C - Audit Logs", "A1", "L1");
-      addMergedSubtitle(
-        logsSheet,
-        `Formatted export | Generated ${now.toLocaleString("en-GB")} | Rows: ${filteredLogs.length}`,
-        "A2",
-        "L2"
-      );
-
-      logsSheet.addRow([]);
-
-      const auditHeader = logsSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Transaction ID",
-        "Who",
-        "Email",
-        "User ID",
-        "Changed Fields",
-        "Changed Count",
-        "Source",
-        "Route",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(auditHeader, "FF111827");
-
-      if (filteredLogs.length === 0) {
-        const emptyRow = logsSheet.addRow(["No audit logs found for the current filters."]);
-        styleBodyRow(emptyRow);
+      if (selectedYear !== "all") {
+        params.set("year", selectedYear);
       } else {
-        filteredLogs.forEach((log) => {
-          const changedNames = getChangedFieldNames(log.changed_fields);
-          const row = logsSheet.addRow({
-            createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action),
-            transactionTitle: getTransactionTitle(log),
-            transactionId: log.transaction_id || "",
-            actorName: getActorDisplayName(log),
-            actorEmail: log.actor_email || "",
-            actorUserId: log.actor_user_id || "",
-            changedFields: changedNames.map(cleanFieldName).join(", "),
-            changedCount: changedNames.length,
-            source: getSourceLabel(log),
-            route: log.metadata?.route || "",
-            logId: log.id,
-          });
+        params.set("year", String(new Date().getFullYear()));
+      }
 
-          styleBodyRow(row);
+      const route = `/api/admin/money/export/audit-logs-export?${params.toString()}`;
 
-          row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action);
+      const response = await fetch(route, {
+        method: "GET",
+        cache: "no-store",
+      });
 
-          row.getCell("transactionTitle").font = { bold: true };
-          row.getCell("actorName").font = { bold: true };
-          row.getCell("changedCount").alignment = {
-            horizontal: "center",
-            vertical: "middle",
+      if (!response.ok) {
+        const text = await response.text();
+
+        let data: any = {};
+
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = {
+            rawResponse: text,
           };
-          row.getCell("changedCount").font = { bold: true };
+        }
 
-          if (!log.actor_email) styleMutedCell(row.getCell("actorEmail"));
-          if (!log.actor_user_id) styleMutedCell(row.getCell("actorUserId"));
-          if (changedNames.length === 0) styleMutedCell(row.getCell("changedFields"));
-        });
+        throw {
+          message:
+            data?.error ||
+            data?.details?.message ||
+            `Audit logs export failed with status ${response.status}`,
+          details: {
+            route,
+            status: response.status,
+            statusText: response.statusText,
+            response: data,
+          },
+          status: response.status,
+        };
       }
 
-      logsSheet.autoFilter = {
-        from: "A4",
-        to: "L4",
-      };
+      const blob = await response.blob();
 
-      const changedSheet = workbook.addWorksheet("Changed Fields", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      changedSheet.properties.defaultRowHeight = 32;
-
-      changedSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "actorName", width: 26 },
-        { key: "field", width: 26 },
-        { key: "before", width: 55 },
-        { key: "after", width: 55 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(changedSheet, "Burton Pride C.I.C - Changed Fields", "A1", "H1");
-      addMergedSubtitle(
-        changedSheet,
-        "One row per changed field, with before and after values.",
-        "A2",
-        "H2"
-      );
-
-      changedSheet.addRow([]);
-
-      const changedHeader = changedSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Who",
-        "Field",
-        "Before",
-        "After",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(changedHeader, "FF111827");
-
-      let changedFieldRowCount = 0;
-
-      filteredLogs.forEach((log) => {
-        const changed = log.changed_fields || {};
-        const entries = Object.entries(changed);
-
-        entries.forEach(([field, value]: [string, any]) => {
-          changedFieldRowCount += 1;
-
-          const row = changedSheet.addRow({
-            createdAt: formatExcelDate(log.created_at),
-            action: actionLabel(log.action),
-            transactionTitle: getTransactionTitle(log),
-            actorName: getActorDisplayName(log),
-            field: cleanFieldName(field),
-            before: shortValue(value?.before),
-            after: shortValue(value?.after),
-            logId: log.id,
-          });
-
-          styleBodyRow(row);
-          row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-          styleActionCell(row.getCell("action"), log.action);
-          row.getCell("transactionTitle").font = { bold: true };
-          row.getCell("actorName").font = { bold: true };
-          row.getCell("field").font = { bold: true };
-          styleDangerCell(row.getCell("before"));
-          styleSuccessCell(row.getCell("after"));
-        });
-      });
-
-      if (changedFieldRowCount === 0) {
-        const emptyRow = changedSheet.addRow(["No changed field rows found for the current filters."]);
-        styleBodyRow(emptyRow);
+      if (!blob || blob.size === 0) {
+        throw {
+          message: "The audit logs export returned an empty file.",
+          details: {
+            route,
+            year: selectedYear,
+            expectedFile:
+              "app/api/admin/money/export/audit-logs-export/route.ts",
+          },
+        };
       }
 
-      changedSheet.autoFilter = {
-        from: "A4",
-        to: "H4",
-      };
+      const fileYear =
+        selectedYear === "all" ? new Date().getFullYear() : selectedYear;
 
-      const usersSheet = workbook.addWorksheet("Users", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
 
-      usersSheet.properties.defaultRowHeight = 24;
+      link.href = objectUrl;
+      link.download = `burton-pride-money-audit-logs-${fileYear}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.xlsx`;
 
-      usersSheet.columns = [
-        { key: "name", width: 30 },
-        { key: "email", width: 36 },
-        { key: "userId", width: 40 },
-        { key: "total", width: 14 },
-        { key: "created", width: 14 },
-        { key: "edited", width: 14 },
-        { key: "deleted", width: 14 },
-        { key: "paidBack", width: 18 },
-        { key: "latest", width: 24 },
-      ];
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
 
-      addMergedTitle(usersSheet, "Burton Pride C.I.C - Audit Users", "A1", "I1");
-      addMergedSubtitle(
-        usersSheet,
-        "Summary by user / actor.",
-        "A2",
-        "I2"
-      );
-
-      usersSheet.addRow([]);
-
-      const usersHeader = usersSheet.addRow([
-        "Name",
-        "Email",
-        "User ID",
-        "Total Actions",
-        "Created",
-        "Edited",
-        "Deleted",
-        "Paid Back Changes",
-        "Latest Action",
-      ]);
-
-      styleHeaderRow(usersHeader, "FF111827");
-
-      const userMap = new Map<
-        string,
-        {
-          name: string;
-          email: string;
-          userId: string;
-          logs: MoneyAuditLog[];
-        }
-      >();
-
-      filteredLogs.forEach((log) => {
-        const key =
-          log.actor_email ||
-          log.actor_user_id ||
-          getActorDisplayName(log) ||
-          "Unknown user";
-
-        const existing = userMap.get(key);
-
-        if (existing) {
-          existing.logs.push(log);
-        } else {
-          userMap.set(key, {
-            name: getActorDisplayName(log),
-            email: log.actor_email || "",
-            userId: log.actor_user_id || "",
-            logs: [log],
-          });
-        }
-      });
-
-      Array.from(userMap.values())
-        .sort((a, b) => b.logs.length - a.logs.length)
-        .forEach((user) => {
-          const userLogs = user.logs;
-          const latest = [...userLogs].sort(
-            (a, b) =>
-              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          )[0];
-
-          const row = usersSheet.addRow({
-            name: user.name,
-            email: user.email,
-            userId: user.userId,
-            total: userLogs.length,
-            created: userLogs.filter((log) => log.action === "create").length,
-            edited: userLogs.filter((log) => log.action === "edit").length,
-            deleted: userLogs.filter(
-              (log) =>
-                log.action === "delete" ||
-                log.action === "delete_year" ||
-                log.action === "delete_all"
-            ).length,
-            paidBack: userLogs.filter(
-              (log) =>
-                log.action === "mark_paid_back" ||
-                log.action === "mark_not_paid_back"
-            ).length,
-            latest: formatExcelDate(latest?.created_at),
-          });
-
-          styleBodyRow(row);
-          row.getCell("name").font = { bold: true };
-          row.getCell("latest").numFmt = "dd mmm yyyy, hh:mm";
-
-          ["total", "created", "edited", "deleted", "paidBack"].forEach((key) => {
-            row.getCell(key).alignment = {
-              horizontal: "center",
-              vertical: "middle",
-            };
-            row.getCell(key).font = { bold: true };
-          });
-        });
-
-      usersSheet.autoFilter = {
-        from: "A4",
-        to: "I4",
-      };
-
-      const rawSheet = workbook.addWorksheet("Raw JSON", {
-        views: [{ state: "frozen", ySplit: 5 }],
-        pageSetup: {
-          paperSize: 9,
-          orientation: "landscape",
-          fitToPage: true,
-          fitToWidth: 1,
-          fitToHeight: 0,
-        },
-      });
-
-      rawSheet.properties.defaultRowHeight = 45;
-
-      rawSheet.columns = [
-        { key: "createdAt", width: 22 },
-        { key: "action", width: 22 },
-        { key: "transactionTitle", width: 34 },
-        { key: "actorName", width: 26 },
-        { key: "beforeData", width: 70 },
-        { key: "afterData", width: 70 },
-        { key: "changedFields", width: 70 },
-        { key: "metadata", width: 70 },
-        { key: "logId", width: 38 },
-      ];
-
-      addMergedTitle(rawSheet, "Burton Pride C.I.C - Audit Raw JSON", "A1", "I1");
-      addMergedSubtitle(
-        rawSheet,
-        "Full raw audit log data for checking details.",
-        "A2",
-        "I2"
-      );
-
-      rawSheet.addRow([]);
-
-      const rawHeader = rawSheet.addRow([
-        "When",
-        "Action",
-        "Transaction",
-        "Who",
-        "Before Data",
-        "After Data",
-        "Changed Fields",
-        "Metadata",
-        "Log ID",
-      ]);
-
-      styleHeaderRow(rawHeader, "FF111827");
-
-      filteredLogs.forEach((log) => {
-        const row = rawSheet.addRow({
-          createdAt: formatExcelDate(log.created_at),
-          action: actionLabel(log.action),
-          transactionTitle: getTransactionTitle(log),
-          actorName: getActorDisplayName(log),
-          beforeData: safeJson(log.before_data),
-          afterData: safeJson(log.after_data),
-          changedFields: safeJson(log.changed_fields),
-          metadata: safeJson(log.metadata),
-          logId: log.id,
-        });
-
-        styleBodyRow(row);
-        row.getCell("createdAt").numFmt = "dd mmm yyyy, hh:mm";
-        styleActionCell(row.getCell("action"), log.action);
-        row.getCell("transactionTitle").font = { bold: true };
-        row.getCell("actorName").font = { bold: true };
-      });
-
-      rawSheet.autoFilter = {
-        from: "A4",
-        to: "I4",
-      };
-
-      [summarySheet, logsSheet, changedSheet, usersSheet, rawSheet].forEach((sheet) => {
-        sheet.eachRow((row) => {
-          row.eachCell((cell) => {
-            cell.alignment = {
-              ...cell.alignment,
-              vertical: cell.alignment?.vertical || "top",
-              wrapText: true,
-            };
-          });
-        });
-      });
-
-      await downloadWorkbook(
-        workbook,
-        `burton-pride-money-audit-logs-${fileDate}.xlsx`
-      );
+      window.URL.revokeObjectURL(objectUrl);
     } catch (err: any) {
       setError(err?.message || "Failed to export formatted Excel file");
       setErrorDetails(err);
     } finally {
       setExporting(false);
     }
+  }
+
+  function printAuditReport() {
+    window.print();
   }
 
   async function copySelectedLog() {
@@ -1165,46 +1655,139 @@ export default function MoneyAuditLogsPage() {
     }, 1600);
   }
 
+  async function saveSelectedLogComment() {
+    if (!selectedLog || savingComment) return;
+
+    try {
+      setSavingComment(true);
+      setCommentSaveError("");
+      setCommentSaved(false);
+
+      const comment = commentDraft.trim();
+      const res = await fetch("/api/admin/money/audit-logs", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          logId: selectedLog.id,
+          comment,
+        }),
+      });
+
+      const text = await res.text();
+      let data: any = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { rawResponse: text };
+      }
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to save audit log comment");
+      }
+
+      const updatedLog: MoneyAuditLog = data.log || {
+        ...selectedLog,
+        admin_comment: comment || null,
+        admin_comment_updated_at: new Date().toISOString(),
+      };
+
+      setLogs((currentLogs) =>
+        currentLogs.map((log) =>
+          log.id === updatedLog.id ? { ...log, ...updatedLog } : log,
+        ),
+      );
+      setSelectedLog((currentLog) =>
+        currentLog && currentLog.id === updatedLog.id
+          ? { ...currentLog, ...updatedLog }
+          : currentLog,
+      );
+      setCommentDraft(getAuditComment(updatedLog));
+      setCommentSaved(true);
+
+      setTimeout(() => {
+        setCommentSaved(false);
+      }, 2200);
+    } catch (err: any) {
+      setCommentSaveError(err?.message || "Failed to save audit log comment");
+    } finally {
+      setSavingComment(false);
+    }
+  }
+
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1700px] space-y-6">
-        <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur">
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
+        <section className="w-full max-w-none overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] backdrop-blur">
           <div className="relative p-6">
             <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-purple-500/20 blur-3xl" />
             <div className="absolute -bottom-24 left-10 h-56 w-56 rounded-full bg-pink-500/10 blur-3xl" />
 
             <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-              <div>
+              <div className="min-w-0">
                 <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-purple-500/15 px-4 py-2 text-xs font-bold text-purple-100 ring-1 ring-purple-300/20">
                   <ShieldCheck className="h-4 w-4" />
                   Money Tracker Audit Log
                 </div>
 
-                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+                <h1 className="break-words text-3xl font-black tracking-tight sm:text-4xl">
                   Audit Logs
                 </h1>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   View every money tracker action, including creates, edits,
-                  deletes, selected-year deletes, delete all actions, and
-                  personal funds paid-back changes. This helps protect your
-                  records and shows who changed what.
+                  checks, hidden soft-deletes, saving target changes, budget
+                  tracker updates, restore actions, selected-year deletes,
+                  delete-all actions, refund tracker actions, permanent refund
+                  deletions, personal funds paid-back changes, and main-admin
+                  comments explaining why changes were made.
                 </p>
 
-                {latestLog && (
-                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
-                    <Clock3 className="h-4 w-4" />
-                    Latest visible log:{" "}
-                    <span className="font-bold text-white">
-                      {formatDateTime(latestLog.created_at)}
-                    </span>
-                    <span className="text-white/30">•</span>
-                    <span>{actionLabel(latestLog.action)}</span>
-                  </div>
-                )}
+                <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
+                  <Clock3 className="h-4 w-4" />
+                  {latestLog ? (
+                    <>
+                      Latest visible log:{" "}
+                      <span className="font-bold text-white">
+                        {formatDateTime(latestLog.created_at)}
+                      </span>
+                      <span className="text-white/30">•</span>
+                      <span>{actionLabel(latestLog.action, latestLog)}</span>
+                    </>
+                  ) : (
+                    <span>No visible logs loaded yet</span>
+                  )}
+                  {lastRefreshed && (
+                    <>
+                      <span className="text-white/30">•</span>
+                      <span>
+                        Last refreshed {formatDateTime(lastRefreshed)}
+                      </span>
+                      <span className="text-white/30">•</span>
+                      <span>
+                        Year view{" "}
+                        <strong className="text-white">
+                          {selectedYear === "all" ? "All years" : selectedYear}
+                        </strong>
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={printAuditReport}
+                  disabled={filteredLogs.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-bold text-sky-200 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FileText className="h-4 w-4" />
+                  Print Report
+                </button>
+
                 <button
                   type="button"
                   onClick={exportFormattedExcel}
@@ -1213,6 +1796,16 @@ export default function MoneyAuditLogsPage() {
                 >
                   <FileSpreadsheet className="h-4 w-4" />
                   {exporting ? "Exporting..." : "Export Excel"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={exportRawJson}
+                  disabled={filteredLogs.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-3 text-sm font-bold text-purple-200 ring-1 ring-purple-300/20 hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Clipboard className="h-4 w-4" />
+                  Export JSON
                 </button>
 
                 <button
@@ -1248,17 +1841,77 @@ export default function MoneyAuditLogsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <StatCard label="Total Logs" value={stats.total} tone="white" />
           <StatCard label="Showing" value={stats.visible} tone="purple" />
+          <StatCard label="High Risk" value={stats.highRisk} tone="red" />
           <StatCard label="Created" value={stats.created} tone="emerald" />
           <StatCard label="Edited" value={stats.edited} tone="sky" />
+          <StatCard label="Checked" value={stats.checked} tone="cyan" />
+          <StatCard label="Unchecked" value={stats.unchecked} tone="amber" />
+          <StatCard label="Hidden" value={stats.hidden} tone="orange" />
           <StatCard label="Deleted" value={stats.deleted} tone="red" />
-          <StatCard label="Paid Back" value={stats.paidBack} tone="orange" />
-          <StatCard label="Users" value={stats.uniqueUsers} tone="pink" />
+          <StatCard label="Saving Targets" value={stats.savingTargets} tone="sky" />
+          <StatCard label="Budget Logs" value={stats.budgetPlanning} tone="purple" />
+          <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
+          <StatCard label="Refund Logs" value={stats.refundLogs} tone="cyan" />
+          <StatCard
+            label="Refunds Hidden"
+            value={stats.refundsHidden}
+            tone="orange"
+          />
+          <StatCard
+            label="Refunds Deleted"
+            value={stats.refundsDeleted}
+            tone="red"
+          />
+          <StatCard
+            label="Refunds Restored"
+            value={stats.refundsRestored}
+            tone="purple"
+          />
+          <StatCard label="Auto Website" value={stats.automated} tone="emerald" />
+          <StatCard label="Comments" value={stats.comments} tone="amber" />
+          <StatCard label="Users" value={stats.uniqueUsers} tone="white" />
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+        <section className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-3xl border border-red-300/20 bg-red-500/10 p-5">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-red-500/15 px-3 py-2 text-xs font-black uppercase tracking-wide text-red-100 ring-1 ring-red-300/20">
+              <AlertTriangle className="h-4 w-4" />
+              Risk watch
+            </div>
+            <p className="text-3xl font-black text-white">{stats.highRisk}</p>
+            <p className="mt-2 text-sm leading-6 text-red-100/75">
+              High-risk actions include deletes, permanent refund deletions,
+              soft-deletes, delete-year and delete-all records.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-sky-500/15 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 ring-1 ring-sky-300/20">
+              <Target className="h-4 w-4" />
+              Saving targets
+            </div>
+            <p className="text-3xl font-black text-white">{stats.savingTargets}</p>
+            <p className="mt-2 text-sm leading-6 text-sky-100/75">
+              Tracks created, updated, soft-deleted and restored saving target records.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-purple-500/15 px-3 py-2 text-xs font-black uppercase tracking-wide text-purple-100 ring-1 ring-purple-300/20">
+              <Database className="h-4 w-4" />
+              Budget tracker
+            </div>
+            <p className="text-3xl font-black text-white">{stats.budgetPlanning}</p>
+            <p className="mt-2 text-sm leading-6 text-purple-100/75">
+              Tracks budget updates, budget item soft-deletes and restore actions.
+            </p>
+          </div>
+        </section>
+
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
           <div className="mb-4 flex flex-col gap-3 2xl:flex-row 2xl:items-center">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
@@ -1266,12 +1919,28 @@ export default function MoneyAuditLogsPage() {
               <input
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by transaction, user, email, action, changed field, route, or raw data..."
+                placeholder="Search by record, refund, transaction, user, email, action, comment, changed field, route, or raw data..."
                 className="w-full rounded-2xl bg-black/30 py-3 pl-11 pr-4 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-purple-300/40"
               />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:w-[860px]">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 2xl:w-[1060px]">
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value as YearFilter)}
+                className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+                title="Year"
+              >
+                <option className="bg-[#11111f] text-white" value="all">
+                  All years
+                </option>
+                {yearOptions.map((year) => (
+                  <option key={year} className="bg-[#11111f] text-white" value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+
               <select
                 value={selectedAction}
                 onChange={(e) => setSelectedAction(e.target.value)}
@@ -1303,7 +1972,7 @@ export default function MoneyAuditLogsPage() {
                   Sort by action
                 </option>
                 <option className="bg-[#11111f] text-white" value="transaction">
-                  Sort by transaction
+                  Sort by record
                 </option>
               </select>
 
@@ -1325,8 +1994,94 @@ export default function MoneyAuditLogsPage() {
             </div>
           </div>
 
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <select
+              value={selectedRisk}
+              onChange={(e) => setSelectedRisk(e.target.value as RiskFilter)}
+              className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+            >
+              <option className="bg-[#11111f] text-white" value="all">
+                All risk levels
+              </option>
+              <option className="bg-[#11111f] text-white" value="High">
+                High risk only
+              </option>
+              <option className="bg-[#11111f] text-white" value="Medium">
+                Medium risk only
+              </option>
+              <option className="bg-[#11111f] text-white" value="Low">
+                Low risk only
+              </option>
+            </select>
+
+            <select
+              value={selectedArea}
+              onChange={(e) => setSelectedArea(e.target.value as AreaFilter)}
+              className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+            >
+              <option className="bg-[#11111f] text-white" value="all">
+                All areas
+              </option>
+              {areaOptions.map((area) => (
+                <option key={area} className="bg-[#11111f] text-white" value={area}>
+                  {area}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedActor}
+              onChange={(e) => setSelectedActor(e.target.value)}
+              className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+            >
+              <option className="bg-[#11111f] text-white" value="all">
+                All users / actors
+              </option>
+              {actorOptions.map((actor) => (
+                <option key={actor.key} className="bg-[#11111f] text-white" value={actor.key}>
+                  {actor.label}{actor.email ? ` — ${actor.email}` : ""}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value) || 50)}
+              className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+            >
+              <option className="bg-[#11111f] text-white" value={25}>
+                25 per page
+              </option>
+              <option className="bg-[#11111f] text-white" value={50}>
+                50 per page
+              </option>
+              <option className="bg-[#11111f] text-white" value={100}>
+                100 per page
+              </option>
+              <option className="bg-[#11111f] text-white" value={250}>
+                250 per page
+              </option>
+            </select>
+          </div>
+
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
+              {yearOptions.slice(0, 4).map((year) => (
+                <button
+                  key={year}
+                  type="button"
+                  onClick={() => setSelectedYear(year)}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ring-1 transition ${
+                    selectedYear === year
+                      ? "bg-purple-300 text-black ring-purple-200"
+                      : "bg-purple-500/10 text-purple-100 ring-purple-300/20 hover:bg-purple-500/20"
+                  }`}
+                >
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {year}
+                </button>
+              ))}
+
               {actionOptions.slice(0, 6).map((item) => (
                 <button
                   key={item.value}
@@ -1346,6 +2101,74 @@ export default function MoneyAuditLogsPage() {
 
             <button
               type="button"
+              onClick={() => setQuickDateRange("today")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+            >
+              Today
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setQuickDateRange("7days")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+            >
+              Last 7 days
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setQuickDateRange("30days")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+            >
+              Last 30 days
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setQuickDateRange("year")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+            >
+              Whole year
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedRisk("High")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-2 text-xs font-bold text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/20"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              High risk
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedArea("Saving Targets")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500/10 px-4 py-2 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/20"
+            >
+              <Target className="h-4 w-4" />
+              Saving targets
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedArea("Budget Planning")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100 ring-1 ring-purple-300/20 hover:bg-purple-500/20"
+            >
+              <BarChart3 className="h-4 w-4" />
+              Budget logs
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedArea("Refund Tracker")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/20"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Refund logs
+            </button>
+
+            <button
+              type="button"
               onClick={clearFilters}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
             >
@@ -1355,9 +2178,24 @@ export default function MoneyAuditLogsPage() {
           </div>
 
           <div className="mb-4 rounded-2xl bg-black/20 px-4 py-3 text-sm text-white/60">
-            Showing <strong className="text-white">{filteredLogs.length}</strong>{" "}
-            audit log{filteredLogs.length === 1 ? "" : "s"} from{" "}
-            <strong className="text-white">{logs.length}</strong> loaded.
+            Showing{" "}
+            <strong className="text-white">{filteredLogs.length}</strong> audit
+            log{filteredLogs.length === 1 ? "" : "s"} from{" "}
+            <strong className="text-white">{logs.length}</strong> loaded for{" "}
+            <strong className="text-white">
+              {selectedYear === "all" ? "all years" : selectedYear}
+            </strong>.
+            {filteredLogs.length > 0 && (
+              <>
+                {" "}
+                Page <strong className="text-white">{safeCurrentPage}</strong> of{" "}
+                <strong className="text-white">{totalPages}</strong>, showing rows{" "}
+                <strong className="text-white">{pageStartIndex + 1}</strong>-
+                <strong className="text-white">
+                  {Math.min(pageEndIndex, filteredLogs.length)}
+                </strong>.
+              </>
+            )}
           </div>
 
           {loading ? (
@@ -1371,15 +2209,18 @@ export default function MoneyAuditLogsPage() {
             </div>
           ) : (
             <>
-              <div className="hidden max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 xl:block">
+              <div className="hidden w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 xl:block">
                 <table className="w-full min-w-[1250px] text-sm">
                   <thead className="bg-white/10 text-white/60">
                     <tr>
                       <th className="p-3 text-left">When</th>
                       <th className="p-3 text-left">Action</th>
-                      <th className="p-3 text-left">Transaction</th>
+                      <th className="p-3 text-left">Record</th>
                       <th className="p-3 text-left">Who</th>
+                      <th className="p-3 text-left">Area</th>
+                      <th className="p-3 text-left">Risk</th>
                       <th className="p-3 text-left">Changed Fields</th>
+                      <th className="p-3 text-left">Comment</th>
                       <th className="p-3 text-left">Source</th>
                       <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
                         View
@@ -1388,10 +2229,13 @@ export default function MoneyAuditLogsPage() {
                   </thead>
 
                   <tbody>
-                    {filteredLogs.map((log) => {
-                      const changedNames = getChangedFieldNames(log.changed_fields);
+                    {visiblePageLogs.map((log) => {
+                      const changedNames = getChangedFieldNames(
+                        log.changed_fields,
+                      );
                       const source = getSourceLabel(log);
-                      const ActionIcon = actionIcon(log.action);
+                      const risk = getRiskLevel(log);
+                      const ActionIcon = actionIcon(log.action, log);
 
                       return (
                         <tr key={log.id} className="border-t border-white/10">
@@ -1405,22 +2249,23 @@ export default function MoneyAuditLogsPage() {
                           <td className="p-3">
                             <span
                               className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold capitalize ring-1 ${actionClass(
-                                log.action
+                                log.action,
+                                log,
                               )}`}
                             >
                               <ActionIcon className="h-3.5 w-3.5" />
-                              {actionLabel(log.action)}
+                              {actionLabel(log.action, log)}
                             </span>
                           </td>
 
                           <td className="max-w-[280px] p-3">
                             <p className="break-words font-bold text-white">
-                              {getTransactionTitle(log)}
+                              {getRecordTitle(log)}
                             </p>
 
-                            {log.transaction_id && (
+                            {getRecordId(log) && (
                               <p className="mt-1 break-all text-xs text-white/35">
-                                {log.transaction_id}
+                                {getRecordId(log)}
                               </p>
                             )}
                           </td>
@@ -1431,12 +2276,25 @@ export default function MoneyAuditLogsPage() {
                               {getActorDisplayName(log)}
                             </p>
 
-                            {log.actor_email && (
+                            {getActorEmailDisplay(log) && (
                               <p className="mt-1 flex items-center gap-2 break-words text-xs text-white/45">
                                 <Mail className="h-3.5 w-3.5 text-white/30" />
-                                {log.actor_email}
+                                {getActorEmailDisplay(log)}
                               </p>
                             )}
+                          </td>
+
+                          <td className="max-w-[220px] p-3">
+                            <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold capitalize text-white/80 ring-1 ring-white/10">
+                              <Layers3 className="h-3.5 w-3.5 text-white/45" />
+                              {getAuditArea(log)}
+                            </p>
+                          </td>
+
+                          <td className="p-3">
+                            <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ring-1 ${riskClass(risk)}`}>
+                              {risk}
+                            </span>
                           </td>
 
                           <td className="max-w-[360px] p-3">
@@ -1456,6 +2314,18 @@ export default function MoneyAuditLogsPage() {
                                     +{changedNames.length - 5} more
                                   </span>
                                 )}
+                              </div>
+                            ) : (
+                              <span className="text-white/35">—</span>
+                            )}
+                          </td>
+
+                          <td className="max-w-[300px] p-3">
+                            {getAuditComment(log) ? (
+                              <div className="rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-300/15">
+                                <p className="line-clamp-4 break-words text-xs leading-5 text-amber-50">
+                                  {getAuditComment(log)}
+                                </p>
                               </div>
                             ) : (
                               <span className="text-white/35">—</span>
@@ -1491,8 +2361,8 @@ export default function MoneyAuditLogsPage() {
               </div>
 
               <div className="space-y-3 xl:hidden">
-                {filteredLogs.map((log) => {
-                  const ActionIcon = actionIcon(log.action);
+                {visiblePageLogs.map((log) => {
+                  const ActionIcon = actionIcon(log.action, log);
                   const changedNames = getChangedFieldNames(log.changed_fields);
 
                   return (
@@ -1503,11 +2373,12 @@ export default function MoneyAuditLogsPage() {
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <span
                           className={`inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
-                            log.action
+                            log.action,
+                            log,
                           )}`}
                         >
                           <ActionIcon className="h-3.5 w-3.5" />
-                          {actionLabel(log.action)}
+                          {actionLabel(log.action, log)}
                         </span>
 
                         <button
@@ -1520,7 +2391,7 @@ export default function MoneyAuditLogsPage() {
                       </div>
 
                       <h3 className="break-words font-bold">
-                        {getTransactionTitle(log)}
+                        {getRecordTitle(log)}
                       </h3>
 
                       <p className="mt-1 text-xs text-white/45">
@@ -1532,7 +2403,7 @@ export default function MoneyAuditLogsPage() {
                           {getActorDisplayName(log)}
                         </p>
                         <p className="mt-1 break-words text-xs text-white/45">
-                          {log.actor_email || "No email saved"}
+                          {getActorEmailDisplay(log) || "No email saved"}
                         </p>
                       </div>
 
@@ -1548,6 +2419,18 @@ export default function MoneyAuditLogsPage() {
                           ))}
                         </div>
                       )}
+
+                      {getAuditComment(log) && (
+                        <div className="mt-3 rounded-xl bg-amber-500/10 p-3 ring-1 ring-amber-300/15">
+                          <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-amber-100">
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Main admin comment
+                          </div>
+                          <p className="break-words text-sm leading-6 text-amber-50/90">
+                            {getAuditComment(log)}
+                          </p>
+                        </div>
+                      )}
                     </article>
                   );
                 })}
@@ -1557,6 +2440,451 @@ export default function MoneyAuditLogsPage() {
         </section>
       </div>
 
+      <section className="audit-print-report hidden">
+        <div className="audit-print-header">
+          <div>
+            <p className="audit-print-kicker">Burton Pride C.I.C</p>
+            <h1>Money Tracker Audit Logs</h1>
+            <p className="audit-print-subtitle">
+              Printed {new Date().toLocaleString("en-GB")} • Showing{" "}
+              {filteredLogs.length} of {logs.length} loaded audit logs
+            </p>
+          </div>
+          <div className="audit-print-badge">Audit Report</div>
+        </div>
+
+        <div className="audit-print-filters">
+          <span>
+            <strong>Action:</strong>{" "}
+            {selectedAction === "all"
+              ? "All actions"
+              : actionOptions.find((item) => item.value === selectedAction)
+                  ?.label || actionLabel(selectedAction)}
+          </span>
+          <span>
+            <strong>Search:</strong> {searchTerm || "No search"}
+          </span>
+          <span>
+            <strong>Date from:</strong> {dateFrom || "No start date"}
+          </span>
+          <span>
+            <strong>Date to:</strong> {dateTo || "No end date"}
+          </span>
+          <span>
+            <strong>Sort:</strong> {sortMode}
+          </span>
+        </div>
+
+        <div className="audit-print-stats">
+          <div>
+            <span>Total</span>
+            <strong>{stats.total}</strong>
+          </div>
+          <div>
+            <span>Showing</span>
+            <strong>{stats.visible}</strong>
+          </div>
+          <div>
+            <span>Created</span>
+            <strong>{stats.created}</strong>
+          </div>
+          <div>
+            <span>Checked</span>
+            <strong>{stats.checked}</strong>
+          </div>
+          <div>
+            <span>Unchecked</span>
+            <strong>{stats.unchecked}</strong>
+          </div>
+          <div>
+            <span>Edited</span>
+            <strong>{stats.edited}</strong>
+          </div>
+          <div>
+            <span>Hidden</span>
+            <strong>{stats.hidden}</strong>
+          </div>
+          <div>
+            <span>Deleted</span>
+            <strong>{stats.deleted}</strong>
+          </div>
+          <div>
+            <span>Paid Back</span>
+            <strong>{stats.paidBack}</strong>
+          </div>
+          <div>
+            <span>Refund Logs</span>
+            <strong>{stats.refundLogs}</strong>
+          </div>
+          <div>
+            <span>Refunds Deleted</span>
+            <strong>{stats.refundsDeleted}</strong>
+          </div>
+          <div>
+            <span>Users</span>
+            <strong>{stats.uniqueUsers}</strong>
+          </div>
+        </div>
+
+        <table className="audit-print-table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Record</th>
+              <th>Who</th>
+              <th>Changed Fields</th>
+              <th>Main Admin Comment</th>
+              <th>Source / Route</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredLogs.length === 0 ? (
+              <tr>
+                <td colSpan={7}>
+                  No audit logs found for the current filters.
+                </td>
+              </tr>
+            ) : (
+              filteredLogs.map((log) => {
+                const changedNames = getChangedFieldNames(log.changed_fields);
+
+                return (
+                  <tr key={`print-${log.id}`}>
+                    <td>{formatDateTime(log.created_at)}</td>
+                    <td>
+                      <span className="audit-print-action">
+                        {actionLabel(log.action, log)}
+                      </span>
+                    </td>
+                    <td>
+                      <strong>{getRecordTitle(log)}</strong>
+                      {getRecordId(log) && (
+                        <small>{getRecordId(log)}</small>
+                      )}
+                    </td>
+                    <td>
+                      <strong>{getActorDisplayName(log)}</strong>
+                      {getActorEmailDisplay(log) && <small>{getActorEmailDisplay(log)}</small>}
+                    </td>
+                    <td>
+                      {changedNames.length > 0
+                        ? changedNames.map(cleanFieldName).join(", ")
+                        : "—"}
+                    </td>
+                    <td>{getAuditComment(log) || "—"}</td>
+                    <td>
+                      <strong>{getSourceLabel(log)}</strong>
+                      {log.metadata?.route && (
+                        <small>{log.metadata.route}</small>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        <div className="audit-print-footer">
+          This report is generated from the Burton Pride C.I.C money tracker
+          audit logs.
+        </div>
+      </section>
+
+      <style jsx global>{`
+        @media screen {
+          .audit-print-report {
+            display: none !important;
+          }
+        }
+
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+
+          html,
+          body {
+            background: #ffffff !important;
+            color: #111827 !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .audit-print-report,
+          .audit-print-report * {
+            visibility: visible !important;
+          }
+
+          .audit-print-report {
+            display: block !important;
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 100% !important;
+            min-height: auto !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #111827 !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+          }
+
+          .audit-print-header {
+            display: flex !important;
+            align-items: flex-start !important;
+            justify-content: space-between !important;
+            gap: 16px !important;
+            border-bottom: 3px solid #7c3aed !important;
+            padding-bottom: 12px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .audit-print-kicker {
+            margin: 0 0 3px !important;
+            color: #7c3aed !important;
+            font-size: 10px !important;
+            font-weight: 800 !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
+          }
+
+          .audit-print-header h1 {
+            margin: 0 !important;
+            color: #111827 !important;
+            font-size: 24px !important;
+            line-height: 1.1 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-subtitle {
+            margin: 6px 0 0 !important;
+            color: #4b5563 !important;
+            font-size: 10px !important;
+          }
+
+          .audit-print-badge {
+            border: 1px solid #c4b5fd !important;
+            border-radius: 999px !important;
+            background: #f5f3ff !important;
+            color: #5b21b6 !important;
+            padding: 7px 12px !important;
+            font-size: 10px !important;
+            font-weight: 900 !important;
+            white-space: nowrap !important;
+          }
+
+          .audit-print-filters {
+            display: grid !important;
+            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 10px !important;
+          }
+
+          .audit-print-filters span {
+            border: 1px solid #e5e7eb !important;
+            border-radius: 8px !important;
+            background: #f9fafb !important;
+            padding: 6px 8px !important;
+            color: #374151 !important;
+            font-size: 9px !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .audit-print-stats {
+            display: grid !important;
+            grid-template-columns: repeat(10, minmax(0, 1fr)) !important;
+            gap: 6px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .audit-print-stats div {
+            border: 1px solid #e5e7eb !important;
+            border-radius: 10px !important;
+            background: #ffffff !important;
+            padding: 7px 8px !important;
+            break-inside: avoid !important;
+          }
+
+          .audit-print-stats span {
+            display: block !important;
+            color: #6b7280 !important;
+            font-size: 8px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.04em !important;
+          }
+
+          .audit-print-stats strong {
+            display: block !important;
+            margin-top: 2px !important;
+            color: #111827 !important;
+            font-size: 18px !important;
+            line-height: 1 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            color: #111827 !important;
+            font-size: 9px !important;
+          }
+
+          .audit-print-table thead {
+            display: table-header-group !important;
+          }
+
+          .audit-print-table tr {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+
+          .audit-print-table th {
+            border: 1px solid #d1d5db !important;
+            background: #111827 !important;
+            color: #ffffff !important;
+            padding: 7px 6px !important;
+            text-align: left !important;
+            font-size: 9px !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table td {
+            border: 1px solid #e5e7eb !important;
+            padding: 6px !important;
+            vertical-align: top !important;
+            color: #111827 !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .audit-print-table tbody tr:nth-child(even) td {
+            background: #f9fafb !important;
+          }
+
+          .audit-print-table th:nth-child(1),
+          .audit-print-table td:nth-child(1) {
+            width: 13% !important;
+          }
+
+          .audit-print-table th:nth-child(2),
+          .audit-print-table td:nth-child(2) {
+            width: 12% !important;
+          }
+
+          .audit-print-table th:nth-child(3),
+          .audit-print-table td:nth-child(3) {
+            width: 20% !important;
+          }
+
+          .audit-print-table th:nth-child(4),
+          .audit-print-table td:nth-child(4) {
+            width: 18% !important;
+          }
+
+          .audit-print-table th:nth-child(5),
+          .audit-print-table td:nth-child(5) {
+            width: 18% !important;
+          }
+
+          .audit-print-table th:nth-child(6),
+          .audit-print-table td:nth-child(6) {
+            width: 19% !important;
+          }
+
+          .audit-print-table strong {
+            display: block !important;
+            color: #111827 !important;
+            font-weight: 900 !important;
+          }
+
+          .audit-print-table small {
+            display: block !important;
+            margin-top: 2px !important;
+            color: #6b7280 !important;
+            font-size: 8px !important;
+            line-height: 1.25 !important;
+          }
+
+          .audit-print-action {
+            display: inline-block !important;
+            border: 1px solid #c4b5fd !important;
+            border-radius: 999px !important;
+            background: #f5f3ff !important;
+            color: #4c1d95 !important;
+            padding: 3px 7px !important;
+            font-size: 8px !important;
+            font-weight: 900 !important;
+            white-space: nowrap !important;
+          }
+
+          .audit-print-footer {
+            margin-top: 10px !important;
+            border-top: 1px solid #e5e7eb !important;
+            padding-top: 7px !important;
+            color: #6b7280 !important;
+            font-size: 9px !important;
+          }
+
+          .fixed {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      {filteredLogs.length > pageSize && (
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-white/60">
+              Showing page{" "}
+              <strong className="text-white">{safeCurrentPage}</strong> of{" "}
+              <strong className="text-white">{totalPages}</strong>
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(1)}
+                disabled={safeCurrentPage <= 1}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                First
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={safeCurrentPage <= 1}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                disabled={safeCurrentPage >= totalPages}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={safeCurrentPage >= totalPages}
+                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Last
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {selectedLog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-7xl overflow-hidden rounded-3xl border border-white/10 bg-[#070716] text-white shadow-2xl">
@@ -1565,18 +2893,19 @@ export default function MoneyAuditLogsPage() {
                 <div className="min-w-0">
                   <div
                     className={`mb-3 inline-flex items-center gap-2 rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${actionClass(
-                      selectedLog.action
+                      selectedLog.action,
+                      selectedLog,
                     )}`}
                   >
                     {(() => {
-                      const Icon = actionIcon(selectedLog.action);
+                      const Icon = actionIcon(selectedLog.action, selectedLog);
                       return <Icon className="h-3.5 w-3.5" />;
                     })()}
-                    {actionLabel(selectedLog.action)}
+                    {actionLabel(selectedLog.action, selectedLog)}
                   </div>
 
                   <h2 className="break-words text-2xl font-black">
-                    {getTransactionTitle(selectedLog)}
+                    {getRecordTitle(selectedLog)}
                   </h2>
 
                   <p className="mt-1 text-sm text-white/50">
@@ -1610,15 +2939,15 @@ export default function MoneyAuditLogsPage() {
                 <InfoCard
                   label="Who did it"
                   title={getActorDisplayName(selectedLog)}
-                  subtitle={selectedLog.actor_email || "No email saved"}
-                  extra={selectedLog.actor_user_id || ""}
+                  subtitle={getActorEmailDisplay(selectedLog) || "No email saved"}
+                  extra={getActorUserIdDisplay(selectedLog)}
                   icon={<UserRound className="h-5 w-5" />}
                 />
 
                 <InfoCard
-                  label="Transaction"
-                  title={getTransactionTitle(selectedLog)}
-                  subtitle={selectedLog.transaction_id || "No transaction ID"}
+                  label="Record"
+                  title={getRecordTitle(selectedLog)}
+                  subtitle={getRecordId(selectedLog) || "No record ID saved"}
                   icon={<FileText className="h-5 w-5" />}
                 />
 
@@ -1628,6 +2957,81 @@ export default function MoneyAuditLogsPage() {
                   subtitle={selectedLog.metadata?.route || "No route saved"}
                   icon={<Activity className="h-5 w-5" />}
                 />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5 text-amber-100" />
+                      <h3 className="font-black text-amber-50">Main Admin Comment</h3>
+                    </div>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-50/70">
+                      Add a clear explanation for why this record was changed, deleted, checked, restored, or imported. Saving an empty comment removes the existing comment.
+                    </p>
+                  </div>
+
+                  {selectedLog.admin_comment_updated_at && (
+                    <div className="rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-amber-50/65 ring-1 ring-amber-300/10">
+                      Last updated {formatDateTime(selectedLog.admin_comment_updated_at)}
+                      <br />
+                      by {getAuditCommentUpdatedBy(selectedLog)}
+                    </div>
+                  )}
+                </div>
+
+                <textarea
+                  value={commentDraft}
+                  onChange={(event) => {
+                    setCommentDraft(event.target.value);
+                    setCommentSaveError("");
+                    setCommentSaved(false);
+                  }}
+                  rows={5}
+                  maxLength={2000}
+                  placeholder="Example: Hidden because this was entered twice, or checked against the bank statement on 30 May 2026."
+                  className="mt-4 w-full resize-y rounded-2xl bg-black/30 p-4 text-sm leading-6 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs text-amber-50/60">
+                    {commentDraft.length}/2000 characters
+                    {commentSaved && (
+                      <span className="ml-3 font-bold text-emerald-200">Comment saved.</span>
+                    )}
+                    {commentSaveError && (
+                      <span className="ml-3 font-bold text-red-200">{commentSaveError}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    {commentDraft && (
+                      <button
+                        type="button"
+                        onClick={() => setCommentDraft("")}
+                        disabled={savingComment}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Clear comment
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={saveSelectedLogComment}
+                      disabled={savingComment}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-black text-black hover:bg-amber-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingComment ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      {savingComment ? "Saving..." : "Save Comment"}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -1662,7 +3066,10 @@ export default function MoneyAuditLogsPage() {
                       <tbody>
                         {Object.entries(selectedLog.changed_fields).map(
                           ([field, value]: [string, any]) => (
-                            <tr key={field} className="border-t border-white/10">
+                            <tr
+                              key={field}
+                              className="border-t border-white/10"
+                            >
                               <td className="p-3 font-bold text-white">
                                 {cleanFieldName(field)}
                               </td>
@@ -1679,7 +3086,7 @@ export default function MoneyAuditLogsPage() {
                                 </pre>
                               </td>
                             </tr>
-                          )
+                          ),
                         )}
                       </tbody>
                     </table>
@@ -1694,8 +3101,14 @@ export default function MoneyAuditLogsPage() {
               {showRawData && (
                 <>
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <RawDataCard title="Before Data" data={selectedLog.before_data} />
-                    <RawDataCard title="After Data" data={selectedLog.after_data} />
+                    <RawDataCard
+                      title="Before Data"
+                      data={selectedLog.before_data}
+                    />
+                    <RawDataCard
+                      title="After Data"
+                      data={selectedLog.after_data}
+                    />
                   </div>
 
                   <RawDataCard
@@ -1720,13 +3133,24 @@ function StatCard({
 }: {
   label: string;
   value: number;
-  tone: "white" | "purple" | "emerald" | "sky" | "red" | "orange" | "pink";
+  tone:
+    | "white"
+    | "purple"
+    | "emerald"
+    | "sky"
+    | "cyan"
+    | "amber"
+    | "red"
+    | "orange"
+    | "pink";
 }) {
   const classes = {
     white: "bg-white/[0.04] ring-white/10 text-white",
     purple: "bg-purple-500/10 ring-purple-300/10 text-purple-100",
     emerald: "bg-emerald-500/10 ring-emerald-300/10 text-emerald-100",
     sky: "bg-sky-500/10 ring-sky-300/10 text-sky-100",
+    cyan: "bg-cyan-500/10 ring-cyan-300/10 text-cyan-100",
+    amber: "bg-amber-500/10 ring-amber-300/10 text-amber-100",
     red: "bg-red-500/10 ring-red-300/10 text-red-100",
     orange: "bg-orange-500/10 ring-orange-300/10 text-orange-100",
     pink: "bg-pink-500/10 ring-pink-300/10 text-pink-100",
@@ -1751,7 +3175,7 @@ function InfoCard({
   title: string;
   subtitle?: string;
   extra?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -1781,7 +3205,9 @@ function RawDataCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${className}`}>
+    <div
+      className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${className}`}
+    >
       <h3 className="mb-3 font-bold">{title}</h3>
 
       <pre className="max-h-96 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-white/70">

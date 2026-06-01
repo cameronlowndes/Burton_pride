@@ -33,6 +33,10 @@ type Transaction = {
   sponsor_name: string | null;
   sponsorship_note: string | null;
 
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  supplier_category?: string | null;
+
   source: string | null;
   stripe_session_id: string | null;
   stripe_invoice_id: string | null;
@@ -137,7 +141,7 @@ export default function HiddenTransactionsPage() {
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
@@ -198,6 +202,8 @@ export default function HiddenTransactionsPage() {
           item.payment_method?.toLowerCase().includes(q) ||
           item.sponsor_name?.toLowerCase().includes(q) ||
           item.sponsorship_note?.toLowerCase().includes(q) ||
+          item.supplier_name?.toLowerCase().includes(q) ||
+          item.supplier_category?.toLowerCase().includes(q) ||
           item.personal_funds_name?.toLowerCase().includes(q) ||
           displayAdminName(item.deleted_by).toLowerCase().includes(q) ||
           sourceLabel(item.source).toLowerCase().includes(q)
@@ -260,37 +266,6 @@ export default function HiddenTransactionsPage() {
     }
   }
 
-  async function verifyMainAdminDeletePassword(password: string) {
-    const res = await fetch("/api/admin/settings/delete-password", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        password,
-      }),
-    });
-
-    const text = await res.text();
-
-    let data: any = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      data = { rawResponse: text };
-    }
-
-    if (!res.ok || !data.ok) {
-      throw {
-        message: data.error || "Incorrect main admin delete password.",
-        details: data,
-        status: res.status,
-      };
-    }
-
-    return true;
-  }
-
   async function permanentlyDeleteTransaction() {
     if (!deleteId) return;
 
@@ -299,15 +274,13 @@ export default function HiddenTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const cleanPassword = deletePassword.trim();
+      const cleanConfirmText = deleteConfirmText.trim();
 
-      if (!cleanPassword) {
-        setError("Please enter the main admin delete password.");
+      if (cleanConfirmText !== "DELETE") {
+        setError("Please type DELETE in capital letters to confirm.");
         setDeleting(false);
         return;
       }
-
-      await verifyMainAdminDeletePassword(cleanPassword);
 
       const res = await fetch(
         `/api/admin/money/transactions/${deleteId}/permanent`,
@@ -317,7 +290,7 @@ export default function HiddenTransactionsPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            password: cleanPassword,
+            confirmText: cleanConfirmText,
           }),
         }
       );
@@ -341,7 +314,7 @@ export default function HiddenTransactionsPage() {
 
       setTransactions((prev) => prev.filter((item) => item.id !== deleteId));
       setDeleteId(null);
-      setDeletePassword("");
+      setDeleteConfirmText("");
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -351,11 +324,11 @@ export default function HiddenTransactionsPage() {
   }
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1550px] space-y-6">
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div className="w-full max-w-none min-w-0 space-y-6">
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
+          <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 flex-1">
               <Link
                 href="/Admin/Money"
                 className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20"
@@ -399,7 +372,7 @@ export default function HiddenTransactionsPage() {
           </section>
         )}
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid w-full max-w-none gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-purple-500/10 p-5">
             <p className="text-sm text-purple-200">Hidden Items</p>
             <p className="text-3xl font-bold">{totals.count}</p>
@@ -416,9 +389,9 @@ export default function HiddenTransactionsPage() {
           </div>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+        <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+          <div className="mb-4 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold">Hidden Payments</h2>
               <p className="text-sm text-white/50">
                 Restore a payment to bring it back into the main tracker. The
@@ -426,7 +399,7 @@ export default function HiddenTransactionsPage() {
               </p>
             </div>
 
-            <div className="relative w-full lg:max-w-md">
+            <div className="relative w-full lg:w-[520px] lg:shrink-0">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
               <input
                 value={searchTerm}
@@ -446,8 +419,8 @@ export default function HiddenTransactionsPage() {
               No hidden transactions found.
             </div>
           ) : (
-            <div className="max-w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1400px] text-sm">
+            <div className="w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
+              <table className="w-full min-w-[1650px] text-sm">
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
@@ -457,6 +430,7 @@ export default function HiddenTransactionsPage() {
                     <th className="p-3 text-left">Type</th>
                     <th className="p-3 text-left">Source</th>
                     <th className="p-3 text-left">Sponsor</th>
+                    <th className="p-3 text-left">Supplier</th>
                     <th className="p-3 text-left">Personal</th>
                     <th className="p-3 text-left">Payment</th>
                     <th className="p-3 text-left">Invoice</th>
@@ -535,6 +509,24 @@ export default function HiddenTransactionsPage() {
                           )}
                         </td>
 
+                        <td className="max-w-[200px] p-3">
+                          {item.supplier_name ? (
+                            <div className="space-y-1">
+                              <span className="inline-flex rounded-2xl bg-cyan-500/15 px-3 py-1 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20">
+                                {item.supplier_name}
+                              </span>
+
+                              {item.supplier_category && (
+                                <p className="text-xs text-cyan-100/65">
+                                  {item.supplier_category}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-white/40">—</span>
+                          )}
+                        </td>
+
                         <td className="p-3">
                           {isPersonal ? (
                             <div className="space-y-1">
@@ -595,7 +587,10 @@ export default function HiddenTransactionsPage() {
                             <button
                               type="button"
                               disabled={deleting}
-                              onClick={() => setDeleteId(item.id)}
+                              onClick={() => {
+                                setDeleteId(item.id);
+                                setDeleteConfirmText("");
+                              }}
                               className="inline-flex items-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:opacity-50"
                               title="Permanently delete transaction"
                             >
@@ -615,7 +610,7 @@ export default function HiddenTransactionsPage() {
       </div>
 
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-1 py-4 backdrop-blur-sm sm:px-2">
           <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
             <h2 className="text-xl font-bold">Permanently delete payment?</h2>
 
@@ -629,25 +624,30 @@ export default function HiddenTransactionsPage() {
             </div>
 
             <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
+              Type DELETE to confirm
             </label>
 
             <input
-              type="password"
-              value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-hidden-delete-password"
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="Type DELETE"
+              autoComplete="off"
+              name="money-hidden-delete-confirm"
               className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
             />
+
+            <p className="mt-2 text-xs text-white/45">
+              This must be typed exactly as{" "}
+              <span className="font-bold text-red-200">DELETE</span>.
+            </p>
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setDeleteId(null);
-                  setDeletePassword("");
+                  setDeleteConfirmText("");
                 }}
                 disabled={deleting}
                 className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
@@ -658,7 +658,7 @@ export default function HiddenTransactionsPage() {
               <button
                 type="button"
                 onClick={permanentlyDeleteTransaction}
-                disabled={deleting || !deletePassword.trim()}
+                disabled={deleting || deleteConfirmText.trim() !== "DELETE"}
                 className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {deleting ? "Deleting..." : "Delete Forever"}

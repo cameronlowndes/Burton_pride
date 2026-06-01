@@ -1,10 +1,25 @@
 "use client";
 
+import Link from "next/link";
+import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
+import { Loader2, Lock, User, WalletCards } from "lucide-react";
+
 export default function MoneyManagementHomePage() {
+  const { isLoaded, isSignedIn, user } = useUser();
+
+  const userName =
+    user?.fullName ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "Money tracker user";
+
   return (
     <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
-      <div className="flex min-h-[70vh] items-center justify-center">
-        <div className="rounded-3xl border border-white/10 bg-white/5 px-8 py-10 text-center shadow-2xl backdrop-blur-xl">
+      <div className="mx-auto flex min-h-[70vh] w-full max-w-6xl items-center justify-center">
+        <div className="w-full rounded-3xl border border-white/10 bg-white/5 px-6 py-8 text-center shadow-2xl backdrop-blur-xl sm:px-8 sm:py-10">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20">
+            <WalletCards className="h-8 w-8" />
+          </div>
+
           <p className="text-sm font-semibold uppercase tracking-[0.3em] text-emerald-300">
             Burton Pride
           </p>
@@ -12,6 +27,88 @@ export default function MoneyManagementHomePage() {
           <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">
             Welcome to Burton Pride Money Management App
           </h1>
+
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
+            This money tracker checks who is logged in, so each admin can keep
+            their own saved view, filters, and working setup separate.
+          </p>
+
+          {!isLoaded && (
+            <div className="mt-8 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-5 py-3 text-sm font-bold text-white/70">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking who is logged in...
+            </div>
+          )}
+
+          {isLoaded && !isSignedIn && (
+            <div className="mt-8 rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100 ring-1 ring-amber-300/20">
+                <Lock className="h-6 w-6" />
+              </div>
+
+              <h2 className="text-xl font-black text-white">
+                Please sign in first
+              </h2>
+
+              <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-amber-100/75">
+                You need to be signed in before using the money tracker. This
+                lets the app save filters and actions against the correct admin.
+              </p>
+
+              <div className="mt-5">
+                <SignInButton mode="modal">
+                  <button
+                    type="button"
+                    className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-black hover:bg-white/90"
+                  >
+                    Sign in to money tracker
+                  </button>
+                </SignInButton>
+              </div>
+            </div>
+          )}
+
+          {isLoaded && isSignedIn && (
+            <div className="mt-8 rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5">
+              <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+                <div className="flex min-w-0 items-center gap-3 text-left">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/20">
+                    <User className="h-6 w-6" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-emerald-100">
+                      Logged in as
+                    </p>
+
+                    <p className="break-words text-sm text-white/75">
+                      {userName}
+                    </p>
+                  </div>
+                </div>
+
+                <UserButton afterSignOutUrl="/Admin/MoneyManagement" />
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney"
+                  className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400"
+                >
+                  Open my money tracker
+                </Link>
+
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney?view=my-filters"
+                  className="rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
+                >
+                  Open my saved filters
+                </Link>
+              </div>
+
+              
+            </div>
+          )}
         </div>
       </div>
     </main>

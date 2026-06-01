@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireAdminPermission } from "@/lib/adminPermissions";
 import bcrypt from "bcryptjs";
 
 export const runtime = "nodejs";
-
-const ADMIN_EMAILS = [
-  "cameronlowndes@burtonpride.co.uk",
-];
-
-function isAdminEmail(email: string) {
-  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
-}
+export const dynamic = "force-dynamic";
 
 function clean(value: unknown) {
   return String(value || "").trim();
@@ -24,11 +17,14 @@ function cleanNullable(value: unknown) {
 
 function cleanBoolean(value: unknown, fallback = false) {
   if (typeof value === "boolean") return value;
+
   if (typeof value === "string") {
     const lowered = value.toLowerCase().trim();
+
     if (lowered === "true") return true;
     if (lowered === "false") return false;
   }
+
   return fallback;
 }
 
@@ -39,41 +35,22 @@ function cleanNumber(value: unknown, fallback = 999) {
 
 function cleanStatus(value: unknown) {
   const v = String(value || "").trim().toLowerCase();
-  if (v === "live" || v === "hidden" || v === "coming_soon") return v;
+
+  if (v === "live" || v === "hidden" || v === "coming_soon") {
+    return v;
+  }
+
   return "live";
 }
 
-async function requireAdmin() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return {
-      ok: false as const,
-      response: NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
-      ),
-    };
-  }
-
-  const user = await currentUser();
-  const email =
-    user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
-
-  if (!email || !isAdminEmail(email)) {
-    return {
-      ok: false as const,
-      response: NextResponse.json(
-        { ok: false, error: "Forbidden" },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return {
-    ok: true as const,
-    email,
-  };
+async function requireSitePagesAccess() {
+  /*
+    New permissions system:
+    - Main admins automatically pass this check.
+    - Other admins must have site_pages:manage enabled in Admin Users.
+    - This replaces the old hardcoded email-only admin check.
+  */
+  await requireAdminPermission("site_pages:manage");
 }
 
 const selectFields = `
@@ -91,6 +68,8 @@ const selectFields = `
   hidden_message,
   coming_soon_title,
   coming_soon_message,
+  locked_title,
+  locked_message,
   password_protected,
   created_at,
   updated_at
@@ -98,12 +77,9 @@ const selectFields = `
 
 export async function GET() {
   try {
-    const adminCheck = await requireAdmin();
-    if (!adminCheck.ok) return adminCheck.response;
+    await requireSitePagesAccess();
 
-    const db = supabaseAdmin;
-
-    const { data, error } = await db
+    const { data, error } = await supabaseAdmin
       .from("site_pages")
       .select(selectFields)
       .order("sort_order", { ascending: true })
@@ -111,7 +87,10 @@ export async function GET() {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message || "Failed to load site pages" },
+        {
+          ok: false,
+          error: error.message || "Failed to load site pages",
+        },
         { status: 500 }
       );
     }
@@ -120,30 +99,35 @@ export async function GET() {
       ok: true,
       pages: data || [],
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error("GET /api/admin/site-pages error:", error);
+
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Unexpected server error",
+          error?.message === "Unauthorized"
+            ? "Unauthorized"
+            : error?.message || "Forbidden",
       },
-      { status: 500 }
+      { status: error?.message === "Unauthorized" ? 401 : 403 }
     );
   }
 }
 
 export async function PATCH(req: Request) {
   try {
-    const adminCheck = await requireAdmin();
-    if (!adminCheck.ok) return adminCheck.response;
+    await requireSitePagesAccess();
 
-    const db = supabaseAdmin;
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const id = clean(body?.id);
 
     if (!id) {
       return NextResponse.json(
-        { ok: false, error: "Page id is required" },
+        {
+          ok: false,
+          error: "Page id is required",
+        },
         { status: 400 }
       );
     }
@@ -173,14 +157,17 @@ export async function PATCH(req: Request) {
       hidden_message: cleanNullable(body?.hidden_message),
       coming_soon_title: cleanNullable(body?.coming_soon_title),
       coming_soon_message: cleanNullable(body?.coming_soon_message),
+      locked_title: cleanNullable(body?.locked_title),
+      locked_message: cleanNullable(body?.locked_message),
       password_protected: passwordProtected,
+      updated_at: new Date().toISOString(),
     };
 
     if (pagePasswordHash !== undefined) {
       updates.page_password_hash = pagePasswordHash;
     }
 
-    const { data, error } = await db
+    const { data, error } = await supabaseAdmin
       .from("site_pages")
       .update(updates)
       .eq("id", id)
@@ -189,7 +176,10 @@ export async function PATCH(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message || "Failed to update page" },
+        {
+          ok: false,
+          error: error.message || "Failed to update page",
+        },
         { status: 500 }
       );
     }
@@ -198,14 +188,18 @@ export async function PATCH(req: Request) {
       ok: true,
       page: data,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error("PATCH /api/admin/site-pages error:", error);
+
     return NextResponse.json(
       {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Unexpected server error",
+          error?.message === "Unauthorized"
+            ? "Unauthorized"
+            : error?.message || "Forbidden",
       },
-      { status: 500 }
+      { status: error?.message === "Unauthorized" ? 401 : 403 }
     );
   }
 }
