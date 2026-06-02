@@ -7,9 +7,9 @@ import {
   type ElementType,
   type ReactNode,
 } from "react";
-import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAdmin } from "../components/providers/AdminProvider";
 import {
   AlertTriangle,
   ArrowRight,
@@ -271,10 +271,6 @@ function nameFromEmail(email: string) {
 
   const lower = email.toLowerCase();
 
-  /*
-   * Special fix because cameronlowndes has no dot, dash, underscore,
-   * or space for the code to split automatically.
-   */
   if (lower.includes("cameronlowndes")) {
     return "Cameron Lowndes";
   }
@@ -286,18 +282,15 @@ function nameFromEmail(email: string) {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, isLoaded } = useUser();
+  const { admin, loading: adminLoading } = useAdmin();
 
-  const emailAddress = user?.primaryEmailAddress?.emailAddress || "";
+  const emailAddress = admin?.email || "";
   const emailName = nameFromEmail(emailAddress);
 
-  const clerkName =
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-    user?.fullName ||
-    "";
-
   const displayName =
-    formatDisplayName(clerkName) || emailName || "Committee Member";
+    formatDisplayName(admin?.full_name || "") ||
+    emailName ||
+    "Committee Member";
 
   const [quickStart, setQuickStart] = useState<QuickStartKey>("email");
   const [dashLoading, setDashLoading] = useState(true);
@@ -401,6 +394,7 @@ export default function DashboardPage() {
 
       const res = await fetch(`/api/admin/dashboard?t=${Date.now()}`, {
         cache: "no-store",
+        credentials: "include",
       });
 
       const json = (await res.json()) as DashboardResponse | { error?: string };
@@ -483,7 +477,7 @@ export default function DashboardPage() {
               <h1 className="mt-5 max-w-5xl break-words text-4xl font-black leading-tight sm:text-5xl lg:text-6xl">
                 {getGreeting()},{" "}
                 <span className="bg-gradient-to-r from-pink-200 via-white to-blue-200 bg-clip-text text-transparent">
-                  {isLoaded ? displayName : "Loading..."}
+                  {adminLoading ? "Loading..." : displayName}
                 </span>
               </h1>
 
@@ -794,7 +788,7 @@ export default function DashboardPage() {
                   />
 
                   <ActivityItem
-                    title="Committee route protection enabled"
+                    title="Supabase route protection enabled"
                     meta="Protected"
                     icon={ShieldCheck}
                     tone="purple"
@@ -970,8 +964,8 @@ export default function DashboardPage() {
             <div className="mt-6 space-y-3">
               <HealthRow
                 title="Authentication"
-                desc="Clerk user loaded"
-                ok={isLoaded}
+                desc="Supabase admin loaded"
+                ok={!adminLoading && !!admin}
               />
               <HealthRow
                 title="Dashboard API"
@@ -1114,8 +1108,8 @@ function StatCard({
       : tone === "blue"
       ? "bg-blue-500/15 text-blue-100"
       : tone === "yellow"
-      ? "bg-yellow-500/15 text-yellow-100"
-      : "bg-emerald-500/15 text-emerald-100";
+        ? "bg-yellow-500/15 text-yellow-100"
+        : "bg-emerald-500/15 text-emerald-100";
 
   return (
     <div className="group rounded-[2rem] border border-white/10 bg-[#11111f]/85 p-5 shadow-xl backdrop-blur-xl transition hover:-translate-y-1 hover:bg-[#171729]">
@@ -1184,10 +1178,10 @@ function ActivityItem({
     tone === "green"
       ? "bg-emerald-500/15 text-emerald-100"
       : tone === "blue"
-      ? "bg-blue-500/15 text-blue-100"
-      : tone === "purple"
-      ? "bg-purple-500/15 text-purple-100"
-      : "bg-red-500/15 text-red-100";
+        ? "bg-blue-500/15 text-blue-100"
+        : tone === "purple"
+          ? "bg-purple-500/15 text-purple-100"
+          : "bg-red-500/15 text-red-100";
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">

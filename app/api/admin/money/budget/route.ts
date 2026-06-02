@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -56,66 +57,37 @@ function nameFromEmail(email: string | null | undefined) {
   return cleaned || null;
 }
 
-function getClaimValue(claims: any, keys: string[]) {
-  for (const key of keys) {
-    const value = claims?.[key];
+function getAdminName(admin: any) {
+  return (
+    admin?.name ||
+    admin?.full_name ||
+    admin?.display_name ||
+    nameFromEmail(admin?.email) ||
+    admin?.id ||
+    "Unknown user"
+  );
+}
 
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
+function getAdminEmail(admin: any) {
+  return admin?.email || admin?.admin_email || null;
 }
 
 async function getActorDetails(): Promise<ActorDetails> {
-  const authData = await auth();
-  const user = await currentUser();
-  const claims: any = authData.sessionClaims || {};
+  const admin = await getCurrentAdmin();
 
-  const email =
-    user?.emailAddresses?.[0]?.emailAddress ||
-    getClaimValue(claims, ["email", "email_address"]) ||
-    null;
-
-  const firstName =
-    user?.firstName ||
-    getClaimValue(claims, ["first_name", "given_name"]) ||
-    "";
-
-  const lastName =
-    user?.lastName ||
-    getClaimValue(claims, ["last_name", "family_name"]) ||
-    "";
-
-  const fullName = `${firstName || ""} ${lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const claimName =
-    getClaimValue(claims, ["name", "full_name", "username"]) || null;
-
-  const actorName =
-    fullName ||
-    claimName ||
-    nameFromEmail(email) ||
-    authData.userId ||
-    "Unknown user";
+  if (!admin?.id) {
+    throw new Error("You must be signed in.");
+  }
 
   return {
-    actor_id: authData.userId || user?.id || null,
-    actor_name: actorName,
-    actor_email: email,
+    actor_id: admin.id,
+    actor_name: getAdminName(admin),
+    actor_email: getAdminEmail(admin),
   };
 }
 
 function columnMissing(error: any) {
-  const text = [
-    error?.message,
-    error?.details,
-    error?.hint,
-    error?.code,
-  ]
+  const text = [error?.message, error?.details, error?.hint, error?.code]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -137,14 +109,9 @@ function buildBudgetRows(
   return items
     .map((item: any) => {
       const categoryKey = cleanText(item.category_key || item.categoryKey);
-      const categoryLabel = cleanText(
-        item.category_label || item.categoryLabel,
-      );
+      const categoryLabel = cleanText(item.category_label || item.categoryLabel);
 
       const row: Record<string, any> = {
-        // Important fix:
-        // Your money_budget_items.id column is NOT NULL and may not have a database default.
-        // So the API creates an id for every new row before Supabase inserts it.
         id: isRealId(item.id) ? cleanText(item.id) : randomUUID(),
         year,
         category_key: categoryKey,
@@ -157,9 +124,6 @@ function buildBudgetRows(
         updated_at: new Date().toISOString(),
       };
 
-      // Optional user tracking on the budget item itself.
-      // If your money_budget_items table does not have these columns, the route
-      // automatically retries without them so saving will not break.
       if (includeActorColumns) {
         row.updated_by = actor.actor_name;
         row.updated_by_email = actor.actor_email;
@@ -177,9 +141,7 @@ function buildMergedBudgetItems(existing: any[], year: string) {
   );
 
   const defaultRows = DEFAULT_BUDGET_CATEGORIES.map((category) => {
-    const saved = existing.find(
-      (item) => item.category_key === category.key,
-    );
+    const saved = existing.find((item) => item.category_key === category.key);
 
     return (
       saved || {
@@ -202,11 +164,7 @@ function buildMergedBudgetItems(existing: any[], year: string) {
     (item) => item.category_key !== "other",
   );
 
-  return [
-    ...rowsBeforeOther,
-    ...customRows,
-    ...(otherRow ? [otherRow] : []),
-  ];
+  return [...rowsBeforeOther, ...customRows, ...(otherRow ? [otherRow] : [])];
 }
 
 async function upsertBudgetRows(
@@ -229,8 +187,6 @@ async function upsertBudgetRows(
     };
   }
 
-  // If the only issue is missing optional user-tracking columns,
-  // retry without those columns.
   if (columnMissing(result.error)) {
     const retryResult = await supabaseAdmin
       .from("money_budget_items")
@@ -245,7 +201,7 @@ async function upsertBudgetRows(
       userTrackingSaved: false,
       warning: retryResult.error
         ? null
-        : "Budget saved, but money_budget_items does not have updated_by / updated_by_email / updated_by_user_id columns, so user tracking was only returned in the API response and audit log metadata.",
+        : "Budget saved, but money_budget_items does not have updated_by / updated_by_email / updated_by_user_id columns, so user tracking was only returned in the API response.",
     };
   }
 
@@ -259,23 +215,10 @@ async function upsertBudgetRows(
 
 export async function GET(req: Request) {
   try {
-    const authData = await auth();
-
-    if (!authData.userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You must be signed in.",
-        },
-        { status: 401 },
-      );
-    }
-
     const actor = await getActorDetails();
 
     const { searchParams } = new URL(req.url);
-    const year =
-      searchParams.get("year") || new Date().getFullYear().toString();
+    const year = searchParams.get("year") || new Date().getFullYear().toString();
 
     const { data, error } = await supabaseAdmin
       .from("money_budget_items")
@@ -307,25 +250,13 @@ export async function GET(req: Request) {
         ok: false,
         error: error?.message || "Failed to load budget planning.",
       },
-      { status: 500 },
+      { status: error?.message === "You must be signed in." ? 401 : 500 },
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const authData = await auth();
-
-    if (!authData.userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You must be signed in.",
-        },
-        { status: 401 },
-      );
-    }
-
     const actor = await getActorDetails();
 
     const body = await req.json().catch(() => null);
@@ -471,7 +402,7 @@ export async function POST(req: Request) {
         ok: false,
         error: error?.message || "Failed to save budget planning.",
       },
-      { status: 500 },
+      { status: error?.message === "You must be signed in." ? 401 : 500 },
     );
   }
 }

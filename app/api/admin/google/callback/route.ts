@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
-import { auth } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function decodeState(state: string | null) {
   if (!state) return { returnTo: "/Admin/Email" };
 
   try {
-    const parsed = JSON.parse(
-      Buffer.from(state, "base64url").toString("utf8")
-    );
+    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8"));
 
     return {
       returnTo: parsed.returnTo || "/Admin/Email",
@@ -26,12 +28,11 @@ export async function GET(req: NextRequest) {
     const { returnTo } = decodeState(state);
 
     if (!code) {
-      return NextResponse.redirect(
-        new URL(`${returnTo}?error=no_code`, req.url)
-      );
+      return NextResponse.redirect(new URL(`${returnTo}?error=no_code`, req.url));
     }
 
-    const { userId } = await auth();
+    const admin = await getCurrentAdmin();
+    const userId = admin?.id;
 
     if (!userId) {
       return NextResponse.redirect(new URL("/Admin/Login", req.url));
@@ -65,14 +66,10 @@ export async function GET(req: NextRequest) {
     const email = userInfo.data.email;
 
     if (!email) {
-      return NextResponse.redirect(
-        new URL(`${returnTo}?error=no_email`, req.url)
-      );
+      return NextResponse.redirect(new URL(`${returnTo}?error=no_email`, req.url));
     }
 
-    const supabase = supabaseAdmin;
-
-    const { data: existingConnection, error: existingError } = await supabase
+    const { data: existingConnection, error: existingError } = await supabaseAdmin
       .from("google_connections")
       .select("refresh_token")
       .eq("user_id", userId)
@@ -80,6 +77,7 @@ export async function GET(req: NextRequest) {
 
     if (existingError) {
       console.error("Failed to load existing Google connection:", existingError);
+
       return NextResponse.redirect(
         new URL(`${returnTo}?error=lookup_failed`, req.url)
       );
@@ -88,10 +86,9 @@ export async function GET(req: NextRequest) {
     const refreshTokenToSave =
       tokens.refresh_token || existingConnection?.refresh_token || null;
 
-    const scopeToSave =
-      typeof tokens.scope === "string" ? tokens.scope : null;
+    const scopeToSave = typeof tokens.scope === "string" ? tokens.scope : null;
 
-    const { error: upsertError } = await supabase
+    const { error: upsertError } = await supabaseAdmin
       .from("google_connections")
       .upsert(
         {
@@ -110,14 +107,13 @@ export async function GET(req: NextRequest) {
 
     if (upsertError) {
       console.error("Failed to save Google connection:", upsertError);
+
       return NextResponse.redirect(
         new URL(`${returnTo}?error=save_failed`, req.url)
       );
     }
 
-    return NextResponse.redirect(
-      new URL(`${returnTo}?connected=1`, req.url)
-    );
+    return NextResponse.redirect(new URL(`${returnTo}?connected=1`, req.url));
   } catch (error) {
     console.error("Google callback error:", error);
 

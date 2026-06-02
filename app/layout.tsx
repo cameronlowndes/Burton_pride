@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import "../styles/globals.css";
+import "../globals.css";
 import { Analytics } from "@vercel/analytics/react";
-import { ClerkProvider } from "@clerk/nextjs";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,19 +23,17 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <ClerkProvider>
-      <html lang="en" className="h-full">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen m-0`}
-        >
-          {children}
-          <Analytics />
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en" className="h-full">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen m-0 antialiased`}
+      >
+        {children}
+        <Analytics />
+      </body>
+    </html>
   );
 }

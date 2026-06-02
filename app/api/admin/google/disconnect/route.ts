@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST() {
   try {
-    const { userId } = await auth();
+    const admin = await getCurrentAdmin();
+    const userId = admin?.id;
 
     if (!userId) {
       return NextResponse.json(
@@ -16,9 +21,7 @@ export async function POST() {
       );
     }
 
-    const supabase = supabaseAdmin;
-
-    const { data: existing, error: lookupError } = await supabase
+    const { data: existing, error: lookupError } = await supabaseAdmin
       .from("google_connections")
       .select("user_id, email, google_email")
       .eq("user_id", userId)
@@ -31,6 +34,9 @@ export async function POST() {
         {
           ok: false,
           error: "Failed to load Google connection before disconnect.",
+          details: lookupError,
+          likelyFix:
+            "Check the google_connections table exists and user_id stores your Supabase admin/auth user id.",
         },
         { status: 500 }
       );
@@ -39,11 +45,12 @@ export async function POST() {
     if (!existing) {
       return NextResponse.json({
         ok: true,
+        deleted: 0,
         message: "No Google connection found.",
       });
     }
 
-    const { error: deleteError, count } = await supabase
+    const { error: deleteError, count } = await supabaseAdmin
       .from("google_connections")
       .delete({ count: "exact" })
       .eq("user_id", userId);
@@ -55,6 +62,7 @@ export async function POST() {
         {
           ok: false,
           error: deleteError.message || "Failed to disconnect Google account.",
+          details: deleteError,
         },
         { status: 500 }
       );
@@ -75,6 +83,8 @@ export async function POST() {
           error instanceof Error
             ? error.message
             : "Failed to disconnect Google account.",
+        likelyFix:
+          "Make sure getCurrentAdmin() uses your Supabase login system and returns the current admin record.",
       },
       { status: 500 }
     );

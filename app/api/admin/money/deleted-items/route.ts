@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -25,55 +26,42 @@ function cleanText(value: unknown) {
   return String(value || "").trim();
 }
 
-function getDisplayName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+function nameFromEmail(email: string | null | undefined) {
+  if (!email) return "Unknown user";
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
+  const username = email.split("@")[0] || "";
 
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
+  return (
+    username
       .replace(/[._-]+/g, " ")
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
-}
-
-function getPrimaryEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+      .trim() || "Unknown user"
+  );
 }
 
 async function getActor() {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin?.id) {
     return {
       ok: false as const,
       response: NextResponse.json(
         {
           error: "You must be signed in.",
-          details: "Clerk did not return a userId for this request.",
+          details: "No Supabase admin session was found for this request.",
         },
         { status: 401 },
       ),
     };
   }
 
-  const user = await currentUser();
+  const email = admin.email || null;
 
   return {
     ok: true as const,
-    userId,
-    name: getDisplayName(user),
-    email: getPrimaryEmail(user),
+    userId: admin.id,
+    name: nameFromEmail(email),
+    email,
   };
 }
 
@@ -504,4 +492,3 @@ export async function DELETE(request: Request) {
     item: deletedItem,
   });
 }
-

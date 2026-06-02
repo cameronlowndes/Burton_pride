@@ -1,30 +1,36 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+};
 
 export async function GET() {
   try {
-    const { userId } = await auth();
+    const admin = await getCurrentAdmin();
+
+    const userId = admin?.id;
 
     if (!userId) {
       return NextResponse.json(
         {
           ok: false,
           connected: false,
-          error: "Not authenticated.",
+          error: "Not authenticated. Please sign in with your admin account.",
         },
         {
           status: 401,
-          headers: {
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
+          headers: NO_STORE_HEADERS,
         }
       );
     }
 
-    const supabase = supabaseAdmin;
-
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("google_connections")
       .select("google_email, email, expires_at")
       .eq("user_id", userId)
@@ -38,12 +44,13 @@ export async function GET() {
           ok: false,
           connected: false,
           error: error.message || "Failed to load Google connection status.",
+          details: error,
+          likelyFix:
+            "Check the google_connections table exists and that user_id stores the Supabase admin/auth user id.",
         },
         {
           status: 500,
-          headers: {
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-          },
+          headers: NO_STORE_HEADERS,
         }
       );
     }
@@ -51,14 +58,12 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: true,
-        connected: !!data,
+        connected: Boolean(data),
         googleEmail: data?.google_email || data?.email || null,
         expiresAt: data?.expires_at ?? null,
       },
       {
-        headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
+        headers: NO_STORE_HEADERS,
       }
     );
   } catch (error) {
@@ -72,12 +77,12 @@ export async function GET() {
           error instanceof Error
             ? error.message
             : "Failed to load Google connection status.",
+        likelyFix:
+          "Make sure getCurrentAdmin() uses Supabase auth and returns the current admin record.",
       },
       {
         status: 500,
-        headers: {
-          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        },
+        headers: NO_STORE_HEADERS,
       }
     );
   }

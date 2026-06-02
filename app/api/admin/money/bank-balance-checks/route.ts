@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -44,25 +44,15 @@ type MoneyRefundRow = {
 
 type TrackerBreakdown = {
   year: string;
-
   opening_balance_pence: number;
-
   ordinary_money_in_pence: number;
   ordinary_money_out_pence: number;
-
   refunds_received_back_pence: number;
   refunds_sent_back_pence: number;
   net_refund_adjustment_pence: number;
-
-  /**
-   * These are the numbers that must be shown in the Money In and Money Out
-   * cards. They include completed refund adjustments exactly once.
-   */
   money_in_including_refunds_pence: number;
   money_out_including_refunds_pence: number;
-
   available_balance_pence: number;
-
   current_year_transaction_count: number;
   current_year_refund_count: number;
   completed_current_year_refund_count: number;
@@ -90,9 +80,7 @@ function cleanText(value: unknown) {
 
 function toPence(value: unknown) {
   const numberValue = Number(value);
-
   if (!Number.isFinite(numberValue)) return 0;
-
   return Math.round(numberValue);
 }
 
@@ -106,49 +94,35 @@ function isValidYear(value: string) {
 
 function parseLimit(value: string | null, fallback = 20) {
   const parsed = Number(value || fallback);
-
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-
   return Math.min(Math.floor(parsed), 100);
 }
 
-function getUserName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
-
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
+function getAdminName(admin: any) {
+  return (
+    admin?.name ||
+    admin?.full_name ||
+    admin?.display_name ||
+    admin?.email ||
+    "Unknown user"
+  );
 }
 
-function getUserEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+function getAdminEmail(admin: any) {
+  return admin?.email || admin?.admin_email || null;
 }
 
 async function getSignedInUser() {
-  const user = await currentUser();
+  const admin = await getCurrentAdmin();
 
-  if (!user?.id) {
+  if (!admin?.id) {
     throw new Error("You must be signed in to use bank balance checks.");
   }
 
   return {
-    userId: user.id,
-    userName: getUserName(user),
-    userEmail: getUserEmail(user),
+    userId: admin.id,
+    userName: getAdminName(admin),
+    userEmail: getAdminEmail(admin),
   };
 }
 
@@ -200,7 +174,8 @@ function isRestrictedFundingTransaction(row: MoneyTransactionRow) {
 function isPersonalFundsTransaction(row: MoneyTransactionRow) {
   return Boolean(
     row.is_personal_funds ||
-      String(row.payment_method || "").trim().toLowerCase() === "personal funds",
+      String(row.payment_method || "").trim().toLowerCase() ===
+        "personal funds",
   );
 }
 
@@ -365,21 +340,15 @@ async function getTrackerBreakdown(year: string): Promise<TrackerBreakdown> {
 
   return {
     year,
-
     opening_balance_pence: openingBalance,
-
     ordinary_money_in_pence: currentTransactionTotals.income,
     ordinary_money_out_pence: currentTransactionTotals.expense,
-
     refunds_received_back_pence: currentRefundTotals.receivedBack,
     refunds_sent_back_pence: currentRefundTotals.sentBack,
     net_refund_adjustment_pence: netRefundAdjustment,
-
     money_in_including_refunds_pence: moneyInIncludingRefunds,
     money_out_including_refunds_pence: moneyOutIncludingRefunds,
-
     available_balance_pence: availableBalance,
-
     current_year_transaction_count: currentTransactions.length,
     current_year_refund_count: currentRefunds.filter((refund) => !refund.is_hidden)
       .length,

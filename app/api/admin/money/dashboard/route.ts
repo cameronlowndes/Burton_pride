@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -38,9 +39,9 @@ type MoneySavingsGoal = {
 };
 
 async function requireAdmin() {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin?.id) {
     return {
       ok: false as const,
       error: "Unauthorized",
@@ -50,7 +51,7 @@ async function requireAdmin() {
 
   return {
     ok: true as const,
-    userId,
+    userId: admin.id,
   };
 }
 
@@ -238,10 +239,7 @@ export async function GET() {
       .map(([label, amount]) => ({
         label,
         value: formatMoney(amount),
-        width: `${Math.max(
-          12,
-          safePercent((amount / maxBreakdown) * 100)
-        )}%`,
+        width: `${Math.max(12, safePercent((amount / maxBreakdown) * 100))}%`,
         rawAmount: amount,
       }))
       .sort((a, b) => b.rawAmount - a.rawAmount)
@@ -328,9 +326,7 @@ export async function GET() {
       {
         ok: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "Internal server error",
+          error instanceof Error ? error.message : "Internal server error",
       },
       { status: 500 }
     );

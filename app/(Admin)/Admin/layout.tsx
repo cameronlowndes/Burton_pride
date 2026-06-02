@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { AdminProvider } from "./components/providers/AdminProvider";
 import AdminSidebar from "./components/rooting/AdminSidebar";
 
 type AdminRole = "main_admin" | "admin" | "editor";
@@ -194,11 +195,7 @@ function NoAccessScreen() {
   );
 }
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function AdminLayoutInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -258,6 +255,7 @@ export default function AdminLayout({
 
         const res = await fetch(`/api/admin/me/permissions?t=${Date.now()}`, {
           cache: "no-store",
+          credentials: "include",
         });
 
         const data = (await res
@@ -377,5 +375,13 @@ export default function AdminLayout({
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  return (
+    <AdminProvider>
+      <AdminLayoutInner>{children}</AdminLayoutInner>
+    </AdminProvider>
   );
 }

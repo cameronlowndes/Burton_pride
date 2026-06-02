@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -37,36 +38,23 @@ function cleanMonths(value: unknown) {
   return Math.round(months);
 }
 
-function getDisplayName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+function nameFromEmail(email: string | null | undefined) {
+  if (!email) return "Unknown user";
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
+  const username = email.split("@")[0] || "";
 
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
+  return (
+    username
       .replace(/[._-]+/g, " ")
       .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
-}
-
-function getPrimaryEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+      .trim() || "Unknown user"
+  );
 }
 
 async function getActor() {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin?.id) {
     return {
       ok: false as const,
       response: NextResponse.json(
@@ -76,13 +64,13 @@ async function getActor() {
     };
   }
 
-  const user = await currentUser();
+  const email = admin.email || null;
 
   return {
     ok: true as const,
-    userId,
-    name: getDisplayName(user),
-    email: getPrimaryEmail(user),
+    userId: admin.id,
+    name: nameFromEmail(email),
+    email,
   };
 }
 
@@ -144,6 +132,7 @@ function getChangedFields(beforeData: any, afterData: any) {
     "deleted_at",
     "deleted_by",
     "deleted_by_email",
+    "deleted_by_user_id",
   ];
 
   return fields.filter((field) => {
@@ -167,16 +156,27 @@ function apiError(error: any, message: string, status = 500) {
   );
 }
 
-/**
- * GET /api/admin/money/saving-targets?year=2026
- * Normal view: only returns active targets.
- *
- * GET /api/admin/money/saving-targets?year=2026&includeDeleted=true
- * Deleted view: returns active and soft-deleted targets.
- *
- * GET /api/admin/money/saving-targets?year=2026&deletedOnly=true
- * Bin view: returns only soft-deleted targets.
- */
+async function readJsonBody(request: Request) {
+  const text = await request.text().catch(() => "");
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+async function findSavingTargetById(id: string) {
+  const { data, error } = await supabaseAdmin
+    .from("money_saving_targets")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  return { data, error };
+}
+
 export async function GET(request: Request) {
   const actor = await getActor();
 
@@ -228,9 +228,7 @@ export async function POST(request: Request) {
     return actor.response;
   }
 
-  const payload = (await request.json().catch(() => null)) as
-    | SavingTargetPayload
-    | null;
+  const payload = (await readJsonBody(request)) as SavingTargetPayload | null;
 
   if (!payload) {
     return NextResponse.json(
@@ -266,8 +264,6 @@ export async function POST(request: Request) {
     updated_by: actor.name,
     updated_by_email: actor.email,
     updated_by_user_id: actor.userId,
-
-    // New targets must always be active.
     deleted_at: null,
     deleted_by: null,
     deleted_by_email: null,
@@ -304,24 +300,6 @@ export async function POST(request: Request) {
   });
 }
 
-/**
- * PATCH /api/admin/money/saving-targets
- * Normal update body:
- * {
- *   "id": "...",
- *   "target_name": "Insurance",
- *   "target_amount_pence": 50000,
- *   "saved_amount_pence": 10000,
- *   "months_to_save": 6,
- *   "notes": "..."
- * }
- *
- * Restore body:
- * {
- *   "id": "...",
- *   "action": "restore"
- * }
- */
 export async function PATCH(request: Request) {
   const actor = await getActor();
 
@@ -329,9 +307,7 @@ export async function PATCH(request: Request) {
     return actor.response;
   }
 
-  const payload = (await request.json().catch(() => null)) as
-    | SavingTargetPayload
-    | null;
+  const payload = (await readJsonBody(request)) as SavingTargetPayload | null;
 
   if (!payload) {
     return NextResponse.json(
@@ -349,17 +325,20 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const { data: existingTarget, error: existingError } = await supabaseAdmin
-    .from("money_saving_targets")
-    .select("*")
-    .eq("id", id)
-    .single();
+  const { data: existingTarget, error: existingError } =
+    await findSavingTargetById(id);
 
-  if (existingError || !existingTarget) {
+  if (existingError) {
+    return apiError(existingError, "Failed to find saving target.");
+  }
+
+  if (!existingTarget) {
     return NextResponse.json(
       {
         error: "Saving target not found.",
-        details: existingError?.message,
+        details:
+          "No saving target exists with this ID. Create/save it again as a new database target.",
+        id,
       },
       { status: 404 },
     );
@@ -506,19 +485,6 @@ export async function PATCH(request: Request) {
   });
 }
 
-/**
- * DELETE /api/admin/money/saving-targets?id=...
- *
- * This is a SOFT DELETE.
- * It does not remove the database row.
- * It fills:
- * - deleted_at
- * - deleted_by
- * - deleted_by_email
- * - deleted_by_user_id
- *
- * Normal GET calls hide rows where deleted_at is not null.
- */
 export async function DELETE(request: Request) {
   const actor = await getActor();
 
@@ -529,39 +495,48 @@ export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const idFromQuery = cleanText(searchParams.get("id"));
 
-  const body = await request.json().catch(() => null);
+  const body = await readJsonBody(request);
   const idFromBody = cleanText(body?.id);
 
   const id = idFromQuery || idFromBody;
 
   if (!id) {
     return NextResponse.json(
-      { error: "Saving target ID is required." },
+      {
+        error: "Saving target ID is required.",
+        details:
+          "The delete request did not include ?id=TARGET_ID or a JSON body with id.",
+      },
       { status: 400 },
     );
   }
 
-  const { data: existingTarget, error: existingError } = await supabaseAdmin
-    .from("money_saving_targets")
-    .select("*")
-    .eq("id", id)
-    .single();
+  const { data: existingTarget, error: existingError } =
+    await findSavingTargetById(id);
 
-  if (existingError || !existingTarget) {
-    return NextResponse.json(
-      {
-        error: "Saving target not found.",
-        details: existingError?.message,
-      },
-      { status: 404 },
-    );
+  if (existingError) {
+    return apiError(existingError, "Failed to find saving target.");
+  }
+
+  if (!existingTarget) {
+    return NextResponse.json({
+      target: null,
+      deleted: true,
+      softDeleted: false,
+      notFound: true,
+      id,
+      message:
+        "Saving target was not found in the database. It has been removed from the page state.",
+    });
   }
 
   if (existingTarget.deleted_at) {
     return NextResponse.json({
       target: existingTarget,
       deleted: true,
+      softDeleted: true,
       alreadyDeleted: true,
+      id,
       message: "This saving target was already soft deleted.",
     });
   }
@@ -608,5 +583,6 @@ export async function DELETE(request: Request) {
     target: data,
     deleted: true,
     softDeleted: true,
+    id,
   });
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -37,36 +38,23 @@ function cleanMonths(value: unknown) {
   return Math.round(months);
 }
 
-function getDisplayName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+function nameFromEmail(email: string | null | undefined) {
+  if (!email) return null;
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
+  const username = email.split("@")[0] || "";
+
+  const cleaned = username
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .trim();
 
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
-}
-
-function getPrimaryEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+  return cleaned || null;
 }
 
 async function getActor() {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin?.id) {
     return {
       ok: false as const,
       response: NextResponse.json(
@@ -76,13 +64,13 @@ async function getActor() {
     };
   }
 
-  const user = await currentUser();
+  const email = admin.email || null;
 
   return {
     ok: true as const,
-    userId,
-    name: getDisplayName(user),
-    email: getPrimaryEmail(user),
+    userId: admin.id,
+    name: email ? nameFromEmail(email) || email : "Unknown user",
+    email,
   };
 }
 
@@ -186,18 +174,13 @@ async function findSavingTargetById(id: string) {
     .eq("id", id)
     .maybeSingle();
 
-  return {
-    data,
-    error,
-  };
+  return { data, error };
 }
 
 export async function GET(request: Request) {
   const actor = await getActor();
 
-  if (!actor.ok) {
-    return actor.response;
-  }
+  if (!actor.ok) return actor.response;
 
   const { searchParams } = new URL(request.url);
   const year = cleanText(searchParams.get("year"));
@@ -213,9 +196,7 @@ export async function GET(request: Request) {
     .select("*")
     .order("created_at", { ascending: true });
 
-  if (year) {
-    query = query.eq("year", year);
-  }
+  if (year) query = query.eq("year", year);
 
   if (deletedOnly) {
     query = query.not("deleted_at", "is", null);
@@ -225,9 +206,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await query;
 
-  if (error) {
-    return apiError(error, "Failed to load saving targets.");
-  }
+  if (error) return apiError(error, "Failed to load saving targets.");
 
   return NextResponse.json({
     targets: data || [],
@@ -239,9 +218,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const actor = await getActor();
 
-  if (!actor.ok) {
-    return actor.response;
-  }
+  if (!actor.ok) return actor.response;
 
   const payload = (await readJsonBody(request)) as SavingTargetPayload | null;
 
@@ -291,9 +268,7 @@ export async function POST(request: Request) {
     .select("*")
     .single();
 
-  if (error) {
-    return apiError(error, "Failed to create saving target.");
-  }
+  if (error) return apiError(error, "Failed to create saving target.");
 
   await createAuditLog({
     actorName: actor.name,
@@ -310,17 +285,13 @@ export async function POST(request: Request) {
     },
   });
 
-  return NextResponse.json({
-    target: data,
-  });
+  return NextResponse.json({ target: data });
 }
 
 export async function PATCH(request: Request) {
   const actor = await getActor();
 
-  if (!actor.ok) {
-    return actor.response;
-  }
+  if (!actor.ok) return actor.response;
 
   const payload = (await readJsonBody(request)) as SavingTargetPayload | null;
 
@@ -352,7 +323,7 @@ export async function PATCH(request: Request) {
       {
         error: "Saving target not found.",
         details:
-          "No saving target exists with this ID. This can happen if an old local browser-only target is being edited. Create/save it again as a new database target.",
+          "No saving target exists with this ID. Create/save it again as a new database target.",
         id,
       },
       { status: 404 },
@@ -378,9 +349,7 @@ export async function PATCH(request: Request) {
       .select("*")
       .single();
 
-    if (error) {
-      return apiError(error, "Failed to restore saving target.");
-    }
+    if (error) return apiError(error, "Failed to restore saving target.");
 
     await createAuditLog({
       actorName: actor.name,
@@ -422,38 +391,20 @@ export async function PATCH(request: Request) {
     updated_at: new Date().toISOString(),
   };
 
-  if (payload.year !== undefined) {
-    updateData.year = cleanText(payload.year);
-  }
-
-  if (payload.target_name !== undefined) {
-    updateData.target_name = cleanText(payload.target_name);
-  }
-
+  if (payload.year !== undefined) updateData.year = cleanText(payload.year);
+  if (payload.target_name !== undefined) updateData.target_name = cleanText(payload.target_name);
   if (payload.target_amount_pence !== undefined) {
-    updateData.target_amount_pence = cleanMoneyPence(
-      payload.target_amount_pence,
-    );
+    updateData.target_amount_pence = cleanMoneyPence(payload.target_amount_pence);
   }
-
   if (payload.saved_amount_pence !== undefined) {
-    updateData.saved_amount_pence = cleanMoneyPence(
-      payload.saved_amount_pence,
-    );
+    updateData.saved_amount_pence = cleanMoneyPence(payload.saved_amount_pence);
   }
-
   if (payload.months_to_save !== undefined) {
     updateData.months_to_save = cleanMonths(payload.months_to_save);
   }
+  if (payload.notes !== undefined) updateData.notes = cleanOptionalText(payload.notes);
 
-  if (payload.notes !== undefined) {
-    updateData.notes = cleanOptionalText(payload.notes);
-  }
-
-  if (!updateData.year && existingTarget.year) {
-    updateData.year = existingTarget.year;
-  }
-
+  if (!updateData.year && existingTarget.year) updateData.year = existingTarget.year;
   if (!updateData.target_name && existingTarget.target_name) {
     updateData.target_name = existingTarget.target_name;
   }
@@ -476,9 +427,7 @@ export async function PATCH(request: Request) {
     .select("*")
     .single();
 
-  if (error) {
-    return apiError(error, "Failed to update saving target.");
-  }
+  if (error) return apiError(error, "Failed to update saving target.");
 
   await createAuditLog({
     actorName: actor.name,
@@ -495,17 +444,13 @@ export async function PATCH(request: Request) {
     },
   });
 
-  return NextResponse.json({
-    target: data,
-  });
+  return NextResponse.json({ target: data });
 }
 
 export async function DELETE(request: Request) {
   const actor = await getActor();
 
-  if (!actor.ok) {
-    return actor.response;
-  }
+  if (!actor.ok) return actor.response;
 
   const { searchParams } = new URL(request.url);
   const idFromQuery = cleanText(searchParams.get("id"));
@@ -533,12 +478,6 @@ export async function DELETE(request: Request) {
     return apiError(existingError, "Failed to find saving target.");
   }
 
-  /**
-   * Important fix:
-   * If a target is already gone/not found, return success instead of throwing
-   * Supabase's “Cannot coerce the result to a single JSON object”.
-   * The UI can then remove it from screen and carry on.
-   */
   if (!existingTarget) {
     return NextResponse.json({
       target: null,
@@ -580,9 +519,7 @@ export async function DELETE(request: Request) {
     .select("*")
     .single();
 
-  if (error) {
-    return apiError(error, "Failed to soft delete saving target.");
-  }
+  if (error) return apiError(error, "Failed to soft delete saving target.");
 
   await createAuditLog({
     actorName: actor.name,
