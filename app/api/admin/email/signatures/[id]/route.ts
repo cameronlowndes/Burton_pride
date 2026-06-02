@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { auth } from "@clerk/nextjs/server";
 
 type GoogleConnectionRow = {

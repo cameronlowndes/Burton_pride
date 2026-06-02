@@ -1,52 +1,13 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Mail, ShieldAlert } from "lucide-react";
 
-import NavbarManagerClient from "./NavbarManagerClient";
 import { requireAdminPermission } from "@/lib/adminPermissions";
+import SidebarManagerClient from "./SidebarManager";
 
 export const dynamic = "force-dynamic";
 
-export default async function NavbarManagerPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
-        <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:p-10">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-white/20 bg-white/10">
-            <ShieldAlert className="h-8 w-8 text-white" />
-          </div>
-
-          <h1 className="mt-6 text-3xl font-bold tracking-tight sm:text-4xl">
-            Please sign in
-          </h1>
-
-          <p className="mt-3 text-sm leading-7 text-white/85 sm:text-base">
-            You need to be signed in with an authorised admin account to access
-            the navbar manager.
-          </p>
-
-          <div className="mt-8">
-            <Link
-              href="/Admin/Login"
-              className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
-            >
-              Go to login
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+export default async function SidebarManagerPage() {
   try {
-    /*
-      New permissions system:
-      - Main admins automatically pass this check.
-      - Other admins must have site_pages:manage enabled in Admin Users.
-      - This replaces the old hardcoded main-admin-only check.
-    */
     await requireAdminPermission("site_pages:manage");
   } catch {
     return (
@@ -63,10 +24,9 @@ export default async function NavbarManagerPage() {
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-white/85 sm:text-base">
-              This section controls the public website navigation bar. You need
-              the{" "}
+              You need to be signed in with a Supabase admin account that has{" "}
               <span className="font-bold text-white">Manage Site Pages</span>{" "}
-              permission to access it.
+              permission to access the sidebar manager.
             </p>
           </div>
 
@@ -79,9 +39,9 @@ export default async function NavbarManagerPage() {
               <h2 className="text-lg font-semibold">Why access is limited</h2>
 
               <p className="mt-2 text-sm leading-6 text-white/75">
-                Navbar manager access is controlled through Admin Users &
-                Permissions because changes here affect public website
-                navigation.
+                Sidebar manager access is controlled through Supabase Admin
+                Users & Permissions because changes here affect what admin pages
+                the team can see and use.
               </p>
             </div>
 
@@ -109,8 +69,16 @@ export default async function NavbarManagerPage() {
                 Back to dashboard
               </Link>
 
+              <Link
+                href="/Admin/Login"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                Admin login
+              </Link>
+
               <a
-                href="mailto:cameronlowndes@burtonpride.co.uk?subject=Navbar%20manager%20permission%20request"
+                href="mailto:cameronlowndes@burtonpride.co.uk?subject=Admin%20sidebar%20permission%20request"
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-yellow-300/30 bg-yellow-400/15 px-5 py-3 text-sm font-semibold text-yellow-50 transition hover:bg-yellow-400/20"
               >
                 <Mail className="h-4 w-4" />
@@ -123,5 +91,5 @@ export default async function NavbarManagerPage() {
     );
   }
 
-  return <NavbarManagerClient />;
+  return <SidebarManagerClient />;
 }

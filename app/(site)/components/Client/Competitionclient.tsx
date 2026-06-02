@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabaseBrowser } from "@/lib/supabase/supabaseBrowser";
 
 export default function CompetitionPage() {
   const [consent, setConsent] = useState(false);

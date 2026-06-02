@@ -9,7 +9,7 @@ import {
 
 import MoneyExportsClient from "../../../components/money/exports/MoneyExportsClient";
 import FundingReportExportButton from "../../../components/money/exports/FundingReportExportButton";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

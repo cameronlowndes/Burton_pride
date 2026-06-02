@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 function decodeState(state: string | null) {
   if (!state) return { returnTo: "/Admin/Email" };

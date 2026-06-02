@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type SidebarPayload = {
   id?: string;
@@ -13,31 +15,81 @@ type SidebarPayload = {
   is_enabled?: boolean;
 };
 
-async function requireAdmin() {
-  const { userId } = await auth();
+type AdminUser = {
+  id: string;
+  email: string | null;
+  role: string | null;
+  is_active: boolean | null;
+  permissions: unknown;
+};
 
-  if (!userId) {
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
+}
+
+function permissionsToKeys(value: unknown): string[] {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value !== "object") return [];
+
+  return Object.entries(value)
+    .filter(([, allowed]) => allowed === true)
+    .map(([key]) => key);
+}
+
+function hasPermission(admin: AdminUser, permission: string) {
+  if (admin.role === "main_admin") return true;
+
+  const permissions = permissionsToKeys(admin.permissions);
+
+  return permissions.includes(permission);
+}
+
+async function requireSupabaseAdmin() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
     return {
       ok: false as const,
       error: "Unauthorized",
       status: 401,
+      admin: null,
     };
   }
 
-  // 🔥 CHANGED: now checks admin_sidebar_items instead of admin_users
   const { data, error } = await supabaseAdmin
-    .from("admin_sidebar_items")
-    .select("id")
-    .limit(1)
+    .from("admin_users")
+    .select("id,email,role,is_active,permissions")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
     .maybeSingle();
 
   if (error) {
-    console.error("Admin lookup error:", error);
+    console.error("Money sidebar admin lookup error:", error);
 
     return {
       ok: false as const,
-      error: "Failed to verify admin access",
+      error: error.message || "Failed to verify admin access.",
       status: 500,
+      admin: null,
     };
   }
 
@@ -46,11 +98,13 @@ async function requireAdmin() {
       ok: false as const,
       error: "Forbidden",
       status: 403,
+      admin: null,
     };
   }
 
   return {
     ok: true as const,
+    admin: data as AdminUser,
   };
 }
 
@@ -73,12 +127,15 @@ function normalisePayload(body: SidebarPayload) {
 
 export async function GET() {
   try {
-    const access = await requireAdmin();
+    const access = await requireSupabaseAdmin();
 
     if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
+      return jsonResponse(
+        {
+          ok: false,
+          error: access.error,
+        },
+        access.status
       );
     }
 
@@ -87,33 +144,85 @@ export async function GET() {
       .select("*")
       .order("sort_order", { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: error.message || "Failed to load money sidebar items.",
+        },
+        500
+      );
+    }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       items: data || [],
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
+  } catch (error: unknown) {
+    console.error("GET /api/admin/money-sidebar error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to load money sidebar items.";
+
+    return jsonResponse(
+      {
+        ok: false,
+        error: message,
+      },
+      500
     );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const access = await requireAdmin();
+    const access = await requireSupabaseAdmin();
 
     if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
+      return jsonResponse(
+        {
+          ok: false,
+          error: access.error,
+        },
+        access.status
       );
     }
 
-    const body = await req.json();
+    if (!hasPermission(access.admin, "site_pages:manage")) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Forbidden",
+          message: "You do not have permission to manage money sidebar items.",
+        },
+        403
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const payload = normalisePayload(body);
+
+    if (!payload.label) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Label is required.",
+        },
+        400
+      );
+    }
+
+    if (!payload.href) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Href is required.",
+        },
+        400
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from("money_sidebar_items")
@@ -121,82 +230,159 @@ export async function POST(req: NextRequest) {
         label: payload.label,
         href: payload.href,
         icon: payload.icon || "Wallet",
-        sort_order: payload.sort_order || 0,
+        sort_order: Number.isFinite(payload.sort_order)
+          ? payload.sort_order
+          : 0,
         is_enabled: payload.is_enabled ?? true,
       })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: error.message || "Failed to create money sidebar item.",
+        },
+        500
+      );
+    }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       item: data,
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
+  } catch (error: unknown) {
+    console.error("POST /api/admin/money-sidebar error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to create money sidebar item.";
+
+    return jsonResponse(
+      {
+        ok: false,
+        error: message,
+      },
+      500
     );
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
-    const access = await requireAdmin();
+    const access = await requireSupabaseAdmin();
 
     if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
+      return jsonResponse(
+        {
+          ok: false,
+          error: access.error,
+        },
+        access.status
       );
     }
 
-    const body = await req.json();
+    if (!hasPermission(access.admin, "site_pages:manage")) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Forbidden",
+          message: "You do not have permission to manage money sidebar items.",
+        },
+        403
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const payload = normalisePayload(body);
 
     if (!payload.id) {
-      return NextResponse.json(
-        { ok: false, error: "Missing id" },
-        { status: 400 }
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Missing id",
+        },
+        400
       );
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+
+    if (payload.label !== undefined) updatePayload.label = payload.label;
+    if (payload.href !== undefined) updatePayload.href = payload.href;
+    if (payload.icon !== undefined) updatePayload.icon = payload.icon;
+    if (payload.sort_order !== undefined) {
+      updatePayload.sort_order = Number.isFinite(payload.sort_order)
+        ? payload.sort_order
+        : 0;
+    }
+    if (payload.is_enabled !== undefined) {
+      updatePayload.is_enabled = payload.is_enabled;
     }
 
     const { data, error } = await supabaseAdmin
       .from("money_sidebar_items")
-      .update({
-        label: payload.label,
-        href: payload.href,
-        icon: payload.icon,
-        sort_order: payload.sort_order,
-        is_enabled: payload.is_enabled,
-      })
+      .update(updatePayload)
       .eq("id", payload.id)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: error.message || "Failed to update money sidebar item.",
+        },
+        500
+      );
+    }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       item: data,
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
+  } catch (error: unknown) {
+    console.error("PATCH /api/admin/money-sidebar error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to update money sidebar item.";
+
+    return jsonResponse(
+      {
+        ok: false,
+        error: message,
+      },
+      500
     );
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    const access = await requireAdmin();
+    const access = await requireSupabaseAdmin();
 
     if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
+      return jsonResponse(
+        {
+          ok: false,
+          error: access.error,
+        },
+        access.status
+      );
+    }
+
+    if (!hasPermission(access.admin, "site_pages:manage")) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Forbidden",
+          message: "You do not have permission to manage money sidebar items.",
+        },
+        403
       );
     }
 
@@ -204,9 +390,12 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get("id");
 
     if (!id) {
-      return NextResponse.json(
-        { ok: false, error: "Missing id" },
-        { status: 400 }
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Missing id",
+        },
+        400
       );
     }
 
@@ -215,15 +404,33 @@ export async function DELETE(req: NextRequest) {
       .delete()
       .eq("id", id);
 
-    if (error) throw error;
+    if (error) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: error.message || "Failed to delete money sidebar item.",
+        },
+        500
+      );
+    }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
+  } catch (error: unknown) {
+    console.error("DELETE /api/admin/money-sidebar error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to delete money sidebar item.";
+
+    return jsonResponse(
+      {
+        ok: false,
+        error: message,
+      },
+      500
     );
   }
 }

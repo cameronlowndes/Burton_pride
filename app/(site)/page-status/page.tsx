@@ -1,5 +1,5 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import PageStatusCard from "./PageStatusCard";
 
 type PageStatusSearchParams = Promise<{

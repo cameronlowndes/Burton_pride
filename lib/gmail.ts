@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 function decodeBase64Url(data: string) {
   return Buffer.from(data, "base64url").toString("utf8");

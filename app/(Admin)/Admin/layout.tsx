@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
 import AdminSidebar from "./components/rooting/AdminSidebar";
 
 type AdminRole = "main_admin" | "admin" | "editor";
@@ -11,7 +10,6 @@ type AdminPermissionResponse = {
   ok: boolean;
   admin?: {
     id: string;
-    clerk_user_id: string | null;
     email: string | null;
     role: AdminRole;
     is_active: boolean;
@@ -24,7 +22,6 @@ type AdminPermissionResponse = {
 const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
   "admin:users:manage",
-
   "money:view",
   "money:add_transactions",
   "money:edit_transactions",
@@ -38,17 +35,13 @@ const ALL_PERMISSION_KEYS = [
   "money:sync_website_payments",
   "money:print_reports",
   "money:export_reports",
-
   "donations:view",
   "donations:manage",
-
   "raffle:view",
   "raffle:manage",
   "raffle:draw_winners",
-
   "site_pages:view",
   "site_pages:manage",
-
   "audit_logs:view",
 ];
 
@@ -68,41 +61,23 @@ function normalisePath(pathname: string | null) {
 function getRequiredPermission(pathname: string | null) {
   const path = normalisePath(pathname);
 
-  if (!path) return null;
+  if (!path || path === "/admin/login") return null;
 
-  if (path === "/admin/login") return null;
+  if (path.startsWith("/admin/dashboard/settings/pageeditor")) {
+    return "site_pages:manage";
+  }
 
   if (path.startsWith("/admin/dashboard/pageeditor")) {
     return "site_pages:manage";
   }
 
-  if (path.startsWith("/admin/dashboard/logs")) {
-    return "audit_logs:view";
-  }
-
-  if (path.startsWith("/admin/dashboard/donations")) {
-    return "donations:view";
-  }
-
-  if (path.startsWith("/admin/dashboard/raffle")) {
-    return "raffle:view";
-  }
-
-  if (path.startsWith("/admin/money")) {
-    return "money:view";
-  }
-
-  if (path.startsWith("/admin/dashboard/money")) {
-    return "money:view";
-  }
-
-  if (path.startsWith("/admin/dashboard/users")) {
-    return "admin:users:manage";
-  }
-
-  if (path.startsWith("/admin/dashboard")) {
-    return "admin:dashboard:view";
-  }
+  if (path.startsWith("/admin/dashboard/logs")) return "audit_logs:view";
+  if (path.startsWith("/admin/dashboard/donations")) return "donations:view";
+  if (path.startsWith("/admin/dashboard/raffle")) return "raffle:view";
+  if (path.startsWith("/admin/money")) return "money:view";
+  if (path.startsWith("/admin/dashboard/money")) return "money:view";
+  if (path.startsWith("/admin/dashboard/users")) return "admin:users:manage";
+  if (path.startsWith("/admin/dashboard")) return "admin:dashboard:view";
 
   return null;
 }
@@ -112,19 +87,18 @@ function getFirstAllowedPage(
   adminRole: AdminRole | null,
 ) {
   if (adminRole === "main_admin") return "/Admin/Dashboard";
-
   if (permissions.includes("admin:dashboard:view")) return "/Admin/Dashboard";
   if (permissions.includes("money:view")) return "/Admin/Money";
-  if (permissions.includes("donations:view")) {
-    return "/Admin/Dashboard/Donations";
-  }
+  if (permissions.includes("donations:view")) return "/Admin/Dashboard/Donations";
   if (permissions.includes("raffle:view")) return "/Admin/Dashboard/Raffle";
+
   if (
     permissions.includes("site_pages:view") ||
     permissions.includes("site_pages:manage")
   ) {
-    return "/Admin/Dashboard/PageEditor";
+    return "/Admin/Dashboard/Settings/PageEditor";
   }
+
   if (permissions.includes("audit_logs:view")) return "/Admin/Dashboard/Logs";
 
   return null;
@@ -227,18 +201,13 @@ export default function AdminLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, isLoaded } = useUser();
 
   const [permissions, setPermissions] = useState<string[]>([]);
   const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
+  const [adminEmail, setAdminEmail] = useState<string>("");
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [permissionsError, setPermissionsError] = useState("");
 
-  /*
-    Browser tab title.
-    This makes the tab show:
-    Burton Pride Admin Portal APP
-  */
   useEffect(() => {
     document.title = "Burton Pride Admin Portal APP";
   }, []);
@@ -250,22 +219,11 @@ export default function AdminLayout({
   const isEmailRoute = path.startsWith("/admin/email");
   const isMoneyRoute = path.startsWith("/admin/money");
 
-  /*
-    FIX:
-    No hooks can be placed after a conditional return.
-    The old version returned early for /Admin/Login before useMemo/useEffect hooks,
-    then called those hooks on the next page. That changed the hook order and caused:
-    "React has detected a change in the order of Hooks called by AdminLayout".
-  */
   const leaveMoneyLayoutUntouched = Boolean(isMoneyRoute);
   const showAdminNav = Boolean(isDashboardRoute);
   const useFullWidthLayout = Boolean(isEmailRoute);
 
-  const displayName =
-    user?.fullName ||
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-    user?.primaryEmailAddress?.emailAddress ||
-    "Committee Member";
+  const displayName = adminEmail || "Committee Member";
 
   const requiredPermission = useMemo(
     () => getRequiredPermission(pathname),
@@ -285,15 +243,12 @@ export default function AdminLayout({
     let cancelled = false;
 
     async function loadPermissions() {
-      /*
-        Login page should not wait for permissions or call the admin API,
-        but this must live inside the effect, not before the hooks.
-      */
       if (isLoginPage) {
         setPermissionsLoaded(true);
         setPermissionsError("");
         setPermissions([]);
         setAdminRole(null);
+        setAdminEmail("");
         return;
       }
 
@@ -316,6 +271,7 @@ export default function AdminLayout({
         if (cancelled) return;
 
         setAdminRole(data.admin?.role || null);
+        setAdminEmail(data.admin?.email || "");
         setPermissions(data.permissions || data.admin?.permissions || []);
       } catch (error: any) {
         if (cancelled) return;
@@ -325,6 +281,7 @@ export default function AdminLayout({
         );
         setPermissions([]);
         setAdminRole(null);
+        setAdminEmail("");
       } finally {
         if (!cancelled) {
           setPermissionsLoaded(true);
@@ -361,10 +318,6 @@ export default function AdminLayout({
     safePermissions,
   ]);
 
-  /*
-    Returns are now AFTER every hook above.
-    That keeps hook order stable on every render.
-  */
   if (isLoginPage) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
@@ -391,11 +344,6 @@ export default function AdminLayout({
     return <NoAccessScreen />;
   }
 
-  /*
-    Money Management has its own full page layout.
-    This Admin layout only protects /Admin/Money with money:view,
-    then leaves the Money UI untouched.
-  */
   if (leaveMoneyLayoutUntouched) {
     return <>{children}</>;
   }
@@ -414,9 +362,7 @@ export default function AdminLayout({
 
               <div className="text-sm text-white/80">
                 Signed in as{" "}
-                <span className="font-semibold">
-                  {isLoaded ? displayName : "Loading..."}
-                </span>
+                <span className="font-semibold">{displayName}</span>
               </div>
             </header>
           )}

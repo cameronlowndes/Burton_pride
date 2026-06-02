@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Banknote,
   BarChart3,
   Building2,
@@ -17,6 +18,7 @@ import {
   Logs,
   PiggyBank,
   Receipt,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Store,
@@ -29,10 +31,11 @@ import {
 const MONEY_MANAGEMENT_ROOT = "/Admin/MoneyManagement";
 const TRACKING_MONEY_ROOT = "/Admin/MoneyManagement/TrackingMoney";
 const AUDIT_LOGS_ROUTE = "/Admin/MoneyManagement/TrackingMoney/AuditLogs";
+const API_ROUTE = "/api/admin/money-sidebar";
 
 type Notice =
-  | { type: "success"; message: string }
-  | { type: "error"; message: string }
+  | { type: "success"; message: string; details?: unknown }
+  | { type: "error"; message: string; details?: unknown }
   | null;
 
 type MoneySidebarItem = {
@@ -48,8 +51,21 @@ type MoneySidebarItem = {
 type MoneySidebarResponse = {
   ok: boolean;
   error?: string;
+  message?: string;
+  route?: string;
+  method?: string;
+  status?: number;
+  table?: string;
+  operation?: string;
+  query?: string;
+  supabaseCode?: string;
+  supabaseHint?: string;
+  supabaseDetails?: string;
+  likelyFixes?: string[];
+  rawResponse?: string;
   items?: MoneySidebarItem[];
   item?: MoneySidebarItem;
+  deletedId?: string;
 };
 
 type EditorMode = "create" | "edit";
@@ -152,11 +168,43 @@ function clsx(...values: Array<string | false | null | undefined>) {
 
 function normaliseHref(value: string) {
   const clean = String(value || "").trim();
-
   if (!clean) return "";
   if (clean.startsWith("/")) return clean;
-
   return `/${clean}`;
+}
+
+async function readJson(res: Response): Promise<MoneySidebarResponse> {
+  const text = await res.text();
+
+  try {
+    return text ? JSON.parse(text) : { ok: false };
+  } catch {
+    return {
+      ok: false,
+      error: "API returned invalid JSON.",
+      rawResponse: text,
+      status: res.status,
+    };
+  }
+}
+
+function getErrorMessage(data: MoneySidebarResponse, fallback: string) {
+  return (
+    data.error ||
+    data.message ||
+    data.supabaseDetails ||
+    data.supabaseHint ||
+    data.rawResponse ||
+    fallback
+  );
+}
+
+function toReadableDetails(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export default function MoneySidebarAdminClient() {
@@ -174,28 +222,23 @@ export default function MoneySidebarAdminClient() {
     loadItems();
   }, []);
 
-  async function readJson(res: Response) {
-    const text = await res.text();
-
-    try {
-      return text ? JSON.parse(text) : {};
-    } catch {
-      return { rawResponse: text };
-    }
-  }
-
   async function loadItems() {
     setLoading(true);
+    setNotice(null);
 
     try {
-      const res = await fetch("/api/admin/money-sidebar", {
+      const res = await fetch(API_ROUTE, {
         cache: "no-store",
+        credentials: "include",
       });
 
-      const data: MoneySidebarResponse = await readJson(res);
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load money sidebar items");
+        throw {
+          message: getErrorMessage(data, "Failed to load money sidebar items."),
+          details: data,
+        };
       }
 
       const sorted = [...(data.items || [])].sort(
@@ -203,13 +246,11 @@ export default function MoneySidebarAdminClient() {
       );
 
       setItems(sorted);
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to load money sidebar items",
+        message: error?.message || "Failed to load money sidebar items.",
+        details: error?.details || error,
       });
     } finally {
       setLoading(false);
@@ -223,8 +264,8 @@ export default function MoneySidebarAdminClient() {
     return items.filter(
       (item) =>
         item.label.toLowerCase().includes(q) ||
-        (item.href || "").toLowerCase().includes(q) ||
-        (item.icon || "").toLowerCase().includes(q)
+        item.href.toLowerCase().includes(q) ||
+        item.icon.toLowerCase().includes(q)
     );
   }, [items, search]);
 
@@ -241,6 +282,7 @@ export default function MoneySidebarAdminClient() {
       ...defaultForm,
       sort_order: items.length,
     });
+    setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -293,9 +335,10 @@ export default function MoneySidebarAdminClient() {
       label: item.label,
       href: item.href || "",
       icon: item.icon || "LayoutDashboard",
-      sort_order: item.sort_order,
-      is_enabled: item.is_enabled,
+      sort_order: Number(item.sort_order || 0),
+      is_enabled: Boolean(item.is_enabled),
     });
+    setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -306,6 +349,7 @@ export default function MoneySidebarAdminClient() {
 
     try {
       const payload = {
+        id: editingId || undefined,
         label: form.label.trim(),
         href: normaliseHref(form.href),
         icon: form.icon,
@@ -313,30 +357,25 @@ export default function MoneySidebarAdminClient() {
         is_enabled: form.is_enabled,
       };
 
-      if (!payload.label) {
-        throw new Error("Please enter a label.");
-      }
-
-      if (!payload.href) {
-        throw new Error("Please enter a URL / href.");
-      }
-
-      const url = editingId
-        ? `/api/admin/money-sidebar/${editingId}`
-        : "/api/admin/money-sidebar";
+      if (!payload.label) throw new Error("Please enter a label.");
+      if (!payload.href) throw new Error("Please enter a URL / href.");
 
       const method = editingId ? "PATCH" : "POST";
 
-      const res = await fetch(url, {
+      const res = await fetch(API_ROUTE, {
         method,
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const data: MoneySidebarResponse = await readJson(res);
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to save money sidebar item");
+        throw {
+          message: getErrorMessage(data, "Failed to save money sidebar item."),
+          details: data,
+        };
       }
 
       setNotice({
@@ -348,13 +387,11 @@ export default function MoneySidebarAdminClient() {
 
       resetEditor();
       await loadItems();
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to save money sidebar item",
+        message: error?.message || "Failed to save money sidebar item.",
+        details: error?.details || error,
       });
     } finally {
       setSaving(false);
@@ -369,14 +406,18 @@ export default function MoneySidebarAdminClient() {
     if (!ok) return;
 
     try {
-      const res = await fetch(`/api/admin/money-sidebar/${id}`, {
+      const res = await fetch(`${API_ROUTE}?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
+        credentials: "include",
       });
 
       const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to delete item");
+        throw {
+          message: getErrorMessage(data, "Failed to delete item."),
+          details: data,
+        };
       }
 
       setNotice({
@@ -384,30 +425,26 @@ export default function MoneySidebarAdminClient() {
         message: "Money sidebar item deleted successfully.",
       });
 
-      if (editingId === id) {
-        resetEditor();
-      }
+      if (editingId === id) resetEditor();
 
       await loadItems();
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to delete item",
+        message: error?.message || "Failed to delete item.",
+        details: error?.details || error,
       });
     }
   }
 
   async function toggleEnabled(item: MoneySidebarItem) {
     try {
-      const res = await fetch(`/api/admin/money-sidebar/${item.id}`, {
+      const res = await fetch(API_ROUTE, {
         method: "PATCH",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          label: item.label,
-          href: item.href,
-          icon: item.icon,
-          sort_order: item.sort_order,
+          id: item.id,
           is_enabled: !item.is_enabled,
         }),
       });
@@ -415,29 +452,33 @@ export default function MoneySidebarAdminClient() {
       const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to update item");
+        throw {
+          message: getErrorMessage(data, "Failed to update item."),
+          details: data,
+        };
       }
 
       await loadItems();
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to update item",
+        message: error?.message || "Failed to update item.",
+        details: error?.details || error,
       });
     }
   }
 
   async function duplicateItem(item: MoneySidebarItem) {
     try {
-      const res = await fetch("/api/admin/money-sidebar", {
+      const res = await fetch(API_ROUTE, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: `${item.label} Copy`,
           href: `${item.href}-copy`,
           icon: item.icon,
-          sort_order: item.sort_order + 1,
+          sort_order: Number(item.sort_order || 0) + 1,
           is_enabled: false,
         }),
       });
@@ -445,7 +486,10 @@ export default function MoneySidebarAdminClient() {
       const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to duplicate item");
+        throw {
+          message: getErrorMessage(data, "Failed to duplicate item."),
+          details: data,
+        };
       }
 
       setNotice({
@@ -454,11 +498,11 @@ export default function MoneySidebarAdminClient() {
       });
 
       await loadItems();
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to duplicate item",
+        message: error?.message || "Failed to duplicate item.",
+        details: error?.details || error,
       });
     }
   }
@@ -482,28 +526,38 @@ export default function MoneySidebarAdminClient() {
     ];
 
     try {
-      await Promise.all(
+      const results = await Promise.all(
         reordered.map((x, i) =>
-          fetch(`/api/admin/money-sidebar/${x.id}`, {
+          fetch(API_ROUTE, {
             method: "PATCH",
+            credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              label: x.label,
-              href: x.href,
-              icon: x.icon,
+              id: x.id,
               sort_order: i,
-              is_enabled: x.is_enabled,
             }),
-          })
+          }).then(async (res) => ({
+            res,
+            data: await readJson(res),
+          }))
         )
       );
 
+      const failed = results.find((result) => !result.res.ok || !result.data.ok);
+
+      if (failed) {
+        throw {
+          message: getErrorMessage(failed.data, "Failed to reorder items."),
+          details: failed.data,
+        };
+      }
+
       await loadItems();
-    } catch (error) {
+    } catch (error: any) {
       setNotice({
         type: "error",
-        message:
-          error instanceof Error ? error.message : "Failed to reorder items",
+        message: error?.message || "Failed to reorder items.",
+        details: error?.details || error,
       });
     }
   }
@@ -525,17 +579,7 @@ export default function MoneySidebarAdminClient() {
         </p>
       </div>
 
-      {notice && (
-        <div
-          className={`mb-6 rounded-2xl border px-4 py-3 text-sm ${
-            notice.type === "success"
-              ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-              : "border-red-400/30 bg-red-500/10 text-red-200"
-          }`}
-        >
-          {notice.message}
-        </div>
-      )}
+      {notice && <NoticeBox notice={notice} onRetry={loadItems} />}
 
       <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="space-y-6">
@@ -731,8 +775,8 @@ export default function MoneySidebarAdminClient() {
                   {saving
                     ? "Saving..."
                     : editingId
-                    ? "Update item"
-                    : "Create link"}
+                      ? "Update item"
+                      : "Create link"}
                 </button>
 
                 <button
@@ -757,8 +801,9 @@ export default function MoneySidebarAdminClient() {
               <button
                 type="button"
                 onClick={loadItems}
-                className="rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
               >
+                <RefreshCw className="h-4 w-4" />
                 Refresh
               </button>
             </div>
@@ -799,6 +844,62 @@ export default function MoneySidebarAdminClient() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoticeBox({
+  notice,
+  onRetry,
+}: {
+  notice: Notice;
+  onRetry: () => void;
+}) {
+  if (!notice) return null;
+
+  const isError = notice.type === "error";
+
+  return (
+    <div
+      className={clsx(
+        "mb-6 rounded-2xl border px-4 py-3 text-sm",
+        isError
+          ? "border-red-400/30 bg-red-500/10 text-red-200"
+          : "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        {isError ? (
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <p className="font-bold">{notice.message}</p>
+
+          {isError && notice.details ? (
+            <details className="mt-3 rounded-xl bg-black/20 p-3">
+              <summary className="cursor-pointer font-bold">
+                Show full error details
+              </summary>
+
+              <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">
+                {toReadableDetails(notice.details)}
+              </pre>
+            </details>
+          ) : null}
+
+          {isError ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Retry
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -850,6 +951,9 @@ function ItemRow({
         </div>
 
         <div className="mt-1 break-all text-xs text-white/60">{item.href}</div>
+        <div className="mt-1 text-xs text-white/40">
+          Sort order: {item.sort_order}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">

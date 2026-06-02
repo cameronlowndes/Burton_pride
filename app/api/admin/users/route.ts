@@ -1,25 +1,24 @@
 import { NextResponse } from "next/server";
-import { clerkClient } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireMainAdmin } from "@/lib/adminPermissions";
+
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type AdminRole = "main_admin" | "admin" | "editor";
-
 type PermissionMap = Record<string, boolean>;
 
-type AdminPermissionRow = {
-  is_allowed: boolean | null;
-  admin_permissions:
-    | {
-        permission_key: string;
-      }
-    | {
-        permission_key: string;
-      }[]
-    | null;
+type AdminUserRow = {
+  id: string;
+  supabase_user_id: string | null;
+  email: string | null;
+  full_name: string | null;
+  role: AdminRole;
+  is_active: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  permissions: unknown;
 };
 
 const VALID_ROLES: AdminRole[] = ["main_admin", "admin", "editor"];
@@ -41,6 +40,7 @@ const ALL_PERMISSION_KEYS = [
   "money:sync_website_payments",
   "money:print_reports",
   "money:export_reports",
+  "money:manage_refunds",
 
   "donations:view",
   "donations:manage",
@@ -76,6 +76,7 @@ const ADMIN_DEFAULT_PERMISSIONS: PermissionMap = {
   "money:sync_website_payments": false,
   "money:print_reports": true,
   "money:export_reports": true,
+  "money:manage_refunds": false,
 
   "donations:view": false,
   "donations:manage": false,
@@ -107,6 +108,7 @@ const EDITOR_DEFAULT_PERMISSIONS: PermissionMap = {
   "money:sync_website_payments": false,
   "money:print_reports": false,
   "money:export_reports": false,
+  "money:manage_refunds": false,
 
   "donations:view": false,
   "donations:manage": false,
@@ -121,8 +123,24 @@ const EDITOR_DEFAULT_PERMISSIONS: PermissionMap = {
   "audit_logs:view": false,
 };
 
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
+}
+
 function cleanEmail(value: unknown) {
   return String(value || "").trim().toLowerCase();
+}
+
+function cleanFullName(value: unknown) {
+  const name = String(value || "").trim();
+  return name.length > 0 ? name : null;
 }
 
 function cleanRole(value: unknown): AdminRole {
@@ -145,354 +163,260 @@ function permissionsForRole(role: AdminRole): PermissionMap {
   return { ...ADMIN_DEFAULT_PERMISSIONS };
 }
 
+function normalisePermissionInput(value: unknown): PermissionMap {
+  const permissions: PermissionMap = {};
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const key = String(item || "").trim();
+      if (ALL_PERMISSION_KEYS.includes(key as any)) {
+        permissions[key] = true;
+      }
+    }
+
+    return permissions;
+  }
+
+  if (value && typeof value === "object") {
+    for (const [key, allowed] of Object.entries(value)) {
+      if (ALL_PERMISSION_KEYS.includes(key as any)) {
+        permissions[key] = allowed === true;
+      }
+    }
+  }
+
+  return permissions;
+}
+
 function cleanPermissions(value: unknown, role: AdminRole): PermissionMap {
   if (role === "main_admin") return permissionsForRole("main_admin");
 
   const defaults = permissionsForRole(role);
-  const incoming =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+  const incoming = normalisePermissionInput(value);
 
   const cleaned: PermissionMap = { ...defaults };
 
   for (const key of ALL_PERMISSION_KEYS) {
     if (typeof incoming[key] === "boolean") {
-      cleaned[key] = incoming[key] as boolean;
+      cleaned[key] = incoming[key] === true;
     }
   }
 
-  /**
-   * Only main admins should manage admin users.
-   * This prevents accidentally creating another user manager via checkbox.
-   */
   cleaned["admin:users:manage"] = false;
 
   return cleaned;
 }
 
-async function findClerkUserByEmail(email: string) {
-  try {
-    const clerk = await clerkClient();
+function permissionMapToKeys(value: unknown, role: AdminRole): string[] {
+  if (role === "main_admin") return [...ALL_PERMISSION_KEYS];
 
-    const users = await clerk.users.getUserList({
-      emailAddress: [email],
-      limit: 1,
-    });
+  const permissions = cleanPermissions(value, role);
 
-    return users.data[0] || null;
-  } catch (error) {
-    console.error("findClerkUserByEmail error:", error);
-    return null;
-  }
+  return Object.entries(permissions)
+    .filter(([, allowed]) => allowed === true)
+    .map(([key]) => key);
 }
 
-async function getClerkProfile(clerkUserId: string | null) {
-  if (!clerkUserId) {
-    return {
-      clerk_email: null,
-      clerk_name: null,
-    };
+async function requireSupabaseMainAdmin() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    throw new Error("Unauthorized");
   }
 
-  try {
-    const clerk = await clerkClient();
-    const user = await clerk.users.getUser(clerkUserId);
-
-    const primaryEmail =
-      user.emailAddresses.find(
-        (email) => email.id === user.primaryEmailAddressId
-      )?.emailAddress ||
-      user.emailAddresses[0]?.emailAddress ||
-      "";
-
-    const name =
-      [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-      user.username ||
-      "";
-
-    return {
-      clerk_email: primaryEmail || null,
-      clerk_name: name || null,
-    };
-  } catch (error) {
-    console.error("getClerkProfile error:", error);
-
-    return {
-      clerk_email: null,
-      clerk_name: null,
-    };
-  }
-}
-
-async function loadAdminPermissions(adminUserId: string, role: AdminRole) {
-  if (role === "main_admin") {
-    return permissionsForRole("main_admin");
-  }
-
-  const permissions = permissionsForRole(role);
-
-  const { data, error } = await supabaseAdmin
-    .from("admin_user_permissions")
-    .select(
-      `
-      is_allowed,
-      admin_permissions!inner (
-        permission_key
-      )
-      `
-    )
-    .eq("admin_user_id", adminUserId);
+  const { data: admin, error } = await supabaseAdmin
+    .from("admin_users")
+    .select("id,email,role,is_active,supabase_user_id")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
 
   if (error) {
-    console.error("loadAdminPermissions error:", error);
-    return permissions;
+    throw new Error(error.message);
   }
 
-  const rows = (data || []) as AdminPermissionRow[];
+  if (!admin || admin.role !== "main_admin") {
+    throw new Error("Forbidden");
+  }
 
-  for (const row of rows) {
-    const permissionData = Array.isArray(row.admin_permissions)
-      ? row.admin_permissions[0]
-      : row.admin_permissions;
+  return admin;
+}
 
-    const key = permissionData?.permission_key;
+async function findSupabaseUserByEmail(email: string) {
+  const { data, error } = await supabaseAdmin.auth.admin.listUsers();
 
-    if (key && ALL_PERMISSION_KEYS.includes(key as any)) {
-      permissions[key] = row.is_allowed === true;
+  if (error) {
+    console.error("findSupabaseUserByEmail error:", error);
+    return null;
+  }
+
+  const found = data.users.find(
+    (user) => String(user.email || "").toLowerCase() === email.toLowerCase()
+  );
+
+  return found || null;
+}
+
+async function buildAdminResponse(admin: AdminUserRow) {
+  let supabaseUserId = admin.supabase_user_id || null;
+
+  if (!supabaseUserId && admin.email) {
+    const authUser = await findSupabaseUserByEmail(admin.email);
+
+    if (authUser?.id) {
+      supabaseUserId = authUser.id;
+
+      await supabaseAdmin
+        .from("admin_users")
+        .update({
+          supabase_user_id: authUser.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", admin.id);
     }
   }
 
-  permissions["admin:users:manage"] = false;
-
-  return permissions;
-}
-
-async function saveAdminPermissions(
-  adminUserId: string,
-  role: AdminRole,
-  permissionsInput: unknown
-) {
-  const permissions = cleanPermissions(permissionsInput, role);
-
-  if (role === "main_admin") {
-    await supabaseAdmin
-      .from("admin_user_permissions")
-      .delete()
-      .eq("admin_user_id", adminUserId);
-
-    return permissionsForRole("main_admin");
-  }
-
-  const keys = Object.keys(permissions);
-
-  const { data: permissionRows, error: permissionError } = await supabaseAdmin
-    .from("admin_permissions")
-    .select("id, permission_key")
-    .in("permission_key", keys);
-
-  if (permissionError) {
-    throw permissionError;
-  }
-
-  const rows =
-    (permissionRows || []).map((permission) => ({
-      admin_user_id: adminUserId,
-      admin_permission_id: permission.id,
-      is_allowed: permissions[permission.permission_key] === true,
-    })) || [];
-
-  await supabaseAdmin
-    .from("admin_user_permissions")
-    .delete()
-    .eq("admin_user_id", adminUserId);
-
-  if (rows.length === 0) {
-    return permissions;
-  }
-
-  /**
-   * Most builds use admin_permission_id. If your table uses permission_id,
-   * the fallback below keeps the route working.
-   */
-  const { error: insertError } = await supabaseAdmin
-    .from("admin_user_permissions")
-    .insert(rows);
-
-  if (!insertError) {
-    return permissions;
-  }
-
-  const fallbackRows = rows.map((row) => ({
-    admin_user_id: row.admin_user_id,
-    permission_id: row.admin_permission_id,
-    is_allowed: row.is_allowed,
-  }));
-
-  const { error: fallbackError } = await supabaseAdmin
-    .from("admin_user_permissions")
-    .insert(fallbackRows);
-
-  if (fallbackError) {
-    console.error("saveAdminPermissions insert error:", insertError);
-    console.error("saveAdminPermissions fallback error:", fallbackError);
-    throw fallbackError;
-  }
-
-  return permissions;
-}
-
-async function buildAdminResponse(admin: any) {
-  const clerkProfile = await getClerkProfile(admin.clerk_user_id || null);
-  const email = admin.email || clerkProfile.clerk_email || null;
-
-  if (!admin.email && email) {
-    await supabaseAdmin
-      .from("admin_users")
-      .update({
-        email,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", admin.id);
-  }
-
-  const permissions = await loadAdminPermissions(admin.id, admin.role);
-
   return {
     ...admin,
-    email,
-    clerk_email: clerkProfile.clerk_email,
-    clerk_name: clerkProfile.clerk_name,
-    permissions,
+    supabase_user_id: supabaseUserId,
+    permissions: permissionMapToKeys(admin.permissions, admin.role),
   };
 }
 
 export async function GET() {
   try {
-    await requireMainAdmin();
+    await requireSupabaseMainAdmin();
 
     const { data, error } = await supabaseAdmin
       .from("admin_users")
       .select(
         `
         id,
-        clerk_user_id,
+        supabase_user_id,
         email,
+        full_name,
         role,
         is_active,
         created_at,
-        updated_at
+        updated_at,
+        permissions
       `
       )
       .order("created_at", { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    const admins = await Promise.all((data || []).map(buildAdminResponse));
+    const admins = await Promise.all(
+      ((data || []) as AdminUserRow[]).map(buildAdminResponse)
+    );
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       permissions: ALL_PERMISSION_KEYS,
       admins,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("GET /api/admin/users error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error ? error.message : "Failed to load admin users.";
+
+    return jsonResponse(
       {
         ok: false,
-        error: error?.message || "Failed to load admin users.",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      message === "Unauthorized" ? 401 : 403
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const currentAdmin = await requireMainAdmin();
+    const currentAdmin = await requireSupabaseMainAdmin();
 
     const body = await req.json().catch(() => ({}));
 
     const email = cleanEmail(body.email);
+    const fullName = cleanFullName(body.fullName ?? body.full_name);
     const role = cleanRole(body.role);
     const permissions = cleanPermissions(body.permissions, role);
     const isActive =
       typeof body.isActive === "boolean" ? body.isActive : true;
 
     if (!email) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Please enter an email address.",
         },
-        { status: 400 }
+        400
       );
     }
 
     if (!isValidEmail(email)) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Please enter a valid email address.",
         },
-        { status: 400 }
+        400
       );
     }
 
-    const clerkUser = await findClerkUserByEmail(email);
-    const clerkUserId = clerkUser?.id || null;
+    const authUser = await findSupabaseUserByEmail(email);
+    const supabaseUserId = authUser?.id || null;
 
-    const { data: existingByEmail, error: existingEmailError } =
-      await supabaseAdmin
-        .from("admin_users")
-        .select("id, email, clerk_user_id")
-        .or(
-          clerkUserId
-            ? `email.eq.${email},clerk_user_id.eq.${clerkUserId}`
-            : `email.eq.${email}`
-        )
-        .maybeSingle();
+    const query = supabaseUserId
+      ? `email.eq.${email},supabase_user_id.eq.${supabaseUserId}`
+      : `email.eq.${email}`;
 
-    if (existingEmailError) {
-      throw existingEmailError;
-    }
+    const { data: existingAdmin, error: existingError } = await supabaseAdmin
+      .from("admin_users")
+      .select("id,email,supabase_user_id")
+      .or(query)
+      .maybeSingle();
 
-    if (existingByEmail?.id) {
+    if (existingError) throw existingError;
+
+    if (existingAdmin?.id) {
       const { data, error } = await supabaseAdmin
         .from("admin_users")
         .update({
           email,
+          full_name: fullName,
           role,
           is_active: isActive,
-          clerk_user_id: clerkUserId || existingByEmail.clerk_user_id,
+          permissions,
+          supabase_user_id: supabaseUserId || existingAdmin.supabase_user_id,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", existingByEmail.id)
+        .eq("id", existingAdmin.id)
         .select(
           `
           id,
-          clerk_user_id,
+          supabase_user_id,
           email,
+          full_name,
           role,
           is_active,
           created_at,
-          updated_at
+          updated_at,
+          permissions
         `
         )
         .single();
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      await saveAdminPermissions(data.id, role, permissions);
-
-      return NextResponse.json({
+      return jsonResponse({
         ok: true,
-        admin: await buildAdminResponse(data),
+        admin: await buildAdminResponse(data as AdminUserRow),
         message: `${email} has been updated.`,
       });
     }
@@ -501,114 +425,130 @@ export async function POST(req: Request) {
       .from("admin_users")
       .insert({
         email,
-        clerk_user_id: clerkUserId,
+        full_name: fullName,
+        supabase_user_id: supabaseUserId,
         role,
         is_active: isActive,
+        permissions,
         created_by: currentAdmin.id,
         updated_at: new Date().toISOString(),
       })
       .select(
         `
         id,
-        clerk_user_id,
+        supabase_user_id,
         email,
+        full_name,
         role,
         is_active,
         created_at,
-        updated_at
+        updated_at,
+        permissions
       `
       )
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    await saveAdminPermissions(data.id, role, permissions);
-
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
-      admin: await buildAdminResponse(data),
-      message: clerkUserId
+      admin: await buildAdminResponse(data as AdminUserRow),
+      message: supabaseUserId
         ? `${email} has been added as ${role.replace("_", " ")}.`
-        : `${email} has been added, but they have not logged in yet. Their Clerk ID will be linked when they first sign in.`,
+        : `${email} has been added, but they have not created a Supabase Auth login yet.`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("POST /api/admin/users error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error ? error.message : "Failed to save admin user.";
+
+    return jsonResponse(
       {
         ok: false,
-        error: error?.message || "Failed to save admin user.",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      message === "Unauthorized" ? 401 : 403
     );
   }
 }
 
 export async function PATCH(req: Request) {
   try {
-    await requireMainAdmin();
+    await requireSupabaseMainAdmin();
 
     const body = await req.json().catch(() => ({}));
 
     const id = String(body.id || "").trim();
     const role = cleanRole(body.role);
     const permissions = cleanPermissions(body.permissions, role);
+    const fullName =
+      "fullName" in body || "full_name" in body
+        ? cleanFullName(body.fullName ?? body.full_name)
+        : undefined;
+
     const isActive =
       typeof body.isActive === "boolean" ? body.isActive : true;
 
     if (!id) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Missing admin user ID.",
         },
-        { status: 400 }
+        400
       );
+    }
+
+    const updatePayload: Record<string, unknown> = {
+      role,
+      is_active: isActive,
+      permissions,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (fullName !== undefined) {
+      updatePayload.full_name = fullName;
     }
 
     const { data, error } = await supabaseAdmin
       .from("admin_users")
-      .update({
-        role,
-        is_active: isActive,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", id)
       .select(
         `
         id,
-        clerk_user_id,
+        supabase_user_id,
         email,
+        full_name,
         role,
         is_active,
         created_at,
-        updated_at
+        updated_at,
+        permissions
       `
       )
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    await saveAdminPermissions(id, role, permissions);
-
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
-      admin: await buildAdminResponse(data),
+      admin: await buildAdminResponse(data as AdminUserRow),
       message: "Admin user updated.",
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("PATCH /api/admin/users error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error ? error.message : "Failed to update admin user.";
+
+    return jsonResponse(
       {
         ok: false,
-        error: error?.message || "Failed to update admin user.",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      message === "Unauthorized" ? 401 : 403
     );
   }
 }

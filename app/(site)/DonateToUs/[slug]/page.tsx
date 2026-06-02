@@ -2,7 +2,7 @@ import DonationsContent from "../../components/Client/DonateClient";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 

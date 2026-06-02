@@ -1,7 +1,7 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-import { getCurrentAdminPermissions } from "@/lib/adminPermissions";
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,9 +47,7 @@ function objectPermissionsToKeys(permissions: unknown): string[] {
     );
   }
 
-  if (typeof permissions !== "object") {
-    return [];
-  }
+  if (typeof permissions !== "object") return [];
 
   return Object.entries(permissions)
     .filter(([, allowed]) => allowed === true)
@@ -69,43 +67,63 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 export async function GET() {
   try {
-    /*
-      Check Clerk authentication first.
+    const supabase = await createClient();
 
-      This lets us clearly tell the difference between:
-      1. The browser not having a valid Clerk login session.
-      2. The user being signed in but missing from the Supabase admin table.
-    */
-    const { userId, sessionId } = await auth();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    console.log("GET /api/admin/me/permissions Clerk session check", {
-      hasUserId: Boolean(userId),
-      hasSessionId: Boolean(sessionId),
-      userId: userId || null,
+    console.log("GET /api/admin/me/permissions Supabase Auth check", {
+      hasUser: Boolean(user),
+      userId: user?.id ?? null,
+      email: user?.email ?? null,
+      error: userError?.message ?? null,
     });
 
-    if (!userId || !sessionId) {
+    if (userError || !user) {
       return jsonResponse(
         {
           ok: false,
           error: "Unauthorized",
-          reason: "missing_clerk_session",
+          reason: "missing_supabase_session",
           message:
-            "No active Clerk login session was received by the permissions API.",
+            "No active Supabase Auth login session was received by the permissions API.",
           likelyFix:
-            "Sign out and sign back in. If this only happens on one device, check the Clerk production keys, Clerk domain configuration and browser session cookies.",
+            "Sign out and sign back in using the new Supabase Auth login page.",
         },
         401
       );
     }
 
-    const admin = await getCurrentAdminPermissions();
+    const { data: admin, error: adminError } = await supabaseAdmin
+      .from("admin_users")
+      .select("*")
+      .eq("supabase_user_id", user.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (adminError) {
+      console.error("GET /api/admin/me/permissions database error:", adminError);
+
+      return jsonResponse(
+        {
+          ok: false,
+          error: adminError.message,
+          reason: "admin_database_error",
+          message:
+            "The permissions API could not read the admin_users table.",
+        },
+        500
+      );
+    }
 
     if (!admin) {
       console.warn(
         "GET /api/admin/me/permissions could not find an active admin record",
         {
-          clerkUserId: userId,
+          supabaseUserId: user.id,
+          email: user.email,
         }
       );
 
@@ -115,9 +133,11 @@ export async function GET() {
           error: "Admin permissions could not be loaded",
           reason: "admin_record_missing_or_inactive",
           message:
-            "You are signed in with Clerk, but no active admin permissions record could be found.",
+            "You are signed in with Supabase Auth, but no active admin row is linked to this Supabase user ID.",
           likelyFix:
-            "Check the Supabase admin users table. Make sure it contains the Clerk production user ID for this account and that is_active is true.",
+            "Check public.admin_users. Make sure supabase_user_id matches auth.users.id and is_active is true.",
+          signedInEmail: user.email,
+          supabaseUserId: user.id,
         },
         403
       );
@@ -128,12 +148,6 @@ export async function GET() {
         ? ALL_PERMISSION_KEYS
         : objectPermissionsToKeys(admin.permissions);
 
-    /*
-      Safety default:
-      Normal admins and editors must at least be able to open the dashboard.
-      Without this, an account with incomplete permissions can get stuck in a
-      redirect loop.
-    */
     if (
       admin.role !== "main_admin" &&
       !permissions.includes("admin:dashboard:view")
@@ -145,8 +159,8 @@ export async function GET() {
       ok: true,
       admin: {
         id: admin.id,
-        clerk_user_id: admin.clerk_user_id,
-        email: "email" in admin ? admin.email : null,
+        supabase_user_id: admin.supabase_user_id,
+        email: admin.email ?? user.email ?? null,
         role: admin.role,
         is_active: admin.is_active,
         permissions,
@@ -169,7 +183,7 @@ export async function GET() {
         message:
           "The permissions API crashed while checking the admin account.",
         likelyFix:
-          "Check the Vercel server logs and inspect lib/adminPermissions.ts.",
+          "Check lib/supabase/server.ts, lib/supabaseAdmin.ts, and public.admin_users.",
       },
       500
     );

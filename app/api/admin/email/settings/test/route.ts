@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGmailClient } from "@/lib/gmail";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 const SETTINGS_KEY = "email_settings";
 

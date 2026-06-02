@@ -1,4 +1,5 @@
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 const MAIN_ADMIN_EMAILS = ["cameronlowndes@burtonpride.co.uk"];
 
@@ -31,37 +32,32 @@ function isMainAdminEmail(email: string | null | undefined) {
 }
 
 export async function getCurrentAdminPermissions(): Promise<AdminPermissionResult> {
-  const { userId } = await auth();
+  const supabase = await createSupabaseServerClient();
 
-  if (!userId) {
-    throw new Error("Unauthorized");
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user?.id) {
+    throw new Error("Unauthorized. Please sign in with your admin account.");
   }
 
-  const clerk = await clerkClient();
-  const user = await clerk.users.getUser(userId);
+  const email = normaliseEmail(user.email);
 
-  const primaryEmail =
-    user.emailAddresses.find(
-      (email) => email.id === user.primaryEmailAddressId
-    )?.emailAddress ||
-    user.emailAddresses[0]?.emailAddress ||
-    "";
+  if (!email) {
+    throw new Error("Your signed-in account does not have an email address.");
+  }
 
-  const isMainAdmin = isMainAdminEmail(primaryEmail);
+  const isMainAdmin = isMainAdminEmail(email);
 
   return {
-    userId,
-    email: primaryEmail,
+    userId: user.id,
+    email,
     isMainAdmin,
     permissions: {
-      /**
-       * Normal admins can add new transactions.
-       */
       canAddTransactions: true,
 
-      /**
-       * Main admin only permissions.
-       */
       canEditTransactions: isMainAdmin,
       canEditOldYears: isMainAdmin,
       canHideTransactions: isMainAdmin,
@@ -72,9 +68,6 @@ export async function getCurrentAdminPermissions(): Promise<AdminPermissionResul
       canChangeSponsorTotals: isMainAdmin,
       canSyncWebsitePayments: isMainAdmin,
 
-      /**
-       * Reporting can stay open to all admins.
-       */
       canPrintReports: true,
       canExportReports: true,
     },
@@ -96,7 +89,7 @@ export async function requireMainAdmin() {
   const result = await getCurrentAdminPermissions();
 
   if (!result.isMainAdmin) {
-    throw new Error("Main admin access required");
+    throw new Error("Main admin access required.");
   }
 
   return {

@@ -9,7 +9,7 @@ import {
   Hash,
   AlertCircle,
 } from "lucide-react";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 type PageProps = {
   searchParams?: Promise<{

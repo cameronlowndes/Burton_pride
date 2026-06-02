@@ -16,10 +16,9 @@ type AdminRole = "main_admin" | "admin" | "editor";
 
 type AdminUser = {
   id: string;
-  clerk_user_id: string | null;
+  supabase_user_id: string | null;
   email: string | null;
-  clerk_email?: string | null;
-  clerk_name?: string | null;
+  full_name?: string | null;
   role: AdminRole;
   is_active: boolean;
   created_at: string | null;
@@ -49,8 +48,7 @@ const roleOptions: { value: AdminRole; label: string; description: string }[] = 
   {
     value: "admin",
     label: "Admin",
-    description:
-      "Can only use the admin portal pages and actions you tick below.",
+    description: "Can only use the admin portal pages and actions you tick below.",
   },
   {
     value: "editor",
@@ -145,6 +143,11 @@ const permissionGroups: PermissionGroup[] = [
         key: "money:export_reports",
         label: "Export money reports",
         description: "Can export Excel and yearly reports.",
+      },
+      {
+        key: "money:manage_refunds",
+        label: "Manage refunds",
+        description: "Can view and manage refund tracker records.",
       },
     ],
   },
@@ -266,11 +269,6 @@ function roleBadgeClass(role: AdminRole) {
   return "border-emerald-300/30 bg-emerald-500/10 text-emerald-100";
 }
 
-function hasPermission(role: AdminRole, permissions: string[] | undefined, key: string) {
-  if (role === "main_admin") return true;
-  return Boolean(permissions?.includes(key));
-}
-
 function permissionCount(role: AdminRole, permissions: string[] | undefined) {
   if (role === "main_admin") return allPermissionKeys.length;
   return normalisePermissions(permissions).length;
@@ -279,20 +277,22 @@ function permissionCount(role: AdminRole, permissions: string[] | undefined) {
 export default function AdminUsersClient() {
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<AdminRole>("admin");
   const [isActive, setIsActive] = useState(true);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>(
     defaultPermissionsByRole.admin
   );
+
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     "Admin Portal": true,
     "Money Tracker": true,
   });
 
   const [expandedAdminId, setExpandedAdminId] = useState<string | null>(null);
-  const [draftPermissions, setDraftPermissions] = useState<Record<string, string[]>>(
-    {}
-  );
+  const [draftPermissions, setDraftPermissions] = useState<
+    Record<string, string[]>
+  >({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -307,10 +307,7 @@ export default function AdminUsersClient() {
   );
 
   const mainAdmins = useMemo(
-    () =>
-      admins.filter(
-        (admin) => admin.role === "main_admin" && admin.is_active
-      ),
+    () => admins.filter((admin) => admin.role === "main_admin" && admin.is_active),
     [admins]
   );
 
@@ -322,12 +319,13 @@ export default function AdminUsersClient() {
 
       const res = await fetch(`/api/admin/users?t=${Date.now()}`, {
         cache: "no-store",
+        credentials: "include",
       });
 
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load admin users.");
+        throw new Error(data.error || data.message || "Failed to load admin users.");
       }
 
       const nextAdmins = (data.admins || []).map((admin: AdminUser) => ({
@@ -339,8 +337,12 @@ export default function AdminUsersClient() {
       }));
 
       setAdmins(nextAdmins);
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong loading admin users.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong loading admin users."
+      );
     } finally {
       setLoading(false);
     }
@@ -417,6 +419,7 @@ export default function AdminUsersClient() {
       setMessage("");
 
       const cleanEmail = email.trim().toLowerCase();
+      const cleanFullName = fullName.trim();
 
       if (!cleanEmail) {
         setError("Please enter an email address.");
@@ -425,11 +428,13 @@ export default function AdminUsersClient() {
 
       const res = await fetch("/api/admin/users", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           email: cleanEmail,
+          fullName: cleanFullName || null,
           role,
           isActive,
           permissions:
@@ -440,18 +445,23 @@ export default function AdminUsersClient() {
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to save admin user.");
+        throw new Error(data.error || data.message || "Failed to save admin user.");
       }
 
       setMessage(data.message || "Admin user saved.");
       setEmail("");
+      setFullName("");
       setRole("admin");
       setIsActive(true);
       setSelectedPermissions(defaultPermissionsByRole.admin);
 
       await loadAdmins();
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong saving admin user.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong saving admin user."
+      );
     } finally {
       setSaving(false);
     }
@@ -482,6 +492,7 @@ export default function AdminUsersClient() {
 
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -490,19 +501,27 @@ export default function AdminUsersClient() {
           role: nextRole,
           isActive: nextIsActive,
           permissions: permissionsToSave,
+          fullName:
+            typeof nextValues.full_name === "string"
+              ? nextValues.full_name
+              : admin.full_name ?? null,
         }),
       });
 
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to update admin user.");
+        throw new Error(data.error || data.message || "Failed to update admin user.");
       }
 
       setMessage(data.message || "Admin user updated.");
       await loadAdmins();
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong updating admin user.");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong updating admin user."
+      );
     } finally {
       setUpdatingId(null);
     }
@@ -533,9 +552,7 @@ export default function AdminUsersClient() {
 
             <p className="mt-1 text-xs leading-5 text-white/55">
               You do not need to tick individual boxes for a main admin. They
-              can access all admin portal pages and all high-risk actions,
-              including user permissions, website pages, money management,
-              raffle, donations, audit logs and delete controls.
+              can access all admin portal pages and all high-risk actions.
             </p>
 
             <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-purple-100">
@@ -752,6 +769,19 @@ export default function AdminUsersClient() {
               />
             </label>
 
+            <label className="mt-5 block">
+              <span className="text-sm font-bold text-white/70">
+                Display name
+              </span>
+              <input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                type="text"
+                placeholder="Cameron Lowndes"
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-300/40"
+              />
+            </label>
+
             <div className="mt-5 space-y-3">
               <p className="text-sm font-bold text-white/70">Role</p>
 
@@ -893,28 +923,28 @@ export default function AdminUsersClient() {
 
                             <span
                               className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
-                                admin.clerk_user_id
+                                admin.supabase_user_id
                                   ? "border-emerald-300/30 bg-emerald-500/10 text-emerald-100"
                                   : "border-amber-300/30 bg-amber-500/10 text-amber-100"
                               }`}
                             >
-                              {admin.clerk_user_id
-                                ? "Clerk linked"
+                              {admin.supabase_user_id
+                                ? "Supabase linked"
                                 : "Not linked"}
                             </span>
                           </div>
 
                           <p className="mt-3 break-words text-base font-black text-white">
-                            {admin.clerk_name ||
-                              admin.email ||
-                              admin.clerk_email ||
-                              "No name saved"}
+                            {admin.full_name || admin.email || "No name saved"}
                           </p>
 
                           <p className="mt-1 break-words text-sm text-white/55">
-                            {admin.email ||
-                              admin.clerk_email ||
-                              "No email saved"}
+                            {admin.email || "No email saved"}
+                          </p>
+
+                          <p className="mt-2 break-words text-xs text-white/35">
+                            Supabase user ID:{" "}
+                            {admin.supabase_user_id || "Not linked yet"}
                           </p>
 
                           <p className="mt-2 text-xs text-white/35">

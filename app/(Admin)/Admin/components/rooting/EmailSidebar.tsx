@@ -17,12 +17,20 @@ import {
 
 const EMAIL_ROOT = "/Admin/Email";
 
+type EmailSidebarItem = {
+  id: string;
+  label: string;
+  href: string;
+  icon: string | null;
+  is_enabled: boolean;
+  sort_order?: number | null;
+};
+
 function clsx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-// 🔥 ICON MAPPER (from DB string → actual icon)
-function getIcon(name: string) {
+function getIcon(name: string | null | undefined) {
   switch (name) {
     case "Mail":
       return Mail;
@@ -43,32 +51,69 @@ function getIcon(name: string) {
   }
 }
 
-export default function EmailSidebar({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const pathname = usePathname();
-  const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<any[]>([]);
+async function readJsonResponse(res: Response) {
+  const text = await res.text();
 
-  // 🔥 LOAD FROM DATABASE
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { rawResponse: text };
+  }
+}
+
+export default function EmailSidebar({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<EmailSidebarItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
   useEffect(() => {
     loadItems();
   }, []);
 
   async function loadItems() {
     try {
+      setLoading(true);
+      setLoadError("");
+
       const res = await fetch("/api/admin/email-sidebar", {
         cache: "no-store",
+        credentials: "include",
       });
-      const data = await res.json();
 
-      if (!data.ok) throw new Error(data.error);
+      const data = await readJsonResponse(res);
 
-      setItems(data.items || []);
-    } catch (err) {
-      console.error("Failed to load email sidebar", err);
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+            data.message ||
+            data.rawResponse ||
+            `Email sidebar API failed with HTTP ${res.status}`
+        );
+      }
+
+      const nextItems = Array.isArray(data.items) ? data.items : [];
+
+      setItems(
+        nextItems
+          .filter((item: EmailSidebarItem) => item.is_enabled)
+          .sort(
+            (a: EmailSidebarItem, b: EmailSidebarItem) =>
+              Number(a.sort_order || 0) - Number(b.sort_order || 0)
+          )
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to load email sidebar.";
+
+      console.error("Failed to load email sidebar:", err);
+      setLoadError(message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -81,19 +126,16 @@ export default function EmailSidebar({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // 🔥 CURRENT PAGE TITLE
   const currentTitle = useMemo(() => {
     const current = items.find(
-      (item) =>
-        pathname === item.href ||
-        pathname.startsWith(`${item.href}/`)
+      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
     );
+
     return current?.label || "Admin Email";
   }, [pathname, items]);
 
   return (
     <>
-      {/* MOBILE HEADER */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-black/30 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
@@ -105,13 +147,12 @@ export default function EmailSidebar({
               <div className="text-base font-extrabold text-white">
                 Burton Pride
               </div>
-              <div className="text-[11px] text-white/70">
-                {currentTitle}
-              </div>
+              <div className="text-[11px] text-white/70">{currentTitle}</div>
             </div>
           </div>
 
           <button
+            type="button"
             onClick={() => setOpen(true)}
             className="rounded-xl px-3 py-2 text-white hover:bg-white/10"
           >
@@ -120,32 +161,41 @@ export default function EmailSidebar({
         </div>
       </div>
 
-      {/* DESKTOP */}
       <div className="flex min-h-screen">
         <aside className="hidden w-72 bg-white/10 backdrop-blur-xl md:block">
-          <DesktopSidebar pathname={pathname} items={items} />
+          <DesktopSidebar
+            pathname={pathname}
+            items={items}
+            loading={loading}
+            loadError={loadError}
+            onRetry={loadItems}
+          />
         </aside>
 
         <main className="flex-1">{children}</main>
       </div>
 
-      {/* MOBILE SIDEBAR */}
       {open && (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div
+          <button
+            type="button"
+            aria-label="Close email menu overlay"
             className="absolute inset-0 bg-black/60"
             onClick={() => setOpen(false)}
           />
 
-          <div className="absolute left-0 top-0 h-full w-80 bg-white/10 backdrop-blur-xl p-4">
+          <div className="absolute left-0 top-0 h-full w-80 bg-white/10 p-4 backdrop-blur-xl">
             <div className="mb-4 flex justify-between">
-              <span className="text-white font-bold">
-                Email Menu
-              </span>
-              <button onClick={() => setOpen(false)}>✕</button>
+              <span className="font-bold text-white">Email Menu</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-white"
+              >
+                ✕
+              </button>
             </div>
 
-            {/* Back */}
             <MobileEmailLink
               href="/Admin/Dashboard"
               label="Back to Dashboard"
@@ -157,10 +207,25 @@ export default function EmailSidebar({
 
             <div className="my-3 border-t border-white/10" />
 
-            {/* 🔥 DB ITEMS */}
-            {items
-              .filter((item) => item.is_enabled)
-              .map((item) => {
+            {loading ? (
+              <div className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white/70">
+                Loading email menu...
+              </div>
+            ) : loadError ? (
+              <div className="rounded-xl border border-red-400/30 bg-red-500/15 p-3 text-sm text-red-100">
+                <p className="font-bold">Email menu failed</p>
+                <p className="mt-1 text-xs leading-5">{loadError}</p>
+
+                <button
+                  type="button"
+                  onClick={loadItems}
+                  className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              items.map((item) => {
                 const Icon = getIcon(item.icon);
 
                 return (
@@ -174,7 +239,8 @@ export default function EmailSidebar({
                     exact={item.href === EMAIL_ROOT}
                   />
                 );
-              })}
+              })
+            )}
           </div>
         </div>
       )}
@@ -185,17 +251,20 @@ export default function EmailSidebar({
 function DesktopSidebar({
   pathname,
   items,
+  loading,
+  loadError,
+  onRetry,
 }: {
   pathname: string;
-  items: any[];
+  items: EmailSidebarItem[];
+  loading: boolean;
+  loadError: string;
+  onRetry: () => void;
 }) {
   return (
     <div className="p-6">
-      <div className="mb-8 text-white font-bold text-lg">
-        Email Admin
-      </div>
+      <div className="mb-8 text-lg font-bold text-white">Email Admin</div>
 
-      {/* Back */}
       <SideNavLink
         href="/Admin/Dashboard"
         label="Back to Dashboard"
@@ -206,10 +275,25 @@ function DesktopSidebar({
 
       <div className="my-3 border-t border-white/10" />
 
-      {/* 🔥 DB ITEMS */}
-      {items
-        .filter((item) => item.is_enabled)
-        .map((item) => {
+      {loading ? (
+        <div className="rounded-xl bg-white/10 px-4 py-3 text-sm text-white/70">
+          Loading email menu...
+        </div>
+      ) : loadError ? (
+        <div className="rounded-xl border border-red-400/30 bg-red-500/15 p-3 text-sm text-red-100">
+          <p className="font-bold">Email menu failed</p>
+          <p className="mt-1 text-xs leading-5">{loadError}</p>
+
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        items.map((item) => {
           const Icon = getIcon(item.icon);
 
           return (
@@ -222,7 +306,8 @@ function DesktopSidebar({
               exact={item.href === EMAIL_ROOT}
             />
           );
-        })}
+        })
+      )}
     </div>
   );
 }
@@ -233,19 +318,21 @@ function SideNavLink({
   pathname,
   icon: Icon,
   exact = false,
-}: any) {
-  const active = exact
-    ? pathname === href
-    : pathname.startsWith(href);
+}: {
+  href: string;
+  label: string;
+  pathname: string;
+  icon: any;
+  exact?: boolean;
+}) {
+  const active = exact ? pathname === href : pathname.startsWith(href);
 
   return (
     <Link
       href={href}
       className={clsx(
-        "flex items-center justify-between px-4 py-3 rounded-xl text-sm",
-        active
-          ? "bg-white/15 text-white"
-          : "text-white hover:bg-white/10"
+        "flex items-center justify-between rounded-xl px-4 py-3 text-sm",
+        active ? "bg-white/15 text-white" : "text-white hover:bg-white/10"
       )}
     >
       <span className="flex items-center gap-3">
@@ -264,20 +351,23 @@ function MobileEmailLink({
   pathname,
   onNavigate,
   exact = false,
-}: any) {
-  const active = exact
-    ? pathname === href
-    : pathname.startsWith(href);
+}: {
+  href: string;
+  label: string;
+  icon: any;
+  pathname: string;
+  onNavigate: () => void;
+  exact?: boolean;
+}) {
+  const active = exact ? pathname === href : pathname.startsWith(href);
 
   return (
     <Link
       href={href}
       onClick={onNavigate}
       className={clsx(
-        "flex items-center justify-between px-4 py-3 rounded-xl text-sm",
-        active
-          ? "bg-white/15 text-white"
-          : "text-white/80 hover:bg-white/10"
+        "flex items-center justify-between rounded-xl px-4 py-3 text-sm",
+        active ? "bg-white/15 text-white" : "text-white/80 hover:bg-white/10"
       )}
     >
       <span className="flex items-center gap-3">

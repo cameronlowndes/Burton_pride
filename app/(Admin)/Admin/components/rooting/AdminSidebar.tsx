@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useClerk } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+
+import { supabase } from "@/lib/supabase/supabaseClient";
+
 import type {
   AdminSidebarItem,
   AdminSidebarResponse,
@@ -33,13 +35,6 @@ function hasPermission(
   return permissions.includes(permission);
 }
 
-/**
- * Your sidebar is loaded from the database, so older rows may not have a
- * permission field. This function protects important links by their href/label.
- *
- * If you later add a permission_key / required_permission column to the
- * sidebar table, this function will use it automatically.
- */
 function getItemPermission(item: AdminSidebarItem): string | null {
   const unsafeItem = item as AdminSidebarItem & {
     permission_key?: string | null;
@@ -57,11 +52,6 @@ function getItemPermission(item: AdminSidebarItem): string | null {
   const label = normalise(item.label);
   const href = normalise(item.href);
 
-  /**
-   * High-risk settings.
-   * The delete password controls high-risk delete actions, so do not show it
-   * unless the admin has the delete-all money permission.
-   */
   if (
     label.includes("delete all password") ||
     label.includes("delete password") ||
@@ -71,9 +61,6 @@ function getItemPermission(item: AdminSidebarItem): string | null {
     return "money:delete_all";
   }
 
-  /**
-   * Admin users and permissions.
-   */
   if (
     label === "users" ||
     label.includes("admin users") ||
@@ -84,9 +71,6 @@ function getItemPermission(item: AdminSidebarItem): string | null {
     return "admin:users:manage";
   }
 
-  /**
-   * Money tracker / accounts.
-   */
   if (
     label.includes("money") ||
     label.includes("accounts") ||
@@ -96,9 +80,6 @@ function getItemPermission(item: AdminSidebarItem): string | null {
     return "money:view";
   }
 
-  /**
-   * Audit logs.
-   */
   if (
     label.includes("audit") ||
     label.includes("logs") ||
@@ -108,23 +89,14 @@ function getItemPermission(item: AdminSidebarItem): string | null {
     return "audit_logs:view";
   }
 
-  /**
-   * Donations.
-   */
   if (label.includes("donation") || href.includes("donation")) {
     return "donations:view";
   }
 
-  /**
-   * Raffle.
-   */
   if (label.includes("raffle") || href.includes("raffle")) {
     return "raffle:view";
   }
 
-  /**
-   * Page editor / navbar / sidebar editors.
-   */
   if (
     label.includes("page editor") ||
     label.includes("navbar") ||
@@ -135,18 +107,10 @@ function getItemPermission(item: AdminSidebarItem): string | null {
     return "site_pages:manage";
   }
 
-  /**
-   * Dashboard should be available to admins with dashboard permission.
-   */
   if (label.includes("dashboard") || href.endsWith("/admin/dashboard")) {
     return "admin:dashboard:view";
   }
 
-  /**
-   * Everything else remains visible by default so old admin portal links are
-   * not accidentally hidden. Add a permission matcher above for any section
-   * you want to restrict.
-   */
   return null;
 }
 
@@ -164,13 +128,21 @@ function canViewItem(
 }
 
 function getActiveHref(pathname: string, items: AdminSidebarItem[]) {
+  const normalisedPathname = pathname.toLowerCase();
+
   const enabled = items.filter((item) => item.is_enabled && item.href);
 
-  const exactMatch = enabled.find((item) => pathname === item.href);
+  const exactMatch = enabled.find(
+    (item) => String(item.href).toLowerCase() === normalisedPathname
+  );
+
   if (exactMatch?.href) return exactMatch.href;
 
   const sortedMatches = enabled
-    .filter((item) => item.href && pathname.startsWith(`${item.href}/`))
+    .filter((item) => {
+      const href = String(item.href || "").toLowerCase();
+      return href && normalisedPathname.startsWith(`${href}/`);
+    })
     .sort((a, b) => String(b.href).length - String(a.href).length);
 
   return sortedMatches[0]?.href || "";
@@ -203,11 +175,6 @@ function filterSidebarItemsByPermissions({
       canViewItem(child, permissions, adminRole)
     );
 
-    /**
-     * For groups, keep the group only if:
-     * - the group itself is allowed, and
-     * - it has a visible child, or it links to a real allowed page.
-     */
     if (item.item_type === "group") {
       const groupAllowed = canViewItem(item, permissions, adminRole);
       const hasVisibleChildren = visibleChildren.length > 0;
@@ -224,25 +191,55 @@ export default function AdminSidebar({
   permissions = [],
   adminRole = null,
 }: AdminSidebarProps) {
-  const { signOut } = useClerk();
   const pathname = usePathname();
 
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AdminSidebarItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const [mobileGroupOpen, setMobileGroupOpen] = useState<
     Record<string, boolean>
   >({});
 
+  async function handleSignOut() {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      window.location.href = "/Admin/Login";
+    }
+  }
+
   useEffect(() => {
     const loadItems = async () => {
-      try {
-        const res = await fetch("/api/admin/sidebar", { cache: "no-store" });
-        const data: AdminSidebarResponse = await res.json();
+      setLoading(true);
+      setLoadError("");
 
-        if (!res.ok || !data.ok) {
-          throw new Error(data.error || "Failed to load sidebar");
+      try {
+        const res = await fetch("/api/admin/sidebar", {
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        const text = await res.text();
+
+        let data: AdminSidebarResponse | null = null;
+
+        try {
+          data = JSON.parse(text) as AdminSidebarResponse;
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok || !data?.ok) {
+          const message =
+            data && "error" in data && data.error
+              ? String(data.error)
+              : data && "message" in data && data.message
+              ? String(data.message)
+              : text || `Sidebar API failed with HTTP ${res.status}`;
+
+          throw new Error(message);
         }
 
         const filteredItems = filterSidebarItemsByPermissions({
@@ -263,7 +260,13 @@ export default function AdminSidebar({
 
         setMobileGroupOpen(initialOpen);
       } catch (error) {
-        console.error(error);
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to load admin sidebar.";
+
+        console.error("AdminSidebar loadItems error:", error);
+        setLoadError(message);
       } finally {
         setLoading(false);
       }
@@ -352,9 +355,36 @@ export default function AdminSidebar({
     );
   }
 
+  if (loadError) {
+    return (
+      <>
+        <div className="sticky top-0 z-40 border-b border-red-300/30 bg-red-950 px-4 py-3 text-sm text-red-50 md:hidden">
+          Menu failed: {loadError}
+        </div>
+
+        <aside className="relative hidden min-h-full w-72 shrink-0 self-stretch overflow-hidden bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 md:flex md:flex-col">
+          <div className="absolute inset-0 bg-black/20" />
+          <div className="relative z-10 flex min-h-full flex-1 flex-col p-6 text-sm text-white">
+            <div className="rounded-2xl border border-red-300/30 bg-red-950/70 p-4">
+              <p className="font-black">Menu failed to load</p>
+              <p className="mt-2 text-sm text-red-100">{loadError}</p>
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="mt-4 rounded-xl bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20"
+              >
+                Log out →
+              </button>
+            </div>
+          </div>
+        </aside>
+      </>
+    );
+  }
+
   return (
     <>
-      {/* MOBILE TOP BAR */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -385,7 +415,6 @@ export default function AdminSidebar({
         </div>
       </div>
 
-      {/* DESKTOP SIDEBAR */}
       <aside className="relative hidden min-h-full w-72 shrink-0 self-stretch overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl md:flex md:flex-col">
         <div className="absolute inset-0 bg-black/20" />
         <div className="absolute -left-20 top-10 h-52 w-52 rounded-full bg-pink-300/25 blur-3xl" />
@@ -397,11 +426,10 @@ export default function AdminSidebar({
           childMap={childMap}
           pathname={pathname}
           activeHref={activeHref}
-          signOut={() => signOut({ redirectUrl: "/Admin/Login" })}
+          signOut={handleSignOut}
         />
       </aside>
 
-      {/* MOBILE DRAWER */}
       <div
         className={clsx(
           "fixed inset-0 z-50 md:hidden",
@@ -541,11 +569,10 @@ export default function AdminSidebar({
                   );
                 })}
 
-                {/* LOG OUT AS LAST NORMAL MOBILE MENU ITEM */}
                 <div className="border-t border-white/15 pt-4">
                   <button
                     type="button"
-                    onClick={() => signOut({ redirectUrl: "/Admin/Login" })}
+                    onClick={handleSignOut}
                     className="w-full rounded-2xl bg-white/10 px-4 py-3 text-left text-sm font-black text-white transition hover:bg-white/20"
                   >
                     Log out →
@@ -554,7 +581,6 @@ export default function AdminSidebar({
               </div>
             </div>
 
-            {/* ONLY THIS IS FORCED TO MOBILE BOTTOM */}
             <div className="shrink-0 px-4 pb-6 pt-4">
               <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 shadow-lg backdrop-blur">
                 <p className="text-xs font-black uppercase tracking-[0.2em] text-white/60">
@@ -601,7 +627,6 @@ function SidebarContent({
 
   return (
     <div className="relative z-10 flex min-h-full flex-1 flex-col p-6">
-      {/* TOP BRAND */}
       <div className="shrink-0">
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-white/20 bg-white/20 text-xl font-black text-white shadow-lg backdrop-blur">
           BP
@@ -615,7 +640,6 @@ function SidebarContent({
         </div>
       </div>
 
-      {/* SCROLLING NAV */}
       <nav className="mt-8 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {items.map((item) => {
           const children = childMap.get(item.id) || [];
@@ -706,7 +730,6 @@ function SidebarContent({
           );
         })}
 
-        {/* LOG OUT AS LAST NORMAL DESKTOP MENU ITEM */}
         <div className="border-t border-white/15 pt-4">
           <button
             type="button"
@@ -718,7 +741,6 @@ function SidebarContent({
         </div>
       </nav>
 
-      {/* ONLY THIS IS FORCED TO DESKTOP BOTTOM */}
       <div className="mt-auto shrink-0 pt-4">
         <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 shadow-lg backdrop-blur">
           <p className="text-xs font-black uppercase tracking-[0.2em] text-white/60">

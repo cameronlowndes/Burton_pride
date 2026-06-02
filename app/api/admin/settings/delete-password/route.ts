@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import bcrypt from "bcryptjs";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
 
 export const runtime = "nodejs";

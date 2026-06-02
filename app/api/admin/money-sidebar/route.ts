@@ -1,38 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const ROUTE_NAME = "/api/admin/money-sidebar";
+const TABLE_NAME = "money_sidebar_items";
+const SELECT_COLUMNS = "id, label, href, icon, sort_order, is_enabled";
 
 type SidebarPayload = {
   id?: string;
   label?: string;
   href?: string;
   icon?: string;
-  sort_order?: number;
+  sort_order?: number | string;
   is_enabled?: boolean;
 };
 
-async function requireAdmin() {
-  const { userId } = await auth();
+function isDevelopment() {
+  return process.env.NODE_ENV !== "production";
+}
 
-  if (!userId) {
-    return {
-      ok: false as const,
-      error: "Unauthorized",
-      status: 401,
-    };
+function errorToMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
   }
+}
 
-  // Since admin_users table does not exist,
-  // we fall back to Clerk-authenticated access only.
-  return {
-    ok: true as const,
-    adminUser: {
-      clerk_user_id: userId,
-      role: "authenticated",
+function errorToStack(error: unknown) {
+  if (!isDevelopment()) return undefined;
+  if (error instanceof Error) return error.stack;
+  return undefined;
+}
+
+function buildDebugResponse(args: {
+  method: string;
+  status: number;
+  error: unknown;
+  operation?: string;
+  query?: string;
+  payload?: unknown;
+  extra?: Record<string, unknown>;
+}) {
+  const { method, status, error, operation, query, payload, extra } = args;
+
+  const message = errorToMessage(error);
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+      message,
+      route: ROUTE_NAME,
+      method,
+      status,
+      table: TABLE_NAME,
+      operation,
+      query,
+      payload: isDevelopment() ? payload : undefined,
+      stack: errorToStack(error),
+      details: isDevelopment() ? error : undefined,
+      likelyFixes: [
+        `Check this API file: app/api/admin/money-sidebar/route.ts`,
+        `Check Supabase table exists: ${TABLE_NAME}`,
+        `Check these columns exist: ${SELECT_COLUMNS}`,
+        "Check Supabase service role key is set correctly.",
+        "Check the route no longer imports Clerk.",
+        "Check Vercel or terminal logs for the full server error.",
+      ],
+      ...extra,
     },
-  };
+    { status }
+  );
 }
 
 function normalisePayload(body: SidebarPayload) {
@@ -40,8 +84,8 @@ function normalisePayload(body: SidebarPayload) {
     typeof body.sort_order === "number"
       ? body.sort_order
       : body.sort_order !== undefined
-      ? Number(body.sort_order)
-      : undefined;
+        ? Number(body.sort_order)
+        : undefined;
 
   return {
     label: typeof body.label === "string" ? body.label.trim() : undefined,
@@ -55,67 +99,84 @@ function normalisePayload(body: SidebarPayload) {
 
 export async function GET() {
   try {
-    const access = await requireAdmin();
-
-    if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
-      );
-    }
-
     const { data, error } = await supabaseAdmin
-      .from("money_sidebar_items")
-      .select("id, label, href, icon, sort_order, is_enabled")
+      .from(TABLE_NAME)
+      .select(SELECT_COLUMNS)
       .order("sort_order", { ascending: true });
 
     if (error) {
-      console.error("GET money sidebar error:", error);
-      return NextResponse.json(
-        { ok: false, error: error.message || "Failed to load sidebar items" },
-        { status: 500 }
-      );
+      return buildDebugResponse({
+        method: "GET",
+        status: 500,
+        error: new Error(
+          `Supabase GET failed. Table=${TABLE_NAME}. Message=${error.message}`
+        ),
+        operation: "select sidebar items",
+        query: `from(${TABLE_NAME}).select(${SELECT_COLUMNS}).order(sort_order)`,
+        extra: {
+          supabaseError: error,
+          supabaseCode: error.code,
+          supabaseHint: error.hint,
+          supabaseDetails: error.details,
+        },
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      route: ROUTE_NAME,
+      table: TABLE_NAME,
+      count: data?.length ?? 0,
       items: data ?? [],
     });
   } catch (error) {
-    console.error("Unexpected GET money sidebar error:", error);
-    return NextResponse.json(
-      { ok: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return buildDebugResponse({
+      method: "GET",
+      status: 500,
+      error,
+      operation: "unexpected GET crash",
+    });
   }
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const access = await requireAdmin();
+  let body: SidebarPayload | null = null;
 
-    if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
-      );
+  try {
+    try {
+      body = (await req.json()) as SidebarPayload;
+    } catch (error) {
+      return buildDebugResponse({
+        method: "POST",
+        status: 400,
+        error: "Invalid JSON body.",
+        operation: "parse request body",
+        extra: {
+          parseError: errorToMessage(error),
+        },
+      });
     }
 
-    const body = (await req.json()) as SidebarPayload;
     const payload = normalisePayload(body);
 
     if (!payload.label) {
-      return NextResponse.json(
-        { ok: false, error: "Label is required" },
-        { status: 400 }
-      );
+      return buildDebugResponse({
+        method: "POST",
+        status: 400,
+        error: "Label is required.",
+        operation: "validate payload",
+        payload,
+      });
     }
 
     if (!payload.href) {
-      return NextResponse.json(
-        { ok: false, error: "Href is required" },
-        { status: 400 }
-      );
+      return buildDebugResponse({
+        method: "POST",
+        status: 400,
+        error: "Href is required.",
+        operation: "validate payload",
+        payload,
+      });
     }
 
     const insertData = {
@@ -127,51 +188,75 @@ export async function POST(req: NextRequest) {
     };
 
     const { data, error } = await supabaseAdmin
-      .from("money_sidebar_items")
+      .from(TABLE_NAME)
       .insert(insertData)
-      .select("id, label, href, icon, sort_order, is_enabled")
+      .select(SELECT_COLUMNS)
       .single();
 
     if (error) {
-      console.error("POST money sidebar error:", error);
-      return NextResponse.json(
-        { ok: false, error: error.message || "Failed to create item" },
-        { status: 500 }
-      );
+      return buildDebugResponse({
+        method: "POST",
+        status: 500,
+        error: new Error(
+          `Supabase POST failed. Table=${TABLE_NAME}. Message=${error.message}`
+        ),
+        operation: "insert sidebar item",
+        query: `from(${TABLE_NAME}).insert(...).select(${SELECT_COLUMNS}).single()`,
+        payload: insertData,
+        extra: {
+          supabaseError: error,
+          supabaseCode: error.code,
+          supabaseHint: error.hint,
+          supabaseDetails: error.details,
+        },
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      route: ROUTE_NAME,
+      table: TABLE_NAME,
       item: data,
     });
   } catch (error) {
-    console.error("Unexpected POST money sidebar error:", error);
-    return NextResponse.json(
-      { ok: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return buildDebugResponse({
+      method: "POST",
+      status: 500,
+      error,
+      operation: "unexpected POST crash",
+      payload: body,
+    });
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  try {
-    const access = await requireAdmin();
+  let body: SidebarPayload | null = null;
 
-    if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
-      );
+  try {
+    try {
+      body = (await req.json()) as SidebarPayload;
+    } catch (error) {
+      return buildDebugResponse({
+        method: "PATCH",
+        status: 400,
+        error: "Invalid JSON body.",
+        operation: "parse request body",
+        extra: {
+          parseError: errorToMessage(error),
+        },
+      });
     }
 
-    const body = (await req.json()) as SidebarPayload;
     const id = typeof body.id === "string" ? body.id.trim() : "";
 
     if (!id) {
-      return NextResponse.json(
-        { ok: false, error: "Item id is required" },
-        { status: 400 }
-      );
+      return buildDebugResponse({
+        method: "PATCH",
+        status: 400,
+        error: "Item id is required.",
+        operation: "validate id",
+        payload: body,
+      });
     }
 
     const payload = normalisePayload(body);
@@ -181,85 +266,117 @@ export async function PATCH(req: NextRequest) {
     if (payload.href !== undefined) updates.href = payload.href;
     if (payload.icon !== undefined) updates.icon = payload.icon;
     if (payload.sort_order !== undefined) updates.sort_order = payload.sort_order;
-    if (payload.is_enabled !== undefined) updates.is_enabled = payload.is_enabled;
+    if (payload.is_enabled !== undefined) {
+      updates.is_enabled = payload.is_enabled;
+    }
 
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "No updates provided" },
-        { status: 400 }
-      );
+      return buildDebugResponse({
+        method: "PATCH",
+        status: 400,
+        error: "No updates provided.",
+        operation: "validate updates",
+        payload: body,
+      });
     }
 
     const { data, error } = await supabaseAdmin
-      .from("money_sidebar_items")
+      .from(TABLE_NAME)
       .update(updates)
       .eq("id", id)
-      .select("id, label, href, icon, sort_order, is_enabled")
+      .select(SELECT_COLUMNS)
       .single();
 
     if (error) {
-      console.error("PATCH money sidebar error:", error);
-      return NextResponse.json(
-        { ok: false, error: error.message || "Failed to update item" },
-        { status: 500 }
-      );
+      return buildDebugResponse({
+        method: "PATCH",
+        status: 500,
+        error: new Error(
+          `Supabase PATCH failed. Table=${TABLE_NAME}. ItemId=${id}. Message=${error.message}`
+        ),
+        operation: "update sidebar item",
+        query: `from(${TABLE_NAME}).update(...).eq(id, ${id}).select(${SELECT_COLUMNS}).single()`,
+        payload: updates,
+        extra: {
+          itemId: id,
+          supabaseError: error,
+          supabaseCode: error.code,
+          supabaseHint: error.hint,
+          supabaseDetails: error.details,
+        },
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      route: ROUTE_NAME,
+      table: TABLE_NAME,
       item: data,
     });
   } catch (error) {
-    console.error("Unexpected PATCH money sidebar error:", error);
-    return NextResponse.json(
-      { ok: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return buildDebugResponse({
+      method: "PATCH",
+      status: 500,
+      error,
+      operation: "unexpected PATCH crash",
+      payload: body,
+    });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    const access = await requireAdmin();
-
-    if (!access.ok) {
-      return NextResponse.json(
-        { ok: false, error: access.error },
-        { status: access.status }
-      );
-    }
-
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id")?.trim();
 
     if (!id) {
-      return NextResponse.json(
-        { ok: false, error: "Item id is required" },
-        { status: 400 }
-      );
+      return buildDebugResponse({
+        method: "DELETE",
+        status: 400,
+        error: "Item id is required.",
+        operation: "validate id",
+        extra: {
+          expectedUrl: `${ROUTE_NAME}?id=SIDEBAR_ITEM_ID`,
+        },
+      });
     }
 
     const { error } = await supabaseAdmin
-      .from("money_sidebar_items")
+      .from(TABLE_NAME)
       .delete()
       .eq("id", id);
 
     if (error) {
-      console.error("DELETE money sidebar error:", error);
-      return NextResponse.json(
-        { ok: false, error: error.message || "Failed to delete item" },
-        { status: 500 }
-      );
+      return buildDebugResponse({
+        method: "DELETE",
+        status: 500,
+        error: new Error(
+          `Supabase DELETE failed. Table=${TABLE_NAME}. ItemId=${id}. Message=${error.message}`
+        ),
+        operation: "delete sidebar item",
+        query: `from(${TABLE_NAME}).delete().eq(id, ${id})`,
+        extra: {
+          itemId: id,
+          supabaseError: error,
+          supabaseCode: error.code,
+          supabaseHint: error.hint,
+          supabaseDetails: error.details,
+        },
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      route: ROUTE_NAME,
+      table: TABLE_NAME,
+      deletedId: id,
     });
   } catch (error) {
-    console.error("Unexpected DELETE money sidebar error:", error);
-    return NextResponse.json(
-      { ok: false, error: "Internal server error" },
-      { status: 500 }
-    );
+    return buildDebugResponse({
+      method: "DELETE",
+      status: 500,
+      error,
+      operation: "unexpected DELETE crash",
+    });
   }
 }

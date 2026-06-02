@@ -1,8 +1,7 @@
 import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
-
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
 import {
   createMoneyAuditLog,
@@ -423,27 +422,9 @@ async function loadAttachmentsForTransactions(
 
 async function getActorLabel() {
   try {
-    const user = await currentUser();
+    const admin = await getCurrentAdmin();
 
-    const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName]
-        .filter(Boolean)
-        .join(" ") ||
-      null;
-
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
-
-    if (actorName && actorEmail) {
-      return `${actorName} (${actorEmail})`;
-    }
-
-    if (actorName) {
-      return actorName;
-    }
+    const actorEmail = admin?.email || null;
 
     if (actorEmail) {
       return actorEmail;
@@ -457,28 +438,13 @@ async function getActorLabel() {
 
 async function getActorDetails() {
   try {
-    const user = await currentUser();
+    const admin = await getCurrentAdmin();
 
-    const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName]
-        .filter(Boolean)
-        .join(" ") ||
-      null;
-
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
+    const actorEmail = admin?.email || null;
 
     return {
-      name:
-        actorName ||
-        actorEmail ||
-        "Unknown admin",
-
-      email:
-        actorEmail || null,
+      name: actorEmail || "Unknown admin",
+      email: actorEmail,
     };
   } catch {
     return {

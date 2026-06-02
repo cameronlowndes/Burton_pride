@@ -1,5 +1,5 @@
 import { headers, cookies } from "next/headers";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { verifyUnlockToken } from "@/lib/pageunlock";
 
 export type SitePageRow = {

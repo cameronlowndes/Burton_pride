@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import {
-  requireAdmin,
-  requireAdminPermission,
-} from "@/lib/adminPermissions";
+
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * Helper: normalize href
- */
+type AdminUser = {
+  id: string;
+  email: string | null;
+  role: "main_admin" | "admin" | "editor" | string | null;
+  is_active: boolean | null;
+  permissions: unknown;
+};
+
 function normalizeHref(value: unknown) {
   if (!value) return null;
 
@@ -49,15 +52,82 @@ function cleanNumber(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-/**
- * GET sidebar items
- *
- * Any active admin can load sidebar items.
- * The sidebar component then hides links based on permissions.
- */
+function objectPermissionsToKeys(permissions: unknown): string[] {
+  if (!permissions) return [];
+
+  if (Array.isArray(permissions)) {
+    return permissions.filter(
+      (item): item is string => typeof item === "string"
+    );
+  }
+
+  if (typeof permissions !== "object") return [];
+
+  return Object.entries(permissions)
+    .filter(([, allowed]) => allowed === true)
+    .map(([key]) => key);
+}
+
+function hasPermission(admin: AdminUser, permission: string) {
+  if (admin.role === "main_admin") return true;
+
+  const permissions = objectPermissionsToKeys(admin.permissions);
+
+  return permissions.includes(permission);
+}
+
+async function getCurrentSupabaseAdmin(): Promise<AdminUser | null> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("admin_users")
+    .select("id,email,role,is_active,permissions")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || "Failed to load admin user.");
+  }
+
+  return (data as AdminUser | null) ?? null;
+}
+
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
+}
+
 export async function GET() {
   try {
-    await requireAdmin();
+    const admin = await getCurrentSupabaseAdmin();
+
+    if (!admin) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Unauthorized",
+          message:
+            "No active Supabase admin user was found for this login session.",
+        },
+        401
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from("admin_sidebar_items")
@@ -66,43 +136,62 @@ export async function GET() {
       .order("sort_order", { ascending: true });
 
     if (error) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: error.message || "Failed to load sidebar items",
         },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       items: data || [],
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("GET /api/admin/sidebar error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error ? error.message : "Failed to load sidebar items.";
+
+    return jsonResponse(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      500
     );
   }
 }
 
-/**
- * CREATE sidebar item
- *
- * Only admins with Manage Site Pages can change sidebar/navigation.
- */
 export async function POST(req: Request) {
   try {
-    await requireAdminPermission("site_pages:manage");
+    const admin = await getCurrentSupabaseAdmin();
+
+    if (!admin) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Unauthorized",
+          message:
+            "No active Supabase admin user was found for this login session.",
+        },
+        401
+      );
+    }
+
+    if (!hasPermission(admin, "site_pages:manage")) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Forbidden",
+          message:
+            "You do not have permission to manage admin sidebar items.",
+        },
+        403
+      );
+    }
 
     const body = await req.json().catch(() => ({}));
 
@@ -120,22 +209,22 @@ export async function POST(req: Request) {
     const icon = body.icon ? String(body.icon).trim() : null;
 
     if (!label) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Label is required",
         },
-        { status: 400 }
+        400
       );
     }
 
     if (item_type === "link" && !href) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Link must have a URL",
         },
-        { status: 400 }
+        400
       );
     }
 
@@ -155,31 +244,31 @@ export async function POST(req: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: error.message || "Failed to create sidebar item",
         },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       item: data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("POST /api/admin/sidebar error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error ? error.message : "Failed to create sidebar item.";
+
+    return jsonResponse(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      500
     );
   }
 }

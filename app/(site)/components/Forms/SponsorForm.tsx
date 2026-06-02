@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabaseBrowser } from "@/lib/supabase/supabaseBrowser";
 
 type SubmitState = "idle" | "submitting" | "success" | "error";
 

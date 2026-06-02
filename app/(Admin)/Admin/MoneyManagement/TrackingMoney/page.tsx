@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowRight,
   Banknote,
+  Bug,
   Coins,
   RefreshCcw,
   RotateCcw,
@@ -23,6 +25,154 @@ import MoneyPageModals from "../../components/money/MoneyPageModals";
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 const RECEIPT_REMINDER_DAYS = 7;
+
+function safeString(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.message;
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value || "Unknown error");
+  }
+}
+
+function getHelpfulErrorMessage(message: string) {
+  const lower = message.toLowerCase();
+
+  if (lower.includes("clerk") || lower.includes("@clerk/nextjs")) {
+    return {
+      title: "Old Clerk code is still being used",
+      summary:
+        "The money tracker is trying to call Clerk, but this app has moved to Supabase auth.",
+      checks: [
+        "Search the project for @clerk/nextjs and remove it from money/admin files.",
+        "Check lib/adminPermissions.ts does not import Clerk auth().",
+        "Check the money API routes do not call Clerk auth() or currentUser().",
+        "Replace Clerk checks with requireAdminPermission() or your Supabase admin session helper.",
+      ],
+    };
+  }
+
+  if (lower.includes("401") || lower.includes("unauthorized")) {
+    return {
+      title: "You are not signed in",
+      summary:
+        "The money tracker could not confirm your Supabase admin login session.",
+      checks: [
+        "Go back to /Admin/Login and sign in again.",
+        "Check your admin session cookie is being created.",
+        "Check the route is using your Supabase auth helper, not Clerk.",
+      ],
+    };
+  }
+
+  if (lower.includes("permission") || lower.includes("403")) {
+    return {
+      title: "Permission missing",
+      summary:
+        "Your admin account is signed in, but does not have permission to use this money tracker action.",
+      checks: [
+        "Open Admin Users & Permissions.",
+        "Make sure your account has money:view.",
+        "For website sync, make sure you have money:sync_website_payments.",
+      ],
+    };
+  }
+
+  if (lower.includes("relation") || lower.includes("table")) {
+    return {
+      title: "Database table or column problem",
+      summary:
+        "Supabase returned a database error. A required table or column may be missing.",
+      checks: [
+        "Check the table named in the error exists in Supabase.",
+        "Check the column names match the code.",
+        "Run any missing SQL migration for the money tracker.",
+      ],
+    };
+  }
+
+  return {
+    title: "Money tracker error",
+    summary:
+      "Something went wrong while loading or syncing the money tracker.",
+    checks: [
+      "Refresh the page.",
+      "Check the browser console.",
+      "Check your Vercel or terminal logs.",
+      "Check the API route mentioned in the error.",
+    ],
+  };
+}
+
+function DetailedErrorBox({
+  title,
+  error,
+  details,
+}: {
+  title: string;
+  error: unknown;
+  details?: unknown;
+}) {
+  const message = safeString(error);
+  const detailText = details ? safeString(details) : "";
+  const help = getHelpfulErrorMessage(`${message}\n${detailText}`);
+
+  return (
+    <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-4 shadow-2xl shadow-black/20">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-red-300/20 bg-red-500/15 text-red-100">
+          <AlertTriangle className="h-5 w-5" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black uppercase tracking-[0.22em] text-red-200">
+            {title}
+          </p>
+
+          <h2 className="mt-2 text-xl font-black text-white">
+            {help.title}
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-red-100/80">
+            {help.summary}
+          </p>
+
+          <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-black text-amber-100">
+              <Bug className="h-4 w-4" />
+              What to check
+            </div>
+
+            <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-amber-100/80">
+              {help.checks.map((check) => (
+                <li key={check}>{check}</li>
+              ))}
+            </ul>
+          </div>
+
+          <details className="mt-4 rounded-2xl border border-red-300/20 bg-black/30">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-black text-red-100">
+              Show technical details
+            </summary>
+
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-red-300/10 p-4 text-xs leading-5 text-red-50/90">
+              {JSON.stringify(
+                {
+                  message,
+                  details: detailText || null,
+                },
+                null,
+                2
+              )}
+            </pre>
+          </details>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
@@ -78,11 +228,22 @@ export default function MoneyTransactionsPage() {
           ) : null}
 
           {money.stripeSyncError ? (
-            <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100">
-              {money.stripeSyncError}
+            <div className="mt-4">
+              <DetailedErrorBox
+                title="Website payments sync error"
+                error={money.stripeSyncError}
+              />
             </div>
           ) : null}
         </section>
+
+        {money.error ? (
+          <DetailedErrorBox
+            title="Money tracker error"
+            error={money.error}
+            details={money.errorDetails}
+          />
+        ) : null}
 
         <MoneyPageStatus
           error={money.error}
@@ -136,7 +297,6 @@ export default function MoneyTransactionsPage() {
 
               <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-amber-100">
                 Open cash tracker
-
                 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
             </Link>
@@ -154,15 +314,12 @@ export default function MoneyTransactionsPage() {
               </h3>
 
               <p className="mt-2 text-sm leading-6 text-white/60">
-                Track money returned to Burton Pride and money refunded back
-                to other people separately from ordinary income and expenses.
-                Money received back is added into the available Burton Pride
-                balance without being counted as new income.
+                Track money returned to Burton Pride and money refunded back to
+                other people separately from ordinary income and expenses.
               </p>
 
               <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-100">
                 Open refund tracker
-
                 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
             </Link>
@@ -181,14 +338,12 @@ export default function MoneyTransactionsPage() {
 
               <p className="mt-2 text-sm leading-6 text-white/60">
                 Open the dedicated page to compare the real bank statement
-                balance with Burton Pride Money In, including completed
-                refunds received back. Save each check with the person who
-                completed it.
+                balance with Burton Pride Money In, including completed refunds
+                received back.
               </p>
 
               <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-sky-100">
                 Open bank balance check
-
                 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
             </Link>

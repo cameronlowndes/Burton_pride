@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -10,46 +9,64 @@ import {
 import EmailSidebarAdminClient from "./EmailSidebarAdminClient";
 import { requireAdminPermission } from "@/lib/adminPermissions";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export default async function EmailSidebarPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-4 text-white">
-        <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-8 backdrop-blur-xl">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-red-300">
-            <ShieldAlert className="h-7 w-7" />
-          </div>
-
-          <h1 className="text-3xl font-black">Please sign in</h1>
-
-          <p className="mt-3 text-white/75">
-            You must be logged in with an authorised admin account to access
-            this admin page.
-          </p>
-
-          <Link
-            href="/Admin/Login"
-            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 font-bold text-black"
-          >
-            Go to login
-          </Link>
-        </div>
-      </div>
-    );
-  }
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
 
   try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+export default async function EmailSidebarPage() {
+  try {
     /*
-      New permissions system:
-      - Main admins automatically pass this check.
-      - Other admins must have site_pages:manage enabled in Admin Users.
-      - This replaces the old hardcoded main-admin-only check.
+      Supabase auth system:
+      - No Clerk auth() is used here anymore.
+      - Access is checked by requireAdminPermission().
+      - Make sure requireAdminPermission has also been migrated to Supabase.
     */
     await requireAdminPermission("site_pages:manage");
-  } catch {
+  } catch (error) {
+    const message = getErrorMessage(error);
+
+    const isNotSignedIn =
+      message.toLowerCase().includes("unauthorized") ||
+      message.toLowerCase().includes("not signed") ||
+      message.toLowerCase().includes("no user") ||
+      message.toLowerCase().includes("session");
+
+    if (isNotSignedIn) {
+      return (
+        <div className="flex min-h-screen items-center justify-center px-4 text-white">
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-8 backdrop-blur-xl">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-red-300">
+              <ShieldAlert className="h-7 w-7" />
+            </div>
+
+            <h1 className="text-3xl font-black">Please sign in</h1>
+
+            <p className="mt-3 text-white/75">
+              You must be logged in with an authorised admin account to access
+              this admin page.
+            </p>
+
+            <Link
+              href="/Admin/Login"
+              className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 font-bold text-black"
+            >
+              Go to login
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
         <div className="w-full max-w-2xl rounded-[36px] border border-white/10 bg-white/10 p-8 backdrop-blur-2xl">
@@ -65,6 +82,16 @@ export default async function EmailSidebarPage() {
             permission to access the Email Sidebar Editor.
           </p>
 
+          <details className="mt-5 rounded-3xl border border-white/10 bg-black/10 p-5">
+            <summary className="cursor-pointer text-sm font-bold text-white">
+              Show error details
+            </summary>
+
+            <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs text-white/70">
+              {message}
+            </pre>
+          </details>
+
           <div className="mt-5 rounded-3xl border border-white/10 bg-black/10 p-5">
             <h2 className="text-lg font-bold text-white">
               Why access is limited
@@ -72,8 +99,7 @@ export default async function EmailSidebarPage() {
 
             <p className="mt-2 text-sm leading-6 text-white/75">
               Email sidebar changes affect the admin portal navigation. Access
-              is now controlled through Admin Users & Permissions instead of a
-              hardcoded main-admin-only rule.
+              is controlled through Supabase Admin Users & Permissions.
             </p>
           </div>
 

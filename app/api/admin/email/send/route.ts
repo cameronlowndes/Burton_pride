@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { Resend } from "resend";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 function toBase64Url(input: Buffer | string) {
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input);

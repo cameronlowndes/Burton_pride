@@ -1,9 +1,18 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdmin, requireAdminPermission } from "@/lib/adminPermissions";
+
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type AdminUser = {
+  id: string;
+  email: string | null;
+  role: string | null;
+  is_active: boolean | null;
+  permissions: unknown;
+};
 
 function clean(value: unknown) {
   return String(value || "").trim();
@@ -51,15 +60,82 @@ function cleanIcon(value: unknown) {
   return icon || "Mail";
 }
 
-/**
- * GET email sidebar items.
- *
- * Any active admin can load the email sidebar list.
- * Changes are protected separately by site_pages:manage.
- */
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
+  });
+}
+
+function permissionsToKeys(value: unknown): string[] {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value !== "object") return [];
+
+  return Object.entries(value)
+    .filter(([, allowed]) => allowed === true)
+    .map(([key]) => key);
+}
+
+function hasPermission(admin: AdminUser, permission: string) {
+  if (admin.role === "main_admin") return true;
+
+  const permissions = permissionsToKeys(admin.permissions);
+
+  return permissions.includes(permission);
+}
+
+async function getCurrentAdmin(): Promise<AdminUser | null> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("admin_users")
+    .select("id,email,role,is_active,permissions")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || "Failed to load admin user.");
+  }
+
+  return (data as AdminUser | null) ?? null;
+}
+
 export async function GET() {
   try {
-    await requireAdmin();
+    const admin = await getCurrentAdmin();
+
+    if (!admin) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Unauthorized",
+          message:
+            "No active Supabase admin user was found for this login session.",
+        },
+        401
+      );
+    }
 
     const { data, error } = await supabaseAdmin
       .from("admin_email_sidebar")
@@ -67,44 +143,64 @@ export async function GET() {
       .order("sort_order", { ascending: true });
 
     if (error) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: error.message || "Failed to load email sidebar items.",
         },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       items: data || [],
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("GET /api/admin/email-sidebar error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to load email sidebar items.";
+
+    return jsonResponse(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      500
     );
   }
 }
 
-/**
- * CREATE email sidebar item.
- *
- * Main admins pass automatically.
- * Other admins need Manage Site Pages permission.
- */
 export async function POST(req: Request) {
   try {
-    await requireAdminPermission("site_pages:manage");
+    const admin = await getCurrentAdmin();
+
+    if (!admin) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Unauthorized",
+          message:
+            "No active Supabase admin user was found for this login session.",
+        },
+        401
+      );
+    }
+
+    if (!hasPermission(admin, "site_pages:manage")) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: "Forbidden",
+          message:
+            "You do not have permission to manage email sidebar settings.",
+        },
+        403
+      );
+    }
 
     const body = await req.json().catch(() => ({}));
 
@@ -115,22 +211,22 @@ export async function POST(req: Request) {
     const isEnabled = cleanBoolean(body.is_enabled, true);
 
     if (!label) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "Label is required.",
         },
-        { status: 400 }
+        400
       );
     }
 
     if (!href) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: "URL / href is required.",
         },
-        { status: 400 }
+        400
       );
     }
 
@@ -147,31 +243,33 @@ export async function POST(req: Request) {
       .single();
 
     if (error) {
-      return NextResponse.json(
+      return jsonResponse(
         {
           ok: false,
           error: error.message || "Failed to create email sidebar item.",
         },
-        { status: 500 }
+        500
       );
     }
 
-    return NextResponse.json({
+    return jsonResponse({
       ok: true,
       item: data,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("POST /api/admin/email-sidebar error:", error);
 
-    return NextResponse.json(
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to create email sidebar item.";
+
+    return jsonResponse(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: message,
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      500
     );
   }
 }
