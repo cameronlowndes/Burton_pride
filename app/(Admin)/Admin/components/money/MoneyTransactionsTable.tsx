@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useAdmin } from "../providers/AdminProvider";
 import {
   AlertTriangle,
   ArrowDown,
@@ -930,11 +930,15 @@ export default function MoneyTransactionsTable({
   openingBalancePence = 0,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
 }: MoneyTransactionsTableProps) {
-  const { user } = useUser();
+  const { admin } = useAdmin();
 
-  const currentUserId = user?.id || null;
-  const currentUserEmail = user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || null;
-  const currentUserName = user?.fullName || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || nameFromEmail(currentUserEmail) || null;
+  const currentUserId = admin?.id || null;
+  const currentUserEmail = admin?.email || null;
+
+  const currentUserName =
+    admin?.full_name ||
+    nameFromEmail(currentUserEmail) ||
+    null;
 
   const receiptReminderDaysSafe = Math.max(1, Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS));
 

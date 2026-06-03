@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+type CurrentAdmin = {
+  userId: string;
+  actorName: string;
+  actorEmail: string | null;
+};
 
 function poundsToPence(value: unknown) {
   const amount = Number(String(value || "0").replace(/,/g, ""));
@@ -21,30 +27,57 @@ function formatPounds(pence: number) {
   return `£${((Number(pence) || 0) / 100).toFixed(2)}`;
 }
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanString(email);
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
+  if (!cleanEmail || !cleanEmail.includes("@")) return "";
+
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
 }
 
-function getActorEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+async function getCurrentAdmin(): Promise<CurrentAdmin> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const actorEmail = cleanString(admin.email || user.email) || null;
+  const actorName =
+    cleanString(admin.name) ||
+    cleanString(admin.full_name) ||
+    nameFromEmail(actorEmail) ||
+    "Unknown admin";
+
+  return {
+    userId: user.id,
+    actorName,
+    actorEmail,
+  };
 }
 
 async function createCashTinAuditLog({
@@ -75,7 +108,7 @@ async function createCashTinAuditLog({
     transaction_id: transactionId || null,
     transaction_title: transactionTitle || null,
     actor_user_id: actorUserId || null,
-    actor_name: actorName || "Unknown user",
+    actor_name: actorName || "Unknown admin",
     actor_email: actorEmail || null,
     before_data: beforeData || null,
     after_data: afterData || null,
@@ -146,14 +179,7 @@ function buildTransactionDescription(row: {
 
 export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "You must be signed in." },
-        { status: 401 }
-      );
-    }
+    await getCurrentAdmin();
 
     const { searchParams } = new URL(req.url);
 
@@ -188,22 +214,14 @@ export async function GET(req: Request) {
         ok: false,
         error: error?.message || "Failed to load cash tin records.",
       },
-      { status: 500 }
+      { status: error?.message === "You must be signed in." ? 401 : 500 }
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
-    const user = await currentUser();
-
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "You must be signed in." },
-        { status: 401 }
-      );
-    }
+    const { userId, actorName, actorEmail } = await getCurrentAdmin();
 
     const body = await req.json();
 
@@ -224,9 +242,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
-    const actorName = getActorName(user);
-    const actorEmail = getActorEmail(user);
 
     const cashTinRow = {
       year,
@@ -311,7 +326,7 @@ export async function POST(req: Request) {
       action: "create",
       transactionId: transaction.id,
       transactionTitle: transaction.title,
-      actorUserId: user?.id || null,
+      actorUserId: userId,
       actorName,
       actorEmail,
       beforeData: null,
@@ -344,7 +359,8 @@ export async function POST(req: Request) {
         event_date: cashTinDay.event_date,
         title: cashTinDay.title,
         location: cashTinDay.location,
-        message: "Cash tin record created and linked money tracker income created.",
+        message:
+          "Cash tin record created and linked money tracker income created.",
       },
     });
 
@@ -361,7 +377,7 @@ export async function POST(req: Request) {
         ok: false,
         error: error?.message || "Failed to save cash tin record.",
       },
-      { status: 500 }
+      { status: error?.message === "You must be signed in." ? 401 : 500 }
     );
   }
 }

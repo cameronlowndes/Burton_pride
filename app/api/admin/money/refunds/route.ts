@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -73,13 +73,16 @@ type SupabaseErrorLike = {
   code?: string;
 };
 
-/**
- * Keep the main refund query simple.
- *
- * Do not place nested Supabase relationship queries in here.
- * A missing foreign key relationship would cause the whole refund tracker
- * to fail even when the refund table itself is working correctly.
- */
+type AdminLike = {
+  id?: string | null;
+  admin_id?: string | null;
+  user_id?: string | null;
+  name?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+};
+
 const REFUND_SELECT = `
   id,
   year,
@@ -105,9 +108,7 @@ const REFUND_SELECT = `
 `;
 
 function getErrorDetails(error: unknown) {
-  if (!error || typeof error !== "object") {
-    return error ?? null;
-  }
+  if (!error || typeof error !== "object") return error ?? null;
 
   const record = error as SupabaseErrorLike;
 
@@ -190,38 +191,21 @@ function jsonError(
     {
       success: false,
       message,
-      ...(details !== undefined
-        ? {
-            details: getErrorDetails(details),
-          }
-        : {}),
-      ...(likelyFix
-        ? {
-            likelyFix,
-          }
-        : {}),
+      ...(details !== undefined ? { details: getErrorDetails(details) } : {}),
+      ...(likelyFix ? { likelyFix } : {}),
     },
-    {
-      status,
-    }
+    { status }
   );
 }
 
 function cleanText(value: unknown, maxLength = 500): string {
   if (typeof value !== "string") return "";
 
-  return value
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maxLength);
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
 
-function cleanNullableText(
-  value: unknown,
-  maxLength = 2_000
-): string | null {
+function cleanNullableText(value: unknown, maxLength = 2_000): string | null {
   const cleaned = cleanText(value, maxLength);
-
   return cleaned || null;
 }
 
@@ -229,7 +213,6 @@ function cleanUuid(value: unknown): string | null {
   if (typeof value !== "string") return null;
 
   const cleaned = value.trim();
-
   if (!cleaned) return null;
 
   const uuidPattern =
@@ -244,19 +227,11 @@ function parseBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === "string") {
     const cleaned = value.toLowerCase().trim();
 
-    if (
-      cleaned === "true" ||
-      cleaned === "1" ||
-      cleaned === "yes"
-    ) {
+    if (cleaned === "true" || cleaned === "1" || cleaned === "yes") {
       return true;
     }
 
-    if (
-      cleaned === "false" ||
-      cleaned === "0" ||
-      cleaned === "no"
-    ) {
+    if (cleaned === "false" || cleaned === "0" || cleaned === "no") {
       return false;
     }
   }
@@ -264,10 +239,7 @@ function parseBoolean(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
-function parsePositiveInteger(
-  value: unknown,
-  fallback?: number
-): number | null {
+function parsePositiveInteger(value: unknown, fallback?: number): number | null {
   const parsed =
     typeof value === "number"
       ? value
@@ -295,9 +267,7 @@ function parseYear(value: unknown): number | null {
 function parseAmountPence(body: JsonObject): number | null {
   const directPence = parsePositiveInteger(body.amount_pence);
 
-  if (directPence) {
-    return directPence;
-  }
+  if (directPence) return directPence;
 
   const poundsValue =
     typeof body.amount === "number"
@@ -318,9 +288,7 @@ function isValidDate(value: unknown): value is string {
 
   const cleaned = value.trim();
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    return false;
-  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) return false;
 
   const date = new Date(`${cleaned}T00:00:00.000Z`);
 
@@ -328,18 +296,11 @@ function isValidDate(value: unknown): value is string {
 }
 
 function isRefundType(value: unknown): value is RefundType {
-  return (
-    value === "money_received_back" ||
-    value === "money_sent_back"
-  );
+  return value === "money_received_back" || value === "money_sent_back";
 }
 
 function isRefundStatus(value: unknown): value is RefundStatus {
-  return (
-    value === "pending" ||
-    value === "completed" ||
-    value === "cancelled"
-  );
+  return value === "pending" || value === "completed" || value === "cancelled";
 }
 
 function isPatchAction(value: unknown): value is RefundPatchAction {
@@ -361,36 +322,30 @@ function formatMoney(amountPence: number): string {
 }
 
 async function getActor(): Promise<Actor | null> {
-  const user = await currentUser();
+  try {
+    const admin = (await requireAdmin()) as AdminLike | null;
 
-  if (!user) {
+    if (!admin) return null;
+
+    const email = cleanText(admin.email || "", 250);
+
+    const name =
+      cleanText(admin.full_name || "", 250) ||
+      cleanText(admin.name || "", 250) ||
+      cleanText(admin.display_name || "", 250) ||
+      email ||
+      "Authenticated admin";
+
+    return {
+      name,
+      email,
+    };
+  } catch (error) {
+    console.error("Refund route auth error:", error);
     return null;
   }
-
-  const fullName =
-    user.fullName ||
-    `${user.firstName || ""} ${user.lastName || ""}`
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const email =
-    user.primaryEmailAddress?.emailAddress ||
-    user.emailAddresses?.find(
-      (item) => item.id === user.primaryEmailAddressId
-    )?.emailAddress ||
-    user.emailAddresses?.[0]?.emailAddress ||
-    "";
-
-  return {
-    name: fullName || email || "Authenticated admin",
-    email,
-  };
 }
 
-/**
- * Attempts to save a refund log without preventing the refund action
- * from succeeding when the audit-log table uses a different structure.
- */
 async function writeAuditLog({
   actor,
   action,
@@ -447,9 +402,7 @@ async function writeAuditLog({
       .from("admin_money_audit_logs")
       .insert(payload);
 
-    if (!error) {
-      return;
-    }
+    if (!error) return;
   }
 
   console.warn(
@@ -457,18 +410,10 @@ async function writeAuditLog({
   );
 }
 
-/**
- * Loads linked supplier and transaction details safely.
- *
- * If a supplier or transaction table cannot be loaded, refunds will still
- * appear. Only the optional linked information will be blank.
- */
 async function hydrateRefundLinks(
   refunds: RefundRecord[]
 ): Promise<HydratedRefundRecord[]> {
-  if (refunds.length === 0) {
-    return [];
-  }
+  if (refunds.length === 0) return [];
 
   const supplierIds = Array.from(
     new Set(
@@ -514,11 +459,6 @@ async function hydrateRefundLinks(
   }
 
   if (transactionIds.length > 0) {
-    /**
-     * The main money transaction route uses `type`, not
-     * `transaction_type`. Map the database column to the shape expected by
-     * the Refund Tracker component.
-     */
     const { data, error } = await supabaseAdmin
       .from("money_transactions")
       .select(
@@ -561,11 +501,9 @@ async function hydrateRefundLinks(
 
   return refunds.map((refund) => ({
     ...refund,
-
     supplier: refund.supplier_id
       ? supplierMap.get(refund.supplier_id) ?? null
       : null,
-
     original_transaction: refund.original_transaction_id
       ? transactionMap.get(refund.original_transaction_id) ?? null
       : null,
@@ -631,26 +569,15 @@ function getPatchDescription(
   ).join(", ")}.`;
 }
 
-/**
- * GET /api/admin/money/refunds
- *
- * Query examples:
- * ?year=2026
- * ?status=completed
- * ?includeHidden=true
- * ?supplierId=...
- * ?originalTransactionId=...
- * ?limit=100
- */
 export async function GET(request: NextRequest) {
   const actor = await getActor();
 
   if (!actor) {
     return jsonError(
-      "You must be signed in to view refunds.",
+      "You must be signed in as an admin to view refunds.",
       401,
       undefined,
-      "Sign in again and confirm that your admin session is active."
+      "Sign in again using the admin login page and confirm your Supabase admin session is active."
     );
   }
 
@@ -660,10 +587,7 @@ export async function GET(request: NextRequest) {
     const yearParam = searchParams.get("year");
     const statusParam = searchParams.get("status");
     const supplierIdParam = searchParams.get("supplierId");
-
-    const transactionIdParam = searchParams.get(
-      "originalTransactionId"
-    );
+    const transactionIdParam = searchParams.get("originalTransactionId");
 
     const includeHidden = parseBoolean(
       searchParams.get("includeHidden"),
@@ -678,12 +602,8 @@ export async function GET(request: NextRequest) {
     let query = supabaseAdmin
       .from("money_refunds")
       .select(REFUND_SELECT)
-      .order("refund_date", {
-        ascending: false,
-      })
-      .order("created_at", {
-        ascending: false,
-      })
+      .order("refund_date", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(limit);
 
     if (!includeHidden) {
@@ -694,10 +614,7 @@ export async function GET(request: NextRequest) {
       const year = parseYear(yearParam);
 
       if (!year) {
-        return jsonError(
-          "The selected refund year is invalid.",
-          400
-        );
+        return jsonError("The selected refund year is invalid.", 400);
       }
 
       query = query.eq("year", year);
@@ -705,10 +622,7 @@ export async function GET(request: NextRequest) {
 
     if (statusParam) {
       if (!isRefundStatus(statusParam)) {
-        return jsonError(
-          "The selected refund status is invalid.",
-          400
-        );
+        return jsonError("The selected refund status is invalid.", 400);
       }
 
       query = query.eq("status", statusParam);
@@ -728,16 +642,10 @@ export async function GET(request: NextRequest) {
       const originalTransactionId = cleanUuid(transactionIdParam);
 
       if (!originalTransactionId) {
-        return jsonError(
-          "The original transaction ID is invalid.",
-          400
-        );
+        return jsonError("The original transaction ID is invalid.", 400);
       }
 
-      query = query.eq(
-        "original_transaction_id",
-        originalTransactionId
-      );
+      query = query.eq("original_transaction_id", originalTransactionId);
     }
 
     const { data, error } = await query;
@@ -753,34 +661,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const refunds = await hydrateRefundLinks(
-      (data ?? []) as RefundRecord[]
-    );
+    const refunds = await hydrateRefundLinks((data ?? []) as RefundRecord[]);
 
     const visibleCompletedRefunds = refunds.filter(
-      (refund) =>
-        !refund.is_hidden && refund.status === "completed"
+      (refund) => !refund.is_hidden && refund.status === "completed"
     );
 
     const moneyReceivedBackPence = visibleCompletedRefunds
-      .filter(
-        (refund) =>
-          refund.refund_type === "money_received_back"
-      )
+      .filter((refund) => refund.refund_type === "money_received_back")
       .reduce(
-        (total, refund) =>
-          total + Number(refund.amount_pence || 0),
+        (total, refund) => total + Number(refund.amount_pence || 0),
         0
       );
 
     const moneySentBackPence = visibleCompletedRefunds
-      .filter(
-        (refund) =>
-          refund.refund_type === "money_sent_back"
-      )
+      .filter((refund) => refund.refund_type === "money_sent_back")
       .reduce(
-        (total, refund) =>
-          total + Number(refund.amount_pence || 0),
+        (total, refund) => total + Number(refund.amount_pence || 0),
         0
       );
 
@@ -793,8 +690,7 @@ export async function GET(request: NextRequest) {
           completed_records: visibleCompletedRefunds.length,
           money_received_back_pence: moneyReceivedBackPence,
           money_sent_back_pence: moneySentBackPence,
-          net_refunds_pence:
-            moneyReceivedBackPence - moneySentBackPence,
+          net_refunds_pence: moneyReceivedBackPence - moneySentBackPence,
         },
       },
       {
@@ -815,18 +711,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * POST /api/admin/money/refunds
- */
 export async function POST(request: NextRequest) {
   const actor = await getActor();
 
   if (!actor) {
     return jsonError(
-      "You must be signed in to add a refund.",
+      "You must be signed in as an admin to add a refund.",
       401,
       undefined,
-      "Sign in again and confirm that your admin session is active."
+      "Sign in again using the admin login page and confirm your Supabase admin session is active."
     );
   }
 
@@ -839,15 +732,10 @@ export async function POST(request: NextRequest) {
     const amountPence = parseAmountPence(body);
     const title = cleanText(body.title, 250);
     const notes = cleanNullableText(body.notes, 4_000);
-
-    const referenceNumber = cleanNullableText(
-      body.reference_number,
-      150
-    );
+    const referenceNumber = cleanNullableText(body.reference_number, 150);
 
     const originalTransactionId =
-      body.original_transaction_id === null ||
-      body.original_transaction_id === ""
+      body.original_transaction_id === null || body.original_transaction_id === ""
         ? null
         : cleanUuid(body.original_transaction_id);
 
@@ -861,17 +749,11 @@ export async function POST(request: NextRequest) {
       : "completed";
 
     if (!year) {
-      return jsonError(
-        "Please select a valid refund year.",
-        400
-      );
+      return jsonError("Please select a valid refund year.", 400);
     }
 
     if (!isValidDate(refundDate)) {
-      return jsonError(
-        "Please enter a valid refund date.",
-        400
-      );
+      return jsonError("Please enter a valid refund date.", 400);
     }
 
     if (!isRefundType(refundType)) {
@@ -882,34 +764,19 @@ export async function POST(request: NextRequest) {
     }
 
     if (!amountPence) {
-      return jsonError(
-        "Please enter a refund amount greater than £0.00.",
-        400
-      );
+      return jsonError("Please enter a refund amount greater than £0.00.", 400);
     }
 
     if (!title) {
-      return jsonError(
-        "Please enter a refund title.",
-        400
-      );
+      return jsonError("Please enter a refund title.", 400);
     }
 
-    if (
-      body.original_transaction_id &&
-      !originalTransactionId
-    ) {
-      return jsonError(
-        "The original transaction ID is invalid.",
-        400
-      );
+    if (body.original_transaction_id && !originalTransactionId) {
+      return jsonError("The original transaction ID is invalid.", 400);
     }
 
     if (body.supplier_id && !supplierId) {
-      return jsonError(
-        "The supplier ID is invalid.",
-        400
-      );
+      return jsonError("The supplier ID is invalid.", 400);
     }
 
     const transactionCheck = await verifyLinkedRecord(
@@ -926,10 +793,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supplierCheck = await verifyLinkedRecord(
-      "money_suppliers",
-      supplierId
-    );
+    const supplierCheck = await verifyLinkedRecord("money_suppliers", supplierId);
 
     if (!supplierCheck.exists) {
       return jsonError(
@@ -982,9 +846,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [hydratedRefund] = await hydrateRefundLinks([
-      data as RefundRecord,
-    ]);
+    const [hydratedRefund] = await hydrateRefundLinks([data as RefundRecord]);
 
     await writeAuditLog({
       actor,
@@ -1008,9 +870,7 @@ export async function POST(request: NextRequest) {
         message: "Refund added successfully.",
         refund: hydratedRefund ?? data,
       },
-      {
-        status: 201,
-      }
+      { status: 201 }
     );
   } catch (error) {
     console.error("Unexpected refund POST error:", error);
@@ -1024,18 +884,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * PATCH /api/admin/money/refunds
- */
 export async function PATCH(request: NextRequest) {
   const actor = await getActor();
 
   if (!actor) {
     return jsonError(
-      "You must be signed in to update a refund.",
+      "You must be signed in as an admin to update a refund.",
       401,
       undefined,
-      "Sign in again and confirm that your admin session is active."
+      "Sign in again using the admin login page and confirm your Supabase admin session is active."
     );
   }
 
@@ -1049,18 +906,14 @@ export async function PATCH(request: NextRequest) {
       : "update";
 
     if (!id) {
-      return jsonError(
-        "A valid refund ID is required.",
-        400
-      );
+      return jsonError("A valid refund ID is required.", 400);
     }
 
-    const { data: existingRefund, error: existingError } =
-      await supabaseAdmin
-        .from("money_refunds")
-        .select(REFUND_SELECT)
-        .eq("id", id)
-        .maybeSingle();
+    const { data: existingRefund, error: existingError } = await supabaseAdmin
+      .from("money_refunds")
+      .select(REFUND_SELECT)
+      .eq("id", id)
+      .maybeSingle();
 
     if (existingError) {
       console.error("Failed to find refund:", existingError);
@@ -1121,10 +974,7 @@ export async function PATCH(request: NextRequest) {
         const year = parseYear(body.year);
 
         if (!year) {
-          return jsonError(
-            "Please select a valid refund year.",
-            400
-          );
+          return jsonError("Please select a valid refund year.", 400);
         }
 
         changes.year = year;
@@ -1132,10 +982,7 @@ export async function PATCH(request: NextRequest) {
 
       if (body.refund_date !== undefined) {
         if (!isValidDate(body.refund_date)) {
-          return jsonError(
-            "Please enter a valid refund date.",
-            400
-          );
+          return jsonError("Please enter a valid refund date.", 400);
         }
 
         changes.refund_date = body.refund_date;
@@ -1143,19 +990,13 @@ export async function PATCH(request: NextRequest) {
 
       if (body.refund_type !== undefined) {
         if (!isRefundType(body.refund_type)) {
-          return jsonError(
-            "The selected refund type is invalid.",
-            400
-          );
+          return jsonError("The selected refund type is invalid.", 400);
         }
 
         changes.refund_type = body.refund_type;
       }
 
-      if (
-        body.amount !== undefined ||
-        body.amount_pence !== undefined
-      ) {
+      if (body.amount !== undefined || body.amount_pence !== undefined) {
         const amountPence = parseAmountPence(body);
 
         if (!amountPence) {
@@ -1172,10 +1013,7 @@ export async function PATCH(request: NextRequest) {
         const title = cleanText(body.title, 250);
 
         if (!title) {
-          return jsonError(
-            "Please enter a refund title.",
-            400
-          );
+          return jsonError("Please enter a refund title.", 400);
         }
 
         changes.title = title;
@@ -1194,10 +1032,7 @@ export async function PATCH(request: NextRequest) {
 
       if (body.status !== undefined) {
         if (!isRefundStatus(body.status)) {
-          return jsonError(
-            "The selected refund status is invalid.",
-            400
-          );
+          return jsonError("The selected refund status is invalid.", 400);
         }
 
         changes.status = body.status;
@@ -1210,14 +1045,8 @@ export async function PATCH(request: NextRequest) {
             ? null
             : cleanUuid(body.original_transaction_id);
 
-        if (
-          body.original_transaction_id &&
-          !originalTransactionId
-        ) {
-          return jsonError(
-            "The original transaction ID is invalid.",
-            400
-          );
+        if (body.original_transaction_id && !originalTransactionId) {
+          return jsonError("The original transaction ID is invalid.", 400);
         }
 
         const transactionCheck = await verifyLinkedRecord(
@@ -1234,22 +1063,17 @@ export async function PATCH(request: NextRequest) {
           );
         }
 
-        changes.original_transaction_id =
-          originalTransactionId;
+        changes.original_transaction_id = originalTransactionId;
       }
 
       if (body.supplier_id !== undefined) {
         const supplierId =
-          body.supplier_id === null ||
-          body.supplier_id === ""
+          body.supplier_id === null || body.supplier_id === ""
             ? null
             : cleanUuid(body.supplier_id);
 
         if (body.supplier_id && !supplierId) {
-          return jsonError(
-            "The supplier ID is invalid.",
-            400
-          );
+          return jsonError("The supplier ID is invalid.", 400);
         }
 
         const supplierCheck = await verifyLinkedRecord(
@@ -1288,9 +1112,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const [hydratedRefund] = await hydrateRefundLinks([
-      data as RefundRecord,
-    ]);
+    const [hydratedRefund] = await hydrateRefundLinks([data as RefundRecord]);
 
     await writeAuditLog({
       actor,
@@ -1335,32 +1157,15 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-/**
- * DELETE /api/admin/money/refunds
- *
- * Permanently delete a refund from Supabase.
- *
- * Safety rules:
- * - The admin must be signed in.
- * - The refund must already be in Deleted Refunds (`is_hidden = true`).
- * - The request must contain `confirmation: "DELETE"`.
- * - An audit-log entry is attempted before the row is removed.
- *
- * Example body:
- * {
- *   "id": "refund-uuid",
- *   "confirmation": "DELETE"
- * }
- */
 export async function DELETE(request: NextRequest) {
   const actor = await getActor();
 
   if (!actor) {
     return jsonError(
-      "You must be signed in to permanently delete a refund.",
+      "You must be signed in as an admin to permanently delete a refund.",
       401,
       undefined,
-      "Sign in again and confirm that your admin session is active."
+      "Sign in again using the admin login page and confirm your Supabase admin session is active."
     );
   }
 
@@ -1371,10 +1176,7 @@ export async function DELETE(request: NextRequest) {
     const confirmation = cleanText(body.confirmation, 20).toUpperCase();
 
     if (!id) {
-      return jsonError(
-        "A valid refund ID is required.",
-        400
-      );
+      return jsonError("A valid refund ID is required.", 400);
     }
 
     if (confirmation !== "DELETE") {
@@ -1384,12 +1186,11 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const { data: existingRefund, error: existingError } =
-      await supabaseAdmin
-        .from("money_refunds")
-        .select(REFUND_SELECT)
-        .eq("id", id)
-        .maybeSingle();
+    const { data: existingRefund, error: existingError } = await supabaseAdmin
+      .from("money_refunds")
+      .select(REFUND_SELECT)
+      .eq("id", id)
+      .maybeSingle();
 
     if (existingError) {
       console.error(
@@ -1423,17 +1224,13 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    /**
-     * Attempt to preserve a final audit record before deleting the source row.
-     * A logging-table mismatch must not prevent the refund from being removed.
-     */
     await writeAuditLog({
       actor,
       action: "refund_permanently_deleted",
       refundId: existingRefund.id,
-      description: `Permanently deleted refund "${existingRefund.title}" for ${formatMoney(
-        existingRefund.amount_pence
-      )}.`,
+      description: `Permanently deleted refund "${
+        existingRefund.title
+      }" for ${formatMoney(existingRefund.amount_pence)}.`,
       metadata: {
         delete_type: "permanent_delete",
         deleted_refund: existingRefund,
@@ -1474,4 +1271,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-

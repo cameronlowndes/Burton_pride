@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -29,7 +29,6 @@ type AuditLogBody = {
 
   metadata?: any;
 
-  // Frontend Budget Planning files may send these.
   createdBy?: string | null;
   created_by?: string | null;
   createdByEmail?: string | null;
@@ -56,11 +55,7 @@ type ActorDetails = {
   actor_id: string | null;
   actor_name: string;
   actor_email: string | null;
-};
-
-type MainAdminCheck = {
-  allowed: boolean;
-  reason: string;
+  role?: string | null;
 };
 
 function cleanText(value: unknown) {
@@ -93,25 +88,6 @@ function nameFromEmail(email: string | null | undefined) {
     .trim();
 
   return cleaned || null;
-}
-
-function splitEnvironmentList(value: string | undefined) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function getClaimValue(claims: any, keys: string[]) {
-  for (const key of keys) {
-    const value = cleanText(claims?.[key]);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 function getBodyActorDetails(body: AuditLogBody | null): Partial<ActorDetails> {
@@ -151,176 +127,87 @@ function getBodyActorDetails(body: AuditLogBody | null): Partial<ActorDetails> {
   };
 }
 
-async function getClerkActorDetails(): Promise<ActorDetails> {
-  const authData = await auth();
-  const user = await currentUser();
+async function getSupabaseActorDetails(): Promise<ActorDetails> {
+  const supabase = await createClient();
 
-  const claims: any = authData.sessionClaims || {};
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-  const clerkEmail =
-    user?.emailAddresses?.[0]?.emailAddress ||
-    getClaimValue(claims, ["email", "email_address"]) ||
-    null;
+  if (error || !user) {
+    throw new Error("Not authenticated");
+  }
 
-  const firstName =
-    cleanText(user?.firstName) ||
-    getClaimValue(claims, ["first_name", "given_name"]) ||
-    "";
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
 
-  const lastName =
-    cleanText(user?.lastName) ||
-    getClaimValue(claims, ["last_name", "family_name"]) ||
-    "";
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
 
-  const fullName = `${firstName || ""} ${lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
 
-  const claimName =
-    getClaimValue(claims, ["name", "full_name", "username"]) || null;
+  const actorEmail = cleanText(admin.email || user.email) || null;
 
   const actorName =
-    cleanText(fullName) ||
-    claimName ||
-    nameFromEmail(clerkEmail) ||
-    authData.userId ||
-    "Unknown user";
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
+    nameFromEmail(actorEmail) ||
+    "Unknown admin";
 
   return {
-    actor_id: authData.userId || user?.id || null,
+    actor_id: user.id,
     actor_name: actorName,
-    actor_email: clerkEmail,
+    actor_email: actorEmail,
+    role: cleanText(admin.role),
   };
 }
 
 async function getActorDetails(body: AuditLogBody | null): Promise<ActorDetails> {
-  const authData = await auth();
-
   const bodyActor = getBodyActorDetails(body);
-  const clerkActor = await getClerkActorDetails();
+  const supabaseActor = await getSupabaseActorDetails();
 
   const actorEmail =
-    cleanText(bodyActor.actor_email) || cleanText(clerkActor.actor_email);
+    cleanText(bodyActor.actor_email) || cleanText(supabaseActor.actor_email);
 
   const actorName =
     cleanText(bodyActor.actor_name) ||
-    cleanText(clerkActor.actor_name) ||
+    cleanText(supabaseActor.actor_name) ||
     nameFromEmail(actorEmail) ||
-    authData.userId ||
-    "Unknown user";
+    "Unknown admin";
 
   const actorId =
     cleanText(bodyActor.actor_id) ||
-    cleanText(clerkActor.actor_id) ||
-    authData.userId ||
+    cleanText(supabaseActor.actor_id) ||
     null;
 
   return {
     actor_id: actorId,
     actor_name: actorName,
     actor_email: actorEmail,
+    role: supabaseActor.role || null,
   };
 }
 
-function getRoleCandidates(user: any, claims: any) {
-  const values = [
-    user?.publicMetadata?.role,
-    user?.privateMetadata?.role,
-    user?.unsafeMetadata?.role,
-    user?.publicMetadata?.roles,
-    user?.privateMetadata?.roles,
-    user?.unsafeMetadata?.roles,
-    claims?.role,
-    claims?.roles,
-    claims?.metadata?.role,
-    claims?.metadata?.roles,
-    claims?.public_metadata?.role,
-    claims?.public_metadata?.roles,
-  ];
-
-  return values
-    .flatMap((value) => (Array.isArray(value) ? value : [value]))
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function hasMainAdminFlag(user: any, claims: any) {
-  const values = [
-    user?.publicMetadata?.is_main_admin,
-    user?.publicMetadata?.main_admin,
-    user?.privateMetadata?.is_main_admin,
-    user?.privateMetadata?.main_admin,
-    user?.unsafeMetadata?.is_main_admin,
-    user?.unsafeMetadata?.main_admin,
-    claims?.is_main_admin,
-    claims?.main_admin,
-    claims?.metadata?.is_main_admin,
-    claims?.metadata?.main_admin,
-    claims?.public_metadata?.is_main_admin,
-    claims?.public_metadata?.main_admin,
-  ];
-
-  return values.some(
-    (value) =>
-      value === true ||
-      String(value || "").trim().toLowerCase() === "true" ||
-      String(value || "").trim() === "1",
-  );
-}
-
-function checkMainAdminAccess(authData: any, user: any): MainAdminCheck {
-  const userId = cleanText(authData?.userId || user?.id);
-  const email = cleanText(user?.emailAddresses?.[0]?.emailAddress)?.toLowerCase();
-  const claims: any = authData?.sessionClaims || {};
-
-  const allowedIds = splitEnvironmentList(
-    process.env.MAIN_ADMIN_USER_IDS || process.env.NEXT_PUBLIC_MAIN_ADMIN_USER_IDS,
-  );
-
-  const allowedEmails = splitEnvironmentList(
-    process.env.MAIN_ADMIN_EMAILS || process.env.NEXT_PUBLIC_MAIN_ADMIN_EMAILS,
-  );
-
-  if (userId && allowedIds.includes(userId.toLowerCase())) {
+function checkMainAdminAccess(actor: ActorDetails) {
+  if (actor.role === "main_admin") {
     return {
       allowed: true,
-      reason: "Matched MAIN_ADMIN_USER_IDS",
-    };
-  }
-
-  if (email && allowedEmails.includes(email)) {
-    return {
-      allowed: true,
-      reason: "Matched MAIN_ADMIN_EMAILS",
-    };
-  }
-
-  if (hasMainAdminFlag(user, claims)) {
-    return {
-      allowed: true,
-      reason: "Matched Clerk main-admin metadata flag",
-    };
-  }
-
-  const roles = getRoleCandidates(user, claims);
-
-  if (
-    roles.some((role) =>
-      ["main_admin", "main-admin", "mainadmin", "super_admin", "super-admin"].includes(
-        role,
-      ),
-    )
-  ) {
-    return {
-      allowed: true,
-      reason: "Matched Clerk main-admin role",
+      reason: "Matched admin_users role main_admin",
     };
   }
 
   return {
     allowed: false,
     reason:
-      "Only the main admin can add or remove audit-log comments. Add the user to MAIN_ADMIN_EMAILS / MAIN_ADMIN_USER_IDS or set Clerk metadata role to main_admin.",
+      "Only the main admin can add or remove audit-log comments. Set this admin_users row role to main_admin.",
   };
 }
 
@@ -346,7 +233,7 @@ function getTransactionTitle(body: AuditLogBody) {
       body.transaction_title ??
       body.metadata?.transaction_title ??
       body.metadata?.title ??
-      null,
+      null
   );
 }
 
@@ -364,7 +251,7 @@ function getLogUserName(log: any) {
       cleanText(log.actor_email) ||
         cleanText(log.created_by_email) ||
         cleanText(metadata.created_by_email) ||
-        cleanText(metadata.actor_email),
+        cleanText(metadata.actor_email)
     ) ||
     "Unknown user"
   );
@@ -506,19 +393,22 @@ async function updateAuditLogComment(logId: string, updateRow: any) {
     .single();
 }
 
+function authStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "Not authenticated" ||
+    message === "No active admin account is linked to this Supabase user."
+  ) {
+    return 401;
+  }
+
+  return 500;
+}
+
 export async function GET(req: Request) {
   try {
-    const authData = await auth();
-
-    if (!authData.userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Not authenticated",
-        },
-        { status: 401 },
-      );
-    }
+    await getSupabaseActorDetails();
 
     const { searchParams } = new URL(req.url);
 
@@ -562,7 +452,7 @@ export async function GET(req: Request) {
           error: error.message,
           details: error,
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -576,25 +466,13 @@ export async function GET(req: Request) {
         ok: false,
         error: error?.message || "Failed to load money audit logs",
       },
-      { status: 500 },
+      { status: authStatus(error) }
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const authData = await auth();
-
-    if (!authData.userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Not authenticated",
-        },
-        { status: 401 },
-      );
-    }
-
     const body = (await req.json().catch(() => null)) as AuditLogBody | null;
 
     if (!body) {
@@ -603,7 +481,7 @@ export async function POST(req: Request) {
           ok: false,
           error: "Missing audit log body",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -615,7 +493,7 @@ export async function POST(req: Request) {
           ok: false,
           error: "Missing audit log action",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -670,7 +548,7 @@ export async function POST(req: Request) {
           code: error.code || null,
           insertRow,
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -686,27 +564,15 @@ export async function POST(req: Request) {
         ok: false,
         error: error?.message || "Failed to create money audit log",
       },
-      { status: 500 },
+      { status: authStatus(error) }
     );
   }
 }
 
 export async function PATCH(req: Request) {
   try {
-    const authData = await auth();
-
-    if (!authData.userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Not authenticated",
-        },
-        { status: 401 },
-      );
-    }
-
-    const user = await currentUser();
-    const access = checkMainAdminAccess(authData, user);
+    const actor = await getSupabaseActorDetails();
+    const access = checkMainAdminAccess(actor);
 
     if (!access.allowed) {
       return NextResponse.json(
@@ -714,7 +580,7 @@ export async function PATCH(req: Request) {
           ok: false,
           error: access.reason,
         },
-        { status: 403 },
+        { status: 403 }
       );
     }
 
@@ -728,13 +594,13 @@ export async function PATCH(req: Request) {
           ok: false,
           error: "Missing comment update body",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const logId = cleanText(body.logId || body.log_id || body.id);
     const comment = cleanComment(
-      body.comment ?? body.adminComment ?? body.admin_comment ?? "",
+      body.comment ?? body.adminComment ?? body.admin_comment ?? ""
     );
 
     if (!logId) {
@@ -743,7 +609,7 @@ export async function PATCH(req: Request) {
           ok: false,
           error: "Missing audit log ID",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -753,7 +619,7 @@ export async function PATCH(req: Request) {
           ok: false,
           error: `Audit-log comments must be ${MAX_COMMENT_LENGTH} characters or fewer.`,
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -770,11 +636,10 @@ export async function PATCH(req: Request) {
           error: existingLogError?.message || "Audit log entry not found",
           details: existingLogError || null,
         },
-        { status: existingLogError?.code === "PGRST116" ? 404 : 500 },
+        { status: existingLogError?.code === "PGRST116" ? 404 : 500 }
       );
     }
 
-    const actor = await getClerkActorDetails();
     const updatedAt = new Date().toISOString();
     const previousMetadata = existingLog.metadata || {};
 
@@ -799,7 +664,7 @@ export async function PATCH(req: Request) {
       admin_comment_updated_by_email: actor.actor_email,
       admin_comment_updated_by_user_id: actor.actor_id,
       admin_comment_history: [...oldHistory, newHistoryItem].slice(
-        -MAX_COMMENT_HISTORY_ITEMS,
+        -MAX_COMMENT_HISTORY_ITEMS
       ),
     };
 
@@ -831,7 +696,7 @@ export async function PATCH(req: Request) {
           hint: error.hint || null,
           code: error.code || null,
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -850,7 +715,7 @@ export async function PATCH(req: Request) {
         ok: false,
         error: error?.message || "Failed to update audit-log comment",
       },
-      { status: 500 },
+      { status: authStatus(error) }
     );
   }
 }

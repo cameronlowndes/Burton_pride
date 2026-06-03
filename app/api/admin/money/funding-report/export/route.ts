@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -41,6 +41,68 @@ type MoneyTransaction = {
 
 function cleanText(value: unknown) {
   return String(value || "").trim();
+}
+
+async function requireSupabaseAdmin() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        {
+          error: "You must be signed in.",
+          details: "Supabase Auth did not return a logged-in user.",
+        },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, supabase_user_id, email, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        {
+          error: "Failed to check admin account.",
+          details: adminError.message,
+        },
+        { status: 500 }
+      ),
+    };
+  }
+
+  if (!admin) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        {
+          error: "Admin access required.",
+          details:
+            "You are signed in with Supabase Auth, but no active admin_users row is linked to this user.",
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return {
+    ok: true as const,
+    user,
+    admin,
+  };
 }
 
 function moneyPounds(value: number | null | undefined) {
@@ -131,7 +193,7 @@ function addMergedSection(
   text: string,
   from: string,
   to: string,
-  colour = "FF334155",
+  colour = "FF334155"
 ) {
   sheet.mergeCells(`${from}:${to}`);
   const cell = sheet.getCell(from);
@@ -156,11 +218,13 @@ function getTransactionTitle(transaction: MoneyTransaction) {
 }
 
 function fileNameSafe(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "funding-report";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "funding-report"
+  );
 }
 
 function buildChangedDetails(transactions: MoneyTransaction[]) {
@@ -198,7 +262,7 @@ function buildFundingFilter(sponsor: MoneySponsor, year: string) {
 
   if (sponsor.id && sponsorName) {
     query = query.or(
-      `sponsor_id.eq.${sponsor.id},sponsor_name.ilike.${sponsorName}`,
+      `sponsor_id.eq.${sponsor.id},sponsor_name.ilike.${sponsorName}`
     );
   } else if (sponsor.id) {
     query = query.eq("sponsor_id", sponsor.id);
@@ -210,20 +274,16 @@ function buildFundingFilter(sponsor: MoneySponsor, year: string) {
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const adminCheck = await requireSupabaseAdmin();
 
-  if (!userId) {
-    return NextResponse.json(
-      {
-        error: "You must be signed in.",
-        details: "Clerk did not return a userId.",
-      },
-      { status: 401 },
-    );
+  if (!adminCheck.ok) {
+    return adminCheck.response;
   }
 
   const { searchParams } = new URL(request.url);
-  const fundingId = cleanText(searchParams.get("fundingId") || searchParams.get("sponsorId"));
+  const fundingId = cleanText(
+    searchParams.get("fundingId") || searchParams.get("sponsorId")
+  );
   const year = cleanText(searchParams.get("year")) || String(new Date().getFullYear());
 
   if (!fundingId) {
@@ -233,7 +293,7 @@ export async function GET(request: Request) {
         details:
           "Call this route with ?fundingId=SPONSOR_ID&year=2026. The funding record is currently read from money_sponsors.",
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -249,7 +309,7 @@ export async function GET(request: Request) {
         error: "Failed to load funding record.",
         details: sponsorError.message,
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -260,7 +320,7 @@ export async function GET(request: Request) {
         details:
           "No row was found in money_sponsors for that ID. Check the fundingId/sponsorId.",
       },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -273,7 +333,7 @@ export async function GET(request: Request) {
         error: "Failed to load funding transactions.",
         details: transactionError.message,
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -333,7 +393,7 @@ export async function GET(request: Request) {
     summarySheet,
     `Burton Pride C.I.C - Grant / Funding Report`,
     "A1",
-    "F1",
+    "F1"
   );
   summarySheet.getRow(1).height = 32;
 
@@ -348,15 +408,38 @@ export async function GET(request: Request) {
   };
 
   addMergedSection(summarySheet, "Funding Record", "A4", "F4", "FF334155");
+
   const fundingInfoRows = [
-    ["Funding / sponsor name", fundingName, "Contact", fundingRecord.contact_name || "", "Active", fundingRecord.is_active ? "Yes" : "No"],
-    ["Email", fundingRecord.email || "", "Phone", fundingRecord.phone || "", "Created", formatDate(fundingRecord.created_at)],
-    ["Agreed amount", Number(moneyPounds(agreedPence)), "Recorded received on sponsor", Number(moneyPounds(sponsorReceivedPence)), "Report year", year],
+    [
+      "Funding / sponsor name",
+      fundingName,
+      "Contact",
+      fundingRecord.contact_name || "",
+      "Active",
+      fundingRecord.is_active ? "Yes" : "No",
+    ],
+    [
+      "Email",
+      fundingRecord.email || "",
+      "Phone",
+      fundingRecord.phone || "",
+      "Created",
+      formatDate(fundingRecord.created_at),
+    ],
+    [
+      "Agreed amount",
+      Number(moneyPounds(agreedPence)),
+      "Recorded received on sponsor",
+      Number(moneyPounds(sponsorReceivedPence)),
+      "Report year",
+      year,
+    ],
   ];
 
   fundingInfoRows.forEach((values) => {
     const row = summarySheet.addRow(values);
     styleBody(row);
+
     [1, 3, 5].forEach((cellNumber) => {
       row.getCell(cellNumber).font = { bold: true, color: { argb: "FF111827" } };
       row.getCell(cellNumber).fill = {
@@ -365,6 +448,7 @@ export async function GET(request: Request) {
         fgColor: { argb: "FFF8FAFC" },
       };
     });
+
     [2, 4].forEach((cellNumber) => {
       if (typeof row.getCell(cellNumber).value === "number") {
         styleMoneyCell(row.getCell(cellNumber));
@@ -373,6 +457,7 @@ export async function GET(request: Request) {
   });
 
   addMergedSection(summarySheet, "Money Summary", "A9", "F9", "FF065F46");
+
   const summaryHeader = summarySheet.addRow([
     "Money received",
     "Money spent",
@@ -392,6 +477,7 @@ export async function GET(request: Request) {
     fundingRecord.notes || "",
   ]);
   styleBody(summaryRow);
+
   [1, 2, 3].forEach((cellNumber) => styleMoneyCell(summaryRow.getCell(cellNumber)));
   summaryRow.getCell(3).font = {
     bold: true,
@@ -399,6 +485,7 @@ export async function GET(request: Request) {
   };
 
   addMergedSection(summarySheet, "Spending / Income Breakdown", "A13", "F13", "FF1D4ED8");
+
   const breakdownHeader = summarySheet.addRow([
     "Date",
     "Type",
@@ -429,6 +516,7 @@ export async function GET(request: Request) {
         Number(moneyPounds(item.amount)),
         item.notes,
       ]);
+
       styleBody(row);
       styleMoneyCell(row.getCell(5));
       row.getCell(2).font = {
@@ -440,7 +528,8 @@ export async function GET(request: Request) {
 
   addMergedSection(summarySheet, "Funding Notes", "A30", "F30", "FF7C3AED");
   summarySheet.mergeCells("A31:F34");
-  summarySheet.getCell("A31").value = fundingRecord.notes || "No funding notes recorded.";
+  summarySheet.getCell("A31").value =
+    fundingRecord.notes || "No funding notes recorded.";
   summarySheet.getCell("A31").alignment = { vertical: "top", wrapText: true };
   setThinBorder(summarySheet.getCell("A31"));
 
@@ -577,6 +666,7 @@ export async function GET(request: Request) {
   const notesSheet = workbook.addWorksheet("Notes", {
     views: [{ showGridLines: false }],
   });
+
   notesSheet.columns = [
     { key: "field", width: 26 },
     { key: "value", width: 90 },

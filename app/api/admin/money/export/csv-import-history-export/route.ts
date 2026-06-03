@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -465,9 +465,9 @@ async function tryLoadTable(tableNames: string[]) {
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
         error: "Unauthorised. Please sign in again.",

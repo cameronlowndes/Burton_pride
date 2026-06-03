@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useUser } from '@clerk/nextjs';
 import { useEffect, useMemo, useState } from 'react';
 
 type QuickLink = {
@@ -33,6 +32,11 @@ type SearchItem = {
   title: string;
   href: string;
   category: 'public' | 'admin';
+};
+
+type AdminMeResponse = {
+  ok?: boolean;
+  admin?: unknown;
 };
 
 function clsx(...values: Array<string | false | null | undefined>) {
@@ -101,129 +105,80 @@ function useTimeGreeting() {
   return greeting;
 }
 
+function useAdminSession() {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAdminSession() {
+      try {
+        const response = await fetch('/api/admin/me', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+        });
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setIsSignedIn(false);
+          return;
+        }
+
+        const data = (await response.json()) as AdminMeResponse;
+        setIsSignedIn(Boolean(data?.ok && data?.admin));
+      } catch (error) {
+        console.error('NotFound admin session check failed:', error);
+
+        if (!cancelled) {
+          setIsSignedIn(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoaded(true);
+        }
+      }
+    }
+
+    loadAdminSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { isLoaded, isSignedIn };
+}
+
 function generateOrbs(): FloatingOrb[] {
   return [
-    {
-      id: 1,
-      size: 280,
-      top: '-4%',
-      left: '-2%',
-      duration: 12,
-      delay: 0,
-      opacity: 0.2,
-    },
-    {
-      id: 2,
-      size: 220,
-      top: '12%',
-      left: '72%',
-      duration: 11,
-      delay: 0.6,
-      opacity: 0.16,
-    },
-    {
-      id: 3,
-      size: 180,
-      top: '72%',
-      left: '10%',
-      duration: 10,
-      delay: 1.2,
-      opacity: 0.14,
-    },
-    {
-      id: 4,
-      size: 360,
-      top: '65%',
-      left: '60%',
-      duration: 14,
-      delay: 0.4,
-      opacity: 0.18,
-    },
-    {
-      id: 5,
-      size: 130,
-      top: '45%',
-      left: '40%',
-      duration: 9,
-      delay: 1,
-      opacity: 0.1,
-    },
+    { id: 1, size: 280, top: '-4%', left: '-2%', duration: 12, delay: 0, opacity: 0.2 },
+    { id: 2, size: 220, top: '12%', left: '72%', duration: 11, delay: 0.6, opacity: 0.16 },
+    { id: 3, size: 180, top: '72%', left: '10%', duration: 10, delay: 1.2, opacity: 0.14 },
+    { id: 4, size: 360, top: '65%', left: '60%', duration: 14, delay: 0.4, opacity: 0.18 },
+    { id: 5, size: 130, top: '45%', left: '40%', duration: 9, delay: 1, opacity: 0.1 },
   ];
 }
 
 function getPublicQuickLinks(): QuickLink[] {
   return [
-    {
-      label: 'Return to Home',
-      href: '/',
-      description: 'Go back to the main website homepage.',
-      icon: '🏠',
-    },
-    {
-      label: 'Contact Us',
-      href: '/ContactUS',
-      description: 'Open the public contact page for help.',
-      icon: '📞',
-    },
-    {
-      label: 'Events',
-      href: '/Events',
-      description: 'Check current or upcoming event pages.',
-      icon: '🎉',
-    },
-    {
-      label: 'Meet Us',
-      href: '/MeetUs',
-      description: 'View the committee and team profiles.',
-      icon: '👥',
-    },
+    { label: 'Return to Home', href: '/', description: 'Go back to the main website homepage.', icon: '🏠' },
+    { label: 'Contact Us', href: '/ContactUS', description: 'Open the public contact page for help.', icon: '📞' },
+    { label: 'Events', href: '/Events', description: 'Check current or upcoming event pages.', icon: '🎉' },
+    { label: 'Meet Us', href: '/MeetUs', description: 'View the committee and team profiles.', icon: '👥' },
   ];
 }
 
 function getAdminQuickLinks(): QuickLink[] {
   return [
-    {
-      label: 'Dashboard',
-      href: '/Admin/Dashboard',
-      description: 'Open the admin dashboard.',
-      adminOnly: true,
-      icon: '📊',
-    },
-    {
-      label: 'Email Centre',
-      href: '/Admin/Email',
-      description: 'Manage admin inboxes and outgoing email.',
-      adminOnly: true,
-      icon: '📧',
-    },
-    {
-      label: 'Countdowns',
-      href: '/Admin/Countdown',
-      description: 'Create and manage website countdowns.',
-      adminOnly: true,
-      icon: '⏳',
-    },
-    {
-      label: 'Website Pages',
-      href: '/Admin/Pages',
-      description: 'Enable, disable, and manage website pages.',
-      adminOnly: true,
-      icon: '🌐',
-    },
-    {
-      label: 'Committee Profiles',
-      href: '/Admin/Committee',
-      description: 'Edit Meet Us committee stories and details.',
-      adminOnly: true,
-      icon: '🧑‍💼',
-    },
-    {
-      label: 'Settings',
-      href: '/Admin/Settings',
-      description: 'Update account and portal settings.',
-      adminOnly: true,
-      icon: '⚙️',
-    },
+    { label: 'Dashboard', href: '/Admin/Dashboard', description: 'Open the admin dashboard.', adminOnly: true, icon: '📊' },
+    { label: 'Email Centre', href: '/Admin/Email', description: 'Manage admin inboxes and outgoing email.', adminOnly: true, icon: '📧' },
+    { label: 'Countdowns', href: '/Admin/Countdown', description: 'Create and manage website countdowns.', adminOnly: true, icon: '⏳' },
+    { label: 'Website Pages', href: '/Admin/Pages', description: 'Enable, disable, and manage website pages.', adminOnly: true, icon: '🌐' },
+    { label: 'Committee Profiles', href: '/Admin/Committee', description: 'Edit Meet Us committee stories and details.', adminOnly: true, icon: '🧑‍💼' },
+    { label: 'Settings', href: '/Admin/Settings', description: 'Update account and portal settings.', adminOnly: true, icon: '⚙️' },
   ];
 }
 
@@ -250,7 +205,7 @@ function getHelpItems(isSignedIn: boolean): HelpItem[] {
     return [
       {
         title: 'Return to the admin dashboard',
-        desc: 'Signed-in users can jump back into the admin portal and continue working from a stable page.',
+        desc: 'Signed-in admins can jump back into the admin portal and continue working from a stable page.',
         icon: '🛡️',
       },
       ...common,
@@ -302,13 +257,11 @@ function ActionButton({
   onClick,
   children,
   variant = 'primary',
-  fullWidth = false,
 }: {
   href?: string;
   onClick?: () => void;
   children: React.ReactNode;
   variant?: 'primary' | 'secondary' | 'ghost' | 'warning';
-  fullWidth?: boolean;
 }) {
   const baseClass =
     'inline-flex items-center justify-center rounded-2xl px-6 py-3.5 text-sm font-bold shadow-lg transition-all duration-300 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/40';
@@ -322,7 +275,7 @@ function ActionButton({
       ? 'bg-rose-500 text-white hover:bg-rose-400'
       : 'border border-white/20 bg-white/10 text-white hover:bg-white/15';
 
-  const className = clsx(baseClass, variantClass, fullWidth && 'w-full');
+  const className = clsx(baseClass, variantClass);
 
   if (href) {
     return (
@@ -376,7 +329,6 @@ function FloatingBackground() {
         />
       ))}
       <div className="absolute inset-0 bg-black/15" />
-      <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.04),transparent_35%,rgba(255,255,255,0.02))]" />
     </>
   );
 }
@@ -392,17 +344,10 @@ function BrokenUrlCard({
 }) {
   return (
     <div className="rounded-3xl border border-white/10 bg-black/15 p-5 shadow-inner">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-            Current page
-          </p>
-          <p className="mt-2 text-lg font-semibold text-white">404 error details</p>
-        </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-xl">
-          🔍
-        </div>
-      </div>
+      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
+        Current page
+      </p>
+      <p className="mt-2 text-lg font-semibold text-white">404 error details</p>
 
       <div className="mt-4 space-y-4">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -456,27 +401,16 @@ function HelpCards({ items }: { items: HelpItem[] }) {
   );
 }
 
-function QuickLinksPanel({
-  isSignedIn,
-}: {
-  isSignedIn: boolean;
-}) {
+function QuickLinksPanel({ isSignedIn }: { isSignedIn: boolean }) {
   const publicLinks = getPublicQuickLinks();
   const adminLinks = getAdminQuickLinks();
 
   return (
     <div className="rounded-3xl border border-white/12 bg-white/8 p-5 backdrop-blur-sm">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-            Quick navigation
-          </p>
-          <h3 className="mt-2 text-xl font-bold text-white">Useful links</h3>
-        </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-xl">
-          🧭
-        </div>
-      </div>
+      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
+        Quick navigation
+      </p>
+      <h3 className="mt-2 text-xl font-bold text-white">Useful links</h3>
 
       <div className="mt-5 grid gap-3">
         {publicLinks.map((item) => (
@@ -485,17 +419,10 @@ function QuickLinksPanel({
             href={item.href}
             className="group rounded-2xl border border-white/10 bg-black/10 p-4 transition-all duration-300 hover:border-white/20 hover:bg-white/10"
           >
-            <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-lg">
-                {item.icon}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-white transition-colors group-hover:text-yellow-200">
-                  {item.label}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
-              </div>
-            </div>
+            <p className="font-semibold text-white">
+              {item.icon} {item.label}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
           </Link>
         ))}
 
@@ -508,17 +435,10 @@ function QuickLinksPanel({
                 href={item.href}
                 className="group rounded-2xl border border-white/10 bg-black/10 p-4 transition-all duration-300 hover:border-white/20 hover:bg-white/10"
               >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-yellow-400/15 text-lg">
-                    {item.icon}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-white transition-colors group-hover:text-yellow-200">
-                      {item.label}
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
-                  </div>
-                </div>
+                <p className="font-semibold text-white">
+                  {item.icon} {item.label}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
               </Link>
             ))}
           </>
@@ -542,30 +462,21 @@ function SearchPanel({ isSignedIn }: { isSignedIn: boolean }) {
 
   return (
     <div className="rounded-3xl border border-white/12 bg-white/8 p-5 backdrop-blur-sm">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-            Quick search
-          </p>
-          <h3 className="mt-2 text-xl font-bold text-white">Find a useful page</h3>
-        </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-xl">
-          🔎
-        </div>
-      </div>
+      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
+        Quick search
+      </p>
+      <h3 className="mt-2 text-xl font-bold text-white">Find a useful page</h3>
 
-      <div className="mt-5">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={
-            isSignedIn
-              ? 'Search home, dashboard, countdowns, settings...'
-              : 'Search home, contact, events...'
-          }
-          className="w-full rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/45 focus:border-white/30 focus:bg-black/25"
-        />
-      </div>
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={
+          isSignedIn
+            ? 'Search home, dashboard, countdowns, settings...'
+            : 'Search home, contact, events...'
+        }
+        className="mt-5 w-full rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/45 focus:border-white/30"
+      />
 
       <div className="mt-4 space-y-3">
         <AnimatePresence mode="popLayout">
@@ -617,37 +528,22 @@ function SupportPanel({
 }) {
   return (
     <div className="rounded-[28px] border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md sm:p-8">
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-2xl font-bold text-white">Still stuck?</p>
-          <p className="mt-1 text-sm text-white/75">
-            Report a missing page or suggest a feature.
-          </p>
-        </div>
-
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 text-2xl shadow-inner">
-          📧
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-        <p className="text-sm leading-6 text-white/85">
-          If this page should exist, or if something is missing from the website or admin portal,
-          please email Cameron with the page link and details so it can be reviewed for a future update.
-        </p>
-      </div>
+      <p className="text-2xl font-bold text-white">Still stuck?</p>
+      <p className="mt-1 text-sm text-white/75">
+        Report a missing page or suggest a feature.
+      </p>
 
       <div className="mt-6 space-y-3">
         <a
           href={supportMailto}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-white px-5 py-3.5 text-sm font-bold text-[#5b21b6] shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/95"
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-white px-5 py-3.5 text-sm font-bold text-[#5b21b6] shadow-lg hover:bg-white/95"
         >
           📧 Email Cameron
         </a>
 
         <Link
           href="/ContactUS"
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-purple-900/70 px-5 py-3.5 text-sm font-bold text-white shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:bg-purple-900"
+          className="inline-flex w-full items-center justify-center rounded-2xl bg-purple-900/70 px-5 py-3.5 text-sm font-bold text-white shadow-lg hover:bg-purple-900"
         >
           📞 Visit Contact Us Page
         </Link>
@@ -655,25 +551,11 @@ function SupportPanel({
         {isSignedIn && (
           <Link
             href={dashboardHref}
-            className="inline-flex w-full items-center justify-center rounded-2xl border border-white/15 bg-yellow-400 px-5 py-3.5 text-sm font-bold text-black shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:bg-yellow-300"
+            className="inline-flex w-full items-center justify-center rounded-2xl border border-white/15 bg-yellow-400 px-5 py-3.5 text-sm font-bold text-black shadow-lg hover:bg-yellow-300"
           >
             Open Admin Dashboard
           </Link>
         )}
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-dashed border-white/15 bg-white/5 p-4">
-        <p className="text-xs uppercase tracking-[0.2em] text-white/60">
-          Suggested details to include
-        </p>
-
-        <div className="mt-3 space-y-2 text-sm text-white/80">
-          <p>• The page link you tried to open</p>
-          <p>• What you expected to see</p>
-          <p>• What happened instead</p>
-          <p>• Whether this should be added to the admin portal</p>
-          <p>• Whether the page may have been disabled by admin</p>
-        </div>
       </div>
     </div>
   );
@@ -726,122 +608,48 @@ function AdminInsightPanel({
       transition={{ delay: 0.32, duration: 0.55 }}
       className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur-sm"
     >
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-            {isAdminView ? 'Admin note' : 'Helpful note'}
-          </p>
-          <h3 className="mt-2 text-xl font-bold text-white">Why this page may be missing</h3>
-        </div>
+      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
+        {isAdminView ? 'Admin note' : 'Helpful note'}
+      </p>
+      <h3 className="mt-2 text-xl font-bold text-white">Why this page may be missing</h3>
 
-        <div
-          className={clsx(
-            'flex h-12 w-12 items-center justify-center rounded-2xl text-xl',
-            isAdminView ? 'bg-yellow-400/15' : 'bg-white/10'
-          )}
-        >
-          {isAdminView ? '🛠️' : '🧩'}
+      <div className="mt-5 rounded-2xl border border-white/10 bg-black/10 p-4">
+        <p className="text-sm font-semibold text-white">Possible reasons</p>
+        <div className="mt-3 space-y-2 text-sm leading-6 text-white/72">
+          <p>• The page URL was typed incorrectly</p>
+          <p>• The page was moved to a new route</p>
+          <p>• The page is disabled from website controls</p>
+          <p>• The page is still in draft mode</p>
+          <p>• The page was deleted or renamed</p>
+          <p>• The admin portal route has changed</p>
         </div>
       </div>
 
-      <div className="mt-5 space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-          <p className="text-sm font-semibold text-white">Possible reasons</p>
-          <div className="mt-3 space-y-2 text-sm leading-6 text-white/72">
-            <p>• The page URL was typed incorrectly</p>
-            <p>• The page was moved to a new route</p>
-            <p>• The page is disabled from website controls</p>
-            <p>• The page is still in draft mode</p>
-            <p>• The page was deleted or renamed</p>
-            <p>• The admin portal route has changed</p>
+      {isAdminView && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/10 p-4">
+          <p className="text-sm font-semibold text-white">Suggested admin next steps</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Link href="/Admin/Dashboard" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
+              📊 Back to Dashboard
+            </Link>
+            <Link href="/Admin/Pages" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
+              🌐 Check Page Controls
+            </Link>
+            <Link href="/Admin/Settings" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
+              ⚙️ Review Settings
+            </Link>
+            <Link href="/Admin/Countdown" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
+              ⏳ Manage Countdowns
+            </Link>
           </div>
         </div>
-
-        {isAdminView ? (
-          <>
-            <div className="rounded-2xl border border-yellow-300/15 bg-yellow-400/5 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">Feature roadmap mentioned</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-yellow-100/65">
-                    Visible to signed-in admins only
-                  </p>
-                </div>
-                <span className="rounded-full bg-yellow-400/15 px-2.5 py-1 text-[11px] font-semibold text-yellow-100">
-                  ADMIN
-                </span>
-              </div>
-
-              <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                  <p className="text-sm font-semibold text-white">Portal upgrades</p>
-                  <div className="mt-2 space-y-2 text-sm leading-6 text-white/72">
-                    <p>• Full email functionality in the admin portal</p>
-                    <p>• Multiple countdowns managed from admin</p>
-                    <p>• Better settings area in the admin portal</p>
-                    <p>• Profile settings including password and account updates</p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                  <p className="text-sm font-semibold text-white">Website controls</p>
-                  <div className="mt-2 space-y-2 text-sm leading-6 text-white/72">
-                    <p>• Page enable / disable controls for the website</p>
-                    <p>• Committee members editing their own Meet Us stories</p>
-                    <p>• Better admin control over public content visibility</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-              <p className="text-sm font-semibold text-white">Suggested admin next steps</p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <Link
-                  href="/Admin/Dashboard"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
-                >
-                  📊 Back to Dashboard
-                </Link>
-                <Link
-                  href="/Admin/Pages"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
-                >
-                  🌐 Check Page Controls
-                </Link>
-                <Link
-                  href="/Admin/Settings"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
-                >
-                  ⚙️ Review Settings
-                </Link>
-                <Link
-                  href="/Admin/Countdown"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
-                >
-                  ⏳ Manage Countdowns
-                </Link>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-            <p className="text-sm font-semibold text-white">What you can do now</p>
-            <div className="mt-2 space-y-2 text-sm leading-6 text-white/72">
-              <p>• Go back to the previous page</p>
-              <p>• Return to the homepage</p>
-              <p>• Visit the contact page for help</p>
-              <p>• Email Cameron if you think this page should exist</p>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </motion.div>
   );
 }
 
 export default function NotFound() {
-  const { isLoaded, isSignedIn } = useUser();
+  const { isLoaded, isSignedIn } = useAdminSession();
   const greeting = useTimeGreeting();
   const { currentUrl, pathname, referrer } = useClientLocation();
 
@@ -852,7 +660,7 @@ export default function NotFound() {
     return buildSupportMailto(currentUrl);
   }, [currentUrl]);
 
-  const helpItems = useMemo(() => getHelpItems(!!isSignedIn), [isSignedIn]);
+  const helpItems = useMemo(() => getHelpItems(isSignedIn), [isSignedIn]);
 
   const handleGoBack = () => {
     if (typeof window === 'undefined') return;
@@ -878,13 +686,7 @@ export default function NotFound() {
         <div className="overflow-hidden rounded-[34px] border border-white/15 bg-white/8 shadow-[0_25px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl">
           <div className="grid min-h-[820px] grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]">
             <div className="flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14">
-              <motion.div
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.06 }}
-              >
-                <SectionBadge>Burton Pride • Page Not Found</SectionBadge>
-              </motion.div>
+              <SectionBadge>Burton Pride • Page Not Found</SectionBadge>
 
               <motion.h1
                 className="mt-6 text-7xl font-black leading-none tracking-tight sm:text-8xl xl:text-9xl"
@@ -894,34 +696,19 @@ export default function NotFound() {
                 404
               </motion.h1>
 
-              <motion.h2
-                className="mt-4 text-3xl font-bold sm:text-4xl xl:text-5xl"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.12 }}
-              >
+              <h2 className="mt-4 text-3xl font-bold sm:text-4xl xl:text-5xl">
                 Lost in the Rainbow?
-              </motion.h2>
+              </h2>
 
-              <motion.p
-                className="mt-5 max-w-3xl text-base leading-7 text-white/84 sm:text-lg"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.18 }}
-              >
+              <p className="mt-5 max-w-3xl text-base leading-7 text-white/84 sm:text-lg">
                 The page you are looking for does not exist, may have been moved, disabled,
                 unpublished, or is currently unavailable.
                 {isLoaded && isSignedIn
                   ? ' You are signed in, so you can return to the admin dashboard, go back to your previous page, or review likely admin causes below.'
                   : ' You can return to the homepage, go back to your previous page, or contact the team for help.'}
-              </motion.p>
+              </p>
 
-              <motion.div
-                className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.24 }}
-              >
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <ActionButton onClick={handleGoBack} variant="primary">
                   ← Go Back
                 </ActionButton>
@@ -939,60 +726,33 @@ export default function NotFound() {
                 <ActionButton href={supportMailto} variant="ghost">
                   📧 Email Cameron
                 </ActionButton>
-              </motion.div>
+              </div>
 
-              <motion.div
-                className="mt-8"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-              >
-                <StatusStrip isLoaded={isLoaded} isSignedIn={!!isSignedIn} greeting={greeting} />
-              </motion.div>
+              <div className="mt-8">
+                <StatusStrip isLoaded={isLoaded} isSignedIn={isSignedIn} greeting={greeting} />
+              </div>
 
-              <motion.div
-                className="mt-8"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.36 }}
-              >
+              <div className="mt-8">
                 <HelpCards items={helpItems} />
-              </motion.div>
+              </div>
 
-              <motion.div
-                className="mt-8 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.42 }}
-              >
-                <QuickLinksPanel isSignedIn={!!isSignedIn} />
-                <SearchPanel isSignedIn={!!isSignedIn} />
-              </motion.div>
+              <div className="mt-8 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                <QuickLinksPanel isSignedIn={isSignedIn} />
+                <SearchPanel isSignedIn={isSignedIn} />
+              </div>
             </div>
 
             <div className="relative border-t border-white/10 bg-black/10 px-6 py-10 lg:border-l lg:border-t-0 lg:px-10">
               <div className="mx-auto flex h-full w-full max-w-2xl flex-col justify-center gap-5">
-                <motion.div
-                  initial={{ opacity: 0, x: 18 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.16, duration: 0.55 }}
-                >
-                  <SupportPanel
-                    supportMailto={supportMailto}
-                    dashboardHref={dashboardHref}
-                    isSignedIn={!!isSignedIn}
-                  />
-                </motion.div>
+                <SupportPanel
+                  supportMailto={supportMailto}
+                  dashboardHref={dashboardHref}
+                  isSignedIn={isSignedIn}
+                />
 
-                <motion.div
-                  initial={{ opacity: 0, x: 18 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.24, duration: 0.55 }}
-                >
-                  <BrokenUrlCard currentUrl={currentUrl} pathname={pathname} referrer={referrer} />
-                </motion.div>
+                <BrokenUrlCard currentUrl={currentUrl} pathname={pathname} referrer={referrer} />
 
-                <AdminInsightPanel isLoaded={isLoaded} isSignedIn={!!isSignedIn} />
+                <AdminInsightPanel isLoaded={isLoaded} isSignedIn={isSignedIn} />
               </div>
             </div>
           </div>

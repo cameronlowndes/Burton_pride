@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
 
@@ -84,32 +84,45 @@ function formatNameFromEmail(email?: string | null) {
 }
 
 async function getActor(): Promise<Actor> {
-  try {
-    const user = await currentUser();
+  const supabase = await createClient();
 
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-    const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-      formatNameFromEmail(actorEmail) ||
-      "Unknown admin";
-
-    return {
-      userId: user?.id || null,
-      name: actorName.trim() || "Unknown admin",
-      email: actorEmail,
-    };
-  } catch {
-    return {
-      userId: null,
-      name: "Unknown admin",
-      email: null,
-    };
+  if (error || !user) {
+    throw new Error("You must be signed in.");
   }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const actorEmail = cleanString(admin.email || user.email) || null;
+
+  const actorName =
+    cleanString(admin.name) ||
+    cleanString(admin.full_name) ||
+    formatNameFromEmail(actorEmail) ||
+    "Unknown admin";
+
+  return {
+    userId: user.id,
+    name: actorName,
+    email: actorEmail,
+  };
 }
 
 function parseAmountToPence(row: CsvImportRow) {
@@ -138,12 +151,10 @@ function normaliseDate(value: unknown) {
 
   if (!raw) return null;
 
-  // Already yyyy-mm-dd
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return raw;
   }
 
-  // UK dd/mm/yyyy or dd-mm-yyyy
   const ukMatch = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
 
   if (ukMatch) {
@@ -221,7 +232,7 @@ function buildPayload(row: CsvImportRow, index: number, batchId: string) {
       row.bankStatementDescription ||
         row.bank_statement_description ||
         row.description ||
-        row.title,
+        row.title
     ) || null;
 
   const title =
@@ -296,7 +307,7 @@ export async function POST(req: Request) {
           ok: false,
           error: "No CSV rows were selected for import.",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -331,7 +342,7 @@ export async function POST(req: Request) {
 
         if (locked) {
           throw new Error(
-            `${year} is locked. Unlock this year before importing CSV transactions.`,
+            `${year} is locked. Unlock this year before importing CSV transactions.`
           );
         }
 
@@ -402,7 +413,7 @@ export async function POST(req: Request) {
           imported: [],
           failedRows,
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -426,7 +437,15 @@ export async function POST(req: Request) {
         ok: false,
         error: err instanceof Error ? err.message : "Server error",
       },
-      { status: 500 },
+      {
+        status:
+          err instanceof Error &&
+          (err.message === "You must be signed in." ||
+            err.message ===
+              "No active admin account is linked to this Supabase user.")
+            ? 401
+            : 500,
+      }
     );
   }
 }

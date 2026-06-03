@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
 
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -65,6 +65,16 @@ type Summary = {
   moneyReceivedBackPence: number;
   moneySentBackPence: number;
   netRefundAdjustmentPence: number;
+};
+
+type CurrentAdmin = {
+  id?: string | null;
+  admin_id?: string | null;
+  user_id?: string | null;
+  name?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+  email?: string | null;
 };
 
 const REFUND_SELECT = `
@@ -193,18 +203,29 @@ function refundReference(refund: RefundRow) {
     .toUpperCase()}`;
 }
 
-function getActorName(
-  user: Awaited<ReturnType<typeof currentUser>>
-) {
-  if (!user) return "Unknown user";
+function cleanText(value: unknown): string {
+  return String(value || "").trim();
+}
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
+function getActorName(admin: CurrentAdmin | null): string {
+  if (!admin) return "Unknown user";
 
-  if (fullName) return fullName;
+  return (
+    cleanText(admin.full_name) ||
+    cleanText(admin.name) ||
+    cleanText(admin.display_name) ||
+    cleanText(admin.email) ||
+    "Unknown user"
+  );
+}
 
-  return user.emailAddresses?.[0]?.emailAddress || "Unknown user";
+async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
+  try {
+    return (await requireAdmin()) as CurrentAdmin | null;
+  } catch (error) {
+    console.error("Refund export admin auth error:", error);
+    return null;
+  }
 }
 
 type SheetTheme = {
@@ -917,19 +938,18 @@ async function loadHydratedRefunds(year: number) {
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return jsonError(
-      "You must be signed in to export refunds.",
+      "You must be signed in as an admin to export refunds.",
       401,
       null,
-      "Sign in again, then try downloading the Refund Tracker export."
+      "Sign in again using the admin login page, then try downloading the Refund Tracker export."
     );
   }
 
-  const user = await currentUser();
-  const actorName = getActorName(user);
+  const actorName = getActorName(admin);
 
   const url = new URL(request.url);
   const year = Number(

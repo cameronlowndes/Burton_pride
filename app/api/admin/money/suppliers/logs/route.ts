@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -20,34 +20,83 @@ const LOG_SELECT = `
   details
 `;
 
+type CurrentAdmin = {
+  userId: string;
+  actorName: string;
+  actorEmail: string | null;
+};
+
 function cleanText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Website / system";
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanText(email);
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return "";
   }
 
-  return "Website / system";
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
 }
 
-function getActorEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+async function getCurrentAdmin(): Promise<CurrentAdmin> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const actorEmail = cleanText(admin.email || user.email) || null;
+
+  const actorName =
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
+    nameFromEmail(actorEmail) ||
+    "Website / system";
+
+  return {
+    userId: user.id,
+    actorName,
+    actorEmail,
+  };
+}
+
+function getAuthErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You must be signed in." ||
+    message === "No active admin account is linked to this Supabase user."
+  ) {
+    return 401;
+  }
+
+  return 500;
 }
 
 function getSupabaseMessage(error: any) {
@@ -70,6 +119,8 @@ function getSupabaseMessage(error: any) {
  */
 export async function GET(request: Request) {
   try {
+    await getCurrentAdmin();
+
     const { searchParams } = new URL(request.url);
 
     const search = cleanText(searchParams.get("search"));
@@ -105,7 +156,7 @@ export async function GET(request: Request) {
           `message.ilike.%${safeSearch}%`,
           `actor_name.ilike.%${safeSearch}%`,
           `actor_email.ilike.%${safeSearch}%`,
-        ].join(","),
+        ].join(",")
       );
     }
 
@@ -120,7 +171,7 @@ export async function GET(request: Request) {
           likelyFix:
             "Make sure the money_supplier_logs table exists. Run the supplier logs SQL migration.",
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -134,7 +185,7 @@ export async function GET(request: Request) {
         ok: false,
         error: error?.message || "Failed to load supplier logs.",
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }
@@ -147,7 +198,7 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const user = await currentUser();
+    const { actorName, actorEmail } = await getCurrentAdmin();
 
     const payload = (await request.json().catch(() => null)) as
       | {
@@ -168,7 +219,7 @@ export async function POST(request: Request) {
           ok: false,
           error: "Invalid supplier log payload.",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -180,7 +231,7 @@ export async function POST(request: Request) {
           ok: false,
           error: "Log action is required.",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -190,8 +241,8 @@ export async function POST(request: Request) {
       action,
       action_label: cleanText(payload.action_label) || action,
       message: cleanText(payload.message) || null,
-      actor_name: getActorName(user),
-      actor_email: getActorEmail(user),
+      actor_name: actorName,
+      actor_email: actorEmail,
       old_data: payload.old_data || null,
       new_data: payload.new_data || null,
       details: payload.details || null,
@@ -210,7 +261,7 @@ export async function POST(request: Request) {
           error: "Failed to create supplier log.",
           details: getSupabaseMessage(error),
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -224,7 +275,7 @@ export async function POST(request: Request) {
         ok: false,
         error: error?.message || "Failed to create supplier log.",
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }

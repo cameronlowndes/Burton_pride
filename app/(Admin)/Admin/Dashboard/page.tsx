@@ -149,7 +149,7 @@ const ADMIN_MODULES: ModuleLink[] = [
   {
     title: "Money Management",
     desc: "Track money in, money out, sponsorship, and personal funds.",
-    href: "/Admin/Money",
+    href: "/Admin/MoneyManagement",
     icon: Wallet,
     badge: "Finance",
   },
@@ -170,7 +170,7 @@ const ADMIN_MODULES: ModuleLink[] = [
   {
     title: "Page Editor",
     desc: "Edit navigation, sidebars, pages, and public website settings.",
-    href: "/Admin/Dashboard/PageEditor",
+    href: "/Admin/Dashboard/Settings/PageEditor",
     icon: LayoutDashboard,
     badge: "Editor",
   },
@@ -360,7 +360,7 @@ export default function DashboardPage() {
         return {
           title: "Money management",
           desc: "Track donations, spending, sponsorship funds, personal funds, and receipts.",
-          href: "/Admin/Money",
+          href: "/Admin/MoneyManagement",
           button: "Open Money Tracker",
           icon: Wallet,
         };
@@ -652,7 +652,7 @@ export default function DashboardPage() {
                 icon={Wallet}
                 active={quickStart === "money"}
                 onClick={() => setQuickStart("money")}
-                onOpen={() => router.push("/Admin/Money")}
+                onOpen={() => router.push("/Admin/MoneyManagement")}
               />
             </div>
           </Card>
@@ -841,7 +841,7 @@ export default function DashboardPage() {
               />
 
               <ActionButton
-                href="/Admin/Money"
+                href="/Admin/MoneyManagement"
                 title="Money Tracker"
                 desc="Track income and spending"
                 icon={Wallet}
@@ -929,7 +929,7 @@ export default function DashboardPage() {
 
             <div className="mt-6 grid gap-3">
               <ActionButton
-                href="/Admin/Money"
+                href="/Admin/MoneyManagement"
                 title="Money Home"
                 desc="Open finance dashboard"
                 icon={Wallet}

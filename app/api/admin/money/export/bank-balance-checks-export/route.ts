@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -79,7 +80,9 @@ function getTrackerBalancePence(item: BankBalanceCheck) {
     penceValue(item.money_tracker_balance_pence) ||
     penceValue(item.system_balance_pence) ||
     penceValue(item.expected_balance_pence) ||
-    Math.round(Number(item.tracker_balance || item.money_tracker_balance || 0) * 100)
+    Math.round(
+      Number(item.tracker_balance || item.money_tracker_balance || 0) * 100
+    )
   );
 }
 
@@ -433,47 +436,49 @@ async function loadBankChecks(year: number) {
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
-
-  if (!userId) {
-    return NextResponse.json(
-      {
-        error: "Unauthorised. Please sign in again.",
-      },
-      {
-        status: 401,
-      }
-    );
-  }
-
-  const url = new URL(req.url);
-  const yearValue = url.searchParams.get("year");
-  const year = Number(yearValue || new Date().getFullYear());
-
-  if (!Number.isFinite(year)) {
-    return NextResponse.json(
-      {
-        error: "Invalid year. Please select a valid year.",
-        details: {
-          receivedYear: yearValue,
-        },
-      },
-      {
-        status: 400,
-      }
-    );
-  }
-
   try {
+    const admin = await requireAdmin();
+
+    if (!admin) {
+      return NextResponse.json(
+        {
+          error: "Unauthorised. Please sign in again as an admin.",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    const url = new URL(req.url);
+    const yearValue = url.searchParams.get("year");
+    const year = Number(yearValue || new Date().getFullYear());
+
+    if (!Number.isFinite(year)) {
+      return NextResponse.json(
+        {
+          error: "Invalid year. Please select a valid year.",
+          details: {
+            receivedYear: yearValue,
+          },
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
     const selectedYear = String(year);
     const fileDate = new Date().toISOString().slice(0, 10);
 
     const { table, rows, attempts } = await loadBankChecks(year);
 
     const totalChecks = rows.length;
+
     const matchedChecks = rows.filter(
       (item) => getDifferencePence(item) === 0
     ).length;
+
     const reviewChecks = rows.filter(
       (item) => getDifferencePence(item) !== 0
     ).length;
@@ -498,9 +503,6 @@ export async function GET(req: Request) {
     workbook.title = "Burton Pride Bank Balance Checks";
     workbook.company = "Burton Pride C.I.C";
 
-    /**
-     * SHEET 1: SUMMARY
-     */
     const summarySheet = workbook.addWorksheet("Bank Check Summary", {
       views: [{ state: "frozen", ySplit: 5 }],
       pageSetup: {
@@ -543,9 +545,21 @@ export async function GET(req: Request) {
 
     const summaryRows: Array<[string, string | number, string]> = [
       ["Table used", table, "Supabase table used for this export."],
-      ["Total checks", totalChecks, "Number of bank checks in the selected year."],
-      ["Matched checks", matchedChecks, "Checks where bank balance and tracker balance match."],
-      ["Needs review checks", reviewChecks, "Checks where the balances do not match."],
+      [
+        "Total checks",
+        totalChecks,
+        "Number of bank checks in the selected year.",
+      ],
+      [
+        "Matched checks",
+        matchedChecks,
+        "Checks where bank balance and tracker balance match.",
+      ],
+      [
+        "Needs review checks",
+        reviewChecks,
+        "Checks where the balances do not match.",
+      ],
       [
         "Total difference",
         poundsFromPence(totalDifferencePence).toFixed(2),
@@ -597,9 +611,6 @@ export async function GET(req: Request) {
       styleBodyRow(usedRow);
     }
 
-    /**
-     * SHEET 2: BANK CHECKS
-     */
     const checksSheet = workbook.addWorksheet("Bank Checks", {
       views: [{ state: "frozen", ySplit: 4 }],
       pageSetup: {
@@ -656,6 +667,7 @@ export async function GET(req: Request) {
       "Created At",
       "Check ID",
     ]);
+
     styleHeaderRow(checksHeader, "FF0F766E");
 
     if (rows.length === 0) {
@@ -697,9 +709,6 @@ export async function GET(req: Request) {
       to: "L4",
     };
 
-    /**
-     * SHEET 3: NEEDS REVIEW
-     */
     const reviewSheet = workbook.addWorksheet("Needs Review", {
       views: [{ state: "frozen", ySplit: 4 }],
       pageSetup: {
@@ -743,6 +752,7 @@ export async function GET(req: Request) {
       "Created At",
       "Check ID",
     ]);
+
     styleHeaderRow(reviewHeader, "FFB91C1C");
 
     const reviewRows = rows.filter(
@@ -788,9 +798,6 @@ export async function GET(req: Request) {
       to: "L4",
     };
 
-    /**
-     * SHEET 4: RAW DEBUG
-     */
     const rawSheet = workbook.addWorksheet("Raw Debug", {
       views: [{ state: "frozen", ySplit: 4 }],
       pageSetup: {

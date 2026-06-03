@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -148,12 +149,12 @@ function getReceiptUrl(item: any) {
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
-        error: "Unauthorised. Please sign in again.",
+        error: "Unauthorised. Please sign in again as an admin.",
       },
       {
         status: 401,

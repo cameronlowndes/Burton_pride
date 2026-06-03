@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -12,29 +12,10 @@ type BankImportRowStatus =
   | "ignored"
   | "needs_review";
 
-type BankCsvRow = {
-  row_number: number;
-  transaction_date: string | null;
-  description: string;
-  amount_pence: number;
-  money_in_pence: number;
-  money_out_pence: number;
-  balance_pence: number | null;
-  reference: string | null;
-  raw: Record<string, string>;
-};
-
-type MatchCandidate = {
-  transaction_id: string;
-  transaction_reference: string | null;
-  title: string | null;
-  transaction_date: string | null;
-  amount_pence: number;
-  type: string | null;
-  payment_method: string | null;
-  confidence: "high" | "medium" | "low";
-  score: number;
-  reasons: string[];
+type SignedInAdmin = {
+  userId: string;
+  userName: string;
+  userEmail: string | null;
 };
 
 function jsonError(message: string, details?: unknown, status = 500) {
@@ -48,12 +29,24 @@ function jsonError(message: string, details?: unknown, status = 500) {
             ? details
             : details || null,
     },
-    { status },
+    { status }
   );
 }
 
 function cleanText(value: unknown) {
   return String(value || "").trim();
+}
+
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanText(email);
+
+  if (!cleanEmail || !cleanEmail.includes("@")) return "";
+
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
 }
 
 function normalise(value: unknown) {
@@ -69,10 +62,7 @@ function parseMoneyToPence(value: unknown) {
 
   if (!raw) return 0;
 
-  const isNegative =
-    raw.includes("(") ||
-    raw.includes(")") ||
-    raw.trim().startsWith("-");
+  const isNegative = raw.includes("(") || raw.includes(")") || raw.startsWith("-");
 
   const cleaned = raw
     .replace(/[£$,]/g, "")
@@ -100,8 +90,7 @@ function parseDate(value: unknown) {
   if (ukMatch) {
     const day = ukMatch[1].padStart(2, "0");
     const month = ukMatch[2].padStart(2, "0");
-    const year =
-      ukMatch[3].length === 2 ? `20${ukMatch[3]}` : ukMatch[3];
+    const year = ukMatch[3].length === 2 ? `20${ukMatch[3]}` : ukMatch[3];
 
     return `${year}-${month}-${day}`;
   }
@@ -111,32 +100,6 @@ function parseDate(value: unknown) {
   if (Number.isNaN(parsed.getTime())) return null;
 
   return parsed.toISOString().slice(0, 10);
-}
-
-function getUserName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
-
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
-}
-
-function getUserEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
 }
 
 function splitCsvLine(line: string) {
@@ -213,7 +176,7 @@ function firstValue(row: Record<string, string>, possibleHeaders: string[]) {
   return "";
 }
 
-function parseBankRows(csvText: string): BankCsvRow[] {
+function parseBankRows(csvText: string) {
   const parsedRows = parseCsv(csvText);
 
   return parsedRows.map(({ row_number, raw }) => {
@@ -265,11 +228,7 @@ function parseBankRows(csvText: string): BankCsvRow[] {
       "amount out",
     ]);
 
-    const amountValue = firstValue(raw, [
-      "amount",
-      "transaction amount",
-      "value",
-    ]);
+    const amountValue = firstValue(raw, ["amount", "transaction amount", "value"]);
 
     const balanceValue = firstValue(raw, [
       "balance",
@@ -282,13 +241,8 @@ function parseBankRows(csvText: string): BankCsvRow[] {
 
     let amountPence = parseMoneyToPence(amountValue);
 
-    if (!amountPence && moneyInPence) {
-      amountPence = moneyInPence;
-    }
-
-    if (!amountPence && moneyOutPence) {
-      amountPence = -moneyOutPence;
-    }
+    if (!amountPence && moneyInPence) amountPence = moneyInPence;
+    if (!amountPence && moneyOutPence) amountPence = -moneyOutPence;
 
     return {
       row_number,
@@ -296,8 +250,7 @@ function parseBankRows(csvText: string): BankCsvRow[] {
       description: cleanText(description),
       amount_pence: amountPence,
       money_in_pence: amountPence > 0 ? Math.abs(amountPence) : moneyInPence,
-      money_out_pence:
-        amountPence < 0 ? Math.abs(amountPence) : moneyOutPence,
+      money_out_pence: amountPence < 0 ? Math.abs(amountPence) : moneyOutPence,
       balance_pence: balanceValue ? parseMoneyToPence(balanceValue) : null,
       reference: reference ? cleanText(reference) : null,
       raw,
@@ -320,7 +273,7 @@ function daysBetween(dateA?: string | null, dateB?: string | null) {
   return Math.round(diff / (1000 * 60 * 60 * 24));
 }
 
-function calculateCandidateScore(row: BankCsvRow, transaction: any) {
+function calculateCandidateScore(row: any, transaction: any) {
   const rowAbsAmount = Math.abs(row.amount_pence);
   const transactionAmount = Math.abs(Number(transaction.amount_pence || 0));
 
@@ -349,13 +302,11 @@ function calculateCandidateScore(row: BankCsvRow, transaction: any) {
   const transactionText = normalise(
     `${transaction.title || ""} ${transaction.description || ""} ${
       transaction.transaction_reference || ""
-    } ${transaction.sponsor_name || ""}`,
+    } ${transaction.sponsor_name || ""}`
   );
 
   const rowWords = rowText.split(" ").filter((word) => word.length >= 4);
-  const matchingWords = rowWords.filter((word) =>
-    transactionText.includes(word),
-  );
+  const matchingWords = rowWords.filter((word) => transactionText.includes(word));
 
   if (matchingWords.length > 0) {
     score += Math.min(20, matchingWords.length * 5);
@@ -369,7 +320,7 @@ function calculateCandidateScore(row: BankCsvRow, transaction: any) {
     reasons.push("Money in/out type matches");
   }
 
-  let confidence: MatchCandidate["confidence"] = "low";
+  let confidence: "high" | "medium" | "low" = "low";
 
   if (score >= 75) confidence = "high";
   else if (score >= 45) confidence = "medium";
@@ -378,6 +329,39 @@ function calculateCandidateScore(row: BankCsvRow, transaction: any) {
     score,
     confidence,
     reasons,
+  };
+}
+
+async function getSignedInUser(): Promise<SignedInAdmin> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in to use bank reconciliation.");
+  }
+
+  const { data: admin } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  const email = cleanText(admin?.email || user.email) || null;
+  const name =
+    cleanText(admin?.name) ||
+    cleanText(admin?.full_name) ||
+    nameFromEmail(email) ||
+    "Unknown admin";
+
+  return {
+    userId: user.id,
+    userName: name,
+    userEmail: email,
   };
 }
 
@@ -395,7 +379,7 @@ async function writeAuditLog({
   metadata: any;
 }) {
   try {
-    await supabaseAdmin.from("money_audit_logs").insert({
+    await supabaseAdmin.from("admin_money_audit_logs").insert({
       action,
       actor_user_id: userId,
       actor_name: userName,
@@ -406,21 +390,6 @@ async function writeAuditLog({
   } catch (error) {
     console.error("Bank reconciliation audit log failed:", error);
   }
-}
-
-async function getSignedInUser() {
-  const user = await currentUser();
-
-  if (!user?.id) {
-    throw new Error("You must be signed in to use bank reconciliation.");
-  }
-
-  return {
-    user,
-    userId: user.id,
-    userName: getUserName(user),
-    userEmail: getUserEmail(user),
-  };
 }
 
 async function getImportRows(importId: string) {
@@ -442,8 +411,7 @@ async function findCandidatesForRows(rows: any[], year?: string | null) {
     .sort();
 
   const firstDate = dates[0] || `${year || new Date().getFullYear()}-01-01`;
-  const lastDate =
-    dates[dates.length - 1] || `${year || new Date().getFullYear()}-12-31`;
+  const lastDate = dates[dates.length - 1] || `${year || new Date().getFullYear()}-12-31`;
 
   const start = new Date(firstDate);
   start.setDate(start.getDate() - 14);
@@ -451,23 +419,21 @@ async function findCandidatesForRows(rows: any[], year?: string | null) {
   const end = new Date(lastDate);
   end.setDate(end.getDate() + 14);
 
-  let query = supabaseAdmin
+  const { data: transactions, error } = await supabaseAdmin
     .from("money_transactions")
     .select(
-      "id, transaction_reference, title, description, type, amount_pence, transaction_date, payment_method, sponsor_name, bank_reconciliation_status, deleted_at",
+      "id, transaction_reference, title, description, type, amount_pence, transaction_date, payment_method, sponsor_name, bank_reconciliation_status, deleted_at"
     )
     .is("deleted_at", null)
     .gte("transaction_date", start.toISOString().slice(0, 10))
     .lte("transaction_date", end.toISOString().slice(0, 10));
-
-  const { data: transactions, error } = await query;
 
   if (error) throw error;
 
   const activeTransactions = transactions || [];
 
   return rows.map((row) => {
-    const bankRow: BankCsvRow = {
+    const bankRow = {
       row_number: row.row_number,
       transaction_date: row.transaction_date,
       description: row.description || "",
@@ -479,7 +445,7 @@ async function findCandidatesForRows(rows: any[], year?: string | null) {
       raw: row.raw || {},
     };
 
-    const candidates: MatchCandidate[] = activeTransactions
+    const candidates = activeTransactions
       .map((transaction) => {
         const result = calculateCandidateScore(bankRow, transaction);
 
@@ -525,10 +491,7 @@ export async function GET(request: Request) {
 
       if (importError) throw importError;
 
-      const rowsWithCandidates = await findCandidatesForRows(
-        rows,
-        bankImport?.year,
-      );
+      const rowsWithCandidates = await findCandidatesForRows(rows, bankImport?.year);
 
       return NextResponse.json({
         import: bankImport || null,
@@ -575,12 +538,12 @@ export async function POST(request: Request) {
 
     const totalMoneyIn = parsedRows.reduce(
       (sum, row) => sum + Math.max(0, row.amount_pence),
-      0,
+      0
     );
 
     const totalMoneyOut = parsedRows.reduce(
       (sum, row) => sum + Math.abs(Math.min(0, row.amount_pence)),
-      0,
+      0
     );
 
     const { data: bankImport, error: importError } = await supabaseAdmin
@@ -720,8 +683,7 @@ export async function PATCH(request: Request) {
           bank_reconciled_at: now,
           bank_reconciled_by: userName,
           bank_reconciliation_note:
-            note ||
-            `Matched from bank import row ${bankRow.row_number}.`,
+            note || `Matched from bank import row ${bankRow.row_number}.`,
         })
         .eq("id", transactionId);
 
@@ -748,13 +710,14 @@ export async function PATCH(request: Request) {
       });
     }
 
-    if (action === "ignore") {
+    if (action === "ignore" || action === "needs_review") {
       const now = new Date().toISOString();
+      const nextStatus = action === "ignore" ? "ignored" : "needs_review";
 
       const { error } = await supabaseAdmin
         .from("money_bank_import_rows")
         .update({
-          status: "ignored",
+          status: nextStatus,
           review_note: note || null,
           updated_at: now,
           reviewed_at: now,
@@ -767,7 +730,7 @@ export async function PATCH(request: Request) {
       if (error) throw error;
 
       await writeAuditLog({
-        action: "bank_row_ignored",
+        action: action === "ignore" ? "bank_row_ignored" : "bank_row_needs_review",
         userId,
         userName,
         userEmail,
@@ -782,53 +745,11 @@ export async function PATCH(request: Request) {
 
       return NextResponse.json({
         ok: true,
-        status: "ignored",
+        status: nextStatus,
       });
     }
 
-    if (action === "needs_review") {
-      const now = new Date().toISOString();
-
-      const { error } = await supabaseAdmin
-        .from("money_bank_import_rows")
-        .update({
-          status: "needs_review",
-          review_note: note || null,
-          updated_at: now,
-          reviewed_at: now,
-          reviewed_by_user_id: userId,
-          reviewed_by_name: userName,
-          reviewed_by_email: userEmail,
-        })
-        .eq("id", rowId);
-
-      if (error) throw error;
-
-      await writeAuditLog({
-        action: "bank_row_needs_review",
-        userId,
-        userName,
-        userEmail,
-        metadata: {
-          row_id: rowId,
-          row_number: bankRow.row_number,
-          amount_pence: bankRow.amount_pence,
-          description: bankRow.description,
-          note,
-        },
-      });
-
-      return NextResponse.json({
-        ok: true,
-        status: "needs_review",
-      });
-    }
-
-    return jsonError(
-      "Invalid action. Use match, ignore, or needs_review.",
-      null,
-      400,
-    );
+    return jsonError("Invalid action. Use match, ignore, or needs_review.", null, 400);
   } catch (error) {
     return jsonError("Failed to update bank reconciliation row.", error);
   }

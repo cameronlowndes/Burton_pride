@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -1537,12 +1538,12 @@ export async function GET(
     }>;
   }
 ) {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
-        error: "You must be signed in to print this report.",
+        error: "You must be signed in as an admin to print this report.",
       },
       { status: 401 }
     );

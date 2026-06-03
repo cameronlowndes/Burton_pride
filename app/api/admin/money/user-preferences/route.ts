@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -17,49 +17,93 @@ type PreferencePayload = {
   visible_columns?: Record<string, boolean>;
 };
 
-function getUserName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+type CurrentAdmin = {
+  userId: string;
+  userName: string;
+  userEmail: string | null;
+};
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
+function cleanString(value: unknown) {
+  return String(value || "").trim();
 }
 
-function getUserEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanString(email);
+
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return "";
+  }
+
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+async function getCurrentAdmin(): Promise<CurrentAdmin> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const userEmail = cleanString(admin.email || user.email) || null;
+
+  const userName =
+    cleanString(admin.name) ||
+    cleanString(admin.full_name) ||
+    nameFromEmail(userEmail) ||
+    "Unknown admin";
+
+  return {
+    userId: user.id,
+    userName,
+    userEmail,
+  };
+}
+
+function getAuthErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You must be signed in." ||
+    message === "No active admin account is linked to this Supabase user."
+  ) {
+    return 401;
+  }
+
+  return 500;
 }
 
 export async function GET() {
   try {
-    const user = await currentUser();
-
-    if (!user?.id) {
-      return NextResponse.json(
-        {
-          error: "You must be signed in to load money tracker preferences.",
-        },
-        { status: 401 },
-      );
-    }
+    const { userId } = await getCurrentAdmin();
 
     const { data, error } = await supabaseAdmin
       .from("money_user_preferences")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (error) {
@@ -68,7 +112,7 @@ export async function GET() {
           error: "Failed to load money tracker preferences.",
           details: error.message,
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -81,30 +125,21 @@ export async function GET() {
         error: "Unexpected error loading money tracker preferences.",
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }
 
 export async function PATCH(request: Request) {
   try {
-    const user = await currentUser();
-
-    if (!user?.id) {
-      return NextResponse.json(
-        {
-          error: "You must be signed in to save money tracker preferences.",
-        },
-        { status: 401 },
-      );
-    }
+    const { userId, userName, userEmail } = await getCurrentAdmin();
 
     const body = (await request.json()) as PreferencePayload;
 
     const payload = {
-      user_id: user.id,
-      user_name: getUserName(user),
-      user_email: getUserEmail(user),
+      user_id: userId,
+      user_name: userName,
+      user_email: userEmail,
 
       selected_year: body.selected_year || null,
       selected_view_month: body.selected_view_month || "all",
@@ -133,7 +168,7 @@ export async function PATCH(request: Request) {
           error: "Failed to save money tracker preferences.",
           details: error.message,
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -146,7 +181,7 @@ export async function PATCH(request: Request) {
         error: "Unexpected error saving money tracker preferences.",
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }

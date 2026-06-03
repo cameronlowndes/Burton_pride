@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -15,6 +15,12 @@ type SupplierPayload = {
   category?: string | null;
   notes?: string | null;
   is_active?: boolean | null;
+};
+
+type CurrentAdmin = {
+  id: string;
+  name: string;
+  email: string | null;
 };
 
 const SUPPLIER_CATEGORIES = [
@@ -46,36 +52,79 @@ function normaliseCategory(value: unknown) {
   if (!clean) return null;
 
   const existing = SUPPLIER_CATEGORIES.find(
-    (category) => category.toLowerCase() === clean.toLowerCase(),
+    (category) => category.toLowerCase() === clean.toLowerCase()
   );
 
   return existing || clean;
 }
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown admin";
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanText(email);
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return "";
   }
 
-  return "Unknown admin";
+  return cleanEmail
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
 }
 
-function getActorEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+async function getCurrentAdmin(): Promise<CurrentAdmin> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in to manage suppliers.");
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const email = cleanText(admin.email || user.email) || null;
+
+  const name =
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
+    nameFromEmail(email) ||
+    "Unknown admin";
+
+  return {
+    id: user.id,
+    name,
+    email,
+  };
+}
+
+function getAuthErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You must be signed in to manage suppliers." ||
+    message === "No active admin account is linked to this Supabase user."
+  ) {
+    return 401;
+  }
+
+  return 500;
 }
 
 function supplierSelect() {
@@ -113,25 +162,6 @@ function buildSupplierRow(payload: SupplierPayload) {
   };
 }
 
-async function ensureSignedIn() {
-  const user = await currentUser();
-
-  if (!user?.id) {
-    return {
-      user: null,
-      error: NextResponse.json(
-        { error: "You must be signed in to manage suppliers." },
-        { status: 401 },
-      ),
-    };
-  }
-
-  return {
-    user,
-    error: null,
-  };
-}
-
 function getSupabaseMessage(error: any) {
   return (
     error?.message ||
@@ -151,9 +181,7 @@ function getSupabaseMessage(error: any) {
  */
 export async function GET(request: Request) {
   try {
-    const { user, error } = await ensureSignedIn();
-
-    if (error) return error;
+    const actor = await getCurrentAdmin();
 
     const { searchParams } = new URL(request.url);
 
@@ -189,7 +217,7 @@ export async function GET(request: Request) {
           `website.ilike.%${safeSearch}%`,
           `category.ilike.%${safeSearch}%`,
           `notes.ilike.%${safeSearch}%`,
-        ].join(","),
+        ].join(",")
       );
     }
 
@@ -203,7 +231,7 @@ export async function GET(request: Request) {
           likelyFix:
             "Make sure the money_suppliers table exists and has the expected columns.",
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -211,11 +239,7 @@ export async function GET(request: Request) {
       ok: true,
       suppliers: data || [],
       categories: SUPPLIER_CATEGORIES,
-      actor: {
-        id: user?.id,
-        name: getActorName(user),
-        email: getActorEmail(user),
-      },
+      actor,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -223,7 +247,7 @@ export async function GET(request: Request) {
         error: "Failed to load suppliers.",
         details: error?.message || String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }
@@ -235,9 +259,7 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
-    const { user, error } = await ensureSignedIn();
-
-    if (error) return error;
+    const actor = await getCurrentAdmin();
 
     const payload = (await request.json().catch(() => null)) as
       | SupplierPayload
@@ -246,7 +268,7 @@ export async function POST(request: Request) {
     if (!payload) {
       return NextResponse.json(
         { error: "Invalid supplier payload." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -266,7 +288,7 @@ export async function POST(request: Request) {
           likelyFix:
             "Make sure money_suppliers exists and the supplier_name, contact_name, email, phone, website, category, notes and is_active columns exist.",
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -274,11 +296,7 @@ export async function POST(request: Request) {
       ok: true,
       supplier: data,
       message: "Supplier created.",
-      actor: {
-        id: user?.id,
-        name: getActorName(user),
-        email: getActorEmail(user),
-      },
+      actor,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -286,7 +304,7 @@ export async function POST(request: Request) {
         error: "Failed to create supplier.",
         details: error?.message || String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }
@@ -298,9 +316,7 @@ export async function POST(request: Request) {
  */
 export async function PATCH(request: Request) {
   try {
-    const { user, error } = await ensureSignedIn();
-
-    if (error) return error;
+    const actor = await getCurrentAdmin();
 
     const payload = (await request.json().catch(() => null)) as
       | SupplierPayload
@@ -309,7 +325,7 @@ export async function PATCH(request: Request) {
     if (!payload) {
       return NextResponse.json(
         { error: "Invalid supplier payload." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -318,7 +334,7 @@ export async function PATCH(request: Request) {
     if (!id) {
       return NextResponse.json(
         { error: "Supplier ID is required." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -337,7 +353,7 @@ export async function PATCH(request: Request) {
           error: "Failed to update supplier.",
           details: getSupabaseMessage(updateError),
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -345,11 +361,7 @@ export async function PATCH(request: Request) {
       ok: true,
       supplier: data,
       message: "Supplier updated.",
-      actor: {
-        id: user?.id,
-        name: getActorName(user),
-        email: getActorEmail(user),
-      },
+      actor,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -357,7 +369,7 @@ export async function PATCH(request: Request) {
         error: "Failed to update supplier.",
         details: error?.message || String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }
@@ -370,9 +382,7 @@ export async function PATCH(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    const { user, error } = await ensureSignedIn();
-
-    if (error) return error;
+    const actor = await getCurrentAdmin();
 
     const { searchParams } = new URL(request.url);
     const idFromQuery = cleanText(searchParams.get("id"));
@@ -390,7 +400,7 @@ export async function DELETE(request: Request) {
     if (!id) {
       return NextResponse.json(
         { error: "Supplier ID is required." },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -407,7 +417,7 @@ export async function DELETE(request: Request) {
           error: "Failed to archive supplier.",
           details: getSupabaseMessage(updateError),
         },
-        { status: 500 },
+        { status: 500 }
       );
     }
 
@@ -415,11 +425,7 @@ export async function DELETE(request: Request) {
       ok: true,
       supplier: data,
       message: "Supplier archived.",
-      actor: {
-        id: user?.id,
-        name: getActorName(user),
-        email: getActorEmail(user),
-      },
+      actor,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -427,7 +433,7 @@ export async function DELETE(request: Request) {
         error: "Failed to archive supplier.",
         details: error?.message || String(error),
       },
-      { status: 500 },
+      { status: getAuthErrorStatus(error) }
     );
   }
 }

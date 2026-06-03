@@ -1,14 +1,14 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   ArrowLeft,
   Building2,
   FileSpreadsheet,
-  ShieldAlert,
 } from "lucide-react";
 
 import MoneyExportsClient from "../../../components/money/exports/MoneyExportsClient";
 import FundingReportExportButton from "../../../components/money/exports/FundingReportExportButton";
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -95,31 +95,10 @@ async function loadFundingRecords() {
 }
 
 export default async function MoneyExportsPage() {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
-    return (
-      <main className="min-h-screen w-full bg-slate-950 px-4 py-10 text-white sm:px-6 lg:px-8">
-        <div className="w-full rounded-3xl border border-white/10 bg-white/10 p-8 shadow-2xl backdrop-blur-xl">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-red-300">
-            <ShieldAlert className="h-7 w-7" />
-          </div>
-
-          <h1 className="text-3xl font-black">Please sign in</h1>
-
-          <p className="mt-3 text-white/70">
-            You must be signed in to access the money export centre.
-          </p>
-
-          <Link
-            href="/admin"
-            className="mt-6 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950"
-          >
-            Go back
-          </Link>
-        </div>
-      </main>
-    );
+  if (!admin) {
+    redirect("/Admin/Login");
   }
 
   const currentYear = new Date().getFullYear();

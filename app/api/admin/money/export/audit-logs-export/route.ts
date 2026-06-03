@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -459,7 +460,10 @@ function actionLabel(actionValue: string | null | undefined, log?: MoneyAuditLog
   return labels[action] || action.replaceAll("_", " ") || "Unknown";
 }
 
-function actionExcelColour(actionValue: string | null | undefined, log?: MoneyAuditLog) {
+function actionExcelColour(
+  actionValue: string | null | undefined,
+  log?: MoneyAuditLog
+) {
   const action = cleanLogValue(actionValue);
 
   if (log && isHiddenAuditLog(log)) return "FFEA580C";
@@ -816,12 +820,12 @@ function buildErrorResponse(error: any) {
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
-        error: "Unauthorised. Please sign in again.",
+        error: "Unauthorised. Please sign in again as an admin.",
       },
       {
         status: 401,
@@ -882,9 +886,6 @@ export async function GET(req: Request) {
       )
       .slice(0, 12);
 
-    /**
-     * SHEET 1: PRINT REPORT
-     */
     const summarySheet = workbook.addWorksheet("Print Report", {
       views: [{ showGridLines: false }],
       pageSetup: {
@@ -1013,6 +1014,7 @@ export async function GET(req: Request) {
     }
 
     styleCard("A4:B4", "A5:B6", "Total Logs", logs.length, "FFF8FAFC");
+
     styleCard(
       "C4:D4",
       "C5:D6",
@@ -1020,6 +1022,7 @@ export async function GET(req: Request) {
       logs.filter((log) => log.action === "create").length,
       "FFECFDF5"
     );
+
     styleCard(
       "E4:F4",
       "E5:F6",
@@ -1027,6 +1030,7 @@ export async function GET(req: Request) {
       logs.filter((log) => isCheckedAuditLog(log)).length,
       "FFEFF6FF"
     );
+
     styleCard(
       "G4:H4",
       "G5:H6",
@@ -1034,6 +1038,7 @@ export async function GET(req: Request) {
       logs.filter((log) => isUncheckedAuditLog(log)).length,
       "FFFFFBEB"
     );
+
     styleCard(
       "A8:B8",
       "A9:B10",
@@ -1046,6 +1051,7 @@ export async function GET(req: Request) {
       ).length,
       "FFF0F9FF"
     );
+
     styleCard(
       "C8:D8",
       "C9:D10",
@@ -1053,6 +1059,7 @@ export async function GET(req: Request) {
       logs.filter((log) => isHiddenAuditLog(log)).length,
       "FFFFF7ED"
     );
+
     styleCard(
       "E8:F8",
       "E9:F10",
@@ -1066,6 +1073,7 @@ export async function GET(req: Request) {
       ).length,
       "FFFEF2F2"
     );
+
     styleCard(
       "G8:H8",
       "G9:H10",
@@ -1073,6 +1081,7 @@ export async function GET(req: Request) {
       new Set(logs.map((log) => getActorUniqueKey(log)).filter(Boolean)).size,
       "FFF8FAFC"
     );
+
     styleCard(
       "A11:B11",
       "A12:B13",
@@ -1221,9 +1230,6 @@ export async function GET(req: Request) {
     summarySheet.headerFooter.oddFooter =
       "&LPrinted by Burton Pride C.I.C&RPage &P of &N";
 
-    /**
-     * SHEET 2: AUDIT LOGS
-     */
     const logsSheet = workbook.addWorksheet("Audit Logs", {
       views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
       pageSetup: {
@@ -1255,6 +1261,7 @@ export async function GET(req: Request) {
     ];
 
     addMergedTitle(logsSheet, "Burton Pride C.I.C - Audit Logs", "A1", "N1");
+
     addMergedSubtitle(
       logsSheet,
       `Formatted export | Generated ${now.toLocaleString(
@@ -1352,9 +1359,6 @@ export async function GET(req: Request) {
       to: "N4",
     };
 
-    /**
-     * SHEET 3: CHANGED FIELDS
-     */
     const changedSheet = workbook.addWorksheet("Changed Fields", {
       views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
       pageSetup: {
@@ -1385,6 +1389,7 @@ export async function GET(req: Request) {
       "A1",
       "H1"
     );
+
     addMergedSubtitle(
       changedSheet,
       "One row per changed field, with before and after values.",
@@ -1450,9 +1455,6 @@ export async function GET(req: Request) {
       to: "H4",
     };
 
-    /**
-     * SHEET 4: USERS
-     */
     const usersSheet = workbook.addWorksheet("Users", {
       views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
       pageSetup: {
@@ -1584,9 +1586,6 @@ export async function GET(req: Request) {
       to: "J4",
     };
 
-    /**
-     * SHEET 5: RAW JSON
-     */
     const rawSheet = workbook.addWorksheet("Raw JSON", {
       views: [{ state: "frozen", ySplit: 5, showGridLines: false }],
       pageSetup: {
@@ -1613,6 +1612,7 @@ export async function GET(req: Request) {
     ];
 
     addMergedTitle(rawSheet, "Burton Pride C.I.C - Audit Raw JSON", "A1", "I1");
+
     addMergedSubtitle(
       rawSheet,
       "Full raw audit log data for checking details.",

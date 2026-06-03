@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -210,13 +211,13 @@ function buildFundingFilter(sponsor: MoneySponsor, year: string) {
 }
 
 export async function GET(request: Request) {
-  const { userId } = await auth();
+  const admin = await requireAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
-        error: "You must be signed in.",
-        details: "Clerk did not return a userId.",
+        error: "You must be signed in as an admin.",
+        details: "Your Supabase admin session was not found. Please sign in again through the admin login page.",
       },
       { status: 401 },
     );

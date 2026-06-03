@@ -1,44 +1,88 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getDisplayName(user: any) {
-  const firstName = user?.firstName || "";
-  const lastName = user?.lastName || "";
-  const fullName = `${firstName} ${lastName}`.trim();
+function cleanText(value: unknown) {
+  return String(value || "").trim();
+}
 
-  if (fullName) return fullName;
+function nameFromEmail(email?: string | null) {
+  const cleanEmail = cleanText(email);
 
-  const email =
-    user?.emailAddresses?.find((item: any) => item.id === user.primaryEmailAddressId)
-      ?.emailAddress ||
-    user?.emailAddresses?.[0]?.emailAddress ||
-    null;
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return "Admin";
+  }
 
-  if (!email) return "Admin";
-
-  return email
+  return cleanEmail
     .split("@")[0]
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter: string) => letter.toUpperCase())
     .trim();
 }
 
+async function getCurrentAdmin() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data: admin, error: adminError } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, name, full_name, role, is_active")
+    .eq("supabase_user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (adminError) {
+    throw new Error(adminError.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this Supabase user.");
+  }
+
+  const email = cleanText(admin.email || user.email) || null;
+
+  const name =
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
+    nameFromEmail(email);
+
+  return {
+    userId: user.id,
+    name,
+    email,
+    role: admin.role,
+  };
+}
+
+function errorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You must be signed in." ||
+    message === "No active admin account is linked to this Supabase user."
+  ) {
+    return 401;
+  }
+
+  return 500;
+}
+
 export async function GET() {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "You must be signed in." },
-        { status: 401 }
-      );
-    }
+    await getCurrentAdmin();
 
     await requireMainAdmin();
 
@@ -49,8 +93,12 @@ export async function GET() {
 
     if (error) {
       console.error("Import history load error:", error);
+
       return NextResponse.json(
-        { error: "Failed to load import history." },
+        {
+          error: "Failed to load import history.",
+          details: error.message,
+        },
         { status: 500 }
       );
     }
@@ -60,9 +108,15 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Import history API error:", error);
+
     return NextResponse.json(
-      { error: "Failed to load import history." },
-      { status: 500 }
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load import history.",
+      },
+      { status: errorStatus(error) }
     );
   }
 }

@@ -1,38 +1,63 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+type CurrentAdmin = {
+  id?: string | null;
+  user_id?: string | null;
+  admin_id?: string | null;
+  name?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+};
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(value: unknown) {
+  return String(value || "").trim();
+}
 
-  if (fullName) return fullName;
+function getActorName(admin: CurrentAdmin | null) {
+  if (!admin) return "Unknown user";
 
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
+  return (
+    cleanText(admin.full_name) ||
+    cleanText(admin.name) ||
+    cleanText(admin.display_name) ||
+    cleanText(admin.email) ||
+    "Unknown user"
+  );
+}
 
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
+function getActorEmail(admin: CurrentAdmin | null) {
+  return cleanText(admin?.email) || null;
+}
+
+function getActorId(admin: CurrentAdmin | null) {
+  return (
+    cleanText(admin?.id) ||
+    cleanText(admin?.admin_id) ||
+    cleanText(admin?.user_id) ||
+    null
+  );
+}
+
+async function getAdmin() {
+  try {
+    return (await requireAdmin()) as CurrentAdmin | null;
+  } catch {
+    return null;
   }
-
-  return "Unknown user";
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
+  const admin = await getAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "You must be signed in." },
+      { ok: false, error: "You must be signed in as an admin." },
       { status: 401 }
     );
   }
@@ -95,20 +120,20 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
+  const admin = await getAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
-      { ok: false, error: "You must be signed in." },
+      { ok: false, error: "You must be signed in as an admin." },
       { status: 401 }
     );
   }
 
-  const user = await currentUser();
   const body = await req.json().catch(() => ({}));
 
-  const actorEmail = user?.emailAddresses?.[0]?.emailAddress || null;
-  const actorName = getActorName(user);
+  const actorId = getActorId(admin);
+  const actorName = getActorName(admin);
+  const actorEmail = getActorEmail(admin);
 
   const payload = {
     action: String(body.action || "export"),
@@ -121,7 +146,7 @@ export async function POST(req: Request) {
     file_name: body.file_name || null,
     status: body.status || "started",
 
-    actor_clerk_user_id: userId,
+    actor_admin_id: actorId,
     actor_name: actorName,
     actor_email: actorEmail,
 

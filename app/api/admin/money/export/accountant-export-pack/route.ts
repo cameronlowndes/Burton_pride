@@ -1,13 +1,24 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
+
+import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type AnyRecord = Record<string, any>;
+
+type CurrentAdmin = {
+  id?: string | null;
+  admin_id?: string | null;
+  user_id?: string | null;
+  name?: string | null;
+  full_name?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+};
 
 type PackExportRoute = {
   key:
@@ -132,17 +143,19 @@ function pence(value: any) {
   return Number(value || 0);
 }
 
-function cleanText(value: any) {
+function cleanText(value: any): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return value;
   if (typeof value === "boolean") return value ? "Yes" : "No";
 
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
   }
+
+  return String(value).trim();
 }
 
 function jsonText(value: any) {
@@ -179,30 +192,38 @@ function titleCase(value: any) {
   return clean.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+function getActorName(admin: CurrentAdmin | null): string {
+  if (!admin) return "Unknown user";
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
+  return (
+    cleanText(admin.full_name) ||
+    cleanText(admin.name) ||
+    cleanText(admin.display_name) ||
+    cleanText(admin.email) ||
+    "Unknown user"
+  );
 }
 
-function getActorEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+function getActorEmail(admin: CurrentAdmin | null): string | null {
+  return cleanText(admin?.email) || null;
+}
+
+function getActorAdminId(admin: CurrentAdmin | null): string {
+  return (
+    cleanText(admin?.id) ||
+    cleanText(admin?.admin_id) ||
+    cleanText(admin?.user_id) ||
+    "unknown-admin"
+  );
+}
+
+async function getCurrentAdmin() {
+  try {
+    return (await requireAdmin()) as CurrentAdmin | null;
+  } catch (error) {
+    console.error("Accountant export pack auth error:", error);
+    return null;
+  }
 }
 
 function getBaseUrl(req: Request) {
@@ -265,7 +286,7 @@ function getLikelyFix(
   }
 
   if (status === 401) {
-    return `The route blocked the request as unauthorised. Open ${routeFile} and check Clerk auth/cookie handling.`;
+    return `The route blocked the request as unauthorised. Open ${routeFile} and check Supabase admin auth/session handling.`;
   }
 
   if (status === 403) {
@@ -411,7 +432,7 @@ async function savePackLog({
   route,
   fileName,
   status,
-  actorUserId,
+  actorAdminId,
   actorName,
   actorEmail,
   errorMessage,
@@ -421,31 +442,46 @@ async function savePackLog({
   route: string;
   fileName: string;
   status: "started" | "success" | "failed";
-  actorUserId: string;
+  actorAdminId: string;
   actorName: string;
   actorEmail: string | null;
   errorMessage?: string | null;
   metadata?: any;
 }) {
-  try {
-    await supabaseAdmin.from("money_export_logs").insert({
-      action: "export",
-      export_key: "accountant-export-pack",
-      export_title: "Accountant Export Pack",
-      export_type: "export",
-      export_year: year,
-      route,
-      file_name: fileName,
-      status,
-      actor_clerk_user_id: actorUserId,
-      actor_name: actorName,
-      actor_email: actorEmail,
-      metadata: metadata || null,
-      error_message: errorMessage || null,
-    });
-  } catch (error) {
-    console.error("Could not save accountant export pack log", error);
+  const basePayload = {
+    action: "export",
+    export_key: "accountant-export-pack",
+    export_title: "Accountant Export Pack",
+    export_type: "export",
+    export_year: year,
+    route,
+    file_name: fileName,
+    status,
+    actor_name: actorName,
+    actor_email: actorEmail,
+    metadata: metadata || null,
+    error_message: errorMessage || null,
+  };
+
+  const attempts = [
+    { ...basePayload, actor_admin_id: actorAdminId },
+    { ...basePayload, actor_user_id: actorAdminId },
+    basePayload,
+  ];
+
+  for (const payload of attempts) {
+    try {
+      const { error } = await supabaseAdmin
+        .from("money_export_logs")
+        .insert(payload);
+
+      if (!error) return;
+    } catch {
+      // Try the next payload shape below.
+    }
   }
+
+  console.error("Could not save accountant export pack log");
 }
 
 function createWorkbook(title: string) {
@@ -1043,7 +1079,7 @@ function createAuditLogsWorkbook(year: number, logs: AnyRecord[]) {
       log.export_key || metadata.record_id || "",
       log.actor_name || log.user_name || "Unknown user",
       log.actor_email || log.user_email || "",
-      log.actor_clerk_user_id || log.user_id || "",
+      log.actor_admin_id || log.actor_user_id || log.user_id || "",
       changedNames.join(", "),
       changedNames.length,
       log.route || metadata.source || "Money Tracker",
@@ -1769,13 +1805,13 @@ function buildReadme({
 }
 
 export async function GET(req: Request) {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
+  if (!admin) {
     return NextResponse.json(
       {
         error: "Unauthorised",
-        likelyFix: "Sign in again, then try downloading the accountant pack.",
+        likelyFix: "Sign in again as an admin, then try downloading the accountant pack.",
       },
       {
         status: 401,
@@ -1783,9 +1819,9 @@ export async function GET(req: Request) {
     );
   }
 
-  const user = await currentUser();
-  const actorName = getActorName(user);
-  const actorEmail = getActorEmail(user);
+  const actorAdminId = getActorAdminId(admin);
+  const actorName = getActorName(admin);
+  const actorEmail = getActorEmail(admin);
 
   const url = new URL(req.url);
   const year = Number(url.searchParams.get("year") || new Date().getFullYear());
@@ -1818,7 +1854,7 @@ export async function GET(req: Request) {
     route,
     fileName,
     status: "started",
-    actorUserId: userId,
+    actorAdminId,
     actorName,
     actorEmail,
     metadata: {
@@ -1920,7 +1956,7 @@ export async function GET(req: Request) {
       route,
       fileName,
       status: requiredFailures.length > 0 ? "failed" : "success",
-      actorUserId: userId,
+      actorAdminId,
       actorName,
       actorEmail,
       errorMessage:
@@ -1964,7 +2000,7 @@ export async function GET(req: Request) {
       route,
       fileName,
       status: "failed",
-      actorUserId: userId,
+      actorAdminId,
       actorName,
       actorEmail,
       errorMessage: message,
@@ -1983,7 +2019,7 @@ export async function GET(req: Request) {
           "app/api/admin/money/export/accountant-export-pack/route.ts",
         baseUrl,
         likelyFix:
-          "Check ACCOUNTANT-PACK-DEBUG.json if a ZIP downloaded. If no ZIP downloaded, check this route file, JSZip, Clerk auth, and Vercel/terminal logs.",
+          "Check ACCOUNTANT-PACK-DEBUG.json if a ZIP downloaded. If no ZIP downloaded, check this route file, JSZip, Supabase admin auth, and Vercel/terminal logs.",
         checks: [
           "Make sure JSZip and ExcelJS are installed.",
           "Make sure this route exports named GET.",
