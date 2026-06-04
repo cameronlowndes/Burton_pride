@@ -71,22 +71,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const payload =
-      action === "lock"
-        ? {
-            year,
-            is_locked: true,
-            locked_at: new Date().toISOString(),
-            locked_by: "Main admin",
-            updated_at: new Date().toISOString(),
-          }
-        : {
-            year,
-            is_locked: false,
-            unlocked_at: new Date().toISOString(),
-            unlocked_by: "Main admin",
-            updated_at: new Date().toISOString(),
-          };
+    const now = new Date().toISOString();
+    const payload = {
+      year,
+      is_locked: action === "lock",
+      locked_at: action === "lock" ? now : null,
+      locked_by: action === "lock" ? "Main admin" : null,
+      unlocked_at: action === "unlock" ? now : null,
+      unlocked_by: action === "unlock" ? "Main admin" : null,
+      updated_at: now,
+    };
 
     const { data, error } = await supabaseAdmin
       .from("money_year_locks")
