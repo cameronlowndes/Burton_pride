@@ -110,7 +110,6 @@ export default function AddTransactionPage() {
             saving={moneyPage.saving}
             handleSubmit={moneyPage.handleSubmit}
             cancelEditTransaction={moneyPage.cancelEditTransaction}
-            fillTestTransaction={moneyPage.fillTestTransaction}
             openNewSponsorForm={moneyPage.openNewSponsorForm}
           />
         </section>

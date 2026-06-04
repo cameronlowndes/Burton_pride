@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const MAIN_ADMIN_EMAILS = [
   "cameronlowndes@burtonpride.co.uk",
   "simonwhale@burtonpride.co.uk",
-  "isaactimmins@burtonpride.co.uk",
+  "isaac@burtonpride.co.uk",
   "olga@burtonpride.co.uk",
 ];
 
