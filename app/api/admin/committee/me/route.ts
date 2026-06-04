@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 
 const MAIN_ADMIN_EMAILS = [
   "cameronlowndes@burtonpride.co.uk",
   "simonwhale@burtonpride.co.uk",
- " isaactimmins@burtonpride.co.uk",
-  "olga@burtonpride.co.uk"
+  "isaactimmins@burtonpride.co.uk",
+  "olga@burtonpride.co.uk",
 ];
 
 function clean(value: unknown) {
@@ -52,28 +52,59 @@ function isAdminEmail(email: string) {
   return MAIN_ADMIN_EMAILS.includes(email.toLowerCase().trim());
 }
 
+async function getAdminEmail() {
+  const admin = await getCurrentAdmin();
+
+  if (!admin) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: "Not authenticated.",
+          details:
+            "No admin session was found. Please sign in to the Burton Pride Admin Portal.",
+        },
+        { status: 401 }
+      ),
+      email: "",
+    };
+  }
+
+  const email = String((admin as any).email || "").toLowerCase().trim();
+
+  if (!email) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: "Admin account has no email address.",
+          details:
+            "Your admin account exists, but no email is saved on it. Update the admin_users table.",
+        },
+        { status: 400 }
+      ),
+      email: "",
+    };
+  }
+
+  return {
+    ok: true,
+    response: null,
+    email,
+  };
+}
+
 export async function GET(req: Request) {
   try {
-    const { userId } = await auth();
+    const adminCheck = await getAdminEmail();
 
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
-      );
+    if (!adminCheck.ok) {
+      return adminCheck.response;
     }
 
-    const user = await currentUser();
-    const email =
-      user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
-
-    if (!email) {
-      return NextResponse.json(
-        { ok: false, error: "No user email found" },
-        { status: 400 }
-      );
-    }
-
+    const email = adminCheck.email;
     const db = supabaseAdmin;
     const { searchParams } = new URL(req.url);
     const requestedId = searchParams.get("id");
@@ -89,7 +120,14 @@ export async function GET(req: Request) {
 
         if (error) {
           return NextResponse.json(
-            { ok: false, error: error.message || "Member not found" },
+            {
+              ok: false,
+              error: "Committee member not found.",
+              details: error.message,
+              table: "committee_members",
+              operation: "select_single",
+              memberId: requestedId,
+            },
             { status: 404 }
           );
         }
@@ -110,7 +148,10 @@ export async function GET(req: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: error.message || "Failed to load committee members",
+            error: "Failed to load committee members.",
+            details: error.message,
+            table: "committee_members",
+            operation: "select_all",
           },
           { status: 500 }
         );
@@ -131,7 +172,14 @@ export async function GET(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message || "Profile not found" },
+        {
+          ok: false,
+          error: "Committee profile not found.",
+          details: error.message,
+          table: "committee_members",
+          operation: "select_by_email",
+          email,
+        },
         { status: 404 }
       );
     }
@@ -141,12 +189,16 @@ export async function GET(req: Request) {
       isMainAdmin: false,
       member: data,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Committee GET API error:", error);
+
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error ? error.message : "Unexpected server error",
+        error: "Committee GET API crashed.",
+        details: error?.message || "Unknown error",
+        stack:
+          process.env.NODE_ENV === "development" ? error?.stack : undefined,
       },
       { status: 500 }
     );
@@ -155,35 +207,28 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { userId } = await auth();
+    const adminCheck = await getAdminEmail();
 
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: "Unauthorized" },
-        { status: 401 }
-      );
+    if (!adminCheck.ok) {
+      return adminCheck.response;
     }
 
-    const user = await currentUser();
-    const email =
-      user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
-
-    if (!email) {
-      return NextResponse.json(
-        { ok: false, error: "No user email found" },
-        { status: 400 }
-      );
-    }
-
+    const email = adminCheck.email;
     const db = supabaseAdmin;
     const isMainAdmin = isAdminEmail(email);
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const targetId = clean(body?.id);
 
     if (isMainAdmin) {
       if (!targetId) {
         return NextResponse.json(
-          { ok: false, error: "Member id is required for admin updates" },
+          {
+            ok: false,
+            error: "Member id is required for admin updates.",
+            details:
+              "Main admin updates must send the member id in the request body.",
+            receivedBody: body,
+          },
           { status: 400 }
         );
       }
@@ -212,7 +257,15 @@ export async function PATCH(req: Request) {
 
       if (error) {
         return NextResponse.json(
-          { ok: false, error: error.message || "Failed to update member" },
+          {
+            ok: false,
+            error: "Failed to update committee member.",
+            details: error.message,
+            table: "committee_members",
+            operation: "update_by_id",
+            memberId: targetId,
+            payload: adminUpdates,
+          },
           { status: 500 }
         );
       }
@@ -248,7 +301,15 @@ export async function PATCH(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { ok: false, error: error.message || "Failed to update profile" },
+        {
+          ok: false,
+          error: "Failed to update committee profile.",
+          details: error.message,
+          table: "committee_members",
+          operation: "update_by_email",
+          email,
+          payload: memberUpdates,
+        },
         { status: 500 }
       );
     }
@@ -258,12 +319,16 @@ export async function PATCH(req: Request) {
       isMainAdmin: false,
       member: data,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Committee PATCH API error:", error);
+
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error ? error.message : "Unexpected server error",
+        error: "Committee PATCH API crashed.",
+        details: error?.message || "Unknown error",
+        stack:
+          process.env.NODE_ENV === "development" ? error?.stack : undefined,
       },
       { status: 500 }
     );

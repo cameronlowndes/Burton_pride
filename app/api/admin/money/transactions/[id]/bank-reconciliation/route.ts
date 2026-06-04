@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
 
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,27 +26,35 @@ const allowedStatuses: BankReconciliationStatus[] = [
   "ignored",
 ];
 
-function getUserName(user: any) {
-  const firstName = user?.firstName || "";
-  const lastName = user?.lastName || "";
-  const fullName = `${firstName} ${lastName}`.trim();
+function formatNameFromEmail(email?: string | null) {
+  const cleanEmail = String(email || "").trim();
 
-  if (fullName) return fullName;
+  if (!cleanEmail || !cleanEmail.includes("@")) {
+    return null;
+  }
 
-  const email =
-    user?.emailAddresses?.find(
-      (item: any) => item.id === user.primaryEmailAddressId
-    )?.emailAddress ||
-    user?.emailAddresses?.[0]?.emailAddress ||
-    null;
-
-  if (!email) return "Admin";
-
-  return email
+  return cleanEmail
     .split("@")[0]
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter: string) => letter.toUpperCase())
     .trim();
+}
+
+async function getAdminName() {
+  const admin = await requireAdmin();
+  const safeAdmin = admin as any;
+
+  const email = safeAdmin?.email || null;
+
+  return (
+    safeAdmin?.name ||
+    safeAdmin?.full_name ||
+    safeAdmin?.fullName ||
+    safeAdmin?.username ||
+    safeAdmin?.display_name ||
+    formatNameFromEmail(email) ||
+    "Admin"
+  );
 }
 
 function clean(value: unknown) {
@@ -55,19 +63,8 @@ function clean(value: unknown) {
 
 export async function PATCH(request: Request, { params }: Params) {
   try {
-    const { userId } = await auth();
+    const adminName = await getAdminName();
 
-    if (!userId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You must be signed in.",
-        },
-        { status: 401 }
-      );
-    }
-
-    const user = await currentUser();
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
 
@@ -115,7 +112,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const reconciledAt =
       status === "matched" ? new Date().toISOString() : null;
 
-    const reconciledBy = status === "matched" ? getUserName(user) : null;
+    const reconciledBy = status === "matched" ? adminName : null;
 
     const updatePayload = {
       bank_reconciliation_status: status,
@@ -172,6 +169,7 @@ export async function PATCH(request: Request, { params }: Params) {
         source: "money_tracker",
         route: "/api/admin/money/transactions/[id]/bank-reconciliation",
         bank_reconciliation_status: status,
+        reconciled_by: reconciledBy,
       },
     });
 

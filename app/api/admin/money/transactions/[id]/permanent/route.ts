@@ -1,34 +1,25 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getActorName(user: Awaited<ReturnType<typeof currentUser>>) {
-  if (!user) return "Unknown user";
+async function getActor() {
+  const admin = await requireAdmin();
+  const safeAdmin = admin as any;
 
-  const fullName = `${user.firstName || ""} ${user.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (fullName) return fullName;
-
-  const email = user.emailAddresses?.[0]?.emailAddress || "";
-
-  if (email) {
-    return email
-      .split("@")[0]
-      .replace(/[._-]+/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-      .trim();
-  }
-
-  return "Unknown user";
-}
-
-function getActorEmail(user: Awaited<ReturnType<typeof currentUser>>) {
-  return user?.emailAddresses?.[0]?.emailAddress || null;
+  return {
+    actorUserId: safeAdmin?.id || null,
+    actorName:
+      safeAdmin?.name ||
+      safeAdmin?.full_name ||
+      safeAdmin?.fullName ||
+      safeAdmin?.username ||
+      safeAdmin?.display_name ||
+      "Unknown admin",
+    actorEmail: safeAdmin?.email || null,
+  };
 }
 
 export async function DELETE(
@@ -36,6 +27,8 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { actorUserId, actorName, actorEmail } = await getActor();
+
     const { id } = await context.params;
 
     if (!id) {
@@ -56,12 +49,6 @@ export async function DELETE(
         { status: 400 }
       );
     }
-
-    const user = await currentUser();
-
-    const actorUserId = user?.id || null;
-    const actorName = getActorName(user);
-    const actorEmail = getActorEmail(user);
 
     const { data: beforeTransaction, error: beforeError } = await supabaseAdmin
       .from("money_transactions")

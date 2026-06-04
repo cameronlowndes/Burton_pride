@@ -22,9 +22,15 @@ type Member = {
 type ApiResponse = {
   ok: boolean;
   error?: string;
+  message?: string;
+  details?: unknown;
+  technicalDetails?: unknown;
+  hint?: string;
+  code?: string;
   isMainAdmin?: boolean;
   member?: Member;
   members?: Member[];
+  url?: string;
 };
 
 const emptyForm = {
@@ -60,6 +66,92 @@ const emptyCreateForm = {
 function safeNumber(value: unknown, fallback = 50) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function stringifyDetails(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildDetailedErrorMessage({
+  fallback,
+  response,
+  payload,
+  rawText,
+}: {
+  fallback: string;
+  response?: Response;
+  payload?: ApiResponse | null;
+  rawText?: string;
+}) {
+  const message =
+    payload?.error ||
+    payload?.message ||
+    fallback;
+
+  const parts = [
+    message,
+    response
+      ? `Status: ${response.status} ${response.statusText || ""}`.trim()
+      : "",
+    response?.url ? `Route: ${response.url}` : "",
+    payload?.code ? `Code: ${payload.code}` : "",
+    payload?.hint ? `Hint: ${payload.hint}` : "",
+    payload?.details
+      ? `Details: ${stringifyDetails(payload.details)}`
+      : "",
+    payload?.technicalDetails
+      ? `Technical details: ${stringifyDetails(payload.technicalDetails)}`
+      : "",
+    rawText && !payload
+      ? `Raw response: ${rawText}`
+      : "",
+  ].filter(Boolean);
+
+  return parts.join("\n\n");
+}
+
+async function readJsonResponse(response: Response, fallback: string) {
+  const rawText = await response.text();
+  let payload: ApiResponse | null = null;
+
+  try {
+    payload = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok || !payload?.ok) {
+    throw new Error(
+      buildDetailedErrorMessage({
+        fallback,
+        response,
+        payload,
+        rawText,
+      })
+    );
+  }
+
+  return payload;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
 }
 
 export default function MyCommitteeStoryPage() {
@@ -120,11 +212,10 @@ export default function MyCommitteeStoryPage() {
         cache: "no-store",
       });
 
-      const data: ApiResponse = await res.json();
-
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load committee profile");
-      }
+      const data = await readJsonResponse(
+        res,
+        "Failed to load committee profile"
+      );
 
       setIsMainAdmin(!!data.isMainAdmin);
 
@@ -153,7 +244,7 @@ export default function MyCommitteeStoryPage() {
         throw new Error("Profile not found");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load profile");
+      setError(getErrorMessage(err, "Failed to load profile"));
     } finally {
       setLoading(false);
     }
@@ -214,10 +305,10 @@ export default function MyCommitteeStoryPage() {
       body: file,
     });
 
-    const data = await res.json();
+    const data = await readJsonResponse(res, "Upload failed");
 
-    if (!res.ok || !data?.ok || !data?.url) {
-      throw new Error(data?.error || "Upload failed");
+    if (!data.url) {
+      throw new Error("Upload finished, but the API did not return an image URL.");
     }
 
     return data.url;
@@ -245,7 +336,7 @@ export default function MyCommitteeStoryPage() {
 
       setSuccess("Image uploaded successfully. You can now move the crop to center the face.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload image");
+      setError(getErrorMessage(err, "Failed to upload image"));
     } finally {
       setUploadingEditImage(false);
       e.target.value = "";
@@ -274,7 +365,7 @@ export default function MyCommitteeStoryPage() {
 
       setSuccess("Image uploaded successfully. You can now move the crop to center the face.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload image");
+      setError(getErrorMessage(err, "Failed to upload image"));
     } finally {
       setUploadingCreateImage(false);
       e.target.value = "";
@@ -318,10 +409,10 @@ export default function MyCommitteeStoryPage() {
         body: JSON.stringify(payload),
       });
 
-      const data: ApiResponse = await res.json();
+      const data = await readJsonResponse(res, "Failed to save profile");
 
-      if (!res.ok || !data.ok || !data.member) {
-        throw new Error(data.error || "Failed to save profile");
+      if (!data.member) {
+        throw new Error("Save finished, but the API did not return the updated member.");
       }
 
       setMember(data.member);
@@ -340,7 +431,7 @@ export default function MyCommitteeStoryPage() {
         setMembers([data.member]);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save profile");
+      setError(getErrorMessage(err, "Failed to save profile"));
     } finally {
       setSaving(false);
     }
@@ -367,10 +458,10 @@ export default function MyCommitteeStoryPage() {
         }),
       });
 
-      const data: ApiResponse = await res.json();
+      const data = await readJsonResponse(res, "Failed to create member");
 
-      if (!res.ok || !data.ok || !data.member) {
-        throw new Error(data.error || "Failed to create member");
+      if (!data.member) {
+        throw new Error("Create finished, but the API did not return the new member.");
       }
 
       const created = data.member;
@@ -386,7 +477,7 @@ export default function MyCommitteeStoryPage() {
       setCreateForm(emptyCreateForm);
       setSuccess("New committee member created successfully.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create member");
+      setError(getErrorMessage(err, "Failed to create member"));
     } finally {
       setCreating(false);
     }
@@ -437,7 +528,10 @@ export default function MyCommitteeStoryPage() {
 
           {error && (
             <div className="mt-6 rounded-2xl border border-red-300/30 bg-red-500/20 px-4 py-3 text-white">
-              {error}
+              <p className="mb-2 font-black">Something went wrong</p>
+              <pre className="whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-sm leading-6 text-white/90">
+                {error}
+              </pre>
             </div>
           )}
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,17 +22,18 @@ function safeFileName(name: string) {
 
 async function getActorLabel() {
   try {
-    const user = await currentUser();
+    const admin = await requireAdmin();
+    const safeAdmin = admin as any;
 
     const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      safeAdmin?.name ||
+      safeAdmin?.full_name ||
+      safeAdmin?.fullName ||
+      safeAdmin?.username ||
+      safeAdmin?.display_name ||
       null;
 
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
+    const actorEmail = safeAdmin?.email || null;
 
     if (actorName && actorEmail) return `${actorName} (${actorEmail})`;
     if (actorName) return actorName;
@@ -151,6 +152,8 @@ async function readRepaymentRequest(req: Request) {
 
 export async function PATCH(req: Request, context: RouteContext) {
   try {
+    await requireAdmin();
+
     const { id } = await context.params;
 
     if (!id) {

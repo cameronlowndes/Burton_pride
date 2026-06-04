@@ -1699,7 +1699,7 @@ export default function MoneyRefundTracker() {
                 </Link>
 
                 <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/Refunds/hidden"
+                  href="/Admin/MoneyManagement/TrackingMoney/Refunds/Delete"
                   className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20"
                 >
                   <FileClock className="h-4 w-4" />

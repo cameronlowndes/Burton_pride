@@ -1,5 +1,5 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 
 export type MoneyAuditAction =
   | "create"
@@ -41,25 +41,33 @@ function nameFromEmail(email: string | null | undefined) {
 }
 
 async function getAuditActor() {
-  const authData = await auth();
-  const user = await currentUser().catch(() => null);
+  try {
+    const admin = await getCurrentAdmin();
+    const safeAdmin = admin as any;
 
-  const actorEmail =
-    user?.primaryEmailAddress?.emailAddress ||
-    user?.emailAddresses?.[0]?.emailAddress ||
-    null;
+    const actorEmail = safeAdmin?.email || null;
 
-  const actorName =
-    user?.fullName ||
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-    nameFromEmail(actorEmail) ||
-    null;
+    const actorName =
+      safeAdmin?.name ||
+      safeAdmin?.full_name ||
+      safeAdmin?.fullName ||
+      safeAdmin?.display_name ||
+      safeAdmin?.username ||
+      nameFromEmail(actorEmail) ||
+      "Unknown admin";
 
-  return {
-    actorUserId: authData.userId || user?.id || null,
-    actorName,
-    actorEmail,
-  };
+    return {
+      actorUserId: safeAdmin?.id || null,
+      actorName,
+      actorEmail,
+    };
+  } catch {
+    return {
+      actorUserId: null,
+      actorName: "Unknown admin",
+      actorEmail: null,
+    };
+  }
 }
 
 export function getChangedFields(beforeData: any, afterData: any) {

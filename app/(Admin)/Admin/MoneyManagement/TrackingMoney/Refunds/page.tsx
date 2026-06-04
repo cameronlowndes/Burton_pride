@@ -1,7 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-
 import MoneyRefundTracker from "../../../components/money/Refunds/MoneyRefundTracker";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,11 +11,7 @@ export const metadata = {
 };
 
 export default async function MoneyRefundsPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    redirect("/sign-in");
-  }
+  await requireAdmin();
 
   return <MoneyRefundTracker />;
 }

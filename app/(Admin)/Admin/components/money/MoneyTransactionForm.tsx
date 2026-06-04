@@ -251,7 +251,7 @@ type MoneyTransactionFormProps = {
 
   handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
-  fillTestTransaction: () => void;
+
   openNewSponsorForm: () => void;
 };
 
@@ -397,7 +397,6 @@ export default function MoneyTransactionForm({
   openNewSupplierForm,
   handleSubmit,
   cancelEditTransaction,
-  fillTestTransaction,
   openNewSponsorForm,
 }: MoneyTransactionFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -414,6 +413,7 @@ export default function MoneyTransactionForm({
     useState(false);
   const [fundingOverspendWarningOpen, setFundingOverspendWarningOpen] =
     useState(false);
+  const [testMessageOpen, setTestMessageOpen] = useState(false);
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
@@ -709,6 +709,15 @@ export default function MoneyTransactionForm({
     setFundingOverspendWarningOpen(false);
   }
 
+  function handleTestButtonClick() {
+    // fillTestTransaction();
+    setTestMessageOpen(true);
+
+    setTimeout(() => {
+      setTestMessageOpen(false);
+    }, 3500);
+  }
+
   function resetWarnings() {
     setDuplicateWarning(null);
     setDuplicateError(null);
@@ -747,17 +756,13 @@ export default function MoneyTransactionForm({
                 Cancel
               </button>
             )}
-
-            {!editingTransaction && (
-              <button
-                type="button"
-                onClick={fillTestTransaction}
-                className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/20"
-              >
-                Test
-              </button>
-            )}
           </div>
+
+          {testMessageOpen && (
+            <div className="mt-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 shadow-lg shadow-emerald-500/10">
+              This is a test
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">

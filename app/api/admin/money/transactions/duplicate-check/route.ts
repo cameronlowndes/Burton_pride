@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,14 +16,7 @@ function normaliseTitle(value: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "You must be signed in." },
-        { status: 401 }
-      );
-    }
+    await requireAdmin();
 
     const body = await request.json();
 
@@ -91,7 +84,12 @@ export async function POST(request: Request) {
     console.error("Duplicate transaction check API error:", error);
 
     return NextResponse.json(
-      { error: "Failed to check for duplicate transactions." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to check for duplicate transactions.",
+      },
       { status: 500 }
     );
   }

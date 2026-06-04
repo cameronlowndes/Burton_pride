@@ -1,7 +1,5 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-
 import HiddenRefundsPageClient from "../../../../components/money/Refunds/Delete/HiddenRefundsPageClient";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,11 +11,7 @@ export const metadata = {
 };
 
 export default async function HiddenRefundsPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    redirect("/sign-in");
-  }
+  await requireAdmin();
 
   return <HiddenRefundsPageClient />;
 }

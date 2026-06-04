@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +39,6 @@ function cleanOrNull(value: string) {
 
 function toBoolean(value: string) {
   const text = String(value || "").toLowerCase().trim();
-
   return text === "true" || text === "1" || text === "yes";
 }
 
@@ -83,17 +82,18 @@ function cleanFinanceNoteStatus(value: unknown) {
 
 async function getActorLabel() {
   try {
-    const user = await currentUser();
+    const admin = await requireAdmin();
+    const safeAdmin = admin as any;
 
     const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+      safeAdmin?.name ||
+      safeAdmin?.full_name ||
+      safeAdmin?.fullName ||
+      safeAdmin?.username ||
+      safeAdmin?.display_name ||
       null;
 
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
+    const actorEmail = safeAdmin?.email || null;
 
     if (actorName && actorEmail) return `${actorName} (${actorEmail})`;
     if (actorName) return actorName;
@@ -184,14 +184,13 @@ async function loadAttachmentsForTransaction(transactionId: string) {
 
 export async function PATCH(req: Request, context: RouteContext) {
   try {
+    await requireAdmin();
+
     const { id } = await context.params;
 
     if (!id) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing transaction ID",
-        },
+        { ok: false, error: "Missing transaction ID" },
         { status: 400 }
       );
     }
@@ -204,11 +203,7 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     if (loadError) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: loadError.message,
-          details: loadError,
-        },
+        { ok: false, error: loadError.message, details: loadError },
         { status: 500 }
       );
     }
@@ -225,7 +220,6 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
 
     const beforeAttachments = await loadAttachmentsForTransaction(id);
-
     const formData = await req.formData();
 
     const title = clean(formData.get("title"));
@@ -313,31 +307,21 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     if (type !== "income" && type !== "expense") {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Type must be income or expense",
-          received: type,
-        },
+        { ok: false, error: "Type must be income or expense", received: type },
         { status: 400 }
       );
     }
 
     if (!paymentMethod && !isSponsorLinked) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Please choose a payment method.",
-        },
+        { ok: false, error: "Please choose a payment method." },
         { status: 400 }
       );
     }
 
     if (isPersonalFunds && !personalFundsName && !isSponsorLinked) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Personal funds name is required.",
-        },
+        { ok: false, error: "Personal funds name is required." },
         { status: 400 }
       );
     }
@@ -383,7 +367,6 @@ export async function PATCH(req: Request, context: RouteContext) {
         : cleanOrNull(paymentMethod),
       transaction_date:
         transactionDate || new Date().toISOString().slice(0, 10),
-
       source: isSponsorLinked ? "sponsorship" : source || "manual",
 
       bank_reconciliation_status: bankReconciliationStatus,
@@ -417,13 +400,6 @@ export async function PATCH(req: Request, context: RouteContext) {
       updated_at: updatedAt,
     };
 
-    /*
-      Important:
-      Do not update transaction_reference here.
-      The reference is created once in the main transactions POST route.
-      Editing a transaction should keep the original reference, for example BP-2026-001.
-    */
-
     const { data, error } = await supabaseAdmin
       .from("money_transactions")
       .update(updatePayload)
@@ -434,12 +410,7 @@ export async function PATCH(req: Request, context: RouteContext) {
 
     if (error) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: error.message,
-          details: error,
-          sent: updatePayload,
-        },
+        { ok: false, error: error.message, details: error, sent: updatePayload },
         { status: 500 }
       );
     }
@@ -554,14 +525,13 @@ export async function PATCH(req: Request, context: RouteContext) {
 
 export async function DELETE(req: Request, context: RouteContext) {
   try {
+    await requireAdmin();
+
     const { id } = await context.params;
 
     if (!id) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Missing transaction ID",
-        },
+        { ok: false, error: "Missing transaction ID" },
         { status: 400 }
       );
     }
@@ -574,11 +544,7 @@ export async function DELETE(req: Request, context: RouteContext) {
 
     if (loadError) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: loadError.message,
-          details: loadError,
-        },
+        { ok: false, error: loadError.message, details: loadError },
         { status: 500 }
       );
     }
@@ -610,11 +576,7 @@ export async function DELETE(req: Request, context: RouteContext) {
 
     if (error) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: error.message,
-          details: error,
-        },
+        { ok: false, error: error.message, details: error },
         { status: 500 }
       );
     }

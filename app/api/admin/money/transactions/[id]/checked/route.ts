@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { createMoneyAuditLog } from "@/lib/money/adminMoneyAudit";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,32 +36,25 @@ function formatNameFromEmail(email?: string | null) {
 }
 
 async function getActor(): Promise<Actor> {
-  try {
-    const user = await currentUser();
+  const admin = await requireAdmin();
+  const safeAdmin = admin as any;
 
-    const actorEmail =
-      user?.primaryEmailAddress?.emailAddress ||
-      user?.emailAddresses?.[0]?.emailAddress ||
-      null;
+  const actorEmail = safeAdmin?.email || null;
 
-    const actorName =
-      user?.fullName ||
-      [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
-      formatNameFromEmail(actorEmail) ||
-      "Unknown admin";
+  const actorName =
+    safeAdmin?.name ||
+    safeAdmin?.full_name ||
+    safeAdmin?.fullName ||
+    safeAdmin?.username ||
+    safeAdmin?.display_name ||
+    formatNameFromEmail(actorEmail) ||
+    "Unknown admin";
 
-    return {
-      userId: user?.id || null,
-      name: actorName.trim() || "Unknown admin",
-      email: actorEmail,
-    };
-  } catch {
-    return {
-      userId: null,
-      name: "Unknown admin",
-      email: null,
-    };
-  }
+  return {
+    userId: safeAdmin?.id || null,
+    name: String(actorName).trim() || "Unknown admin",
+    email: actorEmail,
+  };
 }
 
 function normalise(value: unknown) {
@@ -73,7 +66,8 @@ function normalise(value: unknown) {
 function canActorUncheckTransaction(beforeData: any, actor: Actor) {
   const checkedByUserId = beforeData?.checked_by_user_id || null;
   const checkedByEmail = beforeData?.checked_by_email || null;
-  const checkedByName = beforeData?.checked_by || beforeData?.checked_by_name || null;
+  const checkedByName =
+    beforeData?.checked_by || beforeData?.checked_by_name || null;
 
   const hasStoredUserId = Boolean(checkedByUserId);
   const hasStoredEmail = Boolean(checkedByEmail);
@@ -82,12 +76,14 @@ function canActorUncheckTransaction(beforeData: any, actor: Actor) {
     return true;
   }
 
-  if (hasStoredEmail && actor.email && normalise(checkedByEmail) === normalise(actor.email)) {
+  if (
+    hasStoredEmail &&
+    actor.email &&
+    normalise(checkedByEmail) === normalise(actor.email)
+  ) {
     return true;
   }
 
-  // Fallback for older checked records created before checked_by_user_id and checked_by_email existed.
-  // This lets the original checker still undo if the saved display name matches their current name.
   if (!hasStoredUserId && !hasStoredEmail && checkedByName) {
     return normalise(checkedByName) === normalise(actor.name);
   }
@@ -174,7 +170,9 @@ export async function POST(_req: Request, context: RouteContext) {
           {
             ok: false,
             error: `Only ${
-              beforeData.checked_by || beforeData.checked_by_name || "the admin who checked this transaction"
+              beforeData.checked_by ||
+              beforeData.checked_by_name ||
+              "the admin who checked this transaction"
             } can uncheck this transaction.`,
             transaction: beforeData,
           },
@@ -213,7 +211,8 @@ export async function POST(_req: Request, context: RouteContext) {
         return NextResponse.json(
           {
             ok: false,
-            error: "This transaction may have already been unchecked. Refresh the page and try again.",
+            error:
+              "This transaction may have already been unchecked. Refresh the page and try again.",
           },
           { status: 409 }
         );
@@ -311,7 +310,8 @@ export async function POST(_req: Request, context: RouteContext) {
       return NextResponse.json(
         {
           ok: false,
-          error: "This transaction may have already been checked by another admin. Refresh the page and try again.",
+          error:
+            "This transaction may have already been checked by another admin. Refresh the page and try again.",
         },
         { status: 409 }
       );

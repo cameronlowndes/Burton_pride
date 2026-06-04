@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireAdmin } from "@/lib/adminPermissions";
 import { redirect } from "next/navigation";
 
 import BankBalanceCheckPageClient from "../../../components/money/BankBalanceCheckPageClient";
@@ -13,11 +13,7 @@ export const metadata = {
 };
 
 export default async function BankBalanceCheckPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
-    redirect("/sign-in");
-  }
+  await requireAdmin();
 
   return <BankBalanceCheckPageClient />;
 }

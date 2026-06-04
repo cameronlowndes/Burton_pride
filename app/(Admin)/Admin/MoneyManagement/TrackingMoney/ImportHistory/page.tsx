@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -9,11 +8,12 @@ import {
 
 import ImportHistoryClient from "./ImportHistoryClient";
 import { requireMainAdmin } from "@/lib/isMainAdmin";
+import { requireAdmin } from "@/lib/adminPermissions";
 
 export default async function MoneyImportHistoryPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
+  try {
+    await requireAdmin();
+  } catch {
     return (
       <main className="min-h-screen w-full max-w-none bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
         <div className="mx-auto w-full max-w-2xl rounded-3xl border border-white/10 bg-white/10 p-8 shadow-2xl backdrop-blur-xl">

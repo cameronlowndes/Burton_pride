@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -8,15 +7,18 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
-import { requireMoneyPermission } from "@/lib/adminPermissions";
+import {
+  requireAdmin,
+  requireMoneyPermission,
+} from "@/lib/adminPermissions";
 import DeletePasswordClient from "./DeletePasswordClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function DeletePasswordPage() {
-  const { userId } = await auth();
-
-  if (!userId) {
+  try {
+    await requireAdmin();
+  } catch {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 py-10 text-white">
         <div className="w-full max-w-xl rounded-[32px] border border-white/20 bg-white/10 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.28)] backdrop-blur-2xl sm:p-10">
@@ -62,7 +64,9 @@ export default async function DeletePasswordPage() {
           <p className="mt-4 text-sm leading-7 text-white/85">
             This page controls the main delete password used for high-risk money
             tracker actions, including deleting all transactions. You need the{" "}
-            <span className="font-bold text-white">Delete all money transactions</span>{" "}
+            <span className="font-bold text-white">
+              Delete all money transactions
+            </span>{" "}
             permission to access it.
           </p>
 
