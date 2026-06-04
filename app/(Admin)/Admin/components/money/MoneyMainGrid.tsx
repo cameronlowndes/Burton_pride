@@ -221,7 +221,6 @@ export default function MoneyMainGrid({
         saving={saving}
         handleSubmit={handleSubmit}
         cancelEditTransaction={cancelEditTransaction}
-        fillTestTransaction={fillTestTransaction}
         openNewSponsorForm={openNewSponsorForm}
       />
 
