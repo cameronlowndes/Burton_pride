@@ -1364,7 +1364,6 @@ export default function MoneyDashboardPage() {
               saving={moneyPage.saving}
               handleSubmit={moneyPage.handleSubmit}
               cancelEditTransaction={closeAddTransactionModal}
-              fillTestTransaction={moneyPage.fillTestTransaction}
               openNewSponsorForm={moneyPage.openNewSponsorForm}
             />
           </div>
