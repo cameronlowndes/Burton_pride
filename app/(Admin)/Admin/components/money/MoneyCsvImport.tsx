@@ -6,9 +6,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
+  Edit3,
   FileClock,
   FileSpreadsheet,
   Loader2,
+  RefreshCcw,
   Search,
   ShieldAlert,
   Upload,
@@ -72,6 +74,39 @@ type PreviewRow = {
   stripePaymentIntentId: string;
 };
 
+const DEFAULT_CATEGORIES = [
+  "Bank Import",
+  "Donation",
+  "Sponsorship",
+  "Pitch Fee",
+  "Food Vendor",
+  "Printing",
+  "Venue",
+  "Insurance",
+  "Security",
+  "Equipment Hire",
+  "Marketing",
+  "Accessibility",
+  "Transport",
+  "Performer",
+  "Cash Fundraising",
+  "Cash Fundraising Expense",
+  "Other",
+  "Uncategorised",
+];
+
+const PAYMENT_METHODS = [
+  "Bank Transfer",
+  "Cash",
+  "Card",
+  "Stripe",
+  "PayPal",
+  "Cheque",
+  "Direct Debit",
+  "Standing Order",
+  "Other",
+];
+
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -90,6 +125,37 @@ function parseBoolean(value: string) {
   return ["true", "yes", "y", "1", "paid", "repaid"].includes(text);
 }
 
+function getFirstValue(row: CsvRow, keys: string[]) {
+  for (const key of keys) {
+    const normalised = normaliseHeader(key);
+    const value = clean(row[normalised]);
+
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function parseMoneyStringToPence(value: unknown) {
+  const raw = clean(value)
+    .replace(/£/g, "")
+    .replace(/,/g, "")
+    .replace(/\s/g, "");
+
+  if (!raw) return 0;
+
+  const isNegative =
+    raw.startsWith("-") || (raw.startsWith("(") && raw.endsWith(")"));
+
+  const amount = Number(raw.replace(/[()]/g, ""));
+
+  if (!Number.isFinite(amount)) return Number.NaN;
+
+  const pence = Math.round(Math.abs(amount) * 100);
+
+  return isNegative ? -pence : pence;
+}
+
 function parseMoneyToPence(row: CsvRow) {
   const amountPenceRaw = clean(row.amount_pence);
 
@@ -97,24 +163,92 @@ function parseMoneyToPence(row: CsvRow) {
     const pence = Number(amountPenceRaw);
 
     if (Number.isFinite(pence)) {
-      return Math.round(pence);
+      return Math.round(Math.abs(pence));
     }
   }
 
-  const amountRaw = clean(row.amount)
-    .replace(/£/g, "")
-    .replace(/,/g, "")
-    .trim();
+  const moneyIn = parseMoneyStringToPence(
+    getFirstValue(row, ["money_in", "paid_in", "credit", "credits", "deposit", "in"])
+  );
 
-  if (!amountRaw) return 0;
-
-  const amount = Number(amountRaw);
-
-  if (!Number.isFinite(amount)) {
-    return Number.NaN;
+  if (Number.isFinite(moneyIn) && moneyIn > 0) {
+    return Math.abs(moneyIn);
   }
 
-  return Math.round(amount * 100);
+  const moneyOut = parseMoneyStringToPence(
+    getFirstValue(row, ["money_out", "paid_out", "debit", "debits", "withdrawal", "out"])
+  );
+
+  if (Number.isFinite(moneyOut) && moneyOut !== 0) {
+    return Math.abs(moneyOut);
+  }
+
+  const amountRaw =
+    getFirstValue(row, ["amount", "transaction_amount", "value", "paid_in_out"]) ||
+    clean(row.amount);
+
+  const parsed = parseMoneyStringToPence(amountRaw);
+
+  if (!Number.isFinite(parsed)) return Number.NaN;
+
+  return Math.abs(parsed);
+}
+
+function detectType(row: CsvRow): "income" | "expense" | "" {
+  const rawType = clean(row.type).toLowerCase();
+
+  if (["income", "in", "credit", "paid in", "money in"].includes(rawType)) {
+    return "income";
+  }
+
+  if (["expense", "out", "debit", "paid out", "money out"].includes(rawType)) {
+    return "expense";
+  }
+
+  const moneyIn = parseMoneyStringToPence(
+    getFirstValue(row, ["money_in", "paid_in", "credit", "credits", "deposit", "in"])
+  );
+
+  if (Number.isFinite(moneyIn) && moneyIn > 0) return "income";
+
+  const moneyOut = parseMoneyStringToPence(
+    getFirstValue(row, ["money_out", "paid_out", "debit", "debits", "withdrawal", "out"])
+  );
+
+  if (Number.isFinite(moneyOut) && moneyOut !== 0) return "expense";
+
+  const amount = parseMoneyStringToPence(
+    getFirstValue(row, ["amount", "transaction_amount", "value", "paid_in_out"])
+  );
+
+  if (Number.isFinite(amount) && amount < 0) return "expense";
+  if (Number.isFinite(amount) && amount > 0) return "income";
+
+  return "";
+}
+
+function normaliseDate(value: string) {
+  const raw = clean(value);
+
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const ukMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+
+  if (ukMatch) {
+    const day = ukMatch[1].padStart(2, "0");
+    const month = ukMatch[2].padStart(2, "0");
+    const year = ukMatch[3].length === 2 ? `20${ukMatch[3]}` : ukMatch[3];
+
+    return `${year}-${month}-${day}`;
+  }
+
+  const date = new Date(raw);
+
+  if (Number.isNaN(date.getTime())) return raw;
+
+  return date.toISOString().slice(0, 10);
 }
 
 function formatMoney(pence: number) {
@@ -205,55 +339,84 @@ function parseCsv(text: string): CsvRow[] {
   });
 }
 
-function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
+function validatePreviewRow(row: PreviewRow) {
   const errors: string[] = [];
 
-  const title = clean(row.title || row.name || row.details || row.description);
-  const description = clean(row.description || row.notes || row.memo);
-  const rawType = clean(row.type).toLowerCase();
+  if (!clean(row.title)) errors.push("Missing title.");
 
-  let type: "income" | "expense" | "" = "";
-
-  if (rawType === "income" || rawType === "in" || rawType === "credit") {
-    type = "income";
-  } else if (
-    rawType === "expense" ||
-    rawType === "out" ||
-    rawType === "debit"
-  ) {
-    type = "expense";
+  if (row.type !== "income" && row.type !== "expense") {
+    errors.push("Type must be income or expense.");
   }
 
-  const amountPence = parseMoneyToPence(row);
-
-  const transactionDate = clean(
-    row.transaction_date || row.date || row.paid_at || row.created_at
-  );
-
-  const paymentMethod = clean(row.payment_method || row.method);
-
-  if (!title) errors.push("Missing title.");
-  if (!type) errors.push("Type must be income or expense.");
-  if (!Number.isFinite(amountPence) || amountPence <= 0) {
+  if (!Number.isFinite(row.amountPence) || row.amountPence <= 0) {
     errors.push("Amount must be a valid number greater than 0.");
   }
 
-  if (!transactionDate) {
+  if (!clean(row.transactionDate)) {
     errors.push("Missing transaction date.");
-  } else if (Number.isNaN(Date.parse(transactionDate))) {
+  } else if (Number.isNaN(Date.parse(row.transactionDate))) {
     errors.push("Transaction date is not valid.");
   }
 
-  if (!paymentMethod) errors.push("Missing payment method.");
+  if (!clean(row.paymentMethod)) errors.push("Missing payment method.");
+
+  return errors;
+}
+
+function applyValidation(row: PreviewRow): PreviewRow {
+  const errors = validatePreviewRow(row);
+  const valid = errors.length === 0;
 
   return {
+    ...row,
+    errors,
+    valid,
+    selected: row.selected,
+    amountDisplay: Number.isFinite(row.amountPence)
+      ? formatMoney(row.amountPence)
+      : "Invalid",
+  };
+}
+
+function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
+  const title = clean(
+    row.title ||
+      row.name ||
+      row.details ||
+      row.description ||
+      row.transaction_description ||
+      row.payee ||
+      row.merchant ||
+      row.narrative
+  );
+
+  const description = clean(row.description || row.notes || row.memo || row.details);
+  const type = detectType(row);
+  const amountPence = parseMoneyToPence(row);
+
+  const transactionDate = normaliseDate(
+    clean(
+      row.transaction_date ||
+        row.date ||
+        row.posted_date ||
+        row.booking_date ||
+        row.value_date ||
+        row.paid_at ||
+        row.created_at
+    )
+  );
+
+  const paymentMethod =
+    clean(row.payment_method || row.method) || "Bank Transfer";
+
+  const previewRow: PreviewRow = {
     id: `${Date.now()}-${index}`,
     rowNumber: index + 2,
     original: row,
 
-    selected: errors.length === 0,
-    valid: errors.length === 0,
-    errors,
+    selected: true,
+    valid: false,
+    errors: [],
 
     duplicateChecking: false,
     duplicate: false,
@@ -263,7 +426,7 @@ function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
     title,
     description,
     type,
-    category: clean(row.category),
+    category: clean(row.category) || "Bank Import",
     amountPence: Number.isFinite(amountPence) ? amountPence : 0,
     amountDisplay: Number.isFinite(amountPence)
       ? formatMoney(amountPence)
@@ -281,12 +444,110 @@ function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
     sponsorName: clean(row.sponsor_name),
     sponsorshipNote: clean(row.sponsorship_note),
 
-    source: clean(row.source || "manual"),
+    source: clean(row.source || "bank_csv"),
     stripeSessionId: clean(row.stripe_session_id),
     stripeInvoiceId: clean(row.stripe_invoice_id),
     stripeCustomerId: clean(row.stripe_customer_id),
     stripePaymentIntentId: clean(row.stripe_payment_intent_id),
   };
+
+  return applyValidation(previewRow);
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-white/45">
+      {children}
+    </span>
+  );
+}
+
+const SELECT_CLASS =
+  "w-full rounded-2xl border border-white/10 bg-[#12091a] px-4 py-3 text-sm font-bold text-white outline-none focus:border-emerald-300/40";
+
+const SELECT_CLASS_BLACK =
+  "w-full rounded-2xl border border-white/10 bg-[#12091a] px-4 py-3 text-sm font-black text-white outline-none focus:border-emerald-300/40";
+
+const OPTION_DEFAULT_CLASS = "bg-[#12091a] text-white";
+const OPTION_INCOME_CLASS = "bg-[#052e25] text-emerald-100";
+const OPTION_EXPENSE_CLASS = "bg-[#3b1018] text-red-100";
+const OPTION_CATEGORY_CLASS = "bg-[#12091a] text-white";
+const OPTION_METHOD_CLASS = "bg-[#0f172a] text-sky-100";
+
+function prepareRowForImport(row: PreviewRow) {
+  const fallbackTitle =
+    clean(row.title) ||
+    getFirstValue(row.original, [
+      "description",
+      "details",
+      "transaction_description",
+      "name",
+      "payee",
+      "merchant",
+      "narrative",
+      "reference",
+      "ref",
+    ]) ||
+    `Bank CSV row ${row.rowNumber}`;
+
+  const fallbackType =
+    row.type ||
+    detectType(row.original) ||
+    (row.amountPence > 0 ? "income" : "");
+
+  const fallbackAmount =
+    Number.isFinite(row.amountPence) && row.amountPence > 0
+      ? row.amountPence
+      : parseMoneyToPence(row.original);
+
+  const fallbackDate =
+    clean(row.transactionDate) ||
+    normaliseDate(
+      getFirstValue(row.original, [
+        "date",
+        "transaction_date",
+        "posted_date",
+        "booking_date",
+        "value_date",
+        "paid_at",
+        "created_at",
+      ])
+    );
+
+  const fallbackPaymentMethod = clean(row.paymentMethod) || "Bank Transfer";
+
+  return {
+    ...row,
+    title: fallbackTitle,
+    type: fallbackType as "income" | "expense" | "",
+    amountPence:
+      Number.isFinite(fallbackAmount) && fallbackAmount > 0
+        ? Math.abs(fallbackAmount)
+        : 0,
+    transactionDate: fallbackDate,
+    paymentMethod: fallbackPaymentMethod,
+    category: clean(row.category) || "Bank Import",
+  };
+}
+
+function validatePreparedRow(row: ReturnType<typeof prepareRowForImport>) {
+  const errors: string[] = [];
+
+  if (!clean(row.title)) errors.push("Missing title.");
+  if (row.type !== "income" && row.type !== "expense") {
+    errors.push("Type must be income or expense.");
+  }
+  if (!Number.isFinite(row.amountPence) || row.amountPence <= 0) {
+    errors.push("Amount must be a valid number greater than 0.");
+  }
+  if (!clean(row.transactionDate)) {
+    errors.push("Missing transaction date.");
+  } else if (Number.isNaN(Date.parse(row.transactionDate))) {
+    errors.push("Transaction date is not valid.");
+  }
+  if (!clean(row.paymentMethod)) errors.push("Missing payment method.");
+
+  return errors;
 }
 
 export default function MoneyCsvImport() {
@@ -325,6 +586,11 @@ export default function MoneyCsvImport() {
   }, [rows, query]);
 
   const selectedRows = useMemo(
+    () => rows.filter((row) => row.selected),
+    [rows]
+  );
+
+  const selectedValidRows = useMemo(
     () => rows.filter((row) => row.selected && row.valid),
     [rows]
   );
@@ -349,8 +615,10 @@ export default function MoneyCsvImport() {
       (acc, row) => {
         if (row.duplicate && !row.importAnyway) return acc;
 
-        if (row.type === "income") acc.moneyIn += row.amountPence;
-        if (row.type === "expense") acc.moneyOut += row.amountPence;
+        const prepared = prepareRowForImport(row);
+
+        if (prepared.type === "income") acc.moneyIn += prepared.amountPence;
+        if (prepared.type === "expense") acc.moneyOut += prepared.amountPence;
         return acc;
       },
       {
@@ -360,6 +628,99 @@ export default function MoneyCsvImport() {
     );
   }, [selectedRows]);
 
+  function updateRow(rowId: string, patch: Partial<PreviewRow>) {
+    setRows((current) =>
+      current.map((row) => {
+        if (row.id !== rowId) return row;
+
+        return applyValidation({
+          ...row,
+          ...patch,
+          duplicate: false,
+          duplicateMatches: [],
+          importAnyway: false,
+          duplicateChecking: false,
+        });
+      })
+    );
+  }
+
+  function updateAmount(rowId: string, value: string) {
+    const amountPence = parseMoneyStringToPence(value);
+
+    updateRow(rowId, {
+      amountPence: Number.isFinite(amountPence)
+        ? Math.abs(amountPence)
+        : Number.NaN,
+    });
+  }
+
+  function autoFixRow(rowId: string) {
+    const row = rows.find((item) => item.id === rowId);
+    if (!row) return;
+
+    const moneyIn = getFirstValue(row.original, [
+      "money_in",
+      "paid_in",
+      "credit",
+      "credits",
+      "deposit",
+      "in",
+    ]);
+
+    const moneyOut = getFirstValue(row.original, [
+      "money_out",
+      "paid_out",
+      "debit",
+      "debits",
+      "withdrawal",
+      "out",
+    ]);
+
+    const amount = getFirstValue(row.original, [
+      "amount",
+      "transaction_amount",
+      "value",
+      "paid_in_out",
+    ]);
+
+    const guessedAmount =
+      row.amountPence > 0 ? row.amountPence : parseMoneyToPence(row.original);
+
+    const guessedType =
+      row.type ||
+      (moneyIn ? "income" : moneyOut ? "expense" : detectType(row.original));
+
+    updateRow(rowId, {
+      type: guessedType || row.type,
+      category: row.category || "Bank Import",
+      paymentMethod: row.paymentMethod || "Bank Transfer",
+      amountPence:
+        Number.isFinite(guessedAmount) && guessedAmount > 0
+          ? guessedAmount
+          : Math.abs(parseMoneyStringToPence(moneyIn || moneyOut || amount)),
+      transactionDate:
+        row.transactionDate ||
+        normaliseDate(
+          getFirstValue(row.original, [
+            "date",
+            "transaction_date",
+            "posted_date",
+            "booking_date",
+          ])
+        ),
+      title:
+        row.title ||
+        getFirstValue(row.original, [
+          "description",
+          "details",
+          "name",
+          "payee",
+          "merchant",
+        ]),
+    });
+  }
+
   async function checkDuplicateTransaction(row: PreviewRow) {
     const response = await fetch(
       "/api/admin/money/transactions/duplicate-check",
@@ -368,6 +729,7 @@ export default function MoneyCsvImport() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({
           title: row.title,
           transaction_date: row.transactionDate,
@@ -421,19 +783,13 @@ export default function MoneyCsvImport() {
             duplicateMatches: duplicateCheck.matches,
             importAnyway: false,
           };
-        } catch (error: any) {
+        } catch {
           return {
             ...row,
             duplicateChecking: false,
             duplicate: false,
             duplicateMatches: [],
             importAnyway: false,
-            errors: [
-              ...row.errors,
-              error?.message || "Could not check for duplicate transaction.",
-            ],
-            valid: false,
-            selected: false,
           };
         }
       })
@@ -478,9 +834,7 @@ export default function MoneyCsvImport() {
       setRows(previewRows);
 
       setStatusMessage(
-        `Loaded ${previewRows.length} CSV rows. ${
-          previewRows.filter((row) => row.valid).length
-        } rows are ready to import. Checking duplicates...`
+        `Loaded ${previewRows.length} CSV rows. Failed rows can be edited in the cards below. Checking duplicates...`
       );
 
       await checkDuplicatesForRows(previewRows);
@@ -507,7 +861,7 @@ export default function MoneyCsvImport() {
   function toggleRow(rowId: string) {
     setRows((current) =>
       current.map((row) =>
-        row.id === rowId && row.valid
+        row.id === rowId
           ? {
               ...row,
               selected: !row.selected,
@@ -574,6 +928,10 @@ export default function MoneyCsvImport() {
     );
   }
 
+  async function recheckDuplicates() {
+    await checkDuplicatesForRows(rows);
+  }
+
   function downloadFailedRowsCsv() {
     const failedRows = invalidRows;
 
@@ -618,6 +976,7 @@ export default function MoneyCsvImport() {
       headers: {
         "Content-Type": "application/json",
       },
+      credentials: "include",
       body: JSON.stringify({
         fileName: fileName || "bank-statement.csv",
         importType: "money_transactions",
@@ -647,7 +1006,7 @@ export default function MoneyCsvImport() {
 
   async function importSelectedRows() {
     if (selectedRows.length === 0) {
-      setErrorMessage("Please select at least one valid row to import.");
+      setErrorMessage("Please tick at least one row to import.");
       return;
     }
 
@@ -655,11 +1014,15 @@ export default function MoneyCsvImport() {
     setErrorMessage(null);
     setStatusMessage(null);
 
-    const failedRowDetails = invalidRows.map((row) => ({
-      row_number: row.rowNumber,
-      error_message: row.errors.join(" | "),
-      row_data: row.original,
-    }));
+    const selectedRowIds = new Set(selectedRows.map((row) => row.id));
+
+    const failedRowDetails = rows
+      .filter((row) => !selectedRowIds.has(row.id) && !row.valid)
+      .map((row) => ({
+        row_number: row.rowNumber,
+        error_message: row.errors.join(" | "),
+        row_data: row.original,
+      }));
 
     try {
       let importedCount = 0;
@@ -670,8 +1033,21 @@ export default function MoneyCsvImport() {
         row_data: any;
       }[] = [];
 
-      for (const row of selectedRows) {
+      for (const selectedRow of selectedRows) {
+        const row = prepareRowForImport(selectedRow);
+        const preparedErrors = validatePreparedRow(row);
+
         try {
+          if (preparedErrors.length > 0) {
+            importFailures.push({
+              row_number: row.rowNumber,
+              error_message: preparedErrors.join(" | "),
+              row_data: row.original,
+            });
+
+            continue;
+          }
+
           if (row.duplicate && !row.importAnyway) {
             importFailures.push({
               row_number: row.rowNumber,
@@ -688,6 +1064,7 @@ export default function MoneyCsvImport() {
             headers: {
               "Content-Type": "application/json",
             },
+            credentials: "include",
             body: JSON.stringify({
               title: row.title,
               description: row.description || null,
@@ -707,7 +1084,7 @@ export default function MoneyCsvImport() {
               sponsor_name: row.sponsorName || null,
               sponsorship_note: row.sponsorshipNote || null,
 
-              source: row.source || "manual",
+              source: row.source || "bank_csv",
               stripe_session_id: row.stripeSessionId || null,
               stripe_invoice_id: row.stripeInvoiceId || null,
               stripe_customer_id: row.stripeCustomerId || null,
@@ -773,8 +1150,9 @@ export default function MoneyCsvImport() {
           <h2 className="text-3xl font-black">CSV Import</h2>
 
           <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
-            Upload a bank statement CSV, review each row, check for duplicate
-            transactions, then import selected rows into the money tracker.
+            Upload a bank statement CSV, then fix rows using large readable
+            cards. Failed rows turn valid as soon as the missing fields are
+            corrected.
           </p>
         </div>
 
@@ -855,8 +1233,7 @@ export default function MoneyCsvImport() {
                 <p className="mt-1 text-sm leading-6 text-amber-50/80">
                   {duplicateRows.length} row
                   {duplicateRows.length === 1 ? "" : "s"} match an existing
-                  transaction with the same date, amount, title, and payment
-                  method. Duplicate rows will be skipped unless you choose
+                  transaction. Duplicate rows will be skipped unless you choose
                   Import anyway.
                 </p>
               </div>
@@ -892,9 +1269,12 @@ export default function MoneyCsvImport() {
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
-              <p className="text-sm font-bold text-white/55">Selected rows</p>
+              <p className="text-sm font-bold text-white/55">Ticked rows</p>
               <p className="mt-2 text-3xl font-black text-emerald-200">
                 {selectedRows.length}
+              </p>
+              <p className="mt-1 text-xs text-white/40">
+                {selectedValidRows.length} already valid
               </p>
             </div>
 
@@ -955,6 +1335,16 @@ export default function MoneyCsvImport() {
                 Deselect all
               </button>
 
+              <button
+                type="button"
+                onClick={recheckDuplicates}
+                disabled={checkingDuplicates}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Recheck duplicates
+              </button>
+
               {invalidRows.length > 0 && (
                 <button
                   type="button"
@@ -990,183 +1380,280 @@ export default function MoneyCsvImport() {
             </div>
           )}
 
-          <div className="mt-6 overflow-hidden rounded-3xl border border-white/10">
-            <div className="overflow-x-auto">
-              <table className="min-w-[1700px] w-full text-left text-sm">
-                <thead className="bg-black/35 text-xs uppercase tracking-[0.18em] text-white/45">
-                  <tr>
-                    <th className="px-4 py-4">Use</th>
-                    <th className="px-4 py-4">Row</th>
-                    <th className="px-4 py-4">Status</th>
-                    <th className="px-4 py-4">Duplicate warning</th>
-                    <th className="px-4 py-4">Title</th>
-                    <th className="px-4 py-4">Type</th>
-                    <th className="px-4 py-4">Category</th>
-                    <th className="px-4 py-4">Amount</th>
-                    <th className="px-4 py-4">Method</th>
-                    <th className="px-4 py-4">Date</th>
-                    <th className="px-4 py-4">Sponsor</th>
-                    <th className="px-4 py-4">Personal funds</th>
-                    <th className="px-4 py-4">Errors</th>
-                  </tr>
-                </thead>
+          <div className="mt-6 space-y-4">
+            {filteredRows.map((row) => (
+              <article
+                key={row.id}
+                className={[
+                  "rounded-3xl border p-5 shadow-xl",
+                  row.valid
+                    ? "border-emerald-300/15 bg-emerald-500/[0.045]"
+                    : "border-red-300/20 bg-red-500/[0.055]",
+                  row.duplicate ? "border-amber-300/25 bg-amber-500/[0.055]" : "",
+                ].join(" ")}
+              >
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-3 rounded-2xl bg-black/25 px-4 py-3 text-sm font-black text-white">
+                      <input
+                        type="checkbox"
+                        checked={row.selected}
+                        onChange={() => toggleRow(row.id)}
+                        className="h-5 w-5 rounded border-white/20 bg-black/30"
+                      />
+                      Use row {row.rowNumber}
+                    </label>
 
-                <tbody className="divide-y divide-white/10">
-                  {filteredRows.map((row) => (
-                    <tr
-                      key={row.id}
+                    {row.valid ? (
+                      <span className="inline-flex rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100">
+                        Valid
+                      </span>
+                    ) : (
+                      <span className="inline-flex rounded-full border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100">
+                        Failed
+                      </span>
+                    )}
+
+                    {row.duplicateChecking && (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs font-black text-sky-100">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Checking duplicate
+                      </span>
+                    )}
+
+                    {row.duplicate && (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-100">
+                        <AlertTriangle className="h-3 w-3" />
+                        Possible duplicate
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => autoFixRow(row.id)}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm font-black text-emerald-100 hover:bg-emerald-500/20"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    Auto fix row
+                  </button>
+                </div>
+
+                {row.errors.length > 0 && (
+                  <div className="mt-4 rounded-2xl border border-red-300/20 bg-black/25 p-4">
+                    <div className="mb-2 font-black text-red-100">
+                      Fix these issues:
+                    </div>
+                    <ul className="space-y-1 text-sm text-red-100">
+                      {row.errors.map((error) => (
+                        <li key={error}>• {error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {row.duplicate && (
+                  <div className="mt-4 rounded-2xl border border-amber-300/20 bg-black/25 p-4 text-sm text-amber-50/85">
+                    <div className="font-black text-amber-100">
+                      Duplicate warning
+                    </div>
+                    <p className="mt-1">
+                      Similar transaction already exists. Keep blocked or use
+                      Import anyway.
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleImportAnyway(row.id)}
                       className={
-                        !row.valid
-                          ? "bg-red-500/[0.04] hover:bg-red-500/[0.07]"
-                          : row.duplicate
-                            ? "bg-amber-500/[0.06] hover:bg-amber-500/[0.09]"
-                            : "hover:bg-white/[0.04]"
+                        row.importAnyway
+                          ? "mt-3 rounded-xl border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/25"
+                          : "mt-3 rounded-xl border border-amber-300/30 bg-amber-500/15 px-3 py-2 text-xs font-black text-amber-100 hover:bg-amber-500/25"
                       }
                     >
-                      <td className="px-4 py-4">
-                        <input
-                          type="checkbox"
-                          checked={row.selected}
-                          disabled={!row.valid}
-                          onChange={() => toggleRow(row.id)}
-                          className="h-5 w-5 rounded border-white/20 bg-black/30"
-                        />
-                      </td>
+                      {row.importAnyway
+                        ? "Import anyway enabled"
+                        : "Import anyway"}
+                    </button>
+                  </div>
+                )}
 
-                      <td className="px-4 py-4 font-black">{row.rowNumber}</td>
+                <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr]">
+                  <div className="xl:col-span-2">
+                    <FieldLabel>Transaction title</FieldLabel>
+                    <input
+                      value={row.title}
+                      onChange={(event) =>
+                        updateRow(row.id, { title: event.target.value })
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                      placeholder="Transaction title"
+                    />
 
-                      <td className="px-4 py-4">
-                        {row.valid ? (
-                          <span className="inline-flex rounded-full border border-emerald-300/20 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-100">
-                            Valid
-                          </span>
-                        ) : (
-                          <span className="inline-flex rounded-full border border-red-300/20 bg-red-500/10 px-3 py-1 text-xs font-black text-red-100">
-                            Failed
-                          </span>
-                        )}
-                      </td>
+                    <FieldLabel>Description / notes</FieldLabel>
+                    <textarea
+                      value={row.description}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          description: event.target.value,
+                        })
+                      }
+                      className="min-h-24 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80 outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                      placeholder="Description / notes"
+                    />
+                  </div>
 
-                      <td className="px-4 py-4">
-                        {row.duplicateChecking ? (
-                          <span className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-1 text-xs font-black text-sky-100">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            Checking
-                          </span>
-                        ) : row.duplicate ? (
-                          <div className="max-w-sm space-y-2">
-                            <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-100">
-                              <AlertTriangle className="h-3 w-3" />
-                              Possible duplicate
-                            </span>
+                  <div>
+                    <FieldLabel>Type</FieldLabel>
+                    <select
+                      value={row.type}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          type: event.target.value as
+                            | "income"
+                            | "expense"
+                            | "",
+                        })
+                      }
+                      className={SELECT_CLASS_BLACK}
+                    >
+                      <option className={OPTION_DEFAULT_CLASS} value="">
+                        Choose
+                      </option>
+                      <option className={OPTION_INCOME_CLASS} value="income">
+                        Income
+                      </option>
+                      <option className={OPTION_EXPENSE_CLASS} value="expense">
+                        Expense
+                      </option>
+                    </select>
+                  </div>
 
-                            <p className="text-xs leading-5 text-amber-50/75">
-                              Same date, amount, title, and payment method
-                              already exists.
-                            </p>
+                  <div>
+                    <FieldLabel>Category</FieldLabel>
+                    <select
+                      value={row.category || "Bank Import"}
+                      onChange={(event) =>
+                        updateRow(row.id, { category: event.target.value })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      {DEFAULT_CATEGORIES.map((category) => (
+                        <option
+                            key={category}
+                            value={category}
+                            className={OPTION_CATEGORY_CLASS}
+                          >
+                            {category}
+                          </option>
+                      ))}
+                    </select>
+                  </div>
 
-                            {row.duplicateMatches.slice(0, 2).map((match) => (
-                              <div
-                                key={match.id}
-                                className="rounded-2xl border border-amber-300/15 bg-black/25 p-3 text-xs text-amber-50/80"
-                              >
-                                <p className="font-black text-amber-50">
-                                  {match.title}
-                                </p>
-                                <p className="mt-1">
-                                  {formatMoney(match.amount_pence)} ·{" "}
-                                  {formatDate(match.transaction_date)} ·{" "}
-                                  {match.payment_method || "No method"}
-                                </p>
-                              </div>
-                            ))}
+                  <div>
+                    <FieldLabel>Amount</FieldLabel>
+                    <input
+                      value={
+                        Number.isFinite(row.amountPence) && row.amountPence > 0
+                          ? (row.amountPence / 100).toFixed(2)
+                          : ""
+                      }
+                      onChange={(event) =>
+                        updateAmount(row.id, event.target.value)
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-black text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                      placeholder="0.00"
+                    />
+                    <p className="mt-1 text-xs text-white/45">
+                      {row.amountDisplay}
+                    </p>
+                  </div>
 
-                            <button
-                              type="button"
-                              onClick={() => toggleImportAnyway(row.id)}
-                              className={
-                                row.importAnyway
-                                  ? "rounded-xl border border-emerald-300/30 bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/25"
-                                  : "rounded-xl border border-amber-300/30 bg-amber-500/15 px-3 py-2 text-xs font-black text-amber-100 hover:bg-amber-500/25"
-                              }
-                            >
-                              {row.importAnyway
-                                ? "Import anyway enabled"
-                                : "Import anyway"}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-white/35">—</span>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="max-w-xs font-black text-white">
-                          {row.title || "Missing title"}
-                        </p>
-                        {row.description && (
-                          <p className="mt-1 max-w-sm text-xs text-white/45">
-                            {row.description}
-                          </p>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <span
-                          className={
-                            row.type === "income"
-                              ? "font-black text-emerald-200"
-                              : row.type === "expense"
-                                ? "font-black text-red-200"
-                                : "font-black text-amber-200"
-                          }
+                  <div>
+                    <FieldLabel>Payment method</FieldLabel>
+                    <select
+                      value={row.paymentMethod}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          paymentMethod: event.target.value,
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    >
+                      <option className={OPTION_DEFAULT_CLASS} value="">
+                        Choose
+                      </option>
+                      {PAYMENT_METHODS.map((method) => (
+                        <option
+                          key={method}
+                          value={method}
+                          className={OPTION_METHOD_CLASS}
                         >
-                          {row.type || "Invalid"}
-                        </span>
-                      </td>
+                          {method}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                      <td className="px-4 py-4 text-white/70">
-                        {row.category || "Uncategorised"}
-                      </td>
+                  <div>
+                    <FieldLabel>Date</FieldLabel>
+                    <input
+                      type="date"
+                      value={row.transactionDate}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          transactionDate: event.target.value,
+                        })
+                      }
+                      className={SELECT_CLASS}
+                    />
+                  </div>
 
-                      <td className="px-4 py-4 font-black">
-                        {row.amountDisplay}
-                      </td>
+                  <div>
+                    <FieldLabel>Sponsor</FieldLabel>
+                    <input
+                      value={row.sponsorName}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          sponsorName: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                      placeholder="Optional"
+                    />
+                  </div>
 
-                      <td className="px-4 py-4 text-white/70">
-                        {row.paymentMethod || "Missing"}
-                      </td>
+                  <div>
+                    <FieldLabel>Personal funds</FieldLabel>
+                    <label className="flex min-h-[48px] items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white/80">
+                      <input
+                        type="checkbox"
+                        checked={row.isPersonalFunds}
+                        onChange={(event) =>
+                          updateRow(row.id, {
+                            isPersonalFunds: event.target.checked,
+                          })
+                        }
+                      />
+                      Personal funds
+                    </label>
 
-                      <td className="px-4 py-4 text-white/70">
-                        {row.transactionDate || "Missing"}
-                      </td>
-
-                      <td className="px-4 py-4 text-white/70">
-                        {row.sponsorName || "—"}
-                      </td>
-
-                      <td className="px-4 py-4 text-white/70">
-                        {row.isPersonalFunds
-                          ? row.personalFundsName || "Yes"
-                          : "No"}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        {row.errors.length === 0 ? (
-                          <span className="text-white/35">—</span>
-                        ) : (
-                          <ul className="max-w-sm space-y-1 text-xs text-red-100">
-                            {row.errors.map((error) => (
-                              <li key={error}>• {error}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                    {row.isPersonalFunds && (
+                      <input
+                        value={row.personalFundsName}
+                        onChange={(event) =>
+                          updateRow(row.id, {
+                            personalFundsName: event.target.value,
+                          })
+                        }
+                        className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                        placeholder="Name"
+                      />
+                    )}
+                  </div>
+                </div>
+              </article>
+            ))}
           </div>
         </>
       )}

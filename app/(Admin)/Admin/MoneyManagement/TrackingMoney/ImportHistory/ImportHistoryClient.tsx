@@ -90,6 +90,33 @@ function statusText(status: string | null | undefined, failedRows: number) {
   return "Completed";
 }
 
+async function readJsonResponse(response: Response) {
+  const text = await response.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      ok: false,
+      error: "Server returned invalid JSON.",
+      rawResponse: text,
+      status: response.status,
+    };
+  }
+}
+
+function buildApiError(payload: any, fallback: string) {
+  const error = payload?.error || payload?.message || fallback;
+  const reason = payload?.reason ? `\nReason: ${payload.reason}` : "";
+  const likelyFix = payload?.likelyFix ? `\nLikely fix: ${payload.likelyFix}` : "";
+  const details =
+    payload?.details || payload?.debug
+      ? `\nDetails: ${JSON.stringify(payload.details || payload.debug, null, 2)}`
+      : "";
+
+  return `${error}${reason}${likelyFix}${details}`;
+}
+
 function downloadFailedRowsCsv(details: BatchDetails) {
   const rows = details.failedRows;
 
@@ -141,12 +168,15 @@ export default function ImportHistoryClient() {
 
       const response = await fetch("/api/admin/money/import-history", {
         cache: "no-store",
+        credentials: "include",
       });
 
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
 
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to load import history.");
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(
+          buildApiError(payload, "Failed to load import history.")
+        );
       }
 
       setImports(payload.imports || []);
@@ -172,12 +202,13 @@ export default function ImportHistoryClient() {
 
       const response = await fetch(`/api/admin/money/import-history/${batchId}`, {
         cache: "no-store",
+        credentials: "include",
       });
 
-      const payload = await response.json();
+      const payload = await readJsonResponse(response);
 
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to load import batch.");
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(buildApiError(payload, "Failed to load import batch."));
       }
 
       setSelectedDetails(payload);
@@ -317,7 +348,7 @@ export default function ImportHistoryClient() {
         {error && (
           <div className="mt-5 flex gap-3 rounded-3xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <p>{error}</p>
+            <p className="whitespace-pre-line">{error}</p>
           </div>
         )}
 
@@ -486,7 +517,7 @@ export default function ImportHistoryClient() {
                 </div>
               ) : detailsError ? (
                 <div className="rounded-3xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
-                  {detailsError}
+                  <span className="whitespace-pre-line">{detailsError}</span>
                 </div>
               ) : selectedDetails ? (
                 <div className="space-y-5">

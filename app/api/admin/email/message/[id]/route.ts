@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { google, gmail_v1 } from "googleapis";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{
@@ -28,11 +29,26 @@ type ParsedMessageBody = {
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
-    const { userId } = await auth();
+    const admin = await getCurrentAdmin();
 
-    if (!userId) {
+    if (!admin) {
       return NextResponse.json(
-        { ok: false, error: "Unauthorised." },
+        {
+          ok: false,
+          error: "You are not logged in. Please log in to the admin portal.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const adminId = admin.id;
+
+    if (!adminId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Your admin login was found, but your admin ID is missing.",
+        },
         { status: 401 }
       );
     }
@@ -49,27 +65,39 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const { data: connection, error } = await supabaseAdmin
       .from("google_connections")
       .select("google_email, refresh_token")
-      .eq("user_id", userId)
+      .eq("user_id", adminId)
       .maybeSingle();
 
     if (error) {
-      console.error("DB error:", error);
+      console.error("Google connection DB error:", error);
+
       return NextResponse.json(
-        { ok: false, error: "Failed to load Google connection." },
+        {
+          ok: false,
+          error: "Failed to load Google connection.",
+          details: error.message,
+        },
         { status: 500 }
       );
     }
 
     if (!connection) {
       return NextResponse.json(
-        { ok: false, error: "No Gmail account connected." },
+        {
+          ok: false,
+          error: "No Gmail account is connected for this admin account.",
+        },
         { status: 400 }
       );
     }
 
     if (!connection.refresh_token) {
       return NextResponse.json(
-        { ok: false, error: "Missing Gmail refresh token." },
+        {
+          ok: false,
+          error:
+            "Gmail is connected, but the refresh token is missing. Please reconnect Gmail.",
+        },
         { status: 400 }
       );
     }
@@ -80,7 +108,10 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       !process.env.GOOGLE_OAUTH_REDIRECT_URI
     ) {
       return NextResponse.json(
-        { ok: false, error: "Google OAuth environment variables are missing." },
+        {
+          ok: false,
+          error: "Google OAuth environment variables are missing.",
+        },
         { status: 500 }
       );
     }
@@ -110,9 +141,10 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const payload = message.payload;
 
     const headers = payload?.headers || [];
+
     const getHeader = (name: string) =>
-      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ||
-      "";
+      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())
+        ?.value || "";
 
     const parsed = parseMessagePayload(payload);
 
@@ -128,10 +160,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     return NextResponse.json({
       ok: true,
+      googleEmail: connection.google_email,
       message: {
         id: message.id || "",
         threadId: message.threadId || "",
-        subject: getHeader("Subject"),
+        subject: getHeader("Subject") || "(No subject)",
         from: getHeader("From"),
         to: getHeader("To"),
         cc: getHeader("Cc"),
@@ -150,12 +183,15 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       typeof error?.code === "number"
         ? error.code
         : typeof error?.status === "number"
-        ? error.status
-        : 500;
+          ? error.status
+          : 500;
 
     if (status === 401) {
       return NextResponse.json(
-        { ok: false, error: "Google connection expired. Please reconnect." },
+        {
+          ok: false,
+          error: "Google connection expired. Please reconnect Gmail.",
+        },
         { status: 401 }
       );
     }
@@ -182,6 +218,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       {
         ok: false,
         error: "Failed to load email.",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );
@@ -244,6 +281,7 @@ function walkParts(
     textParts.push(decodeBase64Url(bodyData));
   } else if (!mimeType && bodyData) {
     const decoded = decodeBase64Url(bodyData);
+
     if (looksLikeHtml(decoded)) {
       htmlParts.push(decoded);
     } else {
@@ -350,6 +388,7 @@ function textToHtml(text: string) {
     /((https?:\/\/|www\.)[^\s<]+)/gi,
     (match) => {
       const href = match.startsWith("www.") ? `https://${match}` : match;
+
       return `<a href="${href}" target="_blank" rel="noreferrer noopener">${match}</a>`;
     }
   );

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
 const MAX_AUDIT_LOGS = 2000;
 const MAX_COMMENT_LENGTH = 2000;
 const MAX_COMMENT_HISTORY_ITEMS = 50;
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type AuditLogBody = {
   action?: string | null;
@@ -127,22 +131,22 @@ function getBodyActorDetails(body: AuditLogBody | null): Partial<ActorDetails> {
   };
 }
 
-async function getSupabaseActorDetails(): Promise<ActorDetails> {
-  const supabase = await createClient();
+async function getCookieActorDetails(): Promise<ActorDetails> {
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("Not authenticated");
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("admin_users")
     .select("id, email, name, full_name, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -151,10 +155,10 @@ async function getSupabaseActorDetails(): Promise<ActorDetails> {
   }
 
   if (!admin) {
-    throw new Error("No active admin account is linked to this Supabase user.");
+    throw new Error("No active admin account is linked to this admin session.");
   }
 
-  const actorEmail = cleanText(admin.email || user.email) || null;
+  const actorEmail = cleanText(admin.email || adminEmail) || null;
 
   const actorName =
     cleanText(admin.name) ||
@@ -163,7 +167,7 @@ async function getSupabaseActorDetails(): Promise<ActorDetails> {
     "Unknown admin";
 
   return {
-    actor_id: user.id,
+    actor_id: String(admin.id),
     actor_name: actorName,
     actor_email: actorEmail,
     role: cleanText(admin.role),
@@ -172,27 +176,27 @@ async function getSupabaseActorDetails(): Promise<ActorDetails> {
 
 async function getActorDetails(body: AuditLogBody | null): Promise<ActorDetails> {
   const bodyActor = getBodyActorDetails(body);
-  const supabaseActor = await getSupabaseActorDetails();
+  const cookieActor = await getCookieActorDetails();
 
   const actorEmail =
-    cleanText(bodyActor.actor_email) || cleanText(supabaseActor.actor_email);
+    cleanText(bodyActor.actor_email) || cleanText(cookieActor.actor_email);
 
   const actorName =
     cleanText(bodyActor.actor_name) ||
-    cleanText(supabaseActor.actor_name) ||
+    cleanText(cookieActor.actor_name) ||
     nameFromEmail(actorEmail) ||
     "Unknown admin";
 
   const actorId =
     cleanText(bodyActor.actor_id) ||
-    cleanText(supabaseActor.actor_id) ||
+    cleanText(cookieActor.actor_id) ||
     null;
 
   return {
     actor_id: actorId,
     actor_name: actorName,
     actor_email: actorEmail,
-    role: supabaseActor.role || null,
+    role: cookieActor.role || null,
   };
 }
 
@@ -398,7 +402,7 @@ function authStatus(error: unknown) {
 
   if (
     message === "Not authenticated" ||
-    message === "No active admin account is linked to this Supabase user."
+    message === "No active admin account is linked to this admin session."
   ) {
     return 401;
   }
@@ -408,7 +412,7 @@ function authStatus(error: unknown) {
 
 export async function GET(req: Request) {
   try {
-    await getSupabaseActorDetails();
+    await getCookieActorDetails();
 
     const { searchParams } = new URL(req.url);
 
@@ -571,7 +575,7 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const actor = await getSupabaseActorDetails();
+    const actor = await getCookieActorDetails();
     const access = checkMainAdminAccess(actor);
 
     if (!access.allowed) {

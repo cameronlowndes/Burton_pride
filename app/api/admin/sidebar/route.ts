@@ -1,10 +1,13 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type AdminUser = {
   id: string;
@@ -39,7 +42,6 @@ function cleanBoolean(value: unknown, fallback = false) {
 
   if (typeof value === "string") {
     const lowered = value.toLowerCase().trim();
-
     if (lowered === "true") return true;
     if (lowered === "false") return false;
   }
@@ -72,26 +74,25 @@ function hasPermission(admin: AdminUser, permission: string) {
   if (admin.role === "main_admin") return true;
 
   const permissions = objectPermissionsToKeys(admin.permissions);
-
   return permissions.includes(permission);
 }
 
-async function getCurrentSupabaseAdmin(): Promise<AdminUser | null> {
-  const supabase = await createClient();
+async function getCurrentCustomAdmin(): Promise<AdminUser | null> {
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (userError || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     return null;
   }
 
   const { data, error } = await supabaseAdmin
     .from("admin_users")
     .select("id,email,role,is_active,permissions")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -115,7 +116,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 export async function GET() {
   try {
-    const admin = await getCurrentSupabaseAdmin();
+    const admin = await getCurrentCustomAdmin();
 
     if (!admin) {
       return jsonResponse(
@@ -123,7 +124,7 @@ export async function GET() {
           ok: false,
           error: "Unauthorized",
           message:
-            "No active Supabase admin user was found for this login session.",
+            "No active Burton Pride admin session was found. Please log in again.",
         },
         401
       );
@@ -152,13 +153,13 @@ export async function GET() {
   } catch (error: unknown) {
     console.error("GET /api/admin/sidebar error:", error);
 
-    const message =
-      error instanceof Error ? error.message : "Failed to load sidebar items.";
-
     return jsonResponse(
       {
         ok: false,
-        error: message,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load sidebar items.",
       },
       500
     );
@@ -167,7 +168,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const admin = await getCurrentSupabaseAdmin();
+    const admin = await getCurrentCustomAdmin();
 
     if (!admin) {
       return jsonResponse(
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
           ok: false,
           error: "Unauthorized",
           message:
-            "No active Supabase admin user was found for this login session.",
+            "No active Burton Pride admin session was found. Please log in again.",
         },
         401
       );
@@ -186,8 +187,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error: "Forbidden",
-          message:
-            "You do not have permission to manage admin sidebar items.",
+          message: "You do not have permission to manage admin sidebar items.",
         },
         403
       );
@@ -209,23 +209,11 @@ export async function POST(req: Request) {
     const icon = body.icon ? String(body.icon).trim() : null;
 
     if (!label) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Label is required",
-        },
-        400
-      );
+      return jsonResponse({ ok: false, error: "Label is required" }, 400);
     }
 
     if (item_type === "link" && !href) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Link must have a URL",
-        },
-        400
-      );
+      return jsonResponse({ ok: false, error: "Link must have a URL" }, 400);
     }
 
     const { data, error } = await supabaseAdmin
@@ -260,13 +248,13 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     console.error("POST /api/admin/sidebar error:", error);
 
-    const message =
-      error instanceof Error ? error.message : "Failed to create sidebar item.";
-
     return jsonResponse(
       {
         ok: false,
-        error: message,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create sidebar item.",
       },
       500
     );

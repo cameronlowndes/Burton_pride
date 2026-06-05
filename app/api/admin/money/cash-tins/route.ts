@@ -1,9 +1,13 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type CurrentAdmin = {
   userId: string;
@@ -40,21 +44,21 @@ function nameFromEmail(email?: string | null) {
 }
 
 async function getCurrentAdmin(): Promise<CurrentAdmin> {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("You must be signed in.");
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("admin_users")
     .select("id, email, name, full_name, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -63,10 +67,10 @@ async function getCurrentAdmin(): Promise<CurrentAdmin> {
   }
 
   if (!admin) {
-    throw new Error("No active admin account is linked to this Supabase user.");
+    throw new Error("No active admin account is linked to this admin session.");
   }
 
-  const actorEmail = cleanString(admin.email || user.email) || null;
+  const actorEmail = cleanString(admin.email || adminEmail) || null;
   const actorName =
     cleanString(admin.name) ||
     cleanString(admin.full_name) ||
@@ -74,7 +78,7 @@ async function getCurrentAdmin(): Promise<CurrentAdmin> {
     "Unknown admin";
 
   return {
-    userId: user.id,
+    userId: String(admin.id),
     actorName,
     actorEmail,
   };
@@ -113,9 +117,16 @@ async function createCashTinAuditLog({
     before_data: beforeData || null,
     after_data: afterData || null,
     changed_fields: changedFields || null,
+    created_by: actorName || "Unknown admin",
+    created_by_email: actorEmail || null,
     metadata: {
       source: "cash_tin_tracker",
       source_label: "Cash Tin Tracker",
+      actor_id: actorUserId || null,
+      actor_name: actorName || "Unknown admin",
+      actor_email: actorEmail || null,
+      created_by: actorName || "Unknown admin",
+      created_by_email: actorEmail || null,
       ...metadata,
     },
   });
@@ -177,6 +188,19 @@ function buildTransactionDescription(row: {
     .join("\n");
 }
 
+function errorStatus(error: any) {
+  const message = String(error?.message || "");
+
+  if (
+    message === "You must be signed in." ||
+    message === "No active admin account is linked to this admin session."
+  ) {
+    return 401;
+  }
+
+  return 500;
+}
+
 export async function GET(req: Request) {
   try {
     await getCurrentAdmin();
@@ -213,8 +237,12 @@ export async function GET(req: Request) {
       {
         ok: false,
         error: error?.message || "Failed to load cash tin records.",
+        details: {
+          ok: false,
+          error: error?.message || "Failed to load cash tin records.",
+        },
       },
-      { status: error?.message === "You must be signed in." ? 401 : 500 }
+      { status: errorStatus(error) }
     );
   }
 }
@@ -376,8 +404,12 @@ export async function POST(req: Request) {
       {
         ok: false,
         error: error?.message || "Failed to save cash tin record.",
+        details: {
+          ok: false,
+          error: error?.message || "Failed to save cash tin record.",
+        },
       },
-      { status: error?.message === "You must be signed in." ? 401 : 500 }
+      { status: errorStatus(error) }
     );
   }
 }

@@ -7,63 +7,117 @@ import {
 } from "lucide-react";
 
 import ImportHistoryClient from "./ImportHistoryClient";
-import { requireMainAdmin } from "@/lib/isMainAdmin";
 import { requireAdmin } from "@/lib/adminPermissions";
 
-export default async function MoneyImportHistoryPage() {
-  try {
-    await requireAdmin();
-  } catch {
-    return (
-      <main className="min-h-screen w-full max-w-none bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
-        <div className="mx-auto w-full max-w-2xl rounded-3xl border border-white/10 bg-white/10 p-8 shadow-2xl backdrop-blur-xl">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-red-300">
+export const dynamic = "force-dynamic";
+
+type AdminRole = "main_admin" | "admin" | "editor";
+
+function hasPermission(admin: any, permissionKey: string) {
+  if (!admin) return false;
+  if (admin.role === "main_admin") return true;
+
+  if (Array.isArray(admin.permissionKeys)) {
+    return admin.permissionKeys.includes(permissionKey);
+  }
+
+  if (admin.permissions && typeof admin.permissions === "object") {
+    return admin.permissions[permissionKey] === true;
+  }
+
+  return false;
+}
+
+function AccessDeniedCard({
+  title,
+  message,
+  backHref,
+  backLabel,
+  variant = "red",
+}: {
+  title: string;
+  message: string;
+  backHref: string;
+  backLabel: string;
+  variant?: "red" | "amber";
+}) {
+  const isAmber = variant === "amber";
+
+  return (
+    <main className="min-h-screen w-full max-w-none bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+      <div
+        className={[
+          "mx-auto w-full max-w-2xl rounded-3xl border p-8 shadow-2xl backdrop-blur-xl",
+          isAmber
+            ? "border-amber-300/20 bg-amber-500/10"
+            : "border-red-300/20 bg-red-500/10",
+        ].join(" ")}
+      >
+        <div
+          className={[
+            "mb-5 flex h-14 w-14 items-center justify-center rounded-2xl",
+            isAmber
+              ? "bg-amber-500/20 text-amber-200"
+              : "bg-red-500/20 text-red-200",
+          ].join(" ")}
+        >
+          {isAmber ? (
+            <AlertTriangle className="h-7 w-7" />
+          ) : (
             <ShieldAlert className="h-7 w-7" />
-          </div>
-
-          <h1 className="text-3xl font-black">Please sign in</h1>
-
-          <p className="mt-3 text-white/75">
-            You must be signed in before viewing the money import history.
-          </p>
-
-          <Link
-            href="/"
-            className="mt-6 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-black text-[#070716]"
-          >
-            Go back home
-          </Link>
+          )}
         </div>
-      </main>
+
+        <h1 className="text-3xl font-black">{title}</h1>
+
+        <p className="mt-3 whitespace-pre-line text-white/75">{message}</p>
+
+        <Link
+          href={backHref}
+          className="mt-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/15"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {backLabel}
+        </Link>
+      </div>
+    </main>
+  );
+}
+
+export default async function MoneyImportHistoryPage() {
+  let admin: any = null;
+
+  try {
+    admin = await requireAdmin();
+  } catch (error) {
+    return (
+      <AccessDeniedCard
+        title="Please sign in"
+        message={
+          "You must be signed in before viewing the money import history.\n\nIf you are already signed in, log out and sign back in so the custom admin cookies refresh."
+        }
+        backHref="/"
+        backLabel="Go back home"
+      />
     );
   }
 
-  try {
-    await requireMainAdmin();
-  } catch {
+  const canViewImportHistory =
+    admin?.role === "main_admin" ||
+    hasPermission(admin, "money:export_reports") ||
+    hasPermission(admin, "audit_logs:view");
+
+  if (!canViewImportHistory) {
     return (
-      <main className="min-h-screen w-full max-w-none bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
-        <div className="mx-auto w-full max-w-2xl rounded-3xl border border-red-300/20 bg-red-500/10 p-8 shadow-2xl backdrop-blur-xl">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/20 text-red-200">
-            <AlertTriangle className="h-7 w-7" />
-          </div>
-
-          <h1 className="text-3xl font-black">Main admin only</h1>
-
-          <p className="mt-3 text-white/75">
-            Import history contains financial audit information, so only the
-            main admin can view it.
-          </p>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney"
-            className="mt-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white hover:bg-white/15"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Tracking Money
-          </Link>
-        </div>
-      </main>
+      <AccessDeniedCard
+        title="Access needed"
+        message={
+          "Import history contains financial audit information.\n\nYou need main admin access, money export reports permission, or audit logs permission to view this page."
+        }
+        backHref="/Admin/MoneyManagement/TrackingMoney"
+        backLabel="Back to Tracking Money"
+        variant="amber"
+      />
     );
   }
 
@@ -104,6 +158,18 @@ export default async function MoneyImportHistoryPage() {
                   when it happened, how many rows were imported, total money in,
                   total money out, and failed rows.
                 </p>
+
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs leading-5 text-white/55">
+                  Signed in as{" "}
+                  <span className="font-black text-white">
+                    {admin.email || admin.full_name || "admin"}
+                  </span>{" "}
+                  with role{" "}
+                  <span className="font-black text-sky-100">
+                    {String(admin.role || "unknown").replace("_", " ")}
+                  </span>
+                  .
+                </div>
               </div>
             </div>
           </div>

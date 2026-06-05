@@ -239,8 +239,25 @@ async function readJsonResponse(res: Response) {
   try {
     return text ? JSON.parse(text) : {};
   } catch {
-    return { rawResponse: text };
+    return {
+      ok: false,
+      error: "The server returned a response that was not valid JSON.",
+      rawResponse: text,
+      status: res.status,
+    };
   }
+}
+
+function buildApiError(data: any, fallback: string) {
+  const mainMessage = data?.error || data?.message || fallback;
+  const reason = data?.reason ? `\nReason: ${data.reason}` : "";
+  const likelyFix = data?.likelyFix ? `\nLikely fix: ${data.likelyFix}` : "";
+  const details =
+    data?.details || data?.debug
+      ? `\nDetails: ${JSON.stringify(data.details || data.debug, null, 2)}`
+      : "";
+
+  return `${mainMessage}${reason}${likelyFix}${details}`;
 }
 
 function normalisePermissions(value: unknown): string[] {
@@ -325,7 +342,7 @@ export default function AdminUsersClient() {
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || data.message || "Failed to load admin users.");
+        throw new Error(buildApiError(data, "Failed to load admin users."));
       }
 
       const nextAdmins = (data.admins || []).map((admin: AdminUser) => ({
@@ -445,7 +462,7 @@ export default function AdminUsersClient() {
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || data.message || "Failed to save admin user.");
+        throw new Error(buildApiError(data, "Failed to save admin user."));
       }
 
       setMessage(data.message || "Admin user saved.");
@@ -511,7 +528,7 @@ export default function AdminUsersClient() {
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || data.message || "Failed to update admin user.");
+        throw new Error(buildApiError(data, "Failed to update admin user."));
       }
 
       setMessage(data.message || "Admin user updated.");
@@ -734,7 +751,7 @@ export default function AdminUsersClient() {
                 : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
             }`}
           >
-            {error || message}
+            <span className="whitespace-pre-line">{error || message}</span>
           </section>
         )}
 

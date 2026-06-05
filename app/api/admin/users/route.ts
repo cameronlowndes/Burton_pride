@@ -1,10 +1,22 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
+
+const MAIN_ADMIN_EMAILS = [
+  "cameronlowndes@burtonpride.co.uk",
+  "cameronlowndes@gmail.com",
+  "simonwhale@burtonpride.co.uk",
+  "isaactimmins@burtonpride.co.uk",
+  "olga@burtonpride.co.uk",
+].map((email) => email.toLowerCase());
+
 
 type AdminRole = "main_admin" | "admin" | "editor";
 type PermissionMap = Record<string, boolean>;
@@ -202,8 +214,6 @@ function cleanPermissions(value: unknown, role: AdminRole): PermissionMap {
     }
   }
 
-  cleaned["admin:users:manage"] = false;
-
   return cleaned;
 }
 
@@ -217,22 +227,42 @@ function permissionMapToKeys(value: unknown, role: AdminRole): string[] {
     .map(([key]) => key);
 }
 
-async function requireSupabaseMainAdmin() {
-  const supabase = await createClient();
+function hasPermissionValue(permissions: unknown, permissionKey: string) {
+  if (!permissions) return false;
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  if (Array.isArray(permissions)) {
+    return permissions.map(String).includes(permissionKey);
+  }
 
-  if (userError || !user) {
-    throw new Error("Unauthorized");
+  if (typeof permissions === "object") {
+    return (permissions as Record<string, unknown>)[permissionKey] === true;
+  }
+
+  return false;
+}
+
+function isMainAdminEmail(email: unknown) {
+  return MAIN_ADMIN_EMAILS.includes(String(email || "").trim().toLowerCase());
+}
+
+async function requireCurrentMainAdmin() {
+  const cookieStore = await cookies();
+
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
+
+  if (!adminId || !adminEmail || !sessionToken) {
+    throw new Error(
+      "Unauthorized: your admin session cookies are missing. Please log out and log back in."
+    );
   }
 
   const { data: admin, error } = await supabaseAdmin
     .from("admin_users")
-    .select("id,email,role,is_active,supabase_user_id")
-    .eq("supabase_user_id", user.id)
+    .select("id,email,role,is_active,supabase_user_id,permissions")
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -240,8 +270,40 @@ async function requireSupabaseMainAdmin() {
     throw new Error(error.message);
   }
 
-  if (!admin || admin.role !== "main_admin") {
-    throw new Error("Forbidden");
+  if (!admin) {
+    throw new Error(
+      `Forbidden: no active admin_users row was found for ${adminEmail}.`
+    );
+  }
+
+  const allowedByRole = admin.role === "main_admin";
+  const allowedByEmail = isMainAdminEmail(admin.email || adminEmail);
+  const allowedByPermission = hasPermissionValue(
+    admin.permissions,
+    "admin:users:manage"
+  );
+
+  if (!allowedByRole && !allowedByEmail && !allowedByPermission) {
+    throw new Error(
+      `Forbidden: ${admin.email || adminEmail} is logged in but is not allowed to manage admin users. Set role to main_admin or give admin:users:manage permission.`
+    );
+  }
+
+  if (allowedByEmail && admin.role !== "main_admin") {
+    await supabaseAdmin
+      .from("admin_users")
+      .update({
+        role: "main_admin",
+        permissions: MAIN_ADMIN_PERMISSIONS,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", admin.id);
+
+    return {
+      ...admin,
+      role: "main_admin",
+      permissions: MAIN_ADMIN_PERMISSIONS,
+    };
   }
 
   return admin;
@@ -290,7 +352,7 @@ async function buildAdminResponse(admin: AdminUserRow) {
 
 export async function GET() {
   try {
-    await requireSupabaseMainAdmin();
+    await requireCurrentMainAdmin();
 
     const { data, error } = await supabaseAdmin
       .from("admin_users")
@@ -330,15 +392,19 @@ export async function GET() {
       {
         ok: false,
         error: message,
+        likelyFix:
+          message.includes("Forbidden")
+            ? "Set your admin_users role to main_admin, add your email to MAIN_ADMIN_EMAILS, or give admin:users:manage permission."
+            : "Please log out and log back in so the custom admin cookies are refreshed.",
       },
-      message === "Unauthorized" ? 401 : 403
+      message.startsWith("Unauthorized") ? 401 : 403
     );
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const currentAdmin = await requireSupabaseMainAdmin();
+    const currentAdmin = await requireCurrentMainAdmin();
 
     const body = await req.json().catch(() => ({}));
 
@@ -467,15 +533,19 @@ export async function POST(req: Request) {
       {
         ok: false,
         error: message,
+        likelyFix:
+          message.includes("Forbidden")
+            ? "Set your admin_users role to main_admin, add your email to MAIN_ADMIN_EMAILS, or give admin:users:manage permission."
+            : "Please log out and log back in so the custom admin cookies are refreshed.",
       },
-      message === "Unauthorized" ? 401 : 403
+      message.startsWith("Unauthorized") ? 401 : 403
     );
   }
 }
 
 export async function PATCH(req: Request) {
   try {
-    await requireSupabaseMainAdmin();
+    await requireCurrentMainAdmin();
 
     const body = await req.json().catch(() => ({}));
 
@@ -547,8 +617,12 @@ export async function PATCH(req: Request) {
       {
         ok: false,
         error: message,
+        likelyFix:
+          message.includes("Forbidden")
+            ? "Set your admin_users role to main_admin, add your email to MAIN_ADMIN_EMAILS, or give admin:users:manage permission."
+            : "Please log out and log back in so the custom admin cookies are refreshed.",
       },
-      message === "Unauthorized" ? 401 : 403
+      message.startsWith("Unauthorized") ? 401 : 403
     );
   }
 }

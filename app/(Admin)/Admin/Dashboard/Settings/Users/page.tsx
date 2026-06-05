@@ -1,43 +1,43 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import AdminUsersClient from "./AdminUsersClient";
 
 export const dynamic = "force-dynamic";
 
-async function requireSupabaseMainAdmin() {
-  const supabase = await createClient();
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+async function requireCurrentMainAdmin() {
+  const cookieStore = await cookies();
 
-  if (userError || !user) {
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
+
+  if (!adminId || !adminEmail || !sessionToken) {
     return null;
   }
 
   const { data: admin, error } = await supabaseAdmin
     .from("admin_users")
-    .select("id, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .select("id, email, role, is_active")
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
-  if (error || !admin) {
-    return null;
-  }
+  if (error || !admin) return null;
 
-  if (admin.role !== "main_admin") {
-    return null;
-  }
+  if (admin.role !== "main_admin") return null;
 
   return admin;
 }
 
 export default async function AdminUsersPage() {
-  const admin = await requireSupabaseMainAdmin();
+  const admin = await requireCurrentMainAdmin();
 
   if (!admin) {
     redirect("/Admin/Dashboard");

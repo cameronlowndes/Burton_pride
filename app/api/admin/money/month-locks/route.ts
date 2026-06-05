@@ -1,9 +1,13 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type CurrentAdmin = {
   userId: string;
@@ -46,21 +50,21 @@ function nameFromEmail(email?: string | null) {
 }
 
 async function getCurrentAdmin(): Promise<CurrentAdmin> {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("You must be signed in.");
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("admin_users")
     .select("id, email, name, full_name, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -69,21 +73,21 @@ async function getCurrentAdmin(): Promise<CurrentAdmin> {
   }
 
   if (!admin) {
-    throw new Error("No active admin account is linked to this Supabase user.");
+    throw new Error("No active admin account is linked to this admin session.");
   }
 
-  const adminEmail = cleanString(admin.email || user.email) || null;
+  const adminEmailValue = cleanString(admin.email || adminEmail) || null;
 
   const adminName =
     cleanString(admin.name) ||
     cleanString(admin.full_name) ||
-    nameFromEmail(adminEmail) ||
+    nameFromEmail(adminEmailValue) ||
     "Unknown admin";
 
   return {
-    userId: user.id,
+    userId: String(admin.id),
     adminName,
-    adminEmail,
+    adminEmail: adminEmailValue,
   };
 }
 
@@ -92,7 +96,7 @@ function errorStatus(error: unknown) {
 
   if (
     message === "You must be signed in." ||
-    message === "No active admin account is linked to this Supabase user."
+    message === "No active admin account is linked to this admin session."
   ) {
     return 401;
   }
@@ -188,7 +192,9 @@ export async function POST(req: Request) {
       const { data: monthTransactions, error: transactionError } =
         await supabaseAdmin
           .from("money_transactions")
-          .select("id, title, checked_at, deleted_at, transaction_date, created_at")
+          .select(
+            "id, title, checked_at, deleted_at, transaction_date, created_at"
+          )
           .is("deleted_at", null)
           .gte("transaction_date", startDate)
           .lt("transaction_date", endDate);

@@ -1,16 +1,16 @@
 import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export type AdminRole = "main_admin" | "admin" | "editor";
 
 export type CurrentAdmin = {
   id: string;
-  supabase_user_id: string;
+  supabase_user_id: string | null;
   clerk_user_id?: string | null;
   role: AdminRole;
   is_active: boolean;
   email?: string | null;
+  full_name?: string | null;
 };
 
 export type AdminPermissionKey =
@@ -83,8 +83,7 @@ type PermissionRow = {
 
 type AdminLookupReason =
   | "ok"
-  | "missing_supabase_session"
-  | "supabase_auth_failed"
+  | "missing_custom_admin_session"
   | "admin_users_query_failed"
   | "admin_record_missing"
   | "admin_record_inactive"
@@ -95,7 +94,7 @@ export type AdminLookupResult =
   | {
       ok: true;
       reason: "ok";
-      userId: string;
+      userId: string | null;
       sessionId: string | null;
       email: string | null;
       admin: CurrentAdmin;
@@ -110,6 +109,10 @@ export type AdminLookupResult =
       likelyFix: string;
       details?: Record<string, unknown>;
     };
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 export const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -233,106 +236,44 @@ function isAdminRole(value: unknown): value is AdminRole {
   return value === "main_admin" || value === "admin" || value === "editor";
 }
 
-function maskUserId(value: string | null | undefined) {
+function maskValue(value: string | null | undefined) {
   if (!value) return null;
   if (value.length <= 12) return `${value.slice(0, 4)}…`;
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
-async function getSupabaseServerClient() {
+export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
   const cookieStore = await cookies();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY."
-    );
-  }
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // Ignore when called inside a Server Component.
-        }
-      },
-    },
-  });
-}
-
-async function getSignedInSupabaseUser() {
-  const supabase = await getSupabaseServerClient();
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error) {
-    return {
-      ok: false as const,
-      error,
-      user: null,
-    };
-  }
-
-  return {
-    ok: true as const,
-    error: null,
-    user,
-  };
-}
-
-export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
-  const authResult = await getSignedInSupabaseUser();
-
-  if (!authResult.ok) {
+  if (!adminId || !adminEmail || !sessionToken) {
     return {
       ok: false,
-      reason: "supabase_auth_failed",
+      reason: "missing_custom_admin_session",
       userId: null,
       sessionId: null,
-      email: null,
-      message: authResult.error.message,
+      email: adminEmail || null,
+      message: "No active Burton Pride admin session was received.",
       likelyFix:
-        "Check Supabase auth cookies, NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+        "Sign in again using the Admin Portal login page. The login route must set burton_admin_id, burton_admin_email and burton_admin_session cookies.",
       details: {
-        supabaseAuthError: authResult.error.message,
+        hasAdminIdCookie: Boolean(adminId),
+        hasAdminEmailCookie: Boolean(adminEmail),
+        hasSessionCookie: Boolean(sessionToken),
       },
     };
   }
-
-  const user = authResult.user;
-
-  if (!user) {
-    return {
-      ok: false,
-      reason: "missing_supabase_session",
-      userId: null,
-      sessionId: null,
-      email: null,
-      message: "No active Supabase login session was received.",
-      likelyFix:
-        "Sign in again using the Supabase admin login. Check that Supabase auth cookies are being set.",
-    };
-  }
-
-  const userId = user.id;
-  const email = user.email || null;
 
   const { data, error } = await supabaseAdmin
     .from("admin_users")
-    .select("id, supabase_user_id, clerk_user_id, email, role, is_active")
-    .eq("supabase_user_id", userId)
+    .select(
+      "id, supabase_user_id, clerk_user_id, email, full_name, role, is_active"
+    )
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .limit(2);
 
   if (error) {
@@ -341,18 +282,18 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_users_query_failed",
-      userId,
-      sessionId: null,
-      email,
+      userId: adminId,
+      sessionId: maskValue(sessionToken),
+      email: adminEmail,
       message: "The admin user lookup failed in Supabase.",
       likelyFix:
-        "Check public.admin_users exists and includes id, supabase_user_id, email, role and is_active. If you still have clerk_user_id only, add supabase_user_id.",
+        "Check public.admin_users exists and includes id, email, full_name, role and is_active.",
       details: {
         supabaseMessage: error.message,
         supabaseCode: error.code || null,
         supabaseHint: error.hint || null,
         supabaseDetails: error.details || null,
-        maskedSupabaseUserId: maskUserId(userId),
+        maskedAdminId: maskValue(adminId),
       },
     };
   }
@@ -363,14 +304,14 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_duplicate",
-      userId,
-      sessionId: null,
-      email,
-      message: "More than one admin record exists for this Supabase user ID.",
+      userId: adminId,
+      sessionId: maskValue(sessionToken),
+      email: adminEmail,
+      message: "More than one admin record exists for this admin ID and email.",
       likelyFix:
-        "Remove duplicate rows from public.admin_users and add a unique constraint to supabase_user_id.",
+        "Remove duplicate rows from public.admin_users and make id unique.",
       details: {
-        maskedSupabaseUserId: maskUserId(userId),
+        maskedAdminId: maskValue(adminId),
         matchingRows: rows.length,
       },
     };
@@ -382,16 +323,16 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_missing",
-      userId,
-      sessionId: null,
-      email,
+      userId: adminId,
+      sessionId: maskValue(sessionToken),
+      email: adminEmail,
       message:
-        "You are signed in with Supabase, but no matching admin record exists.",
+        "Your admin session exists, but no matching admin record exists.",
       likelyFix:
-        "Create or update public.admin_users so supabase_user_id matches the current Supabase auth user id and is_active is true.",
+        "Check public.admin_users. Make sure the id and email match the cookies and is_active is true.",
       details: {
-        signedInEmail: email,
-        maskedSupabaseUserId: maskUserId(userId),
+        signedInEmail: adminEmail,
+        maskedAdminId: maskValue(adminId),
       },
     };
   }
@@ -400,14 +341,13 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_inactive",
-      userId,
-      sessionId: null,
-      email,
+      userId: adminId,
+      sessionId: maskValue(sessionToken),
+      email: adminEmail,
       message: "Your admin record exists but is inactive.",
       likelyFix: "Set public.admin_users.is_active to true for this user.",
       details: {
         adminId: admin.id,
-        maskedSupabaseUserId: maskUserId(userId),
       },
     };
   }
@@ -416,9 +356,9 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_role_invalid",
-      userId,
-      sessionId: null,
-      email,
+      userId: adminId,
+      sessionId: maskValue(sessionToken),
+      email: adminEmail,
       message: "Your admin record has an invalid role value.",
       likelyFix:
         'Set public.admin_users.role to "main_admin", "admin" or "editor".',
@@ -432,13 +372,13 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
   return {
     ok: true,
     reason: "ok",
-    userId,
-    sessionId: null,
-    email,
+    userId: admin.id,
+    sessionId: maskValue(sessionToken),
+    email: admin.email || adminEmail,
     admin: {
       ...admin,
-      supabase_user_id: admin.supabase_user_id || userId,
-      email: admin.email || email,
+      supabase_user_id: admin.supabase_user_id || null,
+      email: admin.email || adminEmail,
     },
   };
 }
@@ -561,7 +501,7 @@ export async function requireAdmin() {
   const admin = await getCurrentAdminPermissions();
 
   if (!admin) {
-    throw new Error("Unauthorized. Supabase admin session was not found.");
+    throw new Error("Unauthorized. Burton Pride admin session was not found.");
   }
 
   return admin;

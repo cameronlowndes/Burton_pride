@@ -1,52 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
-import { auth } from "@clerk/nextjs/server";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type GoogleConnectionRow = {
   email: string | null;
+  google_email: string | null;
 };
 
 async function getCurrentGoogleEmail() {
-  const supabase = supabaseAdmin;
+  const admin = await getCurrentAdmin();
 
-  const { userId } = await auth();
-
-  if (!userId) {
-    throw new Error("You must be signed in.");
+  if (!admin?.id) {
+    throw new Error("You are not logged in. Please log in to the admin portal.");
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("google_connections")
-    .select("email")
-    .eq("user_id", userId)
+    .select("email, google_email")
+    .eq("user_id", admin.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<GoogleConnectionRow>();
 
-  if (error) throw error;
-
-  const googleEmail = String(data?.email || "").trim().toLowerCase();
-
-  if (!googleEmail) {
-    throw new Error("No Google account connected for this user.");
+  if (error) {
+    console.error("Google connection lookup error:", error);
+    throw new Error("Failed to load Google connection.");
   }
 
-  return { googleEmail, userId };
+  const googleEmail = String(data?.google_email || data?.email || "")
+    .trim()
+    .toLowerCase();
+
+  if (!googleEmail) {
+    throw new Error("No Google account connected for this admin account.");
+  }
+
+  return {
+    googleEmail,
+    adminId: admin.id,
+  };
+}
+
+function getErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (
+    message.includes("not logged in") ||
+    message.includes("log in") ||
+    message.includes("signed in")
+  ) {
+    return 401;
+  }
+
+  if (message.includes("no google account connected")) {
+    return 400;
+  }
+
+  return 500;
 }
 
 export async function GET() {
   try {
-    const supabase = supabaseAdmin;
     const { googleEmail } = await getCurrentGoogleEmail();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("email_signatures")
       .select("id, name, html, text, is_default, created_at")
       .eq("google_email", googleEmail)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error("Email signatures load error:", error);
+      throw new Error("Failed to load email signatures.");
+    }
 
     return NextResponse.json({
       ok: true,
@@ -63,7 +93,7 @@ export async function GET() {
             ? error.message
             : "Failed to load email signatures.",
       },
-      { status: 500 }
+      { status: getErrorStatus(error) }
     );
   }
 }
@@ -91,17 +121,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = supabaseAdmin;
-    const { googleEmail, userId } = await getCurrentGoogleEmail();
+    const { googleEmail, adminId } = await getCurrentGoogleEmail();
 
     if (isDefault) {
-      await supabase
+      const { error: defaultError } = await supabaseAdmin
         .from("email_signatures")
         .update({ is_default: false })
         .eq("google_email", googleEmail);
+
+      if (defaultError) {
+        console.error("Failed to clear default signature:", defaultError);
+        throw new Error("Failed to update default signature.");
+      }
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("email_signatures")
       .insert([
         {
@@ -110,13 +144,16 @@ export async function POST(req: NextRequest) {
           text,
           is_default: isDefault,
           google_email: googleEmail,
-          clerk_user_id: userId,
+          admin_id: adminId,
         },
       ])
       .select("id, name, html, text, is_default, created_at")
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error("Email signature insert error:", error);
+      throw new Error("Failed to save email signature.");
+    }
 
     return NextResponse.json({
       ok: true,
@@ -134,7 +171,7 @@ export async function POST(req: NextRequest) {
             ? error.message
             : "Failed to save email signature.",
       },
-      { status: 500 }
+      { status: getErrorStatus(error) }
     );
   }
 }

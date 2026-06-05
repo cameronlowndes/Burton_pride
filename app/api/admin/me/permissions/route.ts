@@ -1,10 +1,13 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -67,30 +70,22 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 export async function GET() {
   try {
-    const supabase = await createClient();
+    const cookieStore = await cookies();
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+    const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+    const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-    console.log("GET /api/admin/me/permissions Supabase Auth check", {
-      hasUser: Boolean(user),
-      userId: user?.id ?? null,
-      email: user?.email ?? null,
-      error: userError?.message ?? null,
-    });
-
-    if (userError || !user) {
+    if (!adminId || !adminEmail || !sessionToken) {
       return jsonResponse(
         {
           ok: false,
           error: "Unauthorized",
-          reason: "missing_supabase_session",
+          reason: "missing_custom_admin_session",
           message:
-            "No active Supabase Auth login session was received by the permissions API.",
+            "No active Burton Pride admin session was received by the permissions API.",
           likelyFix:
-            "Sign out and sign back in using the new Supabase Auth login page.",
+            "Sign out and sign back in using the Admin Portal login page.",
         },
         401
       );
@@ -99,7 +94,8 @@ export async function GET() {
     const { data: admin, error: adminError } = await supabaseAdmin
       .from("admin_users")
       .select("*")
-      .eq("supabase_user_id", user.id)
+      .eq("id", adminId)
+      .eq("email", adminEmail)
       .eq("is_active", true)
       .maybeSingle();
 
@@ -111,33 +107,24 @@ export async function GET() {
           ok: false,
           error: adminError.message,
           reason: "admin_database_error",
-          message:
-            "The permissions API could not read the admin_users table.",
+          message: "The permissions API could not read the admin_users table.",
         },
         500
       );
     }
 
     if (!admin) {
-      console.warn(
-        "GET /api/admin/me/permissions could not find an active admin record",
-        {
-          supabaseUserId: user.id,
-          email: user.email,
-        }
-      );
-
       return jsonResponse(
         {
           ok: false,
           error: "Admin permissions could not be loaded",
           reason: "admin_record_missing_or_inactive",
           message:
-            "You are signed in with Supabase Auth, but no active admin row is linked to this Supabase user ID.",
+            "Your admin session exists, but no active admin row was found for that account.",
           likelyFix:
-            "Check public.admin_users. Make sure supabase_user_id matches auth.users.id and is_active is true.",
-          signedInEmail: user.email,
-          supabaseUserId: user.id,
+            "Check public.admin_users. Make sure id and email match the login cookies and is_active is true.",
+          adminId,
+          adminEmail,
         },
         403
       );
@@ -159,8 +146,8 @@ export async function GET() {
       ok: true,
       admin: {
         id: admin.id,
-        supabase_user_id: admin.supabase_user_id,
-        email: admin.email ?? user.email ?? null,
+        email: admin.email,
+        full_name: admin.full_name ?? null,
         role: admin.role,
         is_active: admin.is_active,
         permissions,
@@ -180,10 +167,9 @@ export async function GET() {
         ok: false,
         error: message,
         reason: "unexpected_permissions_api_error",
-        message:
-          "The permissions API crashed while checking the admin account.",
+        message: "The permissions API crashed while checking the admin account.",
         likelyFix:
-          "Check lib/supabase/server.ts, lib/supabaseAdmin.ts, and public.admin_users.",
+          "Check the cookies set by /api/admin/login and check public.admin_users.",
       },
       500
     );

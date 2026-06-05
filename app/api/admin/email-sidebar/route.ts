@@ -1,10 +1,14 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type AdminUser = {
   id: string;
@@ -96,21 +100,21 @@ function hasPermission(admin: AdminUser, permission: string) {
 }
 
 async function getCurrentAdmin(): Promise<AdminUser | null> {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (userError || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     return null;
   }
 
   const { data, error } = await supabaseAdmin
     .from("admin_users")
     .select("id,email,role,is_active,permissions")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -121,20 +125,26 @@ async function getCurrentAdmin(): Promise<AdminUser | null> {
   return (data as AdminUser | null) ?? null;
 }
 
+function unauthorizedResponse() {
+  return jsonResponse(
+    {
+      ok: false,
+      error: "Unauthorized",
+      message:
+        "No active custom admin session was found. Please log out and sign back in.",
+      likelyFix:
+        "This route now uses burton_admin_id, burton_admin_email and burton_admin_session cookies. Make sure your login route sets these cookies.",
+    },
+    401
+  );
+}
+
 export async function GET() {
   try {
     const admin = await getCurrentAdmin();
 
     if (!admin) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Unauthorized",
-          message:
-            "No active Supabase admin user was found for this login session.",
-        },
-        401
-      );
+      return unauthorizedResponse();
     }
 
     const { data, error } = await supabaseAdmin
@@ -147,6 +157,8 @@ export async function GET() {
         {
           ok: false,
           error: error.message || "Failed to load email sidebar items.",
+          likelyFix:
+            "Check the admin_email_sidebar table exists in Supabase.",
         },
         500
       );
@@ -155,6 +167,11 @@ export async function GET() {
     return jsonResponse({
       ok: true,
       items: data || [],
+      admin: {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+      },
     });
   } catch (error: unknown) {
     console.error("GET /api/admin/email-sidebar error:", error);
@@ -179,15 +196,7 @@ export async function POST(req: Request) {
     const admin = await getCurrentAdmin();
 
     if (!admin) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: "Unauthorized",
-          message:
-            "No active Supabase admin user was found for this login session.",
-        },
-        401
-      );
+      return unauthorizedResponse();
     }
 
     if (!hasPermission(admin, "site_pages:manage")) {
@@ -197,6 +206,8 @@ export async function POST(req: Request) {
           error: "Forbidden",
           message:
             "You do not have permission to manage email sidebar settings.",
+          likelyFix:
+            "Give this admin main_admin role or site_pages:manage permission.",
         },
         403
       );
@@ -255,6 +266,11 @@ export async function POST(req: Request) {
     return jsonResponse({
       ok: true,
       item: data,
+      admin: {
+        id: admin.id,
+        email: admin.email,
+        role: admin.role,
+      },
     });
   } catch (error: unknown) {
     console.error("POST /api/admin/email-sidebar error:", error);

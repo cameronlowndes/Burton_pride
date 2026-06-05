@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ElementType, type ReactNode } from "react";
 import Link from "next/link";
 import { useAdmin } from "../../../components/providers/AdminProvider";
-import { supabaseBrowser } from "@/lib/supabase/supabaseBrowser";
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Copy,
@@ -14,19 +14,101 @@ import {
   Home,
   Loader2,
   Lock,
-  Mail,
   RefreshCcw,
-  ShieldCheck,
   User,
   Wallet,
   XCircle,
 } from "lucide-react";
 
+function getPasswordErrorMessage(error: unknown) {
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "Could not update password.";
+
+  const message = rawMessage.trim() || "Could not update password.";
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("not signed in") ||
+    lower.includes("not authenticated") ||
+    lower.includes("session") ||
+    lower.includes("unauthorised") ||
+    lower.includes("unauthorized") ||
+    lower.includes("401")
+  ) {
+    return [
+      "Password change failed because your Admin Portal login session is not active.",
+      "",
+      "What to do:",
+      "1. Log out of the admin portal.",
+      "2. Sign in again with your admin email.",
+      "3. Come back to Profile Settings and try changing the password again.",
+      "",
+      `Technical detail: ${message}`,
+    ].join("\n");
+  }
+
+  return [
+    "Password change failed.",
+    "",
+    "What to do:",
+    "1. Check the new password is strong enough.",
+    "2. Make sure both password boxes match.",
+    "3. Refresh the page and try again.",
+    "",
+    `Technical detail: ${message}`,
+  ].join("\n");
+}
+
+function getLocalPasswordValidationError({
+  newPassword,
+  confirmPassword,
+  score,
+}: {
+  newPassword: string;
+  confirmPassword: string;
+  score: number;
+}) {
+  if (!newPassword || !confirmPassword) {
+    return "Please enter your new password in both boxes.";
+  }
+
+  if (newPassword !== confirmPassword) {
+    return "Passwords do not match.";
+  }
+
+  if (score < 5) {
+    return [
+      "Password change failed because the password is not strong enough.",
+      "",
+      "Your password needs:",
+      "• At least 8 characters",
+      "• An uppercase letter",
+      "• A lowercase letter",
+      "• A number",
+      "• A symbol",
+    ].join("\n");
+  }
+
+  return null;
+}
+
+async function readApiError(response: Response) {
+  try {
+    const json = await response.json();
+    return json.error || json.message || `Request failed with status ${response.status}.`;
+  } catch {
+    return `Request failed with status ${response.status}.`;
+  }
+}
+
 export default function ProfileSettingsPage() {
   const { admin, loading } = useAdmin();
 
   const [copiedEmail, setCopiedEmail] = useState(false);
-
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPasswords, setShowPasswords] = useState(false);
@@ -45,45 +127,30 @@ export default function ProfileSettingsPage() {
 
     const score = Object.values(checks).filter(Boolean).length;
 
-    if (!newPassword) {
-      return {
-        label: "Not started",
-        score: 0,
-        percent: 0,
-        colour: "bg-white/10",
-        text: "text-white/60",
-        checks,
-      };
-    }
-
-    if (score <= 2) {
-      return {
-        label: "Weak",
-        score,
-        percent: 35,
-        colour: "bg-red-500",
-        text: "text-red-100",
-        checks,
-      };
-    }
-
-    if (score === 3 || score === 4) {
-      return {
-        label: "Good",
-        score,
-        percent: 70,
-        colour: "bg-yellow-400",
-        text: "text-yellow-100",
-        checks,
-      };
-    }
-
     return {
-      label: "Strong",
+      label: !newPassword
+        ? "Not started"
+        : score <= 2
+          ? "Weak"
+          : score < 5
+            ? "Good"
+            : "Strong",
       score,
-      percent: 100,
-      colour: "bg-emerald-400",
-      text: "text-emerald-100",
+      percent: !newPassword ? 0 : score <= 2 ? 35 : score < 5 ? 70 : 100,
+      colour: !newPassword
+        ? "bg-white/10"
+        : score <= 2
+          ? "bg-red-500"
+          : score < 5
+            ? "bg-yellow-400"
+            : "bg-emerald-400",
+      text: !newPassword
+        ? "text-white/60"
+        : score <= 2
+          ? "text-red-100"
+          : score < 5
+            ? "text-yellow-100"
+            : "text-emerald-100",
       checks,
     };
   }, [newPassword]);
@@ -99,7 +166,7 @@ export default function ProfileSettingsPage() {
     newPassword !== confirmPassword;
 
   const canChangePassword =
-    passwordStrength.score >= 4 && passwordsMatch && !savingPassword;
+    passwordStrength.score >= 5 && passwordsMatch && !savingPassword;
 
   async function copyEmail() {
     if (!admin?.email) return;
@@ -126,41 +193,56 @@ export default function ProfileSettingsPage() {
       setPasswordMessage(null);
       setPasswordError(null);
 
-      if (!newPassword || !confirmPassword) {
-        throw new Error("Please enter and confirm your new password.");
-      }
-
-      if (newPassword !== confirmPassword) {
-        throw new Error("Your new passwords do not match.");
-      }
-
-      if (passwordStrength.score < 4) {
-        throw new Error(
-          "Please use a stronger password with at least 8 characters, uppercase, lowercase, and a number or symbol."
-        );
-      }
-
-      const { error } = await supabaseBrowser.auth.updateUser({
-        password: newPassword,
+      const validationError = getLocalPasswordValidationError({
+        newPassword,
+        confirmPassword,
+        score: passwordStrength.score,
       });
 
-      if (error) {
-        throw new Error(error.message || "Could not update password.");
+      if (validationError) {
+        setPasswordError(validationError);
+        return;
+      }
+
+      const response = await fetch("/api/admin/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          newPassword,
+          confirmPassword,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+
+      const json = await response.json();
+
+      if (!json.ok) {
+        throw new Error(json.error || "Could not update password.");
       }
 
       setNewPassword("");
       setConfirmPassword("");
-      setPasswordMessage("Password changed successfully.");
-    } catch (error: any) {
-      setPasswordError(error?.message || "Could not update password.");
+      setPasswordMessage(
+        json.message ||
+          "Password changed successfully. You can now use your new password next time you sign in."
+      );
+    } catch (error) {
+      setPasswordError(getPasswordErrorMessage(error));
     } finally {
       setSavingPassword(false);
     }
   }
 
   return (
-    <div className="min-h-dvh px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl space-y-6">
+    <div className="min-h-dvh overflow-x-hidden px-4 py-6 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-6xl space-y-6">
         <Link
           href="/Admin/Dashboard"
           className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20"
@@ -169,43 +251,24 @@ export default function ProfileSettingsPage() {
           Back to dashboard
         </Link>
 
-        <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#11111f]/90 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
-          <div className="absolute inset-0 bg-gradient-to-br from-pink-500/20 via-purple-500/15 to-blue-500/20" />
-
-          <div className="relative z-10">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-white/80">
-              <ShieldCheck className="h-4 w-4" />
-              Admin Account Settings
-            </div>
-
-            <h1 className="mt-5 text-4xl font-black sm:text-5xl">
-              Account security
-            </h1>
-
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-white/70">
-              View your admin login details, copy your email, and change your
-              Supabase password securely.
-            </p>
-          </div>
-        </section>
-
         <section className="rounded-[2rem] border border-white/10 bg-[#11111f]/90 p-6 shadow-xl backdrop-blur-xl">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
+            <div className="flex min-w-0 items-start gap-4">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10">
                 <User className="h-7 w-7" />
               </div>
 
-              <div>
-                <h2 className="text-2xl font-black">Admin account tools</h2>
+              <div className="min-w-0">
+                <h2 className="break-words text-2xl font-black">
+                  Admin account tools
+                </h2>
                 <p className="mt-1 text-sm leading-6 text-white/60">
-                  This account is signed in with Supabase Auth. Use the buttons
-                  below to jump to common admin areas.
+                  This account is signed in through the custom Admin Portal login.
                 </p>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
+            <div className="min-w-0 rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
               <div className="text-xs font-black uppercase tracking-wide text-white/45">
                 Login email
               </div>
@@ -241,19 +304,17 @@ export default function ProfileSettingsPage() {
               type="button"
               onClick={copyEmail}
               disabled={!admin?.email}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 text-left transition hover:bg-black/35 disabled:opacity-50"
+              className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 text-left transition hover:bg-black/35 disabled:opacity-50"
             >
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10">
                 <Copy className="h-5 w-5" />
               </div>
 
-              <div>
-                <div className="font-black">
+              <div className="min-w-0">
+                <div className="break-words font-black">
                   {copiedEmail ? "Email copied" : "Copy email"}
                 </div>
-                <div className="mt-1 text-xs text-white/55">
-                  Copy login email
-                </div>
+                <div className="mt-1 text-xs text-white/55">Copy login email</div>
               </div>
             </button>
           </div>
@@ -261,13 +322,15 @@ export default function ProfileSettingsPage() {
 
         <section className="rounded-[2rem] border border-white/10 bg-[#11111f]/90 p-6 shadow-xl backdrop-blur-xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10">
                 <Lock className="h-6 w-6" />
               </div>
 
-              <div>
-                <h2 className="text-2xl font-black">Change password</h2>
+              <div className="min-w-0">
+                <h2 className="break-words text-2xl font-black">
+                  Change password
+                </h2>
                 <p className="text-sm text-white/60">
                   See what you are typing, check strength, and confirm before
                   changing your password.
@@ -309,14 +372,14 @@ export default function ProfileSettingsPage() {
 
               {passwordsMatch && (
                 <div className="flex items-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
-                  <CheckCircle2 className="h-4 w-4" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
                   Passwords match.
                 </div>
               )}
 
               {passwordsDoNotMatch && (
                 <div className="flex items-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">
-                  <XCircle className="h-4 w-4" />
+                  <XCircle className="h-4 w-4 shrink-0" />
                   Passwords do not match yet.
                 </div>
               )}
@@ -327,7 +390,6 @@ export default function ProfileSettingsPage() {
                 <span className="text-sm font-black text-white/80">
                   Password strength
                 </span>
-
                 <span className={`text-sm font-black ${passwordStrength.text}`}>
                   {passwordStrength.label}
                 </span>
@@ -344,23 +406,18 @@ export default function ProfileSettingsPage() {
                 <PasswordCheck ok={passwordStrength.checks.length}>
                   8+ characters
                 </PasswordCheck>
-
                 <PasswordCheck ok={passwordStrength.checks.uppercase}>
                   Uppercase letter
                 </PasswordCheck>
-
                 <PasswordCheck ok={passwordStrength.checks.lowercase}>
                   Lowercase letter
                 </PasswordCheck>
-
                 <PasswordCheck ok={passwordStrength.checks.number}>
                   Number
                 </PasswordCheck>
-
                 <PasswordCheck ok={passwordStrength.checks.symbol}>
                   Symbol
                 </PasswordCheck>
-
                 <PasswordCheck ok={passwordsMatch}>
                   Passwords match
                 </PasswordCheck>
@@ -369,15 +426,23 @@ export default function ProfileSettingsPage() {
           </div>
 
           {passwordError && (
-            <div className="mt-4 whitespace-pre-line rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">
-              {passwordError}
+            <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <div className="font-black">Password update problem</div>
+                  <div className="mt-2 whitespace-pre-line break-words font-semibold leading-6">
+                    {passwordError}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
           {passwordMessage && (
-            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
-              <CheckCircle2 className="h-4 w-4" />
-              {passwordMessage}
+            <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{passwordMessage}</span>
             </div>
           )}
 
@@ -393,13 +458,14 @@ export default function ProfileSettingsPage() {
               ) : (
                 <Lock className="h-4 w-4" />
               )}
-              Change password
+              {savingPassword ? "Changing password..." : "Change password"}
             </button>
 
             <button
               type="button"
               onClick={resetPasswordForm}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20"
+              disabled={savingPassword}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/20 disabled:opacity-50"
             >
               <RefreshCcw className="h-4 w-4" />
               Clear password boxes
@@ -418,21 +484,21 @@ function ToolButton({
   desc,
 }: {
   href: string;
-  icon: typeof Home;
+  icon: ElementType;
   title: string;
   desc: string;
 }) {
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 transition hover:bg-black/35"
+      className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 transition hover:bg-black/35"
     >
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10">
         <Icon className="h-5 w-5" />
       </div>
 
-      <div>
-        <div className="font-black">{title}</div>
+      <div className="min-w-0">
+        <div className="break-words font-black">{title}</div>
         <div className="mt-1 text-xs text-white/55">{desc}</div>
       </div>
     </Link>
@@ -453,19 +519,20 @@ function PasswordInput({
   placeholder: string;
 }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="text-sm font-black text-white/80">{label}</span>
 
-      <div className="mt-2 flex items-center rounded-2xl border border-white/10 bg-black/25 focus-within:border-pink-300/40">
+      <div className="mt-2 flex min-w-0 items-center rounded-2xl border border-white/10 bg-black/25 focus-within:border-pink-300/40">
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
           type={show ? "text" : "password"}
           placeholder={placeholder}
+          autoComplete="new-password"
           className="min-w-0 flex-1 rounded-2xl bg-transparent px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-white/35"
         />
 
-        <div className="px-4 text-white/40">
+        <div className="shrink-0 px-4 text-white/40">
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </div>
       </div>
@@ -473,28 +540,21 @@ function PasswordInput({
   );
 }
 
-function PasswordCheck({
-  ok,
-  children,
-}: {
-  ok: boolean;
-  children: ReactNode;
-}) {
+function PasswordCheck({ ok, children }: { ok: boolean; children: ReactNode }) {
   return (
     <div
       className={[
-        "flex items-center gap-2 rounded-xl px-3 py-2",
-        ok
-          ? "bg-emerald-500/10 text-emerald-100"
-          : "bg-white/5 text-white/45",
+        "flex min-w-0 items-center gap-2 rounded-xl px-3 py-2",
+        ok ? "bg-emerald-500/10 text-emerald-100" : "bg-white/5 text-white/45",
       ].join(" ")}
     >
       {ok ? (
-        <CheckCircle2 className="h-4 w-4" />
+        <CheckCircle2 className="h-4 w-4 shrink-0" />
       ) : (
-        <XCircle className="h-4 w-4 opacity-50" />
+        <XCircle className="h-4 w-4 shrink-0 opacity-50" />
       )}
-      <span className="font-bold">{children}</span>
+
+      <span className="break-words font-bold">{children}</span>
     </div>
   );
 }

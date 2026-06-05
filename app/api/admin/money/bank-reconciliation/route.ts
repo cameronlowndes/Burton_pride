@@ -1,9 +1,14 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type BankImportRowStatus =
   | "unmatched"
@@ -16,11 +21,14 @@ type SignedInAdmin = {
   userId: string;
   userName: string;
   userEmail: string | null;
+  role: string | null;
+  permissions: unknown;
 };
 
 function jsonError(message: string, details?: unknown, status = 500) {
   return NextResponse.json(
     {
+      ok: false,
       error: message,
       details:
         details instanceof Error
@@ -28,6 +36,12 @@ function jsonError(message: string, details?: unknown, status = 500) {
           : typeof details === "string"
             ? details
             : details || null,
+      likelyFix:
+        status === 401
+          ? "Log out and log back in so the custom admin cookies refresh."
+          : status === 403
+            ? "Give this admin money:view, money:add_transactions, money:edit_transactions, money:export_reports, audit_logs:view, or main_admin access."
+            : "Check the server logs and Supabase table columns.",
     },
     { status }
   );
@@ -47,6 +61,32 @@ function nameFromEmail(email?: string | null) {
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .trim();
+}
+
+function hasPermissionValue(permissions: unknown, permissionKey: string) {
+  if (!permissions) return false;
+
+  if (Array.isArray(permissions)) {
+    return permissions.map(String).includes(permissionKey);
+  }
+
+  if (typeof permissions === "object") {
+    return (permissions as Record<string, unknown>)[permissionKey] === true;
+  }
+
+  return false;
+}
+
+function canUseBankReconciliation(admin: SignedInAdmin) {
+  if (admin.role === "main_admin") return true;
+
+  return (
+    hasPermissionValue(admin.permissions, "money:view") ||
+    hasPermissionValue(admin.permissions, "money:add_transactions") ||
+    hasPermissionValue(admin.permissions, "money:edit_transactions") ||
+    hasPermissionValue(admin.permissions, "money:export_reports") ||
+    hasPermissionValue(admin.permissions, "audit_logs:view")
+  );
 }
 
 function normalise(value: unknown) {
@@ -333,36 +373,54 @@ function calculateCandidateScore(row: any, transaction: any) {
 }
 
 async function getSignedInUser(): Promise<SignedInAdmin> {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("You must be signed in to use bank reconciliation.");
   }
 
-  const { data: admin } = await supabaseAdmin
+  const { data: admin, error } = await supabaseAdmin
     .from("admin_users")
-    .select("id, email, name, full_name")
-    .eq("supabase_user_id", user.id)
+    .select("id, email, name, full_name, role, is_active, permissions")
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
-  const email = cleanText(admin?.email || user.email) || null;
+  if (error) {
+    throw new Error(error.message || "Failed to load admin account.");
+  }
+
+  if (!admin) {
+    throw new Error("No active admin account is linked to this admin session.");
+  }
+
+  const email = cleanText(admin.email || adminEmail) || null;
   const name =
-    cleanText(admin?.name) ||
-    cleanText(admin?.full_name) ||
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
     nameFromEmail(email) ||
     "Unknown admin";
 
-  return {
-    userId: user.id,
+  const signedInAdmin = {
+    userId: String(admin.id),
     userName: name,
     userEmail: email,
+    role: cleanText(admin.role) || null,
+    permissions: admin.permissions,
   };
+
+  if (!canUseBankReconciliation(signedInAdmin)) {
+    throw new Error(
+      "Forbidden: you do not have permission to use bank reconciliation."
+    );
+  }
+
+  return signedInAdmin;
 }
 
 async function writeAuditLog({
@@ -384,6 +442,8 @@ async function writeAuditLog({
       actor_user_id: userId,
       actor_name: userName,
       actor_email: userEmail,
+      created_by: userName,
+      created_by_email: userEmail,
       metadata,
       created_at: new Date().toISOString(),
     });
@@ -411,7 +471,8 @@ async function findCandidatesForRows(rows: any[], year?: string | null) {
     .sort();
 
   const firstDate = dates[0] || `${year || new Date().getFullYear()}-01-01`;
-  const lastDate = dates[dates.length - 1] || `${year || new Date().getFullYear()}-12-31`;
+  const lastDate =
+    dates[dates.length - 1] || `${year || new Date().getFullYear()}-12-31`;
 
   const start = new Date(firstDate);
   start.setDate(start.getDate() - 14);
@@ -473,6 +534,23 @@ async function findCandidatesForRows(rows: any[], year?: string | null) {
   });
 }
 
+function getErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (
+    message === "You must be signed in to use bank reconciliation." ||
+    message === "No active admin account is linked to this admin session."
+  ) {
+    return 401;
+  }
+
+  if (message.startsWith("Forbidden")) {
+    return 403;
+  }
+
+  return 500;
+}
+
 export async function GET(request: Request) {
   try {
     await getSignedInUser();
@@ -491,9 +569,13 @@ export async function GET(request: Request) {
 
       if (importError) throw importError;
 
-      const rowsWithCandidates = await findCandidatesForRows(rows, bankImport?.year);
+      const rowsWithCandidates = await findCandidatesForRows(
+        rows,
+        bankImport?.year
+      );
 
       return NextResponse.json({
+        ok: true,
         import: bankImport || null,
         rows: rowsWithCandidates,
       });
@@ -508,10 +590,15 @@ export async function GET(request: Request) {
     if (error) throw error;
 
     return NextResponse.json({
+      ok: true,
       imports: data || [],
     });
   } catch (error) {
-    return jsonError("Failed to load bank reconciliation data.", error);
+    return jsonError(
+      "Failed to load bank reconciliation data.",
+      error,
+      getErrorStatus(error)
+    );
   }
 }
 
@@ -606,11 +693,12 @@ export async function POST(request: Request) {
     const rowsWithCandidates = await findCandidatesForRows(rows, year);
 
     return NextResponse.json({
+      ok: true,
       import: bankImport,
       rows: rowsWithCandidates,
     });
   } catch (error) {
-    return jsonError("Failed to import bank CSV.", error);
+    return jsonError("Failed to import bank CSV.", error, getErrorStatus(error));
   }
 }
 
@@ -751,6 +839,10 @@ export async function PATCH(request: Request) {
 
     return jsonError("Invalid action. Use match, ignore, or needs_review.", null, 400);
   } catch (error) {
-    return jsonError("Failed to update bank reconciliation row.", error);
+    return jsonError(
+      "Failed to update bank reconciliation row.",
+      error,
+      getErrorStatus(error)
+    );
   }
 }

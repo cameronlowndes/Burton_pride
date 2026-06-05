@@ -668,14 +668,14 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-dvh px-4 py-6 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[96rem] space-y-8">
-        <section className="relative overflow-hidden rounded-[2.25rem] border border-white/10 bg-[#0d0d1a]/90 p-6 shadow-2xl backdrop-blur-xl sm:p-8 lg:p-10">
+    <div className="min-h-dvh w-full max-w-full overflow-x-hidden px-3 py-5 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[96rem] min-w-0 space-y-6 sm:space-y-8">
+        <section className="relative w-full max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#0d0d1a]/90 p-4 shadow-2xl backdrop-blur-xl sm:rounded-[2.25rem] sm:p-8 lg:p-10">
           <div className="absolute inset-0 bg-gradient-to-br from-pink-500/20 via-purple-500/15 to-blue-500/20" />
           <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-pink-400/20 blur-3xl" />
           <div className="absolute -bottom-28 left-10 h-96 w-96 rounded-full bg-blue-400/20 blur-3xl" />
 
-          <div className="relative z-10 grid gap-8 xl:grid-cols-[1.4fr_0.8fr] xl:items-end">
+          <div className="relative z-10 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)] xl:items-end">
             <div>
               <div className="flex flex-wrap gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-white/80">
@@ -689,7 +689,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <h1 className="mt-6 max-w-5xl break-words text-4xl font-black leading-tight sm:text-5xl lg:text-7xl">
+              <h1 className="mt-6 max-w-5xl break-words text-3xl font-black leading-tight sm:text-5xl lg:text-7xl">
                 {getGreeting()},{" "}
                 <span className="bg-gradient-to-r from-pink-200 via-white to-blue-200 bg-clip-text text-transparent">
                   {adminLoading ? "Loading..." : displayName}
@@ -771,7 +771,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             title="Emails sent"
             value={dashLoading ? "…" : safeNumber(stats.emailsSent30d)}
@@ -809,7 +809,7 @@ export default function DashboardPage() {
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
           <Card>
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -865,7 +865,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
           <Card>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -964,7 +964,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-3">
+        <section className="grid min-w-0 gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1065,7 +1065,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-3">
+        <section className="grid min-w-0 gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-2">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1142,7 +1142,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-3">
+        <section className="grid min-w-0 gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -1233,7 +1233,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-3">
+        <section className="grid min-w-0 gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-2">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -1314,7 +1314,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-3">
+        <section className="grid min-w-0 gap-6 xl:grid-cols-3">
           <Card>
             <h2 className="text-2xl font-black">Finance centre</h2>
             <p className="mt-1 text-sm text-white/60">
@@ -1396,7 +1396,7 @@ export default function DashboardPage() {
           </Card>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-3">
+        <section className="grid min-w-0 gap-6 lg:grid-cols-3">
           <Card>
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/15 text-red-100">
               <LockKeyhole className="h-6 w-6" />
@@ -1461,7 +1461,7 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#11111f]/85 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+        <section className="relative w-full max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-4 shadow-2xl backdrop-blur-xl sm:rounded-[2rem] sm:p-8">
           <div className="absolute inset-0 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-blue-500/10" />
           <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-pink-400/15 blur-3xl" />
           <div className="absolute -bottom-24 left-10 h-64 w-64 rounded-full bg-blue-400/15 blur-3xl" />
@@ -1508,7 +1508,7 @@ function Card({
   return (
     <div
       className={[
-        "rounded-[2rem] border border-white/10 bg-[#11111f]/85 p-6 shadow-xl backdrop-blur-xl",
+        "w-full min-w-0 max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-4 shadow-xl backdrop-blur-xl sm:rounded-[2rem] sm:p-6",
         className,
       ].join(" ")}
     >
@@ -1529,7 +1529,7 @@ function TopButton({
   return (
     <Link
       href={href}
-      className="inline-flex min-w-[150px] items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/20 active:scale-[0.99]"
+      className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/20 active:scale-[0.99] sm:w-auto sm:min-w-[150px]"
     >
       <Icon className="h-4 w-4" />
       {children}
@@ -1564,7 +1564,7 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="group rounded-[2rem] border border-white/10 bg-[#11111f]/85 p-5 shadow-xl backdrop-blur-xl transition hover:-translate-y-1 hover:bg-[#171729]"
+      className="group w-full min-w-0 max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-4 shadow-xl backdrop-blur-xl transition hover:-translate-y-1 hover:bg-[#171729] sm:rounded-[2rem] sm:p-5"
     >
       <div className="flex items-start justify-between gap-4">
         <div>

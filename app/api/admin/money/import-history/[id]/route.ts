@@ -1,11 +1,14 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
-import { requireMainAdmin } from "@/lib/isMainAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type Params = {
   params: Promise<{
@@ -17,22 +20,36 @@ function cleanText(value: unknown) {
   return String(value || "").trim();
 }
 
+function hasPermissionValue(permissions: unknown, permissionKey: string) {
+  if (!permissions) return false;
+
+  if (Array.isArray(permissions)) {
+    return permissions.map(String).includes(permissionKey);
+  }
+
+  if (typeof permissions === "object") {
+    return (permissions as Record<string, unknown>)[permissionKey] === true;
+  }
+
+  return false;
+}
+
 async function getCurrentAdmin() {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("You must be signed in.");
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("admin_users")
-    .select("id, email, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .select("id, email, role, is_active, permissions")
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -41,15 +58,28 @@ async function getCurrentAdmin() {
   }
 
   if (!admin) {
-    throw new Error("No active admin account is linked to this Supabase user.");
+    throw new Error("No active admin account is linked to this admin session.");
   }
 
   return {
-    userId: user.id,
-    adminId: admin.id,
-    email: cleanText(admin.email || user.email) || null,
+    userId: String(admin.id),
+    adminId: String(admin.id),
+    email: cleanText(admin.email || adminEmail) || null,
     role: admin.role,
+    permissions: admin.permissions,
   };
+}
+
+function canViewImportHistory(admin: {
+  role: string | null;
+  permissions: unknown;
+}) {
+  if (admin.role === "main_admin") return true;
+
+  return (
+    hasPermissionValue(admin.permissions, "audit_logs:view") ||
+    hasPermissionValue(admin.permissions, "money:export_reports")
+  );
 }
 
 function errorStatus(error: unknown) {
@@ -57,9 +87,13 @@ function errorStatus(error: unknown) {
 
   if (
     message === "You must be signed in." ||
-    message === "No active admin account is linked to this Supabase user."
+    message === "No active admin account is linked to this admin session."
   ) {
     return 401;
+  }
+
+  if (message.startsWith("Forbidden")) {
+    return 403;
   }
 
   return 500;
@@ -67,11 +101,25 @@ function errorStatus(error: unknown) {
 
 export async function GET(_request: Request, { params }: Params) {
   try {
-    await getCurrentAdmin();
+    const admin = await getCurrentAdmin();
 
-    await requireMainAdmin();
+    if (!canViewImportHistory(admin)) {
+      throw new Error(
+        "Forbidden: you need main admin, audit logs, or money export reports permission to view import batch details."
+      );
+    }
 
     const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Missing import batch ID.",
+        },
+        { status: 400 }
+      );
+    }
 
     const { data: batch, error: batchError } = await supabaseAdmin
       .from("money_import_batches")
@@ -80,14 +128,13 @@ export async function GET(_request: Request, { params }: Params) {
       .single();
 
     if (batchError) {
-      console.error("Import batch load error:", batchError);
-
       return NextResponse.json(
         {
+          ok: false,
           error: "Import batch could not be found.",
           details: batchError.message,
         },
-        { status: 404 }
+        { status: batchError.code === "PGRST116" ? 404 : 500 }
       );
     }
 
@@ -98,10 +145,9 @@ export async function GET(_request: Request, { params }: Params) {
       .order("row_number", { ascending: true });
 
     if (failedRowsError) {
-      console.error("Failed rows load error:", failedRowsError);
-
       return NextResponse.json(
         {
+          ok: false,
           error: "Failed to load failed rows.",
           details: failedRowsError.message,
         },
@@ -110,16 +156,29 @@ export async function GET(_request: Request, { params }: Params) {
     }
 
     return NextResponse.json({
+      ok: true,
       batch,
       failedRows: failedRows || [],
+      admin: {
+        id: admin.adminId,
+        email: admin.email,
+        role: admin.role,
+      },
     });
   } catch (error) {
-    console.error("Import batch API error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to load import batch.";
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Failed to load import batch.",
+        ok: false,
+        error: message,
+        likelyFix:
+          errorStatus(error) === 401
+            ? "Log out and log back in so the custom admin cookies refresh."
+            : errorStatus(error) === 403
+              ? "Give this admin main_admin role, audit_logs:view, or money:export_reports permission."
+              : "Check the server logs and database table.",
       },
       { status: errorStatus(error) }
     );

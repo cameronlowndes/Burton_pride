@@ -263,7 +263,7 @@ function DesktopSidebar({
 }) {
   return (
     <div className="p-6">
-      <div className="mb-8 text-lg font-bold text-white">Email Admin</div>
+      <div className="mb-8 text-lg font-bold text-white">Emailing APP</div>
 
       <SideNavLink
         href="/Admin/Dashboard"

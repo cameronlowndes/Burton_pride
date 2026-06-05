@@ -1,9 +1,13 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ADMIN_ID_COOKIE = "burton_admin_id";
+const ADMIN_EMAIL_COOKIE = "burton_admin_email";
+const SESSION_COOKIE = "burton_admin_session";
 
 type SupplierPayload = {
   id?: string | null;
@@ -73,21 +77,21 @@ function nameFromEmail(email?: string | null) {
 }
 
 async function getCurrentAdmin(): Promise<CurrentAdmin> {
-  const supabase = await createClient();
+  const cookieStore = await cookies();
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
+  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
+  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
 
-  if (error || !user) {
+  if (!adminId || !adminEmail || !sessionToken) {
     throw new Error("You must be signed in to manage suppliers.");
   }
 
   const { data: admin, error: adminError } = await supabaseAdmin
     .from("admin_users")
     .select("id, email, name, full_name, role, is_active")
-    .eq("supabase_user_id", user.id)
+    .eq("id", adminId)
+    .eq("email", adminEmail)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -96,10 +100,10 @@ async function getCurrentAdmin(): Promise<CurrentAdmin> {
   }
 
   if (!admin) {
-    throw new Error("No active admin account is linked to this Supabase user.");
+    throw new Error("No active admin account is linked to this admin session.");
   }
 
-  const email = cleanText(admin.email || user.email) || null;
+  const email = cleanText(admin.email || adminEmail) || null;
 
   const name =
     cleanText(admin.name) ||
@@ -108,7 +112,7 @@ async function getCurrentAdmin(): Promise<CurrentAdmin> {
     "Unknown admin";
 
   return {
-    id: user.id,
+    id: String(admin.id),
     name,
     email,
   };
@@ -119,7 +123,7 @@ function getAuthErrorStatus(error: unknown) {
 
   if (
     message === "You must be signed in to manage suppliers." ||
-    message === "No active admin account is linked to this Supabase user."
+    message === "No active admin account is linked to this admin session."
   ) {
     return 401;
   }
@@ -226,6 +230,7 @@ export async function GET(request: Request) {
     if (suppliersError) {
       return NextResponse.json(
         {
+          ok: false,
           error: "Failed to load suppliers.",
           details: getSupabaseMessage(suppliersError),
           likelyFix:
@@ -244,6 +249,7 @@ export async function GET(request: Request) {
   } catch (error: any) {
     return NextResponse.json(
       {
+        ok: false,
         error: "Failed to load suppliers.",
         details: error?.message || String(error),
       },
@@ -267,7 +273,7 @@ export async function POST(request: Request) {
 
     if (!payload) {
       return NextResponse.json(
-        { error: "Invalid supplier payload." },
+        { ok: false, error: "Invalid supplier payload." },
         { status: 400 }
       );
     }
@@ -283,6 +289,7 @@ export async function POST(request: Request) {
     if (insertError) {
       return NextResponse.json(
         {
+          ok: false,
           error: "Failed to create supplier.",
           details: getSupabaseMessage(insertError),
           likelyFix:
@@ -301,6 +308,7 @@ export async function POST(request: Request) {
   } catch (error: any) {
     return NextResponse.json(
       {
+        ok: false,
         error: "Failed to create supplier.",
         details: error?.message || String(error),
       },
@@ -324,7 +332,7 @@ export async function PATCH(request: Request) {
 
     if (!payload) {
       return NextResponse.json(
-        { error: "Invalid supplier payload." },
+        { ok: false, error: "Invalid supplier payload." },
         { status: 400 }
       );
     }
@@ -333,7 +341,7 @@ export async function PATCH(request: Request) {
 
     if (!id) {
       return NextResponse.json(
-        { error: "Supplier ID is required." },
+        { ok: false, error: "Supplier ID is required." },
         { status: 400 }
       );
     }
@@ -350,6 +358,7 @@ export async function PATCH(request: Request) {
     if (updateError) {
       return NextResponse.json(
         {
+          ok: false,
           error: "Failed to update supplier.",
           details: getSupabaseMessage(updateError),
         },
@@ -366,6 +375,7 @@ export async function PATCH(request: Request) {
   } catch (error: any) {
     return NextResponse.json(
       {
+        ok: false,
         error: "Failed to update supplier.",
         details: error?.message || String(error),
       },
@@ -399,7 +409,7 @@ export async function DELETE(request: Request) {
 
     if (!id) {
       return NextResponse.json(
-        { error: "Supplier ID is required." },
+        { ok: false, error: "Supplier ID is required." },
         { status: 400 }
       );
     }
@@ -414,6 +424,7 @@ export async function DELETE(request: Request) {
     if (updateError) {
       return NextResponse.json(
         {
+          ok: false,
           error: "Failed to archive supplier.",
           details: getSupabaseMessage(updateError),
         },
@@ -430,6 +441,7 @@ export async function DELETE(request: Request) {
   } catch (error: any) {
     return NextResponse.json(
       {
+        ok: false,
         error: "Failed to archive supplier.",
         details: error?.message || String(error),
       },

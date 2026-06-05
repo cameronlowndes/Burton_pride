@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import type { gmail_v1 } from "googleapis";
-import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 
 function decodeBase64Url(data: string) {
   return Buffer.from(data, "base64url").toString("utf8");
@@ -93,20 +93,18 @@ export function extractAttachmentsFromPayload(
 }
 
 export async function getGmailClient() {
-  const { userId } = await auth();
+  const admin = await getCurrentAdmin();
 
-  if (!userId) {
-    throw new Error("Not authenticated.");
+  if (!admin?.id) {
+    throw new Error("You are not logged in. Please log in to the admin portal.");
   }
 
-  const supabase = supabaseAdmin;
-
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("google_connections")
     .select(
       "user_id, email, google_email, access_token, refresh_token, expires_at, scope, token_type, updated_at"
     )
-    .eq("user_id", userId)
+    .eq("user_id", admin.id)
     .maybeSingle();
 
   if (error) {
@@ -115,7 +113,11 @@ export async function getGmailClient() {
   }
 
   if (!data) {
-    throw new Error("Google account not connected.");
+    throw new Error("Google account not connected for this admin account.");
+  }
+
+  if (!data.refresh_token) {
+    throw new Error("Missing Gmail refresh token. Please reconnect Gmail.");
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -123,7 +125,7 @@ export async function getGmailClient() {
   const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
 
   if (!clientId || !clientSecret || !redirectUri) {
-    throw new Error("Missing Google env variables.");
+    throw new Error("Missing Google OAuth environment variables.");
   }
 
   const oauth2Client = new google.auth.OAuth2(
@@ -135,12 +137,17 @@ export async function getGmailClient() {
   oauth2Client.setCredentials({
     access_token: data.access_token ?? undefined,
     refresh_token: data.refresh_token ?? undefined,
-    expiry_date: data.expires_at ?? undefined,
+    expiry_date:
+      typeof data.expires_at === "number"
+        ? data.expires_at
+        : data.expires_at
+          ? Number(data.expires_at)
+          : undefined,
     token_type: data.token_type ?? undefined,
   });
 
   oauth2Client.on("tokens", async (tokens) => {
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from("google_connections")
       .update({
         access_token: tokens.access_token ?? data.access_token ?? null,
@@ -151,7 +158,7 @@ export async function getGmailClient() {
         token_type: tokens.token_type ?? data.token_type ?? null,
         updated_at: new Date().toISOString(),
       })
-      .eq("user_id", userId);
+      .eq("user_id", admin.id);
 
     if (updateError) {
       console.error("Failed to update Google tokens:", updateError);
