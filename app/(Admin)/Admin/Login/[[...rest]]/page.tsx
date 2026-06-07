@@ -96,7 +96,7 @@ export default function LoginPage() {
         return;
       }
 
-      const response = await fetch("/api/admin/login", {
+      const response = await fetch("/api/admin/settings/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",

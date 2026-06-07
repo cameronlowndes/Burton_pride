@@ -36,7 +36,6 @@ import ManualBankBalanceCheck from "../../../components/money/ManualBankBalanceC
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 import { money } from "@/lib/money/helpers";
 
-
 type RefundType = "money_received_back" | "money_sent_back";
 type RefundStatus = "pending" | "completed" | "cancelled";
 
@@ -95,13 +94,52 @@ export default function MoneyDashboardPage() {
   const [refunds, setRefunds] = useState<DashboardRefund[]>([]);
   const [refundsLoading, setRefundsLoading] = useState(false);
   const [refundsError, setRefundsError] = useState("");
-  const [refundsErrorDetails, setRefundsErrorDetails] =
-    useState<unknown>(null);
+  const [refundsErrorDetails, setRefundsErrorDetails] = useState<unknown>(null);
 
   const [addTransactionOpen, setAddTransactionOpen] = useState(false);
   const [transactionsWindowOpen, setTransactionsWindowOpen] = useState(false);
   const [sponsorWindowOpen, setSponsorWindowOpen] = useState(false);
   const [reportsWindowOpen, setReportsWindowOpen] = useState(false);
+
+  /**
+   * Easy Mode is optional and is deliberately OFF by default.
+   * Full Mode remains the normal dashboard for new browsers.
+   *
+   * The browser remembers the user's choice after they press the toggle.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [easyModeReady, setEasyModeReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(
+        "burton-pride-money-dashboard-easy-mode",
+      );
+
+      setEasyMode(savedMode === "true");
+    } catch {
+      // localStorage can be blocked by browser privacy settings.
+      // Keep Full Mode as the safe default.
+      setEasyMode(false);
+    } finally {
+      setEasyModeReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!easyModeReady) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        "burton-pride-money-dashboard-easy-mode",
+        String(easyMode),
+      );
+    } catch {
+      // Do not break the dashboard if the browser blocks localStorage.
+    }
+  }, [easyMode, easyModeReady]);
 
   const loadRefunds = useCallback(async () => {
     setRefundsLoading(true);
@@ -111,12 +149,12 @@ export default function MoneyDashboardPage() {
     try {
       const response = await fetch(
         `/api/admin/money/refunds?year=${encodeURIComponent(
-          moneyPage.selectedYear
+          moneyPage.selectedYear,
         )}&limit=500`,
         {
           method: "GET",
           cache: "no-store",
-        }
+        },
       );
 
       const payload = (await readJsonResponse(response)) as RefundApiResponse;
@@ -135,14 +173,12 @@ export default function MoneyDashboardPage() {
       setRefunds(
         Array.isArray(payload.refunds)
           ? payload.refunds.filter((refund) => !refund.is_hidden)
-          : []
+          : [],
       );
     } catch (error: any) {
       setRefunds([]);
 
-      setRefundsError(
-        error?.message || "Refund records could not be loaded."
-      );
+      setRefundsError(error?.message || "Refund records could not be loaded.");
 
       setRefundsErrorDetails(error);
     } finally {
@@ -160,7 +196,7 @@ export default function MoneyDashboardPage() {
     }
 
     return refunds.filter(
-      (refund) => getRefundMonthKey(refund) === moneyPage.selectedViewMonth
+      (refund) => getRefundMonthKey(refund) === moneyPage.selectedViewMonth,
     );
   }, [moneyPage.selectedViewMonth, refunds]);
 
@@ -188,7 +224,7 @@ export default function MoneyDashboardPage() {
       {
         receivedBack: 0,
         sentBack: 0,
-      }
+      },
     );
   }, [completedRefunds]);
 
@@ -208,7 +244,7 @@ export default function MoneyDashboardPage() {
       {
         receivedBack: 0,
         sentBack: 0,
-      }
+      },
     );
   }, [completedVisibleRefunds]);
 
@@ -234,7 +270,7 @@ export default function MoneyDashboardPage() {
   async function writeMoneyAuditLog(
     action: string,
     description: string,
-    extra?: Record<string, unknown>
+    extra?: Record<string, unknown>,
   ) {
     try {
       await fetch("/api/admin/money/audit-log", {
@@ -305,7 +341,7 @@ export default function MoneyDashboardPage() {
 
     await writeMoneyAuditLog(
       "reports_window_opened",
-      `Opened reports window for ${moneyPage.selectedYear}.`
+      `Opened reports window for ${moneyPage.selectedYear}.`,
     );
   };
 
@@ -325,7 +361,7 @@ export default function MoneyDashboardPage() {
         completedRefunds: completedVisibleRefunds.length,
         refundsReceivedBack: visibleRefundTotals.receivedBack,
         refundsSentBack: visibleRefundTotals.sentBack,
-      }
+      },
     );
 
     moneyPage.printTransactions();
@@ -342,7 +378,7 @@ export default function MoneyDashboardPage() {
         completedRefunds: completedVisibleRefunds.length,
         refundsReceivedBack: visibleRefundTotals.receivedBack,
         refundsSentBack: visibleRefundTotals.sentBack,
-      }
+      },
     );
 
     await moneyPage.exportTransactionsToExcel();
@@ -366,21 +402,21 @@ export default function MoneyDashboardPage() {
         refundsReceivedBack: refundTotals.receivedBack,
         refundsSentBack: refundTotals.sentBack,
         availableBalanceIncludingRefunds: dashboardTotals.balance,
-      }
+      },
     );
 
     await moneyPage.exportFullYearlyReport();
   }
 
   const overspentSponsors = moneyPage.yearlySponsorBreakdown.filter(
-    (sponsor) => sponsor.remaining_pence < 0
+    (sponsor) => sponsor.remaining_pence < 0,
   );
 
   const lowSponsorBalances = moneyPage.yearlySponsorBreakdown.filter(
     (sponsor) =>
       sponsor.remaining_pence >= 0 &&
       sponsor.received_pence > 0 &&
-      sponsor.remaining_pence <= sponsor.received_pence * 0.2
+      sponsor.remaining_pence <= sponsor.received_pence * 0.2,
   );
 
   const recentActivity = useMemo(() => {
@@ -431,6 +467,50 @@ export default function MoneyDashboardPage() {
           onYearChange={moneyPage.handleYearChange}
           onRefresh={refreshDashboard}
         />
+
+        <section className="rounded-3xl border border-pink-300/20 bg-pink-500/10 p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-pink-200" />
+
+                <h2 className="text-lg font-black text-white">
+                  Dashboard display mode
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-pink-100/75">
+                Easy Mode keeps the dashboard simple and shows the main totals,
+                warnings and everyday actions. Full Mode shows every tracker,
+                graph and accounts tool.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setEasyMode((previous) => !previous)}
+              className={`inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ring-1 transition sm:w-auto ${
+                easyMode
+                  ? "bg-white text-black ring-white hover:bg-white/90"
+                  : "bg-pink-500 text-white ring-pink-300/30 hover:bg-pink-400"
+              }`}
+              aria-pressed={easyMode}
+            >
+              <Sparkles className="h-4 w-4" />
+              {easyMode
+                ? "Easy Mode is on · Show Full Mode"
+                : "Turn on Easy Mode"}
+            </button>
+          </div>
+
+          {easyMode && (
+            <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold leading-6 text-emerald-100">
+              Easy Mode is on. Advanced dashboard sections are hidden only from
+              view. No money records, reports or tracker tools have been
+              removed.
+            </div>
+          )}
+        </section>
 
         <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/[0.08] via-white/[0.04] to-white/[0.02] p-5 shadow-2xl sm:p-6 lg:p-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
@@ -604,11 +684,13 @@ export default function MoneyDashboardPage() {
           onMarkTransactionChecked={moneyPage.markTransactionChecked}
         />
 
-        <MoneyStatsCards totals={dashboardTotals as any} />
+        {!easyMode && (
+          <>
+            <MoneyStatsCards totals={dashboardTotals as any} />
 
-        <ManualBankBalanceCheck
-          selectedYear={moneyPage.selectedYear}
-        />
+            <ManualBankBalanceCheck selectedYear={moneyPage.selectedYear} />
+          </>
+        )}
 
         {(overspentSponsors.length > 0 || lowSponsorBalances.length > 0) && (
           <section className="rounded-3xl border border-red-300/20 bg-red-500/10 p-4 sm:p-5">
@@ -664,474 +746,590 @@ export default function MoneyDashboardPage() {
           </section>
         )}
 
-        <section className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
-          <button
-            type="button"
-            onClick={openTransactionsWindow}
-            className="group hidden rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-left text-sky-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <ReceiptText className="h-5 w-5" />
-              </div>
+        {easyMode && (
+          <section className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-4 shadow-2xl shadow-black/20 sm:p-5">
+            <div className="mb-4">
+              <h2 className="text-xl font-black text-white">
+                Everyday money actions
+              </h2>
 
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              <p className="mt-1 text-sm leading-6 text-emerald-100/70">
+                Use these buttons for the most common jobs. Turn off Easy Mode
+                above when you need graphs, budget planning, cash tin tracking
+                or other advanced tools.
+              </p>
             </div>
 
-            <h2 className="text-lg font-black text-white">Transactions</h2>
+            <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <button
+                type="button"
+                onClick={openAddTransactionModal}
+                className="group hidden rounded-2xl border border-pink-300/20 bg-pink-500/15 p-4 text-left text-pink-100 transition hover:bg-pink-500/25 md:block"
+              >
+                <PlusCircle className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Add payment</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Add money in, money out or personal funds.
+                </p>
+              </button>
 
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Add, edit, print, export, and manage all money records.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open floating window</p>
-          </button>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney"
-            className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-sky-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <ReceiptText className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Transactions</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Add, edit, print, export, and manage all money records.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open transactions page</p>
-          </Link>
-
-          <button
-            type="button"
-            onClick={openAddTransactionModal}
-            className="group hidden rounded-3xl border border-pink-300/20 bg-pink-500/10 p-5 text-left text-pink-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <PlusCircle className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Add payment</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Quickly add money in, money out, personal funds, or sponsor spend.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open floating form</p>
-          </button>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/AddTransaction"
-            className="group rounded-3xl border border-pink-300/20 bg-pink-500/10 p-5 text-pink-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <PlusCircle className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Add payment</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Quickly add money in, money out, personal funds, or sponsor spend.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open form page</p>
-          </Link>
-
-          <button
-            type="button"
-            onClick={openSponsorWindow}
-            className="group hidden rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-left text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <HandCoins className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Sponsor tracking</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Check sponsor income, spending, remaining balances, and overspend.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open floating window</p>
-          </button>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Sponsors"
-            className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <HandCoins className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Sponsor tracking</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Check sponsor income, spending, remaining balances, and overspend.
-            </p>
-
-            <p className="mt-4 text-sm font-black">View sponsors</p>
-          </Link>
-
-          <button
-            type="button"
-            onClick={openReportsWindow}
-            className="group hidden rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-left text-emerald-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <FileText className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Reports</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Use the reports area to print reports and export Excel files.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open floating window</p>
-          </button>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/Exports"
-            className="group rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-emerald-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <FileText className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Reports</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Use the reports area to print reports and export Excel files.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Create Report</p>
-          </Link>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/CashTinTracker"
-            className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <Coins className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Cash Tin Tracker</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Track cash fundraising days, starting cash, money received, money
-              banked, cash spent, who counted it, and any difference.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open cash tracker</p>
-          </Link>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
-            className="group rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-purple-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <PiggyBank className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Budget Planning</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Compare planned budget against actual spending for venue,
-              insurance, printing, security, performers, equipment,
-              accessibility, and other costs.
-            </p>
-
-            <p className="mt-4 text-sm font-black">Open budget planner</p>
-          </Link>
-
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/Refunds"
-            className="group rounded-3xl border border-cyan-300/20 bg-cyan-500/10 p-5 text-cyan-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="rounded-2xl bg-black/20 p-3">
-                <RotateCcw className="h-5 w-5" />
-              </div>
-
-              <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-            </div>
-
-            <h2 className="text-lg font-black text-white">Refund Tracker</h2>
-
-            <p className="mt-2 text-sm leading-6 text-white/60">
-              Track money returned to Burton Pride and money sent back to other
-              people separately from ordinary transactions. Completed refunds
-              automatically adjust Money In, Money Out, and the available
-              balance.
-            </p>
-
-            <div className="mt-4 flex flex-wrap gap-2 text-xs font-black">
-              <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-100 ring-1 ring-emerald-300/20">
-                Received: {money(refundTotals.receivedBack)}
-              </span>
-
-              <span className="rounded-full bg-purple-500/10 px-3 py-1 text-purple-100 ring-1 ring-purple-300/20">
-                Sent: {money(refundTotals.sentBack)}
-              </span>
-            </div>
-
-            <p className="mt-4 text-sm font-black">Open refund tracker</p>
-          </Link>
-        </section>
-
-        <section className="min-w-0 space-y-6">
-          <MoneyDashboardCharts
-            selectedYear={moneyPage.selectedYear}
-            transactions={moneyPage.transactions}
-            yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
-          />
-
-          <div className="w-full max-w-none min-w-0">
-            <MoneyMonthlyBreakdown
-              selectedYear={moneyPage.selectedYear}
-              transactions={moneyPage.transactions}
-            />
-          </div>
-
-          <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
-            <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
-              <div className="mb-4 flex items-start gap-3">
-                <div className="rounded-2xl bg-purple-500/15 p-3 text-purple-200 ring-1 ring-purple-300/20">
-                  <CalendarDays className="h-5 w-5" />
-                </div>
-
-                <div className="min-w-0">
-                  <h2 className="text-xl font-black text-white">
-                    Recent activity
-                  </h2>
-
-                  <p className="text-sm text-white/50">
-                    Latest transactions and refunds in {moneyPage.selectedYear}.
-                  </p>
-                </div>
-              </div>
-
-              {moneyPage.loading ? (
-                <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-                  Loading recent activity...
-                </div>
-              ) : recentActivity.length === 0 ? (
-                <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-                  No transactions or refunds found for {moneyPage.selectedYear}.
-                </div>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {recentActivity.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="break-words font-bold text-white">
-                            {item.title}
-                          </p>
-
-                          <p className="mt-1 text-xs text-white/45">
-                            {item.date}
-                          </p>
-
-                          {item.label ? (
-                            <p
-                              className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ring-1 ${
-                                item.recordType === "refund"
-                                  ? "bg-cyan-500/10 text-cyan-100 ring-cyan-300/20"
-                                  : "bg-amber-500/10 text-amber-100 ring-amber-300/20"
-                              }`}
-                            >
-                              {item.label}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <p
-                          className={`shrink-0 text-sm font-black ${
-                            item.direction === "in"
-                              ? "text-emerald-300"
-                              : "text-red-300"
-                          }`}
-                        >
-                          {item.direction === "in" ? "+" : "-"}
-                          {money(item.amountPence)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <Link
+                href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/AddTransaction"
+                className="group rounded-2xl border border-pink-300/20 bg-pink-500/15 p-4 text-left text-pink-100 transition hover:bg-pink-500/25 md:hidden"
+              >
+                <PlusCircle className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Add payment</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Add money in, money out or personal funds.
+                </p>
+              </Link>
 
               <button
                 type="button"
                 onClick={openTransactionsWindow}
-                className="mt-4 hidden w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 md:inline-flex"
+                className="group hidden rounded-2xl border border-sky-300/20 bg-sky-500/15 p-4 text-left text-sky-100 transition hover:bg-sky-500/25 md:block"
               >
-                View all transactions
-                <ArrowRight className="h-4 w-4" />
+                <ReceiptText className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Transactions</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Search, edit and check payment records.
+                </p>
               </button>
 
               <Link
-                href="/Admin/Money/Transactions"
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 md:hidden"
+                href="/Admin/MoneyManagement/TrackingMoney"
+                className="group rounded-2xl border border-sky-300/20 bg-sky-500/15 p-4 text-left text-sky-100 transition hover:bg-sky-500/25 md:hidden"
               >
-                View all transactions
-                <ArrowRight className="h-4 w-4" />
+                <ReceiptText className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Transactions</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Search, edit and check payment records.
+                </p>
+              </Link>
+
+              <Link
+                href="/Admin/MoneyManagement/TrackingMoney/Refunds"
+                className="rounded-2xl border border-cyan-300/20 bg-cyan-500/15 p-4 text-left text-cyan-100 transition hover:bg-cyan-500/25"
+              >
+                <RotateCcw className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Refund Tracker</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Add and review money refunded or returned.
+                </p>
+              </Link>
+
+              <button
+                type="button"
+                onClick={openReportsWindow}
+                className="group hidden rounded-2xl border border-emerald-300/20 bg-emerald-500/15 p-4 text-left text-emerald-100 transition hover:bg-emerald-500/25 md:block"
+              >
+                <FileText className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Reports</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Print or export the selected accounts.
+                </p>
+              </button>
+
+              <Link
+                href="/Admin/MoneyManagement/TrackingMoney/Exports"
+                className="rounded-2xl border border-emerald-300/20 bg-emerald-500/15 p-4 text-left text-emerald-100 transition hover:bg-emerald-500/25 md:hidden"
+              >
+                <FileText className="mb-3 h-5 w-5" />
+                <h3 className="font-black text-white">Reports</h3>
+                <p className="mt-1 text-xs leading-5 text-white/60">
+                  Print or export the selected accounts.
+                </p>
               </Link>
             </div>
-
-            <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
-              <div className="mb-4 flex items-start gap-3">
-                <div className="rounded-2xl bg-amber-500/15 p-3 text-amber-200 ring-1 ring-amber-300/20">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-
-                <div className="min-w-0">
-                  <h2 className="text-xl font-black text-white">
-                    Quick checks
-                  </h2>
-
-                  <p className="text-sm text-white/50">
-                    Things worth checking before reports are shared.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">
-                      Transactions this year
-                    </span>
-
-                    <strong className="text-white">
-                      {moneyPage.yearTransactions.length}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">Refunds this year</span>
-
-                    <strong className="text-cyan-200">{refunds.length}</strong>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">
-                      Net completed refund adjustment
-                    </span>
-
-                    <strong
-                      className={
-                        refundTotals.receivedBack - refundTotals.sentBack >= 0
-                          ? "text-emerald-300"
-                          : "text-red-300"
-                      }
-                    >
-                      {money(
-                        refundTotals.receivedBack - refundTotals.sentBack
-                      )}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">Sponsor warnings</span>
-
-                    <strong
-                      className={
-                        overspentSponsors.length > 0
-                          ? "text-red-300"
-                          : "text-emerald-300"
-                      }
-                    >
-                      {overspentSponsors.length}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">
-                      Personal funds outstanding
-                    </span>
-
-                    <strong
-                      className={
-                        moneyPage.totals.personalFundsOutstanding > 0
-                          ? "text-orange-300"
-                          : "text-emerald-300"
-                      }
-                    >
-                      {money(moneyPage.totals.personalFundsOutstanding)}
-                    </strong>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl bg-black/20 p-4">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-white/60">Sponsor money left</span>
-
-                    <strong
-                      className={
-                        moneyPage.totals.sponsorshipRemaining >= 0
-                          ? "text-amber-200"
-                          : "text-red-300"
-                      }
-                    >
-                      {money(moneyPage.totals.sponsorshipRemaining)}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            </div>
           </section>
-        </section>
+        )}
+
+        {!easyMode && (
+          <section className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
+            <button
+              type="button"
+              onClick={openTransactionsWindow}
+              className="group hidden rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-left text-sky-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <ReceiptText className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Transactions</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Add, edit, print, export, and manage all money records.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open floating window</p>
+            </button>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney"
+              className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-sky-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <ReceiptText className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Transactions</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Add, edit, print, export, and manage all money records.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open transactions page</p>
+            </Link>
+
+            <button
+              type="button"
+              onClick={openAddTransactionModal}
+              className="group hidden rounded-3xl border border-pink-300/20 bg-pink-500/10 p-5 text-left text-pink-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <PlusCircle className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Add payment</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Quickly add money in, money out, personal funds, or sponsor
+                spend.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open floating form</p>
+            </button>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/AddTransaction"
+              className="group rounded-3xl border border-pink-300/20 bg-pink-500/10 p-5 text-pink-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <PlusCircle className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Add payment</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Quickly add money in, money out, personal funds, or sponsor
+                spend.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open form page</p>
+            </Link>
+
+            <button
+              type="button"
+              onClick={openSponsorWindow}
+              className="group hidden rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-left text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <HandCoins className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">
+                Sponsor tracking
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Check sponsor income, spending, remaining balances, and
+                overspend.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open floating window</p>
+            </button>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Sponsors"
+              className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <HandCoins className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">
+                Sponsor tracking
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Check sponsor income, spending, remaining balances, and
+                overspend.
+              </p>
+
+              <p className="mt-4 text-sm font-black">View sponsors</p>
+            </Link>
+
+            <button
+              type="button"
+              onClick={openReportsWindow}
+              className="group hidden rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-left text-emerald-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:block"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <FileText className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Reports</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Use the reports area to print reports and export Excel files.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open floating window</p>
+            </button>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/Exports"
+              className="group rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-emerald-100 transition hover:-translate-y-1 hover:bg-white/[0.08] md:hidden"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <FileText className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Reports</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Use the reports area to print reports and export Excel files.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Create Report</p>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/CashTinTracker"
+              className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 text-amber-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <Coins className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">
+                Cash Tin Tracker
+              </h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Track cash fundraising days, starting cash, money received,
+                money banked, cash spent, who counted it, and any difference.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open cash tracker</p>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
+              className="group rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-purple-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <PiggyBank className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Budget Planning</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Compare planned budget against actual spending for venue,
+                insurance, printing, security, performers, equipment,
+                accessibility, and other costs.
+              </p>
+
+              <p className="mt-4 text-sm font-black">Open budget planner</p>
+            </Link>
+
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/Refunds"
+              className="group rounded-3xl border border-cyan-300/20 bg-cyan-500/10 p-5 text-cyan-100 transition hover:-translate-y-1 hover:bg-white/[0.08]"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="rounded-2xl bg-black/20 p-3">
+                  <RotateCcw className="h-5 w-5" />
+                </div>
+
+                <ArrowRight className="h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
+              </div>
+
+              <h2 className="text-lg font-black text-white">Refund Tracker</h2>
+
+              <p className="mt-2 text-sm leading-6 text-white/60">
+                Track money returned to Burton Pride and money sent back to
+                other people separately from ordinary transactions. Completed
+                refunds automatically adjust Money In, Money Out, and the
+                available balance.
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-2 text-xs font-black">
+                <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-100 ring-1 ring-emerald-300/20">
+                  Received: {money(refundTotals.receivedBack)}
+                </span>
+
+                <span className="rounded-full bg-purple-500/10 px-3 py-1 text-purple-100 ring-1 ring-purple-300/20">
+                  Sent: {money(refundTotals.sentBack)}
+                </span>
+              </div>
+
+              <p className="mt-4 text-sm font-black">Open refund tracker</p>
+            </Link>
+          </section>
+        )}
+
+        {!easyMode && (
+          <section className="min-w-0 space-y-6">
+            <MoneyDashboardCharts
+              selectedYear={moneyPage.selectedYear}
+              transactions={moneyPage.transactions}
+              yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
+            />
+
+            <div className="w-full max-w-none min-w-0">
+              <MoneyMonthlyBreakdown
+                selectedYear={moneyPage.selectedYear}
+                transactions={moneyPage.transactions}
+              />
+            </div>
+
+            <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-2">
+              <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
+                <div className="mb-4 flex items-start gap-3">
+                  <div className="rounded-2xl bg-purple-500/15 p-3 text-purple-200 ring-1 ring-purple-300/20">
+                    <CalendarDays className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-black text-white">
+                      Recent activity
+                    </h2>
+
+                    <p className="text-sm text-white/50">
+                      Latest transactions and refunds in{" "}
+                      {moneyPage.selectedYear}.
+                    </p>
+                  </div>
+                </div>
+
+                {moneyPage.loading ? (
+                  <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
+                    Loading recent activity...
+                  </div>
+                ) : recentActivity.length === 0 ? (
+                  <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
+                    No transactions or refunds found for{" "}
+                    {moneyPage.selectedYear}.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {recentActivity.map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-words font-bold text-white">
+                              {item.title}
+                            </p>
+
+                            <p className="mt-1 text-xs text-white/45">
+                              {item.date}
+                            </p>
+
+                            {item.label ? (
+                              <p
+                                className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ring-1 ${
+                                  item.recordType === "refund"
+                                    ? "bg-cyan-500/10 text-cyan-100 ring-cyan-300/20"
+                                    : "bg-amber-500/10 text-amber-100 ring-amber-300/20"
+                                }`}
+                              >
+                                {item.label}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <p
+                            className={`shrink-0 text-sm font-black ${
+                              item.direction === "in"
+                                ? "text-emerald-300"
+                                : "text-red-300"
+                            }`}
+                          >
+                            {item.direction === "in" ? "+" : "-"}
+                            {money(item.amountPence)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={openTransactionsWindow}
+                  className="mt-4 hidden w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 md:inline-flex"
+                >
+                  View all transactions
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+
+                <Link
+                  href="/Admin/Money/Transactions"
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 md:hidden"
+                >
+                  View all transactions
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+
+              <div className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
+                <div className="mb-4 flex items-start gap-3">
+                  <div className="rounded-2xl bg-amber-500/15 p-3 text-amber-200 ring-1 ring-amber-300/20">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-black text-white">
+                      Quick checks
+                    </h2>
+
+                    <p className="text-sm text-white/50">
+                      Things worth checking before reports are shared.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 text-sm sm:grid-cols-2">
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">
+                        Transactions this year
+                      </span>
+
+                      <strong className="text-white">
+                        {moneyPage.yearTransactions.length}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">Refunds this year</span>
+
+                      <strong className="text-cyan-200">
+                        {refunds.length}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">
+                        Net completed refund adjustment
+                      </span>
+
+                      <strong
+                        className={
+                          refundTotals.receivedBack - refundTotals.sentBack >= 0
+                            ? "text-emerald-300"
+                            : "text-red-300"
+                        }
+                      >
+                        {money(
+                          refundTotals.receivedBack - refundTotals.sentBack,
+                        )}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">Sponsor warnings</span>
+
+                      <strong
+                        className={
+                          overspentSponsors.length > 0
+                            ? "text-red-300"
+                            : "text-emerald-300"
+                        }
+                      >
+                        {overspentSponsors.length}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">
+                        Personal funds outstanding
+                      </span>
+
+                      <strong
+                        className={
+                          moneyPage.totals.personalFundsOutstanding > 0
+                            ? "text-orange-300"
+                            : "text-emerald-300"
+                        }
+                      >
+                        {money(moneyPage.totals.personalFundsOutstanding)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-black/20 p-4">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-white/60">Sponsor money left</span>
+
+                      <strong
+                        className={
+                          moneyPage.totals.sponsorshipRemaining >= 0
+                            ? "text-amber-200"
+                            : "text-red-300"
+                        }
+                      >
+                        {money(moneyPage.totals.sponsorshipRemaining)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </section>
+        )}
       </div>
 
       {reportsWindowOpen && (
@@ -1162,7 +1360,10 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handlePrintReport}
-                disabled={moneyPage.printTransactionsList.length === 0 && visibleRefunds.length === 0}
+                disabled={
+                  moneyPage.printTransactionsList.length === 0 &&
+                  visibleRefunds.length === 0
+                }
                 className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 text-left text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
@@ -1178,14 +1379,17 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handleExportExcelReport}
-                disabled={moneyPage.filteredTransactions.length === 0 && visibleRefunds.length === 0}
+                disabled={
+                  moneyPage.filteredTransactions.length === 0 &&
+                  visibleRefunds.length === 0
+                }
                 className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5 text-left text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
                 <h3 className="text-lg font-black text-white">Export Excel</h3>
                 <p className="mt-2 text-sm text-white/60">
-                  Export the current transaction view to Excel with a
-                  separate Refunds worksheet and refund-adjusted summary.
+                  Export the current transaction view to Excel with a separate
+                  Refunds worksheet and refund-adjusted summary.
                 </p>
                 <p className="mt-4 text-sm font-black">Export transactions</p>
               </button>
@@ -1193,7 +1397,10 @@ export default function MoneyDashboardPage() {
               <button
                 type="button"
                 onClick={handleExportYearlyReport}
-                disabled={moneyPage.yearTransactions.length === 0 && refunds.length === 0}
+                disabled={
+                  moneyPage.yearTransactions.length === 0 &&
+                  refunds.length === 0
+                }
                 className="rounded-3xl border border-purple-300/20 bg-purple-500/10 p-5 text-left text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileText className="mb-4 h-6 w-6" />
@@ -1259,9 +1466,7 @@ export default function MoneyDashboardPage() {
           <div className="w-full max-w-none rounded-[2rem] border border-white/10 bg-[#070716] p-4 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-black text-white">
-                  Transactions
-                </h2>
+                <h2 className="text-lg font-black text-white">Transactions</h2>
 
                 <p className="text-xs text-white/50">
                   View, search, filter, print, export, edit, and hide
@@ -1308,6 +1513,8 @@ export default function MoneyDashboardPage() {
               financeNoteUpdatingId={moneyPage.financeNoteUpdatingId}
               deleting={moneyPage.deleting}
               openingBalancePence={moneyPage.totals.openingBalance}
+              lockedYears={(moneyPage as any).lockedYears || []}
+              lockedMonths={(moneyPage as any).lockedMonths || []}
               onPrint={moneyPage.printTransactions}
               onExportExcel={moneyPage.exportTransactionsToExcel}
               onExportYearlyReport={moneyPage.exportFullYearlyReport}

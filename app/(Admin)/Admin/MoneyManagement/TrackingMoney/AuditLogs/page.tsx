@@ -1,8 +1,6 @@
-
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import ExcelJS from "exceljs";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -26,1135 +24,63 @@ import {
   RotateCcw,
   Search,
   Save,
+  Settings2,
   ShieldCheck,
+  Sparkles,
   Target,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
 
-type MoneyAuditLog = {
-  id: string;
-  created_at: string;
-  action: string;
-  transaction_id: string | null;
-  transaction_title: string | null;
-  actor_user_id: string | null;
-  actor_name: string | null;
-  actor_email: string | null;
-  created_by?: string | null;
-  created_by_email?: string | null;
-  created_by_user_id?: string | null;
-  before_data: any;
-  after_data: any;
-  changed_fields: any;
-  metadata: any;
-  admin_comment?: string | null;
-  admin_comment_updated_at?: string | null;
-  admin_comment_updated_by?: string | null;
-  admin_comment_updated_by_email?: string | null;
-};
-
-type SortMode = "newest" | "oldest" | "action" | "transaction";
-type YearFilter = "all" | string;
-type RiskFilter = "all" | "High" | "Medium" | "Low";
-type AreaFilter = "all" | string;
-
-const actionOptions = [
-  { value: "all", label: "All actions" },
-  { value: "create", label: "Created" },
-  { value: "edit", label: "Edited" },
-  { value: "checked", label: "Checked" },
-  { value: "unchecked", label: "Unchecked" },
-  { value: "delete", label: "Hidden / deleted" },
-  { value: "delete_year", label: "Deleted year" },
-  { value: "delete_all", label: "Deleted all" },
-  { value: "restore", label: "Restored" },
-  { value: "budget_update", label: "Budget updated" },
-  { value: "budget_item_soft_delete", label: "Budget item soft deleted" },
-  { value: "budget_item_delete", label: "Budget item deleted" },
-  { value: "budget_item_restore", label: "Budget item restored" },
-  { value: "saving_target_create", label: "Saving target created" },
-  { value: "saving_target_update", label: "Saving target updated" },
-  { value: "saving_target_soft_delete", label: "Saving target soft deleted" },
-  { value: "saving_target_delete", label: "Saving target deleted" },
-  { value: "saving_target_restore", label: "Saving target restored" },
-  { value: "mark_paid_back", label: "Marked paid back" },
-  { value: "mark_not_paid_back", label: "Marked not paid back" },
-
-  { value: "refund_created", label: "Refund created" },
-  { value: "refund_update", label: "Refund updated" },
-  { value: "refund_hide", label: "Refund hidden" },
-  { value: "refund_restore", label: "Refund restored" },
-  { value: "refund_cancel", label: "Refund cancelled" },
-  { value: "refund_mark_completed", label: "Refund completed" },
-  { value: "refund_mark_pending", label: "Refund pending" },
-  {
-    value: "refund_permanently_deleted",
-    label: "Refund permanently deleted",
-  },
-];
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatExcelDate(value: string | null | undefined) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date;
-}
-
-function formatDateOnly(value: string | null | undefined) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toISOString().slice(0, 10);
-}
-
-function getYearOnly(value: string | null | undefined) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  return String(date.getFullYear());
-}
-
-function isHiddenAuditLog(log: MoneyAuditLog) {
-  const action = String(log.action || "")
-    .toLowerCase()
-    .trim();
-
-  if (action !== "delete") return false;
-
-  const route = String(log.metadata?.route || "").toLowerCase();
-  const source = String(log.metadata?.source || "").toLowerCase();
-
-  const isMoneyTransactionRoute =
-    route.includes("/api/admin/money/transactions") ||
-    route.includes("/admin/money/transactions");
-
-  const isPermanentDelete =
-    route.includes("/permanent") ||
-    log.metadata?.permanentDelete === true ||
-    log.metadata?.permanent_delete === true;
-
-  const hasSoftDeleteFlag =
-    log.metadata?.softDelete === true ||
-    log.metadata?.soft_delete === true ||
-    log.after_data?.deleted_at ||
-    log.after_data?.deleted_by ||
-    log.changed_fields?.deleted_at ||
-    log.changed_fields?.deleted_by;
-
-  if (isPermanentDelete) return false;
-
-  return (
-    source === "money_tracker" || isMoneyTransactionRoute || hasSoftDeleteFlag
-  );
-}
-
-function isUncheckedAuditLog(log: MoneyAuditLog) {
-  const action = String(log.action || "")
-    .toLowerCase()
-    .trim();
-
-  if (action !== "edit") return false;
-
-  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
-  const route = String(log.metadata?.route || "").toLowerCase();
-  const changedFields = log.changed_fields || {};
-
-  const checkedAtChange = changedFields.checked_at;
-  const checkedByChange = changedFields.checked_by;
-  const afterCheckedAt = checkedAtChange?.after;
-  const beforeCheckedAt = checkedAtChange?.before;
-
-  const hasCheckedRoute =
-    route.includes("/checked") ||
-    route.includes("/check") ||
-    route.includes("checked");
-
-  const hasUncheckedMetadata =
-    auditEvent === "unchecked" ||
-    auditEvent === "uncheck" ||
-    log.metadata?.unchecked === true ||
-    Boolean(log.metadata?.unchecked_at);
-
-  const hasUncheckedFields =
-    Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
-    Boolean(beforeCheckedAt) &&
-    (afterCheckedAt === null || afterCheckedAt === undefined || afterCheckedAt === "");
-
-  const hasClearedCheckedBy =
-    Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
-    Boolean(checkedByChange?.before) &&
-    (checkedByChange?.after === null ||
-      checkedByChange?.after === undefined ||
-      checkedByChange?.after === "");
-
-  return hasUncheckedMetadata || (hasCheckedRoute && (hasUncheckedFields || hasClearedCheckedBy));
-}
-
-function isCheckedAuditLog(log: MoneyAuditLog) {
-  const action = String(log.action || "")
-    .toLowerCase()
-    .trim();
-
-  if (action !== "edit") return false;
-  if (isUncheckedAuditLog(log)) return false;
-
-  const auditEvent = String(log.metadata?.audit_event || "").toLowerCase().trim();
-  const metadataAction = String(log.metadata?.action || "").toLowerCase();
-  const route = String(log.metadata?.route || "").toLowerCase();
-  const changedFields = log.changed_fields || {};
-
-  const checkedAtChange = changedFields.checked_at;
-  const afterCheckedAt = checkedAtChange?.after;
-
-  const hasCheckedRoute =
-    route.includes("/checked") ||
-    route.includes("/check") ||
-    route.includes("checked");
-
-  const hasCheckedMetadata =
-    auditEvent === "checked" ||
-    metadataAction.includes("checked") ||
-    log.metadata?.checked === true ||
-    log.metadata?.mark_checked === true ||
-    Boolean(log.metadata?.checked_at);
-
-  const hasCheckedFields =
-    (Object.prototype.hasOwnProperty.call(changedFields, "checked_at") &&
-      Boolean(afterCheckedAt)) ||
-    (Object.prototype.hasOwnProperty.call(changedFields, "checked_by") &&
-      Boolean(changedFields.checked_by?.after)) ||
-    (Object.prototype.hasOwnProperty.call(changedFields, "checked") &&
-      Boolean(changedFields.checked?.after)) ||
-    Boolean(log.after_data?.checked_at) ||
-    Boolean(log.after_data?.checked_by);
-
-  return hasCheckedMetadata || (hasCheckedRoute && hasCheckedFields);
-}
-
-
-function isRefundAuditLog(log: MoneyAuditLog) {
-  const action = normaliseText(log.action);
-  const area = normaliseText(log.metadata?.area);
-  const source = normaliseText(log.metadata?.source);
-  const route = normaliseText(log.metadata?.route);
-  const entityType = normaliseText(log.metadata?.entity_type);
-  const recordType = normaliseText(log.metadata?.record_type);
-
-  return (
-    action.startsWith("refund_") ||
-    area.includes("refund") ||
-    source.includes("refund") ||
-    route.includes("/refunds") ||
-    entityType === "refund" ||
-    recordType === "refund" ||
-    Boolean(log.metadata?.refund_id) ||
-    Boolean(log.metadata?.deleted_refund)
-  );
-}
-
-function isSavingTargetAuditLog(log: MoneyAuditLog) {
-  const action = normaliseText(log.action);
-  const area = normaliseText(log.metadata?.area);
-  const source = normaliseText(log.metadata?.source);
-  const title = normaliseText(getRecordTitle(log));
-
-  return (
-    action.startsWith("saving_target") ||
-    area.includes("saving") ||
-    source.includes("saving_targets") ||
-    source.includes("saving target") ||
-    title.includes("saving target")
-  );
-}
-
-function isBudgetPlanningAuditLog(log: MoneyAuditLog) {
-  const action = normaliseText(log.action);
-  const area = normaliseText(log.metadata?.area);
-  const source = normaliseText(log.metadata?.source);
-  const route = normaliseText(log.metadata?.route);
-  const title = normaliseText(getRecordTitle(log));
-
-  return (
-    action.startsWith("budget") ||
-    area.includes("budget") ||
-    source.includes("budget") ||
-    route.includes("budget") ||
-    title.includes("budget planning") ||
-    title.includes("budget item")
-  );
-}
-
-function isDeletedAreaAuditLog(log: MoneyAuditLog) {
-  const area = normaliseText(log.metadata?.area);
-  const source = normaliseText(log.metadata?.source);
-  const route = normaliseText(log.metadata?.route);
-
-  return (
-    area.includes("deleted_items") ||
-    source.includes("deleted_items") ||
-    route.includes("deleted-items")
-  );
-}
-
-function getAuditArea(log: MoneyAuditLog) {
-  if (isRefundAuditLog(log)) return "Refund Tracker";
-  if (isSavingTargetAuditLog(log)) return "Saving Targets";
-  if (isBudgetPlanningAuditLog(log)) return "Budget Planning";
-  if (isDeletedAreaAuditLog(log)) return "Deleted Area";
-  if (isWebsiteGeneratedLog(log)) return "Website / Stripe";
-  if (normaliseText(log.metadata?.area)) {
-    return String(log.metadata.area).replaceAll("_", " ");
-  }
-  if (normaliseText(log.metadata?.source)) {
-    return String(log.metadata.source).replaceAll("_", " ");
-  }
-  return "Money Tracker";
-}
-
-function getRiskLevel(log: MoneyAuditLog) {
-  const action = normaliseText(log.action);
-
-  if (action === "refund_permanently_deleted") {
-    return "High";
-  }
-
-  if (
-    action === "refund_hide" ||
-    action === "refund_restore" ||
-    action === "refund_cancel"
-  ) {
-    return "Medium";
-  }
-
-  if (
-    action === "refund_mark_completed" ||
-    action === "refund_mark_pending" ||
-    action === "refund_update"
-  ) {
-    return "Medium";
-  }
-
-  if (
-    action.includes("delete_all") ||
-    action.includes("delete_year") ||
-    action.includes("soft_delete") ||
-    action.includes("delete")
-  ) {
-    return "High";
-  }
-
-  if (
-    action.includes("restore") ||
-    action.includes("budget") ||
-    action.includes("saving_target") ||
-    action.includes("mark_paid_back") ||
-    action.includes("mark_not_paid_back")
-  ) {
-    return "Medium";
-  }
-
-  if (isCheckedAuditLog(log) || isUncheckedAuditLog(log)) {
-    return "Medium";
-  }
-
-  return "Low";
-}
-
-function riskClass(level: string) {
-  if (level === "High") return "bg-red-500/15 text-red-100 ring-red-300/20";
-  if (level === "Medium") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
-  return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
-}
-
-function actionLabel(action: string, log?: MoneyAuditLog) {
-  if (log && isHiddenAuditLog(log)) return "Hidden";
-  if (log && isUncheckedAuditLog(log)) return "Unchecked";
-  if (log && isCheckedAuditLog(log)) return "Checked";
-
-  const labels: Record<string, string> = {
-    create: "Created",
-    edit: "Edited",
-    delete: "Deleted",
-    delete_year: "Deleted Year",
-    delete_all: "Deleted All",
-    restore: "Restored",
-    budget_update: "Budget Updated",
-    budget_item_soft_delete: "Budget Item Hidden",
-    budget_item_delete: "Budget Item Hidden",
-    budget_item_restore: "Budget Item Restored",
-    saving_target_create: "Saving Target Created",
-    saving_target_update: "Saving Target Updated",
-    saving_target_soft_delete: "Saving Target Hidden",
-    saving_target_delete: "Saving Target Deleted",
-    saving_target_restore: "Saving Target Restored",
-    mark_paid_back: "Marked Paid Back",
-    mark_not_paid_back: "Marked Not Paid Back",
-
-    refund_created: "Refund Created",
-    refund_update: "Refund Updated",
-    refund_hide: "Refund Hidden",
-    refund_restore: "Refund Restored",
-    refund_cancel: "Refund Cancelled",
-    refund_mark_completed: "Refund Completed",
-    refund_mark_pending: "Refund Pending",
-    refund_permanently_deleted: "Refund Permanently Deleted",
-  };
-
-  return labels[action] || action.replaceAll("_", " ");
-}
-
-
-function actionClass(action: string, log?: MoneyAuditLog) {
-  if (log && isHiddenAuditLog(log)) {
-    return "bg-orange-500/15 text-orange-200 ring-orange-300/20";
-  }
-
-  if (log && isUncheckedAuditLog(log)) {
-    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
-  }
-
-  if (log && isCheckedAuditLog(log)) {
-    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
-  }
-
-  if (action.startsWith("refund_")) {
-    if (action === "refund_permanently_deleted") {
-      return "bg-red-500/15 text-red-100 ring-red-300/20";
-    }
-
-    if (action === "refund_hide") {
-      return "bg-orange-500/15 text-orange-100 ring-orange-300/20";
-    }
-
-    if (action === "refund_restore") {
-      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
-    }
-
-    if (action === "refund_cancel" || action === "refund_mark_pending") {
-      return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
-    }
-
-    if (action === "refund_created" || action === "refund_mark_completed") {
-      return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
-    }
-
-    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
-  }
-
-  if (action.includes("saving_target")) {
-    if (action.includes("delete") || action.includes("soft_delete")) {
-      return "bg-red-500/15 text-red-100 ring-red-300/20";
-    }
-
-    if (action.includes("restore")) {
-      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
-    }
-
-    return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
-  }
-
-  if (action.includes("budget")) {
-    if (action.includes("delete") || action.includes("soft_delete")) {
-      return "bg-red-500/15 text-red-100 ring-red-300/20";
-    }
-
-    if (action.includes("restore")) {
-      return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
-    }
-
-    return "bg-indigo-500/15 text-indigo-100 ring-indigo-300/20";
-  }
-
-  if (action === "create") {
-    return "bg-emerald-500/15 text-emerald-200 ring-emerald-300/20";
-  }
-
-  if (action === "edit") {
-    return "bg-sky-500/15 text-sky-200 ring-sky-300/20";
-  }
-
-  if (
-    action === "delete" ||
-    action === "delete_year" ||
-    action === "delete_all"
-  ) {
-    return "bg-red-500/15 text-red-200 ring-red-300/20";
-  }
-
-  if (action === "restore") {
-    return "bg-purple-500/15 text-purple-200 ring-purple-300/20";
-  }
-
-  if (action === "mark_paid_back") {
-    return "bg-emerald-500/15 text-emerald-200 ring-emerald-300/20";
-  }
-
-  if (action === "mark_not_paid_back") {
-    return "bg-orange-500/15 text-orange-200 ring-orange-300/20";
-  }
-
-  return "bg-white/10 text-white ring-white/10";
-}
-
-
-function actionExcelColour(action: string, log?: MoneyAuditLog) {
-  if (log && isHiddenAuditLog(log)) return "FFEA580C";
-  if (log && isUncheckedAuditLog(log)) return "FFD97706";
-  if (log && isCheckedAuditLog(log)) return "FF0891B2";
-
-  if (action.startsWith("refund_")) {
-    if (action === "refund_permanently_deleted") return "FFB91C1C";
-    if (action === "refund_hide") return "FFEA580C";
-    if (action === "refund_restore") return "FF7C3AED";
-    if (action === "refund_cancel" || action === "refund_mark_pending") {
-      return "FFD97706";
-    }
-    if (action === "refund_created" || action === "refund_mark_completed") {
-      return "FF047857";
-    }
-    return "FF0891B2";
-  }
-
-  if (action.includes("saving_target")) {
-    if (action.includes("delete") || action.includes("soft_delete")) return "FFB91C1C";
-    if (action.includes("restore")) return "FF7C3AED";
-    return "FF0284C7";
-  }
-
-  if (action.includes("budget")) {
-    if (action.includes("delete") || action.includes("soft_delete")) return "FFB91C1C";
-    if (action.includes("restore")) return "FF7C3AED";
-    return "FF4F46E5";
-  }
-
-  if (action === "create") return "FF047857";
-  if (action === "edit") return "FF0284C7";
-  if (
-    action === "delete" ||
-    action === "delete_year" ||
-    action === "delete_all"
-  ) {
-    return "FFB91C1C";
-  }
-  if (action === "restore") return "FF7C3AED";
-  if (action === "mark_paid_back") return "FF059669";
-  if (action === "mark_not_paid_back") return "FFEA580C";
-  return "FF374151";
-}
-
-
-function actionIcon(action: string, log?: MoneyAuditLog) {
-  if (log && isHiddenAuditLog(log)) return Eye;
-  if (log && isUncheckedAuditLog(log)) return RotateCcw;
-  if (log && isCheckedAuditLog(log)) return ShieldCheck;
-
-  if (action.startsWith("refund_")) {
-    if (
-      action === "refund_permanently_deleted" ||
-      action === "refund_hide"
-    ) {
-      return Trash2;
-    }
-
-    if (action === "refund_restore") return RotateCcw;
-    if (action === "refund_cancel") return AlertTriangle;
-    if (action === "refund_mark_completed") return CheckCircle2;
-    if (action === "refund_mark_pending") return Clock3;
-
-    return Activity;
-  }
-
-  if (action.includes("saving_target")) return Target;
-  if (action.includes("budget")) return BarChart3;
-
-  if (action === "create") return CheckCircle2;
-  if (action === "edit") return FileText;
-  if (
-    action === "delete" ||
-    action === "delete_year" ||
-    action === "delete_all"
-  ) {
-    return Trash2;
-  }
-  if (action === "restore") return RotateCcw;
-  if (action === "mark_paid_back") return CheckCircle2;
-  if (action === "mark_not_paid_back") return AlertTriangle;
-
-  return Activity;
-}
-
-
-function getChangedFieldNames(changedFields: any) {
-  if (!changedFields || typeof changedFields !== "object") return [];
-  return Object.keys(changedFields);
-}
-
-function cleanFieldName(name: string) {
-  return name
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function shortValue(value: any) {
-  if (value === null || value === undefined || value === "") return "—";
-
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  return String(value);
-}
-
-function nameFromEmail(email: string | null | undefined) {
-  if (!email) return "";
-
-  const username = email.split("@")[0] || "";
-
-  return username
-    .replace(/[._-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .trim();
-}
-
-function cleanLogValue(value: unknown) {
-  const text = String(value || "").trim();
-  return text || "";
-}
-
-function normaliseText(value: unknown) {
-  return cleanLogValue(value).toLowerCase();
-}
-
-function isWebsiteGeneratedLog(log: MoneyAuditLog) {
-  const source = normaliseText(log.metadata?.source);
-  const route = normaliseText(log.metadata?.route);
-  const createdFrom = normaliseText(log.metadata?.created_from);
-  const auditEvent = normaliseText(log.metadata?.audit_event);
-  const title = normaliseText(getRecordTitle(log));
-
-  return (
-    source.includes("stripe donation sync") ||
-    source.includes("stripe_sync") ||
-    source.includes("sync_stripe") ||
-    source.includes("website donation") ||
-    source.includes("website_donation") ||
-    source.includes("website_monthly_donation") ||
-    source.includes("donation sync") ||
-    route.includes("sync-stripe") ||
-    route.includes("stripe") ||
-    createdFrom.includes("sync-stripe") ||
-    auditEvent.includes("stripe") ||
-    (log.action === "create" && title.includes("donation"))
-  );
-}
-
-function getMetadataValue(log: MoneyAuditLog, keys: string[]) {
-  for (const key of keys) {
-    const value = cleanLogValue(log.metadata?.[key]);
-
-    if (value) return value;
-  }
-
-  return "";
-}
-
-function getActorDisplayName(log: MoneyAuditLog) {
-  if (isWebsiteGeneratedLog(log)) {
-    return "Website / Stripe Sync";
-  }
-
-  const directName =
-    cleanLogValue(log.actor_name) ||
-    cleanLogValue(log.created_by) ||
-    getMetadataValue(log, [
-      "actor_name",
-      "created_by",
-      "updated_by",
-      "createdBy",
-      "updatedBy",
-      "admin_name",
-      "user_name",
-    ]);
-
-  const directEmail =
-    cleanLogValue(log.actor_email) ||
-    cleanLogValue(log.created_by_email) ||
-    getMetadataValue(log, [
-      "actor_email",
-      "created_by_email",
-      "updated_by_email",
-      "createdByEmail",
-      "updatedByEmail",
-      "admin_email",
-      "user_email",
-    ]);
-
-  return directName || nameFromEmail(directEmail) || "Unknown user";
-}
-
-function getActorEmailDisplay(log: MoneyAuditLog) {
-  if (isWebsiteGeneratedLog(log)) {
-    return "Created automatically from the website / Stripe";
-  }
-
-  return (
-    cleanLogValue(log.actor_email) ||
-    cleanLogValue(log.created_by_email) ||
-    getMetadataValue(log, [
-      "actor_email",
-      "created_by_email",
-      "updated_by_email",
-      "createdByEmail",
-      "updatedByEmail",
-      "admin_email",
-      "user_email",
-    ])
-  );
-}
-
-function getActorUserIdDisplay(log: MoneyAuditLog) {
-  if (isWebsiteGeneratedLog(log)) {
-    return "website_automated_sync";
-  }
-
-  return (
-    cleanLogValue(log.actor_user_id) ||
-    cleanLogValue(log.created_by_user_id) ||
-    getMetadataValue(log, [
-      "actor_id",
-      "created_by_user_id",
-      "updated_by_user_id",
-      "user_id",
-      "admin_id",
-    ])
-  );
-}
-
-function getActorUniqueKey(log: MoneyAuditLog) {
-  return (
-    getActorEmailDisplay(log) ||
-    getActorUserIdDisplay(log) ||
-    getActorDisplayName(log)
-  );
-}
-
-function getSourceLabel(log: MoneyAuditLog) {
-  const source = log.metadata?.source;
-  const route = log.metadata?.route;
-
-  if (isRefundAuditLog(log)) return "Refund Tracker";
-  if (source === "money_tracker") return "Money Tracker";
-  if (source) return String(source).replaceAll("_", " ");
-  if (route) return String(route);
-
-  return "—";
-}
-
-function getRecordTitle(log: MoneyAuditLog) {
-  const metadataRefund =
-    log.metadata?.deleted_refund ||
-    log.metadata?.refund ||
-    log.metadata?.record ||
-    null;
-
-  return (
-    cleanLogValue(log.transaction_title) ||
-    cleanLogValue(log.metadata?.refund_description) ||
-    cleanLogValue(metadataRefund?.title) ||
-    cleanLogValue(log.after_data?.title) ||
-    cleanLogValue(log.before_data?.title) ||
-    (isRefundAuditLog(log) ? "Refund record" : "Untitled record")
-  );
-}
-
-function getRecordId(log: MoneyAuditLog) {
-  return (
-    cleanLogValue(log.transaction_id) ||
-    getMetadataValue(log, [
-      "refund_id",
-      "entity_id",
-      "record_id",
-      "transaction_id",
-      "budget_item_id",
-      "saving_target_id",
-    ])
-  );
-}
-
-function getAuditComment(log: MoneyAuditLog) {
-  return cleanLogValue(log.admin_comment);
-}
-
-function getAuditCommentUpdatedBy(log: MoneyAuditLog) {
-  return (
-    cleanLogValue(log.admin_comment_updated_by) ||
-    nameFromEmail(log.admin_comment_updated_by_email) ||
-    "Main admin"
-  );
-}
-
-function safeJson(value: any) {
-  if (value === null || value === undefined) return "";
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function copyToClipboard(value: string) {
-  return navigator.clipboard.writeText(value);
-}
-
-async function downloadWorkbook(workbook: ExcelJS.Workbook, filename: string) {
-  const buffer = await workbook.xlsx.writeBuffer();
-
-  const blob = new Blob([buffer as BlobPart], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = filename;
-
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-}
-
-function setThinBorder(cell: ExcelJS.Cell) {
-  cell.border = {
-    top: { style: "thin", color: { argb: "FFE5E7EB" } },
-    left: { style: "thin", color: { argb: "FFE5E7EB" } },
-    bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
-    right: { style: "thin", color: { argb: "FFE5E7EB" } },
-  };
-}
-
-function styleTitleCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    size: 20,
-    color: { argb: "FFFFFFFF" },
-  };
-
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FF111827" },
-  };
-
-  cell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-  };
-}
-
-function styleSubtitleCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    size: 11,
-    color: { argb: "FF374151" },
-  };
-
-  cell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-    wrapText: true,
-  };
-}
-
-function styleSectionCell(cell: ExcelJS.Cell, colour = "FF334155") {
-  cell.font = {
-    bold: true,
-    size: 13,
-    color: { argb: "FFFFFFFF" },
-  };
-
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: colour },
-  };
-
-  cell.alignment = {
-    horizontal: "left",
-    vertical: "middle",
-  };
-}
-
-function styleHeaderRow(row: ExcelJS.Row, colour = "FF111827") {
-  row.eachCell((cell) => {
-    cell.font = {
-      bold: true,
-      color: { argb: "FFFFFFFF" },
-    };
-
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: colour },
-    };
-
-    cell.alignment = {
-      horizontal: "center",
-      vertical: "middle",
-      wrapText: true,
-    };
-
-    setThinBorder(cell);
-  });
-
-  row.height = 26;
-}
-
-function styleBodyRow(row: ExcelJS.Row) {
-  row.eachCell((cell) => {
-    cell.alignment = {
-      vertical: "top",
-      wrapText: true,
-    };
-
-    setThinBorder(cell);
-  });
-}
-
-function addMergedTitle(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string,
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleTitleCell(cell);
-}
-
-function addMergedSubtitle(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string,
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleSubtitleCell(cell);
-}
-
-function addMergedSection(
-  worksheet: ExcelJS.Worksheet,
-  text: string,
-  fromCell: string,
-  toCell: string,
-  colour = "FF7C3AED",
-) {
-  worksheet.mergeCells(`${fromCell}:${toCell}`);
-  const cell = worksheet.getCell(fromCell);
-  cell.value = text;
-  styleSectionCell(cell, colour);
-}
-
-function styleActionCell(
-  cell: ExcelJS.Cell,
-  action: string,
-  log?: MoneyAuditLog,
-) {
-  cell.font = {
-    bold: true,
-    color: { argb: "FFFFFFFF" },
-  };
-
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: actionExcelColour(action, log) },
-  };
-
-  cell.alignment = {
-    horizontal: "center",
-    vertical: "middle",
-    wrapText: true,
-  };
-}
-
-function styleMutedCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    color: { argb: "FF6B7280" },
-  };
-}
-
-function styleSuccessCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    color: { argb: "FF166534" },
-  };
-
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFDCFCE7" },
-  };
-}
-
-function styleDangerCell(cell: ExcelJS.Cell) {
-  cell.font = {
-    bold: true,
-    color: { argb: "FF991B1B" },
-  };
-
-  cell.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFFEE2E2" },
-  };
-}
-
-function makeSummaryRows(logs: MoneyAuditLog[]) {
-  const hidden = logs.filter((log) => isHiddenAuditLog(log)).length;
-  const deleted = logs.filter(
-    (log) =>
-      !isHiddenAuditLog(log) &&
-      (log.action === "delete" ||
-        log.action === "delete_year" ||
-        log.action === "delete_all" ||
-        log.action === "refund_permanently_deleted"),
-  ).length;
-
-  const refundLogs = logs.filter((log) => isRefundAuditLog(log)).length;
-  const refundHidden = logs.filter((log) => log.action === "refund_hide").length;
-  const refundDeleted = logs.filter(
-    (log) => log.action === "refund_permanently_deleted",
-  ).length;
-  const refundRestored = logs.filter(
-    (log) => log.action === "refund_restore",
-  ).length;
-
-  return [
-    {
-      label: "Total logs",
-      value: logs.length,
-      notes: "Total audit logs in this export.",
-    },
-    {
-      label: "Created",
-      value: logs.filter((log) => log.action === "create").length,
-      notes: "Transactions or records created.",
-    },
-    {
-      label: "Edited",
-      value: logs.filter(
-        (log) =>
-          log.action === "edit" &&
-          !isCheckedAuditLog(log) &&
-          !isUncheckedAuditLog(log),
-      ).length,
-      notes: "Transactions or records edited.",
-    },
-    {
-      label: "Checked",
-      value: logs.filter((log) => isCheckedAuditLog(log)).length,
-      notes: "Transactions marked as checked.",
-    },
-    {
-      label: "Unchecked",
-      value: logs.filter((log) => isUncheckedAuditLog(log)).length,
-      notes: "Transactions where checked status was undone.",
-    },
-    {
-      label: "Hidden",
-      value: hidden,
-      notes: "Single money tracker transactions soft-deleted and hidden.",
-    },
-    {
-      label: "Deleted",
-      value: deleted,
-      notes: "Permanent, selected-year, or full delete actions.",
-    },
-    {
-      label: "Restored",
-      value: logs.filter((log) => log.action === "restore").length,
-      notes: "Restored transaction records.",
-    },
-    {
-      label: "Paid back changes",
-      value: logs.filter(
-        (log) =>
-          log.action === "mark_paid_back" ||
-          log.action === "mark_not_paid_back",
-      ).length,
-      notes: "Personal funds repayment status changes.",
-    },
-    {
-      label: "Refund logs",
-      value: refundLogs,
-      notes: "All refund tracker actions.",
-    },
-    {
-      label: "Refunds hidden",
-      value: refundHidden,
-      notes: "Refunds moved into Deleted Refunds.",
-    },
-    {
-      label: "Refunds permanently deleted",
-      value: refundDeleted,
-      notes: "Refund records permanently removed from Supabase.",
-    },
-    {
-      label: "Refunds restored",
-      value: refundRestored,
-      notes: "Refunds returned to the active Refund Tracker.",
-    },
-    {
-      label: "Unique users",
-      value: new Set(
-        logs
-          .map(
-            (log) =>
-              getActorUniqueKey(log),
-          )
-          .filter(Boolean),
-      ).size,
-      notes: "Unique actors based on email, user ID, or display name.",
-    },
-  ];
-}
+import type {
+  AreaFilter,
+  MoneyAuditLog,
+  MoneyAuditRiskRule,
+  RiskFilter,
+  SortMode,
+  YearFilter,
+} from "@/lib/money/audit_logs/audit-log-types";
+import {
+  EASY_MODE_STORAGE_KEY,
+  actionClass,
+  actionIcon,
+  actionLabel,
+  actionOptions,
+  cleanFieldName,
+  copyToClipboard,
+  formatDateOnly,
+  formatDateTime,
+  getActorDisplayName,
+  getActorEmailDisplay,
+  getActorUniqueKey,
+  getActorUserIdDisplay,
+  getAuditArea,
+  getAuditComment,
+  getAuditCommentUpdatedBy,
+  getAuditMoneyDisplay,
+  getChangedFieldNames,
+  getRecordId,
+  getRecordTitle,
+  getRiskLevel,
+  getSourceLabel,
+  getYearOnly,
+  isBudgetPlanningAuditLog,
+  isCheckedAuditLog,
+  isHiddenAuditLog,
+  isRefundAuditLog,
+  isSavingTargetAuditLog,
+  isUncheckedAuditLog,
+  isWebsiteGeneratedLog,
+  riskClass,
+  shortValue,
+} from "@/lib/money/audit_logs/audit-log-utils";
+import { InfoCard, RawDataCard, StatCard } from "../../../components/money/AduitLogs/AuditLogCards";
+import AuditRiskRulesPanel from "../../../components/money/AduitLogs/AuditRiskRulesPanel";
 
 export default function MoneyAuditLogsPage() {
   const [logs, setLogs] = useState<MoneyAuditLog[]>([]);
+  const [riskRules, setRiskRules] = useState<MoneyAuditRiskRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAction, setSelectedAction] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1180,6 +106,58 @@ export default function MoneyAuditLogsPage() {
   const [savingComment, setSavingComment] = useState(false);
   const [commentSaveError, setCommentSaveError] = useState("");
   const [commentSaved, setCommentSaved] = useState(false);
+
+  /**
+   * Full Mode is the default.
+   * Easy Mode only turns on after the user chooses it.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page still works if browser storage is blocked.
+      }
+
+      return next;
+    });
+  }
+
+  async function loadRiskRules() {
+    try {
+      const res = await fetch("/api/admin/money/audit-risk-rules", {
+        cache: "no-store",
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
+        setRiskRules(Array.isArray(data.rules) ? data.rules : []);
+      }
+    } catch {
+      // Audit logs still load if custom risk rules are unavailable.
+      setRiskRules([]);
+    }
+  }
 
   async function loadLogs() {
     try {
@@ -1236,6 +214,16 @@ export default function MoneyAuditLogsPage() {
   }
 
   useEffect(() => {
+    loadRiskRules();
+  }, []);
+
+  // AuditRiskRulesPanel does not currently export prop types that TS can
+  // recognize from here. Cast to any to allow passing a callback when rules
+  // change so the page can reload risk rules. This avoids a TSX prop type
+  // mismatch without changing the panel component.
+  const AuditRiskRulesPanelAny = AuditRiskRulesPanel as any;
+
+  useEffect(() => {
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAction, selectedYear]);
@@ -1285,7 +273,7 @@ export default function MoneyAuditLogsPage() {
     }
 
     if (selectedRisk !== "all") {
-      rows = rows.filter((log) => getRiskLevel(log) === selectedRisk);
+      rows = rows.filter((log) => getRiskLevel(log, riskRules) === selectedRisk);
     }
 
     if (selectedArea !== "all") {
@@ -1308,7 +296,7 @@ export default function MoneyAuditLogsPage() {
           getActorDisplayName(log).toLowerCase().includes(q) ||
           getActorEmailDisplay(log).toLowerCase().includes(q) ||
           getAuditArea(log).toLowerCase().includes(q) ||
-          getRiskLevel(log).toLowerCase().includes(q) ||
+          getRiskLevel(log, riskRules).toLowerCase().includes(q) ||
           getSourceLabel(log).toLowerCase().includes(q) ||
           getAuditComment(log).toLowerCase().includes(q) ||
           JSON.stringify(log.changed_fields || {})
@@ -1377,6 +365,7 @@ export default function MoneyAuditLogsPage() {
     dateFrom,
     dateTo,
     sortMode,
+    riskRules,
   ]);
 
   const stats = useMemo(() => {
@@ -1424,7 +413,7 @@ export default function MoneyAuditLogsPage() {
       savingTargets: logs.filter((log) => isSavingTargetAuditLog(log)).length,
       budgetPlanning: logs.filter((log) => isBudgetPlanningAuditLog(log)).length,
       automated: logs.filter((log) => isWebsiteGeneratedLog(log)).length,
-      highRisk: logs.filter((log) => getRiskLevel(log) === "High").length,
+      highRisk: logs.filter((log) => getRiskLevel(log, riskRules) === "High").length,
       comments: logs.filter((log) => Boolean(getAuditComment(log))).length,
       uniqueUsers: new Set(
         logs
@@ -1435,7 +424,7 @@ export default function MoneyAuditLogsPage() {
           .filter(Boolean),
       ).size,
     };
-  }, [logs, filteredLogs.length]);
+  }, [logs, filteredLogs.length, riskRules]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<string>();
@@ -1737,12 +726,9 @@ export default function MoneyAuditLogsPage() {
                 </h1>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
-                  View every money tracker action, including creates, edits,
-                  checks, hidden soft-deletes, saving target changes, budget
-                  tracker updates, restore actions, selected-year deletes,
-                  delete-all actions, refund tracker actions, permanent refund
-                  deletions, personal funds paid-back changes, and main-admin
-                  comments explaining why changes were made.
+                  {easyMode
+                    ? "A simple view of the most important money tracker audit logs. Use Full Mode when you need advanced filters, detailed statistics, JSON export, or raw technical data."
+                    : "View every money tracker action, including creates, edits, checks, hidden soft-deletes, saving target changes, budget tracker updates, restore actions, selected-year deletes, delete-all actions, refund tracker actions, permanent refund deletions, personal funds paid-back changes, and main-admin comments explaining why changes were made."}
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -1798,15 +784,17 @@ export default function MoneyAuditLogsPage() {
                   {exporting ? "Exporting..." : "Export Excel"}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={exportRawJson}
-                  disabled={filteredLogs.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-3 text-sm font-bold text-purple-200 ring-1 ring-purple-300/20 hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Clipboard className="h-4 w-4" />
-                  Export JSON
-                </button>
+                {!easyMode && (
+                  <button
+                    type="button"
+                    onClick={exportRawJson}
+                    disabled={filteredLogs.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/15 px-4 py-3 text-sm font-bold text-purple-200 ring-1 ring-purple-300/20 hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Clipboard className="h-4 w-4" />
+                    Export JSON
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1821,6 +809,53 @@ export default function MoneyAuditLogsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-emerald-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps the audit log page focused on search, the main filters, and the audit records."
+                  : "Full Mode shows advanced filters, detailed statistics, technical exports, and raw audit data."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
           </div>
         </section>
 
@@ -1841,6 +876,8 @@ export default function MoneyAuditLogsPage() {
           </section>
         )}
 
+        {!easyMode && (
+          <>
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           <StatCard label="Total Logs" value={stats.total} tone="white" />
           <StatCard label="Showing" value={stats.visible} tone="purple" />
@@ -1910,6 +947,14 @@ export default function MoneyAuditLogsPage() {
             </p>
           </div>
         </section>
+          </>
+        )}
+
+        {!easyMode && (
+          <AuditRiskRulesPanelAny
+            onRulesChanged={loadRiskRules}
+          />
+        )}
 
         <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
           <div className="mb-4 flex flex-col gap-3 2xl:flex-row 2xl:items-center">
@@ -1957,44 +1002,49 @@ export default function MoneyAuditLogsPage() {
                 ))}
               </select>
 
-              <select
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
-              >
-                <option className="bg-[#11111f] text-white" value="newest">
-                  Newest first
-                </option>
-                <option className="bg-[#11111f] text-white" value="oldest">
-                  Oldest first
-                </option>
-                <option className="bg-[#11111f] text-white" value="action">
-                  Sort by action
-                </option>
-                <option className="bg-[#11111f] text-white" value="transaction">
-                  Sort by record
-                </option>
-              </select>
+              {!easyMode && (
+                <>
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value as SortMode)}
+                    className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+                  >
+                    <option className="bg-[#11111f] text-white" value="newest">
+                      Newest first
+                    </option>
+                    <option className="bg-[#11111f] text-white" value="oldest">
+                      Oldest first
+                    </option>
+                    <option className="bg-[#11111f] text-white" value="action">
+                      Sort by action
+                    </option>
+                    <option className="bg-[#11111f] text-white" value="transaction">
+                      Sort by record
+                    </option>
+                  </select>
 
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
-                title="Date from"
-              />
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+                    title="Date from"
+                  />
 
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
-                title="Date to"
-              />
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+                    title="Date to"
+                  />
+                </>
+              )}
             </div>
           </div>
 
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {!easyMode && (
+            <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <select
               value={selectedRisk}
               onChange={(e) => setSelectedRisk(e.target.value as RiskFilter)}
@@ -2062,8 +1112,10 @@ export default function MoneyAuditLogsPage() {
                 250 per page
               </option>
             </select>
-          </div>
+            </div>
+          )}
 
+          {!easyMode ? (
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
               {yearOptions.slice(0, 4).map((year) => (
@@ -2176,6 +1228,34 @@ export default function MoneyAuditLogsPage() {
               Clear filters
             </button>
           </div>
+          ) : (
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setQuickDateRange("today")}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+              >
+                Today
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQuickDateRange("7days")}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+              >
+                Last 7 days
+              </button>
+
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white/75 ring-1 ring-white/10 hover:bg-white/20"
+              >
+                <X className="h-4 w-4" />
+                Clear filters
+              </button>
+            </div>
+          )}
 
           <div className="mb-4 rounded-2xl bg-black/20 px-4 py-3 text-sm text-white/60">
             Showing{" "}
@@ -2216,6 +1296,7 @@ export default function MoneyAuditLogsPage() {
                       <th className="p-3 text-left">When</th>
                       <th className="p-3 text-left">Action</th>
                       <th className="p-3 text-left">Record</th>
+                      <th className="p-3 text-left">Amount</th>
                       <th className="p-3 text-left">Who</th>
                       <th className="p-3 text-left">Area</th>
                       <th className="p-3 text-left">Risk</th>
@@ -2234,7 +1315,8 @@ export default function MoneyAuditLogsPage() {
                         log.changed_fields,
                       );
                       const source = getSourceLabel(log);
-                      const risk = getRiskLevel(log);
+                      const risk = getRiskLevel(log, riskRules);
+                      const amountDisplay = getAuditMoneyDisplay(log);
                       const ActionIcon = actionIcon(log.action, log);
 
                       return (
@@ -2268,6 +1350,12 @@ export default function MoneyAuditLogsPage() {
                                 {getRecordId(log)}
                               </p>
                             )}
+                          </td>
+
+                          <td className="whitespace-nowrap p-3">
+                            <span className="inline-flex rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20">
+                              {amountDisplay}
+                            </span>
                           </td>
 
                           <td className="max-w-[260px] p-3">
@@ -2364,6 +1452,7 @@ export default function MoneyAuditLogsPage() {
                 {visiblePageLogs.map((log) => {
                   const ActionIcon = actionIcon(log.action, log);
                   const changedNames = getChangedFieldNames(log.changed_fields);
+                  const amountDisplay = getAuditMoneyDisplay(log);
 
                   return (
                     <article
@@ -2397,6 +1486,10 @@ export default function MoneyAuditLogsPage() {
                       <p className="mt-1 text-xs text-white/45">
                         {formatDateTime(log.created_at)}
                       </p>
+
+                      <div className="mt-3 inline-flex rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20">
+                        Amount: {amountDisplay}
+                      </div>
 
                       <div className="mt-3 rounded-xl bg-white/5 p-3">
                         <p className="text-sm font-bold">
@@ -2532,6 +1625,7 @@ export default function MoneyAuditLogsPage() {
               <th>When</th>
               <th>Action</th>
               <th>Record</th>
+              <th>Amount</th>
               <th>Who</th>
               <th>Changed Fields</th>
               <th>Main Admin Comment</th>
@@ -2541,7 +1635,7 @@ export default function MoneyAuditLogsPage() {
           <tbody>
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   No audit logs found for the current filters.
                 </td>
               </tr>
@@ -2562,6 +1656,9 @@ export default function MoneyAuditLogsPage() {
                       {getRecordId(log) && (
                         <small>{getRecordId(log)}</small>
                       )}
+                    </td>
+                    <td>
+                      <strong>{getAuditMoneyDisplay(log)}</strong>
                     </td>
                     <td>
                       <strong>{getActorDisplayName(log)}</strong>
@@ -2914,14 +2011,16 @@ export default function MoneyAuditLogsPage() {
                 </div>
 
                 <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    onClick={copySelectedLog}
-                    className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white/80 hover:bg-white/20"
-                  >
-                    <Clipboard className="h-4 w-4" />
-                    {copied ? "Copied" : "Copy JSON"}
-                  </button>
+                  {!easyMode && (
+                    <button
+                      type="button"
+                      onClick={copySelectedLog}
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white/80 hover:bg-white/20"
+                    >
+                      <Clipboard className="h-4 w-4" />
+                      {copied ? "Copied" : "Copy JSON"}
+                    </button>
+                  )}
 
                   <button
                     type="button"
@@ -2935,7 +2034,7 @@ export default function MoneyAuditLogsPage() {
             </div>
 
             <div className="max-h-[78vh] overflow-auto p-5">
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
                 <InfoCard
                   label="Who did it"
                   title={getActorDisplayName(selectedLog)}
@@ -2949,6 +2048,13 @@ export default function MoneyAuditLogsPage() {
                   title={getRecordTitle(selectedLog)}
                   subtitle={getRecordId(selectedLog) || "No record ID saved"}
                   icon={<FileText className="h-5 w-5" />}
+                />
+
+                <InfoCard
+                  label="Amount"
+                  title={getAuditMoneyDisplay(selectedLog)}
+                  subtitle="Money amount linked to this audit record"
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
                 />
 
                 <InfoCard
@@ -3041,14 +2147,16 @@ export default function MoneyAuditLogsPage() {
                     <h3 className="font-bold">Changed Fields</h3>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowRawData((prev) => !prev)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white/75 hover:bg-white/20"
-                  >
-                    <ChevronDown className="h-4 w-4" />
-                    {showRawData ? "Hide raw data" : "Show raw data"}
-                  </button>
+                  {!easyMode && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRawData((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white/75 hover:bg-white/20"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                      {showRawData ? "Hide raw data" : "Show raw data"}
+                    </button>
+                  )}
                 </div>
 
                 {selectedLog.changed_fields &&
@@ -3098,7 +2206,7 @@ export default function MoneyAuditLogsPage() {
                 )}
               </div>
 
-              {showRawData && (
+              {!easyMode && showRawData && (
                 <>
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
                     <RawDataCard
@@ -3123,96 +2231,5 @@ export default function MoneyAuditLogsPage() {
         </div>
       )}
     </main>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone:
-    | "white"
-    | "purple"
-    | "emerald"
-    | "sky"
-    | "cyan"
-    | "amber"
-    | "red"
-    | "orange"
-    | "pink";
-}) {
-  const classes = {
-    white: "bg-white/[0.04] ring-white/10 text-white",
-    purple: "bg-purple-500/10 ring-purple-300/10 text-purple-100",
-    emerald: "bg-emerald-500/10 ring-emerald-300/10 text-emerald-100",
-    sky: "bg-sky-500/10 ring-sky-300/10 text-sky-100",
-    cyan: "bg-cyan-500/10 ring-cyan-300/10 text-cyan-100",
-    amber: "bg-amber-500/10 ring-amber-300/10 text-amber-100",
-    red: "bg-red-500/10 ring-red-300/10 text-red-100",
-    orange: "bg-orange-500/10 ring-orange-300/10 text-orange-100",
-    pink: "bg-pink-500/10 ring-pink-300/10 text-pink-100",
-  };
-
-  return (
-    <div className={`rounded-3xl p-5 ring-1 ${classes[tone]}`}>
-      <p className="text-sm opacity-75">{label}</p>
-      <p className="mt-1 text-3xl font-black">{value}</p>
-    </div>
-  );
-}
-
-function InfoCard({
-  label,
-  title,
-  subtitle,
-  extra,
-  icon,
-}: {
-  label: string;
-  title: string;
-  subtitle?: string;
-  extra?: string;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-      <div className="mb-3 flex items-center gap-2 text-white/40">
-        {icon}
-        <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
-      </div>
-
-      <p className="break-words text-lg font-bold">{title || "—"}</p>
-
-      {subtitle && (
-        <p className="mt-1 break-words text-sm text-white/50">{subtitle}</p>
-      )}
-
-      {extra && <p className="mt-3 break-all text-xs text-white/35">{extra}</p>}
-    </div>
-  );
-}
-
-function RawDataCard({
-  title,
-  data,
-  className = "",
-}: {
-  title: string;
-  data: any;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${className}`}
-    >
-      <h3 className="mb-3 font-bold">{title}</h3>
-
-      <pre className="max-h-96 overflow-auto rounded-xl bg-black/40 p-4 text-xs text-white/70">
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
   );
 }

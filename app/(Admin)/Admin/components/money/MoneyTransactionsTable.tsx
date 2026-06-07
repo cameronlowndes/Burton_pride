@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import Link from "next/link";
 import { useAdmin } from "../providers/AdminProvider";
 import {
   AlertTriangle,
   ArrowDown,
   CalendarClock,
-
   ArrowUp,
   CheckCircle2,
   ChevronDown,
@@ -84,7 +90,9 @@ type MoneyTransactionsTableProps = {
   setSearchTerm: Dispatch<SetStateAction<string>>;
 
   filter: "all" | "income" | "expense" | "sponsorship" | "personal";
-  setFilter: Dispatch<SetStateAction<"all" | "income" | "expense" | "sponsorship" | "personal">>;
+  setFilter: Dispatch<
+    SetStateAction<"all" | "income" | "expense" | "sponsorship" | "personal">
+  >;
 
   selectedSponsorId: string;
   setSelectedSponsorId: Dispatch<SetStateAction<string>>;
@@ -110,14 +118,21 @@ type MoneyTransactionsTableProps = {
   onOpenDeleteAll: () => void;
   onEditTransaction: (item: Transaction) => void;
   onHideTransaction: (id: string) => void;
-  onTogglePersonalFundsRepaid: (item: Transaction, proofFiles?: File[]) => void | Promise<void>;
+  onTogglePersonalFundsRepaid: (
+    item: Transaction,
+    proofFiles?: File[],
+  ) => void | Promise<void>;
   onMarkTransactionChecked: (item: Transaction) => void | Promise<void>;
   onUpdateBankReconciliationStatus: (
     item: Transaction,
     status: BankReconciliationStatus,
-    note?: string
+    note?: string,
   ) => void | Promise<void>;
-  onUpdateFinanceNote: (item: Transaction, status: FinanceNoteStatus, note?: string) => void | Promise<void>;
+  onUpdateFinanceNote: (
+    item: Transaction,
+    status: FinanceNoteStatus,
+    note?: string,
+  ) => void | Promise<void>;
 
   /**
    * Opening balance carried forward into the selected year.
@@ -134,6 +149,13 @@ type MoneyTransactionsTableProps = {
    * Default is 7 days.
    */
   receiptReminderDays?: number;
+
+  /**
+   * Read-only protection for locked accounting periods.
+   * Pass only values that are currently locked.
+   */
+  lockedYears?: string[];
+  lockedMonths?: string[];
 };
 
 type SortKey =
@@ -260,6 +282,7 @@ const RECEIPT_OVERDUE_SEARCH_WORDS =
   "receipt overdue overdue receipt old receipt expired receipt receipt expiry missing receipt over 7 days";
 
 const receiptReminderDayOptions = [3, 7, 14, 21, 30];
+const EMPTY_STRING_LIST: string[] = [];
 
 const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "select", label: "Select", locked: true },
@@ -303,6 +326,27 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   actions: true,
 };
 
+const easyModeVisibleColumns: Record<ColumnKey, boolean> = {
+  select: true,
+  reference: true,
+  date: true,
+  title: true,
+  type: true,
+  amount: true,
+  funding: false,
+  fundingNote: false,
+  supplier: false,
+  personal: false,
+  paidBy: false,
+  repayment: false,
+  payment: true,
+  bank: false,
+  receipt: false,
+  finance: false,
+  checked: true,
+  actions: true,
+};
+
 function cleanText(value?: unknown) {
   return String(value || "").trim();
 }
@@ -331,9 +375,11 @@ function fundingShortLabel(type?: FundingType | string | null) {
 }
 
 function fundingBadgeClass(type?: FundingType | string | null) {
-  if (type === "grant") return "bg-emerald-500/20 text-emerald-100 ring-emerald-300/20";
+  if (type === "grant")
+    return "bg-emerald-500/20 text-emerald-100 ring-emerald-300/20";
   if (type === "loan") return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
-  if (type === "other") return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
+  if (type === "other")
+    return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
   return "bg-amber-500/20 text-amber-100 ring-amber-300/20";
 }
 
@@ -371,11 +417,16 @@ function hasSupplierLinked(item: Transaction) {
 function supplierBadgeClass(category?: string | null) {
   const cleanCategory = cleanText(category).toLowerCase();
 
-  if (cleanCategory.includes("venue")) return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
-  if (cleanCategory.includes("insurance")) return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
-  if (cleanCategory.includes("food")) return "bg-orange-500/20 text-orange-100 ring-orange-300/20";
-  if (cleanCategory.includes("printer") || cleanCategory.includes("print")) return "bg-pink-500/20 text-pink-100 ring-pink-300/20";
-  if (cleanCategory.includes("security")) return "bg-red-500/20 text-red-100 ring-red-300/20";
+  if (cleanCategory.includes("venue"))
+    return "bg-purple-500/20 text-purple-100 ring-purple-300/20";
+  if (cleanCategory.includes("insurance"))
+    return "bg-blue-500/20 text-blue-100 ring-blue-300/20";
+  if (cleanCategory.includes("food"))
+    return "bg-orange-500/20 text-orange-100 ring-orange-300/20";
+  if (cleanCategory.includes("printer") || cleanCategory.includes("print"))
+    return "bg-pink-500/20 text-pink-100 ring-pink-300/20";
+  if (cleanCategory.includes("security"))
+    return "bg-red-500/20 text-red-100 ring-red-300/20";
 
   return "bg-violet-500/20 text-violet-100 ring-violet-300/20";
 }
@@ -388,8 +439,10 @@ function bankReconciliationLabel(status?: string | null) {
 }
 
 function bankReconciliationBadgeClass(status?: string | null) {
-  if (status === "matched") return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
-  if (status === "needs_review") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  if (status === "matched")
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  if (status === "needs_review")
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
   if (status === "ignored") return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
   return "bg-white/10 text-white/60 ring-white/10";
 }
@@ -403,10 +456,14 @@ function financeNoteStatusLabel(status?: string | null) {
 }
 
 function financeNoteBadgeClass(status?: string | null) {
-  if (status === "waiting_for_receipt") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
-  if (status === "ask_sponsor") return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
-  if (status === "bank_query") return "bg-red-500/15 text-red-100 ring-red-300/20";
-  if (status === "resolved") return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  if (status === "waiting_for_receipt")
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  if (status === "ask_sponsor")
+    return "bg-purple-500/15 text-purple-100 ring-purple-300/20";
+  if (status === "bank_query")
+    return "bg-red-500/15 text-red-100 ring-red-300/20";
+  if (status === "resolved")
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
   return "bg-white/10 text-white/60 ring-white/10";
 }
 
@@ -445,7 +502,9 @@ function hasMissingReceiptWarning(item: Transaction) {
 }
 
 function normaliseText(value?: string | null) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function nameFromEmail(email?: string | null) {
@@ -466,7 +525,12 @@ function getCheckedByDisplayName(item: Transaction) {
     checked_by_user_id?: string | null;
   };
 
-  return row.checked_by_name || row.checked_by || nameFromEmail(row.checked_by_email) || "Unknown admin";
+  return (
+    row.checked_by_name ||
+    row.checked_by ||
+    nameFromEmail(row.checked_by_email) ||
+    "Unknown admin"
+  );
 }
 
 function getCheckedByEmail(item: Transaction) {
@@ -496,9 +560,12 @@ function canCurrentAdminUncheckTransaction({
   const checkedByEmail = getCheckedByEmail(item);
   const checkedByName = getCheckedByDisplayName(item);
 
-  if (checkedByUserId && currentUserId) return checkedByUserId === currentUserId;
-  if (checkedByEmail && currentUserEmail) return normaliseText(checkedByEmail) === normaliseText(currentUserEmail);
-  if (checkedByName && currentUserName) return normaliseText(checkedByName) === normaliseText(currentUserName);
+  if (checkedByUserId && currentUserId)
+    return checkedByUserId === currentUserId;
+  if (checkedByEmail && currentUserEmail)
+    return normaliseText(checkedByEmail) === normaliseText(currentUserEmail);
+  if (checkedByName && currentUserName)
+    return normaliseText(checkedByName) === normaliseText(currentUserName);
 
   return false;
 }
@@ -507,6 +574,74 @@ function transactionMonthKey(item: Transaction) {
   const rawDate = String(item.transaction_date || item.created_at || "").trim();
   if (!rawDate) return "";
   return rawDate.slice(0, 7);
+}
+
+
+function normaliseLockedMonthKeys(value: unknown) {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => {
+          if (typeof item === "string") return item.trim();
+
+          if (item && typeof item === "object") {
+            const row = item as Record<string, unknown>;
+
+            if (row.is_locked === false) return "";
+
+            return String(
+              row.month_key ||
+                row.monthKey ||
+                row.period_key ||
+                row.periodKey ||
+                row.key ||
+                "",
+            ).trim();
+          }
+
+          return "";
+        })
+        .filter((monthKey) => /^\d{4}-\d{2}$/.test(monthKey)),
+    ),
+  );
+}
+
+function normaliseLockedYearKeys(value: unknown) {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => {
+          if (typeof item === "string") return item.trim();
+
+          if (item && typeof item === "object") {
+            const row = item as Record<string, unknown>;
+
+            if (row.is_locked === false) return "";
+
+            return String(row.year || row.year_key || row.key || "").trim();
+          }
+
+          return "";
+        })
+        .filter((yearKey) => /^\d{4}$/.test(yearKey)),
+    ),
+  );
+}
+
+async function readLockPayload(response: Response) {
+  const rawBody = await response.text();
+
+  if (!rawBody) return {};
+
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return {};
+  }
 }
 
 function transactionReminderBaseDate(item: Transaction) {
@@ -533,18 +668,27 @@ function transactionAgeDays(item: Transaction) {
   return Math.max(0, Math.floor((Date.now() - date.getTime()) / MS_PER_DAY));
 }
 
-function receiptDueDate(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+function receiptDueDate(
+  item: Transaction,
+  reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
   const date = parseTransactionDate(item);
 
   if (!date) return null;
 
   const nextDate = new Date(date);
-  nextDate.setDate(nextDate.getDate() + Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)));
+  nextDate.setDate(
+    nextDate.getDate() +
+      Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)),
+  );
 
   return nextDate;
 }
 
-function receiptDueDateLabel(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+function receiptDueDateLabel(
+  item: Transaction,
+  reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
   const date = receiptDueDate(item, reminderDays);
 
   if (!date) return "No due date";
@@ -552,15 +696,32 @@ function receiptDueDateLabel(item: Transaction, reminderDays = DEFAULT_RECEIPT_R
   return formatDate(date.toISOString());
 }
 
-function receiptOverdueDays(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
-  return Math.max(0, transactionAgeDays(item) - Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)));
+function receiptOverdueDays(
+  item: Transaction,
+  reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
+  return Math.max(
+    0,
+    transactionAgeDays(item) -
+      Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)),
+  );
 }
 
-function isReceiptOverdue(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
-  return hasMissingReceiptWarning(item) && transactionAgeDays(item) >= Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS));
+function isReceiptOverdue(
+  item: Transaction,
+  reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
+  return (
+    hasMissingReceiptWarning(item) &&
+    transactionAgeDays(item) >=
+      Math.max(1, Number(reminderDays || DEFAULT_RECEIPT_REMINDER_DAYS))
+  );
 }
 
-function receiptReminderLabel(item: Transaction, reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+function receiptReminderLabel(
+  item: Transaction,
+  reminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
   const ageDays = transactionAgeDays(item);
   const overdueDays = receiptOverdueDays(item, reminderDays);
   const dueDate = receiptDueDateLabel(item, reminderDays);
@@ -599,12 +760,15 @@ function isSpecialCheckedSearch(searchTerm: string) {
     isUncheckedSearch,
     isCheckedSearch,
     isReceiptOverdueSearch,
-    isSpecialSearch: isUncheckedSearch || isCheckedSearch || isReceiptOverdueSearch,
+    isSpecialSearch:
+      isUncheckedSearch || isCheckedSearch || isReceiptOverdueSearch,
   };
 }
 
 function compareText(a: unknown, b: unknown) {
-  return cleanText(a).localeCompare(cleanText(b), "en-GB", { sensitivity: "base" });
+  return cleanText(a).localeCompare(cleanText(b), "en-GB", {
+    sensitivity: "base",
+  });
 }
 
 function refundMonthKey(refund: TrackingRefund) {
@@ -618,7 +782,9 @@ function refundReference(refund: TrackingRefund) {
     return suppliedReference;
   }
 
-  return `REFUND-${refund.year}-${String(refund.id || "").slice(0, 8).toUpperCase()}`;
+  return `REFUND-${refund.year}-${String(refund.id || "")
+    .slice(0, 8)
+    .toUpperCase()}`;
 }
 
 function refundTypeLabel(refund: TrackingRefund) {
@@ -634,8 +800,10 @@ function refundStatusLabel(status: RefundStatus) {
 }
 
 function refundStatusBadgeClass(status: RefundStatus) {
-  if (status === "completed") return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
-  if (status === "pending") return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  if (status === "completed")
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  if (status === "pending")
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
   return "bg-white/10 text-white/60 ring-white/10";
 }
 
@@ -673,8 +841,10 @@ function trackingRowSortText(row: TrackingRow, sortKey: SortKey) {
     if (sortKey === "funding") return item.sponsor_name;
     if (sortKey === "payment") return item.payment_method;
     if (sortKey === "checked") return item.checked_at ? "checked" : "unchecked";
-    if (sortKey === "bank") return item.bank_reconciliation_status || "unmatched";
-    if (sortKey === "receipt") return hasMissingReceiptWarning(item) ? "missing" : "uploaded";
+    if (sortKey === "bank")
+      return item.bank_reconciliation_status || "unmatched";
+    if (sortKey === "receipt")
+      return hasMissingReceiptWarning(item) ? "missing" : "uploaded";
     if (sortKey === "finance") return item.finance_note_status || "none";
 
     return "";
@@ -712,7 +882,9 @@ function getRowSearchText(item: Transaction) {
     item.sponsorship_note,
     getSupplierName(item),
     getSupplierCategory(item),
-    hasSupplierLinked(item) ? "supplier contact linked supplier contact" : "no supplier no contact",
+    hasSupplierLinked(item)
+      ? "supplier contact linked supplier contact"
+      : "no supplier no contact",
     item.personal_funds_name,
     item.bank_reconciliation_status,
     item.bank_reconciliation_note,
@@ -722,8 +894,12 @@ function getRowSearchText(item: Transaction) {
     item.checked_by,
     (item as any).checked_by_name,
     (item as any).checked_by_email,
-    missingReceipt ? "missing receipt no receipt receipt missing proof missing" : "receipt uploaded proof attached",
-    isReceiptOverdue(item) ? RECEIPT_OVERDUE_SEARCH_WORDS : "receipt not overdue",
+    missingReceipt
+      ? "missing receipt no receipt receipt missing proof missing"
+      : "receipt uploaded proof attached",
+    isReceiptOverdue(item)
+      ? RECEIPT_OVERDUE_SEARCH_WORDS
+      : "receipt not overdue",
     files.map((file) => file.file_name).join(" "),
     String(item.amount_pence || ""),
     money(item.amount_pence),
@@ -733,15 +909,28 @@ function getRowSearchText(item: Transaction) {
     .toLowerCase();
 }
 
-function transactionMatchesQuickFilter(item: Transaction, quickFilter: QuickFilter, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS) {
+function transactionMatchesQuickFilter(
+  item: Transaction,
+  quickFilter: QuickFilter,
+  receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+) {
   if (quickFilter === "all") return true;
   if (quickFilter === "unchecked") return !item.checked_at;
   if (quickFilter === "checked") return Boolean(item.checked_at);
   if (quickFilter === "missing_receipts") return hasMissingReceiptWarning(item);
-  if (quickFilter === "receipt_overdue") return isReceiptOverdue(item, receiptReminderDays);
-  if (quickFilter === "finance_queries") return Boolean(item.finance_note_status && item.finance_note_status !== "none");
-  if (quickFilter === "bank_unmatched") return !item.bank_reconciliation_status || item.bank_reconciliation_status === "unmatched";
-  if (quickFilter === "personal_unpaid") return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
+  if (quickFilter === "receipt_overdue")
+    return isReceiptOverdue(item, receiptReminderDays);
+  if (quickFilter === "finance_queries")
+    return Boolean(
+      item.finance_note_status && item.finance_note_status !== "none",
+    );
+  if (quickFilter === "bank_unmatched")
+    return (
+      !item.bank_reconciliation_status ||
+      item.bank_reconciliation_status === "unmatched"
+    );
+  if (quickFilter === "personal_unpaid")
+    return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
   if (quickFilter === "funding") return isSponsorshipTransaction(item);
   if (quickFilter === "refunds") return false;
   return true;
@@ -778,12 +967,20 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     item.personal_funds_name || "",
     item.bank_reconciliation_status || "unmatched",
     item.finance_note_status || "none",
-    isReceiptOverdue(item) ? receiptReminderLabel(item) : hasMissingReceiptWarning(item) ? "Missing receipt" : "Receipt uploaded",
-    item.checked_at ? `Checked by ${getCheckedByDisplayName(item)}` : "Not checked",
+    isReceiptOverdue(item)
+      ? receiptReminderLabel(item)
+      : hasMissingReceiptWarning(item)
+        ? "Missing receipt"
+        : "Receipt uploaded",
+    item.checked_at
+      ? `Checked by ${getCheckedByDisplayName(item)}`
+      : "Not checked",
   ]);
 
   const csv = [headers, ...rows]
-    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .map((row) =>
+      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+    )
     .join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -797,19 +994,40 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
   URL.revokeObjectURL(url);
 }
 
-function Badge({ children, className }: { children: ReactNode; className: string }) {
-  return <span className={`inline-flex rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${className}`}>{children}</span>;
+function Badge({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className: string;
+}) {
+  return (
+    <span
+      className={`inline-flex rounded-2xl px-3 py-1 text-xs font-bold ring-1 ${className}`}
+    >
+      {children}
+    </span>
+  );
 }
 
-function WarningBadges({ item, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS }: { item: Transaction; receiptReminderDays?: number }) {
+function WarningBadges({
+  item,
+  receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+}: {
+  item: Transaction;
+  receiptReminderDays?: number;
+}) {
   const badges: ReactNode[] = [];
 
   if (!item.checked_at) {
     badges.push(
-      <span key="unchecked" className="inline-flex items-center gap-1 rounded-xl border border-amber-300/20 bg-amber-500/10 px-2 py-1 text-[11px] font-black text-amber-100">
+      <span
+        key="unchecked"
+        className="inline-flex items-center gap-1 rounded-xl border border-amber-300/20 bg-amber-500/10 px-2 py-1 text-[11px] font-black text-amber-100"
+      >
         <ShieldAlert className="h-3 w-3" />
         Unchecked
-      </span>
+      </span>,
     );
   }
 
@@ -822,7 +1040,7 @@ function WarningBadges({ item, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DA
       >
         <CalendarClock className="h-3 w-3" />
         Receipt overdue · {transactionAgeDays(item)} days
-      </span>
+      </span>,
     );
   } else if (hasMissingReceiptWarning(item)) {
     badges.push(
@@ -833,25 +1051,31 @@ function WarningBadges({ item, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DA
       >
         <AlertTriangle className="h-3 w-3" />
         Missing receipt
-      </span>
+      </span>,
     );
   }
 
   if (isPersonalFundsTransaction(item) && !item.personal_funds_repaid) {
     badges.push(
-      <span key="personal" className="inline-flex items-center gap-1 rounded-xl border border-orange-300/20 bg-orange-500/10 px-2 py-1 text-[11px] font-black text-orange-100">
+      <span
+        key="personal"
+        className="inline-flex items-center gap-1 rounded-xl border border-orange-300/20 bg-orange-500/10 px-2 py-1 text-[11px] font-black text-orange-100"
+      >
         <AlertTriangle className="h-3 w-3" />
         Payback due
-      </span>
+      </span>,
     );
   }
 
   if (item.finance_note_status && item.finance_note_status !== "none") {
     badges.push(
-      <span key="finance" className="inline-flex items-center gap-1 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2 py-1 text-[11px] font-black text-cyan-100">
+      <span
+        key="finance"
+        className="inline-flex items-center gap-1 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-2 py-1 text-[11px] font-black text-cyan-100"
+      >
         <FileText className="h-3 w-3" />
         Finance query
-      </span>
+      </span>,
     );
   }
 
@@ -860,7 +1084,13 @@ function WarningBadges({ item, receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DA
   return <div className="mt-2 flex flex-wrap gap-1">{badges}</div>;
 }
 
-function SortButton({ label, sortKey, activeSortKey, sortDirection, onSort }: {
+function SortButton({
+  label,
+  sortKey,
+  activeSortKey,
+  sortDirection,
+  onSort,
+}: {
   label: string;
   sortKey: SortKey;
   activeSortKey: SortKey;
@@ -870,9 +1100,19 @@ function SortButton({ label, sortKey, activeSortKey, sortDirection, onSort }: {
   const active = sortKey === activeSortKey;
 
   return (
-    <button type="button" onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1 text-left font-black text-white/70 hover:text-white">
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className="inline-flex items-center gap-1 text-left font-black text-white/70 hover:text-white"
+    >
       {label}
-      {active ? sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
+      {active ? (
+        sortDirection === "asc" ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : (
+          <ArrowDown className="h-3 w-3" />
+        )
+      ) : null}
     </button>
   );
 }
@@ -929,6 +1169,8 @@ export default function MoneyTransactionsTable({
   onUpdateFinanceNote,
   openingBalancePence = 0,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+  lockedYears = EMPTY_STRING_LIST,
+  lockedMonths = EMPTY_STRING_LIST,
 }: MoneyTransactionsTableProps) {
   const { admin } = useAdmin();
 
@@ -936,33 +1178,256 @@ export default function MoneyTransactionsTable({
   const currentUserEmail = admin?.email || null;
 
   const currentUserName =
-    admin?.full_name ||
-    nameFromEmail(currentUserEmail) ||
-    null;
+    admin?.full_name || nameFromEmail(currentUserEmail) || null;
 
-  const receiptReminderDaysSafe = Math.max(1, Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS));
+  const receiptReminderDaysSafe = Math.max(
+    1,
+    Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS),
+  );
 
-  const [repaymentProofFiles, setRepaymentProofFiles] = useState<Record<string, File[]>>({});
-  const [financeNoteDrafts, setFinanceNoteDrafts] = useState<Record<string, { status: FinanceNoteStatus; note: string }>>({});
+  const [repaymentProofFiles, setRepaymentProofFiles] = useState<
+    Record<string, File[]>
+  >({});
+  const [financeNoteDrafts, setFinanceNoteDrafts] = useState<
+    Record<string, { status: FinanceNoteStatus; note: string }>
+  >({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
-  const [localReceiptReminderDays, setLocalReceiptReminderDays] = useState(receiptReminderDaysSafe);
+  const [localReceiptReminderDays, setLocalReceiptReminderDays] = useState(
+    receiptReminderDaysSafe,
+  );
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [easyMode, setEasyMode] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
   const [detailsItem, setDetailsItem] = useState<Transaction | null>(null);
-  const [visibleColumns, setVisibleColumns] = useState<Record<ColumnKey, boolean>>(defaultVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState<
+    Record<ColumnKey, boolean>
+  >(defaultVisibleColumns);
   const [refunds, setRefunds] = useState<TrackingRefund[]>([]);
   const [refundsLoading, setRefundsLoading] = useState(false);
   const [refundsError, setRefundsError] = useState("");
 
-  const topActionButtonBase =
-    "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none";
+  /**
+   * Fallback lock data loaded directly by this table.
+   *
+   * The parent page should still pass lockedYears and lockedMonths, but this
+   * fallback keeps the read-only protection and warning banner working when an
+   * older MoneyMainGrid or hook has not passed the arrays through yet.
+   */
+  const [apiLockedYears, setApiLockedYears] = useState<string[]>([]);
+  const [apiLockedMonths, setApiLockedMonths] = useState<string[]>([]);
 
-  const activeReceiptReminderDays = Math.max(1, Number(localReceiptReminderDays || receiptReminderDaysSafe));
+  const effectiveVisibleColumns = useMemo(
+    () => (easyMode ? easyModeVisibleColumns : visibleColumns),
+    [easyMode, visibleColumns],
+  );
+
+  function enableEasyMode() {
+    setEasyMode(true);
+    setColumnsOpen(false);
+    setSelectedSponsorId("all");
+    setSelectedPaymentMethod("all");
+    setQuickFilter("all");
+    setLocalReceiptReminderDays(receiptReminderDaysSafe);
+  }
+
+  const topActionButtonBase =
+    "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5 sm:flex-none";
+
+  const activeReceiptReminderDays = Math.max(
+    1,
+    Number(localReceiptReminderDays || receiptReminderDaysSafe),
+  );
+
+  const lockedYearSet = useMemo(
+    () =>
+      new Set([
+        ...normaliseLockedYearKeys(lockedYears),
+        ...apiLockedYears,
+      ]),
+    [lockedYears, apiLockedYears],
+  );
+
+  const lockedMonthSet = useMemo(
+    () =>
+      new Set([
+        ...normaliseLockedMonthKeys(lockedMonths),
+        ...apiLockedMonths,
+      ]),
+    [lockedMonths, apiLockedMonths],
+  );
+
+  const selectedYearIsLocked = lockedYearSet.has(String(selectedYear));
+  const selectedViewMonthIsLocked =
+    selectedViewMonth !== "all" &&
+    lockedMonthSet.has(String(selectedViewMonth));
+  const selectedPrintMonthIsLocked =
+    selectedPrintMonth !== "all" &&
+    lockedMonthSet.has(String(selectedPrintMonth));
+  const selectedViewIsLocked =
+    selectedYearIsLocked || selectedViewMonthIsLocked;
+  const selectedPrintPeriodIsLocked =
+    selectedYearIsLocked || selectedPrintMonthIsLocked;
+  const hasAnyLockedPeriod = lockedYearSet.size > 0 || lockedMonthSet.size > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadActiveLocks() {
+      try {
+        const [yearResponse, monthResponse] = await Promise.all([
+          fetch(`/api/admin/money/year-locks?t=${Date.now()}`, {
+            cache: "no-store",
+          }),
+          fetch(
+            `/api/admin/money/month-locks?year=${encodeURIComponent(
+              selectedYear,
+            )}&t=${Date.now()}`,
+            {
+              cache: "no-store",
+            },
+          ),
+        ]);
+
+        const [yearPayload, monthPayload] = await Promise.all([
+          readLockPayload(yearResponse),
+          readLockPayload(monthResponse),
+        ]);
+
+        if (cancelled) return;
+
+        if (yearResponse.ok) {
+          setApiLockedYears(
+            normaliseLockedYearKeys(
+              yearPayload.lockedYears || yearPayload.locks || [],
+            ),
+          );
+        }
+
+        if (monthResponse.ok) {
+          setApiLockedMonths(
+            normaliseLockedMonthKeys(
+              monthPayload.lockedMonths || monthPayload.locks || [],
+            ),
+          );
+        }
+      } catch {
+        // Keep using parent props if this fallback request fails.
+      }
+    }
+
+    /**
+     * Load once when the selected year changes.
+     *
+     * Do not poll every few seconds. The main hook already refreshes lock data
+     * immediately after a lock or unlock action, and focus refresh keeps this
+     * fallback safe when returning to the browser tab.
+     */
+    void loadActiveLocks();
+
+    function reloadOnFocus() {
+      void loadActiveLocks();
+    }
+
+    window.addEventListener("focus", reloadOnFocus);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", reloadOnFocus);
+    };
+  }, [selectedYear]);
+
+  function getSelectedViewLockReason() {
+    if (selectedYearIsLocked) {
+      return `${selectedYear} is locked. Unlock the year before making changes.`;
+    }
+
+    if (selectedViewMonthIsLocked) {
+      return `${monthNameFromKey(selectedViewMonth)} is locked. Unlock the month before making changes.`;
+    }
+
+    return "";
+  }
+
+  function getSelectedPrintLockReason() {
+    if (selectedYearIsLocked) {
+      return `${selectedYear} is locked. Unlock the year before making changes.`;
+    }
+
+    if (selectedPrintMonthIsLocked) {
+      return `${monthNameFromKey(selectedPrintMonth)} is locked. Unlock the month before making changes.`;
+    }
+
+    return "";
+  }
+
+  function getTransactionLockReason(item: Transaction) {
+    const monthKey = transactionMonthKey(item);
+    const yearKey = monthKey.slice(0, 4);
+
+    if (yearKey && lockedYearSet.has(yearKey)) {
+      return `${yearKey} is locked. Unlock the year before making changes.`;
+    }
+
+    if (monthKey && lockedMonthSet.has(monthKey)) {
+      return `${monthNameFromKey(monthKey)} is locked. Unlock the month before making changes.`;
+    }
+
+    // Safety fallback: if the current table view is locked, do not allow
+    // any mutation button to run even when a row has a missing/odd date.
+    if (selectedViewIsLocked) {
+      return getSelectedViewLockReason();
+    }
+
+    return "";
+  }
+
+  function isTransactionLocked(item: Transaction) {
+    return Boolean(getTransactionLockReason(item));
+  }
+
+  function showLockedToast(lockReason: string) {
+    setToast({
+      type: "error",
+      message:
+        lockReason ||
+        "This transaction is in a locked month or year. Unlock it before making changes.",
+    });
+  }
+
+  function runTransactionAction(
+    item: Transaction,
+    action: () => void | Promise<void>,
+  ) {
+    const lockReason = getTransactionLockReason(item);
+
+    if (lockReason) {
+      showLockedToast(lockReason);
+      return undefined;
+    }
+
+    return action();
+  }
+
+  function runPeriodAction(
+    action: () => void | Promise<void>,
+    lockReason = getSelectedViewLockReason(),
+  ) {
+    if (lockReason) {
+      showLockedToast(lockReason);
+      return undefined;
+    }
+
+    return action();
+  }
+
+  function lockedActionTitle(item: Transaction, fallback: string) {
+    return getTransactionLockReason(item) || fallback;
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -976,7 +1441,7 @@ export default function MoneyTransactionsTable({
           `/api/admin/money/refunds?year=${encodeURIComponent(selectedYear)}&limit=500`,
           {
             cache: "no-store",
-          }
+          },
         );
 
         const payload = (await response.json()) as RefundListResponse;
@@ -989,7 +1454,7 @@ export default function MoneyTransactionsTable({
           setRefunds(
             Array.isArray(payload.refunds)
               ? payload.refunds.filter((refund) => !refund.is_hidden)
-              : []
+              : [],
           );
         }
       } catch (error) {
@@ -998,7 +1463,7 @@ export default function MoneyTransactionsTable({
           setRefundsError(
             error instanceof Error
               ? error.message
-              : "Refunds could not be loaded."
+              : "Refunds could not be loaded.",
           );
         }
       } finally {
@@ -1015,31 +1480,70 @@ export default function MoneyTransactionsTable({
     };
   }, [selectedYear]);
 
+  useEffect(() => {
+    setSelectedIds((previous) => {
+      let changed = false;
+      const next = new Set<string>();
+
+      for (const id of previous) {
+        const item = transactions.find((transaction) => transaction.id === id);
+
+        if (item && !isTransactionLocked(item) && !selectedViewIsLocked) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
+  }, [transactions, lockedYearSet, lockedMonthSet]);
+
   function getFundingForTransaction(item: Transaction) {
     if (!isSponsorshipTransaction(item)) return null;
 
     return (
       displaySponsors.find((sponsor) => {
-        const sponsorName = String(sponsor.sponsor_name || "").trim().toLowerCase();
-        const itemSponsorName = String(item.sponsor_name || "").trim().toLowerCase();
+        const sponsorName = String(sponsor.sponsor_name || "")
+          .trim()
+          .toLowerCase();
+        const itemSponsorName = String(item.sponsor_name || "")
+          .trim()
+          .toLowerCase();
 
-        return sponsor.id === item.sponsor_id || Boolean(sponsorName && itemSponsorName && sponsorName === itemSponsorName);
+        return (
+          sponsor.id === item.sponsor_id ||
+          Boolean(
+            sponsorName && itemSponsorName && sponsorName === itemSponsorName,
+          )
+        );
       }) || null
     );
   }
 
   function getFinanceDraft(item: Transaction) {
-    return financeNoteDrafts[item.id] || { status: item.finance_note_status || "none", note: item.finance_note || "" };
+    return (
+      financeNoteDrafts[item.id] || {
+        status: item.finance_note_status || "none",
+        note: item.finance_note || "",
+      }
+    );
   }
 
   function setFinanceDraftStatus(item: Transaction, status: FinanceNoteStatus) {
     const currentDraft = getFinanceDraft(item);
-    setFinanceNoteDrafts((prev) => ({ ...prev, [item.id]: { ...currentDraft, status } }));
+    setFinanceNoteDrafts((prev) => ({
+      ...prev,
+      [item.id]: { ...currentDraft, status },
+    }));
   }
 
   function setFinanceDraftNote(item: Transaction, note: string) {
     const currentDraft = getFinanceDraft(item);
-    setFinanceNoteDrafts((prev) => ({ ...prev, [item.id]: { ...currentDraft, note } }));
+    setFinanceNoteDrafts((prev) => ({
+      ...prev,
+      [item.id]: { ...currentDraft, note },
+    }));
   }
 
   async function saveFinanceDraft(item: Transaction) {
@@ -1060,16 +1564,26 @@ export default function MoneyTransactionsTable({
     }
 
     setSortKey(nextKey);
-    setSortDirection(nextKey === "date" || nextKey === "amount" ? "desc" : "asc");
+    setSortDirection(
+      nextKey === "date" || nextKey === "amount" ? "desc" : "asc",
+    );
   }
 
   const visibleTransactions = useMemo(() => {
-    const { cleanSearch, isUncheckedSearch, isCheckedSearch, isReceiptOverdueSearch, isSpecialSearch } = isSpecialCheckedSearch(searchTerm);
+    const {
+      cleanSearch,
+      isUncheckedSearch,
+      isCheckedSearch,
+      isReceiptOverdueSearch,
+      isSpecialSearch,
+    } = isSpecialCheckedSearch(searchTerm);
 
     const baseItems = isSpecialSearch ? yearTransactions : filteredTransactions;
 
     const filtered = baseItems.filter((item) => {
-      const matchesMonth = selectedViewMonth === "all" || transactionMonthKey(item) === selectedViewMonth;
+      const matchesMonth =
+        selectedViewMonth === "all" ||
+        transactionMonthKey(item) === selectedViewMonth;
 
       const matchesType =
         filter === "all"
@@ -1088,39 +1602,91 @@ export default function MoneyTransactionsTable({
         selectedPaymentMethod === "all"
           ? true
           : selectedPaymentMethod === "Other Types"
-            ? !paymentMethodFilterOptions.includes(item.payment_method || "Other Types")
+            ? !paymentMethodFilterOptions.includes(
+                item.payment_method || "Other Types",
+              )
             : item.payment_method === selectedPaymentMethod;
 
       const matchesSponsor =
         selectedSponsorId === "all"
           ? true
-          : isSponsorshipTransaction(item) && Boolean(item.sponsor_id === selectedSponsorId || getFundingForTransaction(item)?.id === selectedSponsorId);
+          : isSponsorshipTransaction(item) &&
+            Boolean(
+              item.sponsor_id === selectedSponsorId ||
+              getFundingForTransaction(item)?.id === selectedSponsorId,
+            );
 
-      const matchesCheckedSearch = isUncheckedSearch ? !item.checked_at : isCheckedSearch ? Boolean(item.checked_at) : true;
-      const matchesReceiptOverdueSearch = isReceiptOverdueSearch ? isReceiptOverdue(item, activeReceiptReminderDays) : true;
-      const matchesQuickFilter = transactionMatchesQuickFilter(item, quickFilter, activeReceiptReminderDays);
-      const matchesTextSearch = !cleanSearch || isSpecialSearch || getRowSearchText(item).includes(cleanSearch);
+      const matchesCheckedSearch = isUncheckedSearch
+        ? !item.checked_at
+        : isCheckedSearch
+          ? Boolean(item.checked_at)
+          : true;
+      const matchesReceiptOverdueSearch = isReceiptOverdueSearch
+        ? isReceiptOverdue(item, activeReceiptReminderDays)
+        : true;
+      const matchesQuickFilter = transactionMatchesQuickFilter(
+        item,
+        quickFilter,
+        activeReceiptReminderDays,
+      );
+      const matchesTextSearch =
+        !cleanSearch ||
+        isSpecialSearch ||
+        getRowSearchText(item).includes(cleanSearch);
 
-      return matchesMonth && matchesType && matchesPaymentMethod && matchesSponsor && matchesCheckedSearch && matchesReceiptOverdueSearch && matchesQuickFilter && matchesTextSearch;
+      return (
+        matchesMonth &&
+        matchesType &&
+        matchesPaymentMethod &&
+        matchesSponsor &&
+        matchesCheckedSearch &&
+        matchesReceiptOverdueSearch &&
+        matchesQuickFilter &&
+        matchesTextSearch
+      );
     });
 
     return [...filtered].sort((a, b) => {
       let result = 0;
 
-      if (sortKey === "date") result = compareText(a.transaction_date || a.created_at, b.transaction_date || b.created_at);
+      if (sortKey === "date")
+        result = compareText(
+          a.transaction_date || a.created_at,
+          b.transaction_date || b.created_at,
+        );
       if (sortKey === "title") result = compareText(a.title, b.title);
       if (sortKey === "type") result = compareText(a.type, b.type);
-      if (sortKey === "amount") result = numberValue(a.amount_pence) - numberValue(b.amount_pence);
-      if (sortKey === "funding") result = compareText(a.sponsor_name, b.sponsor_name);
-      if (sortKey === "payment") result = compareText(a.payment_method, b.payment_method);
-      if (sortKey === "checked") result = Number(Boolean(a.checked_at)) - Number(Boolean(b.checked_at));
-      if (sortKey === "bank") result = compareText(a.bank_reconciliation_status || "unmatched", b.bank_reconciliation_status || "unmatched");
+      if (sortKey === "amount")
+        result = numberValue(a.amount_pence) - numberValue(b.amount_pence);
+      if (sortKey === "funding")
+        result = compareText(a.sponsor_name, b.sponsor_name);
+      if (sortKey === "payment")
+        result = compareText(a.payment_method, b.payment_method);
+      if (sortKey === "checked")
+        result = Number(Boolean(a.checked_at)) - Number(Boolean(b.checked_at));
+      if (sortKey === "bank")
+        result = compareText(
+          a.bank_reconciliation_status || "unmatched",
+          b.bank_reconciliation_status || "unmatched",
+        );
       if (sortKey === "receipt") {
-        const aOverdue = isReceiptOverdue(a, activeReceiptReminderDays) ? 2 : hasMissingReceiptWarning(a) ? 1 : 0;
-        const bOverdue = isReceiptOverdue(b, activeReceiptReminderDays) ? 2 : hasMissingReceiptWarning(b) ? 1 : 0;
+        const aOverdue = isReceiptOverdue(a, activeReceiptReminderDays)
+          ? 2
+          : hasMissingReceiptWarning(a)
+            ? 1
+            : 0;
+        const bOverdue = isReceiptOverdue(b, activeReceiptReminderDays)
+          ? 2
+          : hasMissingReceiptWarning(b)
+            ? 1
+            : 0;
         result = aOverdue - bOverdue;
       }
-      if (sortKey === "finance") result = compareText(a.finance_note_status || "none", b.finance_note_status || "none");
+      if (sortKey === "finance")
+        result = compareText(
+          a.finance_note_status || "none",
+          b.finance_note_status || "none",
+        );
 
       return sortDirection === "asc" ? result : result * -1;
     });
@@ -1178,14 +1744,14 @@ export default function MoneyTransactionsTable({
         (item): TrackingRow => ({
           kind: "transaction",
           item,
-        })
+        }),
       ),
 
       ...visibleRefunds.map(
         (item): TrackingRow => ({
           kind: "refund",
           item,
-        })
+        }),
       ),
     ];
 
@@ -1195,7 +1761,7 @@ export default function MoneyTransactionsTable({
           ? trackingRowSortAmount(a) - trackingRowSortAmount(b)
           : compareText(
               trackingRowSortText(a, sortKey),
-              trackingRowSortText(b, sortKey)
+              trackingRowSortText(b, sortKey),
             );
 
       return sortDirection === "asc" ? result : result * -1;
@@ -1222,13 +1788,28 @@ export default function MoneyTransactionsTable({
       {
         receivedBack: 0,
         sentBack: 0,
-      }
+      },
     );
   }, [refunds]);
 
-  const visibleIds = useMemo(() => visibleTransactions.map((item) => item.id).filter(Boolean), [visibleTransactions]);
-  const selectedTransactions = useMemo(() => visibleTransactions.filter((item) => selectedIds.has(item.id)), [visibleTransactions, selectedIds]);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const visibleIds = useMemo(
+    () =>
+      visibleTransactions
+        .filter((item) => !isTransactionLocked(item) && !selectedViewIsLocked)
+        .map((item) => item.id)
+        .filter(Boolean),
+    [visibleTransactions, lockedYears, lockedMonths],
+  );
+  const selectedTransactions = useMemo(
+    () => visibleTransactions.filter((item) => selectedIds.has(item.id)),
+    [visibleTransactions, selectedIds],
+  );
+  const selectedEditableTransactions = useMemo(
+    () => selectedTransactions.filter((item) => !isTransactionLocked(item)),
+    [selectedTransactions, lockedYears, lockedMonths],
+  );
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
 
   const totals = useMemo(() => {
     return visibleTransactions.reduce(
@@ -1249,11 +1830,7 @@ export default function MoneyTransactionsTable({
           acc.availableIncome += amount;
         }
 
-        if (
-          item.type === "expense" &&
-          !fundingLinked &&
-          !personalFunds
-        ) {
+        if (item.type === "expense" && !fundingLinked && !personalFunds) {
           acc.availableExpense += amount;
         }
 
@@ -1300,7 +1877,7 @@ export default function MoneyTransactionsTable({
         missingReceipts: 0,
         overdueReceipts: 0,
         unpaidPersonal: 0,
-      }
+      },
     );
   }, [visibleTransactions, activeReceiptReminderDays]);
 
@@ -1331,6 +1908,10 @@ export default function MoneyTransactionsTable({
     moneyOutIncludingCompletedRefunds;
 
   function toggleSelect(id: string) {
+    const item = transactions.find((transaction) => transaction.id === id);
+
+    if (item && isTransactionLocked(item)) return;
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -1348,56 +1929,127 @@ export default function MoneyTransactionsTable({
     });
   }
 
-  async function bulkAction(label: string, action: (item: Transaction) => Promise<void> | void) {
-    if (selectedTransactions.length === 0) return;
+  async function bulkAction(
+    label: string,
+    action: (item: Transaction) => Promise<void> | void,
+  ) {
+    const editableTransactions = selectedTransactions.filter(
+      (item) => !isTransactionLocked(item),
+    );
+
+    if (editableTransactions.length === 0) {
+      setToast({
+        type: "error",
+        message:
+          "The selected transaction is in a locked month or year. Unlock it before making changes.",
+      });
+      return;
+    }
 
     try {
       setBulkBusy(true);
       setToast(null);
 
-      for (const item of selectedTransactions) {
+      for (const item of editableTransactions) {
         await action(item);
       }
 
-      setToast({ type: "success", message: `${label} completed for ${selectedTransactions.length} selected transaction${selectedTransactions.length === 1 ? "" : "s"}.` });
+      setToast({
+        type: "success",
+        message: `${label} completed for ${editableTransactions.length} selected transaction${editableTransactions.length === 1 ? "" : "s"}.`,
+      });
       setSelectedIds(new Set());
     } catch (error) {
       console.error(error);
-      setToast({ type: "error", message: `${label} failed. Check console/server logs for details.` });
+      setToast({
+        type: "error",
+        message: `${label} failed. Check console/server logs for details.`,
+      });
     } finally {
       setBulkBusy(false);
     }
   }
 
-  function ColumnCell({ column, children, className = "" }: { column: ColumnKey; children: ReactNode; className?: string }) {
-    if (!visibleColumns[column]) return null;
+  function ColumnCell({
+    column,
+    children,
+    className = "",
+  }: {
+    column: ColumnKey;
+    children: ReactNode;
+    className?: string;
+  }) {
+    if (!effectiveVisibleColumns[column]) return null;
     return <td className={className}>{children}</td>;
   }
 
-  function ColumnHeader({ column, children, className = "" }: { column: ColumnKey; children: ReactNode; className?: string }) {
-    if (!visibleColumns[column]) return null;
+  function ColumnHeader({
+    column,
+    children,
+    className = "",
+  }: {
+    column: ColumnKey;
+    children: ReactNode;
+    className?: string;
+  }) {
+    if (!effectiveVisibleColumns[column]) return null;
     return <th className={className}>{children}</th>;
   }
 
   function renderCheckedCell(item: Transaction) {
+    const lockReason = getTransactionLockReason(item);
+
+    if (lockReason) {
+      return (
+        <div
+          className="rounded-2xl bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 ring-1 ring-red-300/20"
+          title={lockReason}
+        >
+          Locked
+          <div className="mt-1 text-[11px] font-semibold text-red-100/70">
+            Unlock the month or year to change this.
+          </div>
+        </div>
+      );
+    }
+
     if (item.checked_at) {
       const checkedByName = getCheckedByDisplayName(item);
-      const canUncheck = canCurrentAdminUncheckTransaction({ item, currentUserId, currentUserEmail, currentUserName });
+      const canUncheck = canCurrentAdminUncheckTransaction({
+        item,
+        currentUserId,
+        currentUserEmail,
+        currentUserName,
+      });
 
       return (
         <div className="space-y-2">
           <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
             <div>Checked</div>
-            <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">By {checkedByName}</div>
-            <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">{formatDate(item.checked_at)}</div>
+            <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+              By {checkedByName}
+            </div>
+            <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+              {formatDate(item.checked_at)}
+            </div>
           </div>
 
           {canUncheck ? (
-            <button type="button" disabled={checkingId === item.id} onClick={() => onMarkTransactionChecked(item)} className="w-full rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:opacity-60">
+            <button
+              type="button"
+              disabled={checkingId === item.id}
+              onClick={() =>
+                runTransactionAction(item, () => onMarkTransactionChecked(item))
+              }
+              className="w-full rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+            >
               {checkingId === item.id ? "Undoing..." : "Undo checked"}
             </button>
           ) : (
-            <div className="rounded-xl bg-white/10 px-3 py-2 text-[11px] font-bold text-white/50 ring-1 ring-white/10" title="Only the admin who marked this transaction as checked can undo it.">
+            <div
+              className="rounded-xl bg-white/10 px-3 py-2 text-[11px] font-bold text-white/50 ring-1 ring-white/10"
+              title="Only the admin who marked this transaction as checked can undo it."
+            >
               Only {checkedByName} can uncheck
             </div>
           )}
@@ -1407,8 +2059,17 @@ export default function MoneyTransactionsTable({
 
     return (
       <div className="space-y-2">
-        <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-bold text-white/60 ring-1 ring-white/10">Not checked</div>
-        <button type="button" disabled={checkingId === item.id} onClick={() => onMarkTransactionChecked(item)} className="w-full rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-60">
+        <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-bold text-white/60 ring-1 ring-white/10">
+          Not checked
+        </div>
+        <button
+          type="button"
+          disabled={checkingId === item.id}
+          onClick={() =>
+            runTransactionAction(item, () => onMarkTransactionChecked(item))
+          }
+          className="w-full rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+        >
           {checkingId === item.id ? "Checking..." : "Mark checked"}
         </button>
       </div>
@@ -1420,24 +2081,48 @@ export default function MoneyTransactionsTable({
     const hasFunding = isSponsorshipTransaction(item);
     const missingReceipt = hasMissingReceiptWarning(item);
     const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
+    const lockReason = getTransactionLockReason(item);
+    const locked = Boolean(lockReason);
 
     return (
-      <div key={item.id} className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${receiptOverdue ? "ring-2 ring-red-300/30" : missingReceipt ? "ring-1 ring-red-300/20" : ""}`}>
+      <div
+        key={item.id}
+        className={`rounded-2xl border border-white/10 bg-black/20 p-4 ${receiptOverdue ? "ring-2 ring-red-300/30" : missingReceipt ? "ring-1 ring-red-300/20" : ""}`}
+      >
         <div className="flex items-start justify-between gap-3">
           <label className="flex items-start gap-3">
-            <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30" />
+            <input
+              type="checkbox"
+              checked={selectedIds.has(item.id)}
+              disabled={locked}
+              onChange={() => toggleSelect(item.id)}
+              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+            />
             <div>
               <p className="break-words font-black text-white">{item.title}</p>
-              <p className="mt-1 text-xs text-white/45">{item.transaction_reference || "Pending reference"}</p>
+              <p className="mt-1 text-xs text-white/45">
+                {item.transaction_reference || "Pending reference"}
+              </p>
             </div>
           </label>
 
-          <div className={`shrink-0 rounded-xl px-3 py-2 text-sm font-black ring-1 ${item.type === "income" ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20" : "bg-red-500/15 text-red-100 ring-red-300/20"}`}>
+          <div
+            className={`shrink-0 rounded-xl px-3 py-2 text-sm font-black ring-1 ${item.type === "income" ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20" : "bg-red-500/15 text-red-100 ring-red-300/20"}`}
+          >
             {money(item.amount_pence)}
           </div>
         </div>
 
-        <WarningBadges item={item} receiptReminderDays={activeReceiptReminderDays} />
+        <WarningBadges
+          item={item}
+          receiptReminderDays={activeReceiptReminderDays}
+        />
+
+        {locked && (
+          <div className="mt-3 rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-xs font-bold leading-5 text-red-100">
+            {lockReason}
+          </div>
+        )}
 
         {receiptOverdue && (
           <div className="mt-3 rounded-xl border border-red-300/20 bg-red-500/10 p-3 text-xs font-bold leading-5 text-red-100">
@@ -1446,44 +2131,103 @@ export default function MoneyTransactionsTable({
         )}
 
         <div className="mt-4 grid gap-2 text-sm text-white/65 sm:grid-cols-2">
-          <div>Date: <strong className="text-white">{none(item.transaction_date)}</strong></div>
-          <div>Type: <strong className="text-white">{item.type === "income" ? "Money In" : "Money Out"}</strong></div>
-          <div>Payment: <strong className="text-white">{hasFunding ? "Funding Money" : item.payment_method || "None"}</strong></div>
-          {hasSupplierLinked(item) && (
-            <div>
-              Supplier: <strong className="text-white">{getSupplierName(item) || "Supplier/contact"}</strong>
-              {getSupplierCategory(item) ? ` · ${getSupplierCategory(item)}` : ""}
-            </div>
-          )}
-          <div>Status: <strong className="text-white">{item.checked_at ? "Checked" : "Not checked"}</strong></div>
-          {isPersonal && <div>Personal funds: <strong className="text-white">{item.personal_funds_repaid ? "Paid back" : "Not paid back"}</strong></div>}
-          {hasFunding && <div>Funding: <strong className="text-white">{item.sponsor_name || "Funding record"}</strong></div>}
+          <div>
+            Date:{" "}
+            <strong className="text-white">
+              {none(item.transaction_date)}
+            </strong>
+          </div>
+          <div>
+            Type:{" "}
+            <strong className="text-white">
+              {item.type === "income" ? "Money In" : "Money Out"}
+            </strong>
+          </div>
+          <div>
+            Payment:{" "}
+            <strong className="text-white">
+              {hasFunding ? "Funding Money" : item.payment_method || "None"}
+            </strong>
+          </div>
           {hasSupplierLinked(item) && (
             <div>
               Supplier:{" "}
               <strong className="text-white">
                 {getSupplierName(item) || "Supplier/contact"}
               </strong>
-              {getSupplierCategory(item) ? ` · ${getSupplierCategory(item)}` : ""}
+              {getSupplierCategory(item)
+                ? ` · ${getSupplierCategory(item)}`
+                : ""}
+            </div>
+          )}
+          <div>
+            Status:{" "}
+            <strong className="text-white">
+              {item.checked_at ? "Checked" : "Not checked"}
+            </strong>
+          </div>
+          {isPersonal && (
+            <div>
+              Personal funds:{" "}
+              <strong className="text-white">
+                {item.personal_funds_repaid ? "Paid back" : "Not paid back"}
+              </strong>
+            </div>
+          )}
+          {hasFunding && (
+            <div>
+              Funding:{" "}
+              <strong className="text-white">
+                {item.sponsor_name || "Funding record"}
+              </strong>
+            </div>
+          )}
+          {hasSupplierLinked(item) && (
+            <div>
+              Supplier:{" "}
+              <strong className="text-white">
+                {getSupplierName(item) || "Supplier/contact"}
+              </strong>
+              {getSupplierCategory(item)
+                ? ` · ${getSupplierCategory(item)}`
+                : ""}
             </div>
           )}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setDetailsItem(item)} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20">
+          <button
+            type="button"
+            onClick={() => setDetailsItem(item)}
+            className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+          >
             <Eye className="mr-1 inline h-3 w-3" /> Details
           </button>
-          <button type="button" onClick={() => onEditTransaction(item)} className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/25">
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() =>
+              runTransactionAction(item, () => onEditTransaction(item))
+            }
+            className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+          >
             <Pencil className="mr-1 inline h-3 w-3" /> Edit
           </button>
-          <button type="button" onClick={() => onMarkTransactionChecked(item)} disabled={checkingId === item.id} className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-50">
-            <CheckCircle2 className="mr-1 inline h-3 w-3" /> {item.checked_at ? "Undo" : "Check"}
+          <button
+            type="button"
+            onClick={() =>
+              runTransactionAction(item, () => onMarkTransactionChecked(item))
+            }
+            disabled={locked || checkingId === item.id}
+            className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+          >
+            <CheckCircle2 className="mr-1 inline h-3 w-3" />{" "}
+            {item.checked_at ? "Undo" : "Check"}
           </button>
         </div>
       </div>
     );
   }
-
 
   function renderMobileRefundCard(refund: TrackingRefund) {
     return (
@@ -1518,17 +2262,13 @@ export default function MoneyTransactionsTable({
         </div>
 
         {refund.notes ? (
-          <p className="mt-3 text-xs leading-5 text-white/55">
-            {refund.notes}
-          </p>
+          <p className="mt-3 text-xs leading-5 text-white/55">{refund.notes}</p>
         ) : null}
 
         <div className="mt-4 grid gap-2 text-sm text-white/65 sm:grid-cols-2">
           <div>
             Date:{" "}
-            <strong className="text-white">
-              {none(refund.refund_date)}
-            </strong>
+            <strong className="text-white">{none(refund.refund_date)}</strong>
           </div>
 
           <div>
@@ -1570,46 +2310,168 @@ export default function MoneyTransactionsTable({
     <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <h2 className="text-xl font-bold">Transactions</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-bold">Transactions</h2>
+
+            {selectedViewIsLocked && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-red-300/30 bg-red-500/20 px-3 py-1 text-xs font-black uppercase tracking-[0.12em] text-red-50">
+                <ShieldAlert className="h-3.5 w-3.5" />
+                {selectedYearIsLocked
+                  ? `${selectedYear} locked`
+                  : `${monthNameFromKey(selectedViewMonth)} locked`}
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (easyMode) {
+                  setEasyMode(false);
+                } else {
+                  enableEasyMode();
+                }
+              }}
+              className={`rounded-xl px-3 py-2 text-xs font-black ring-1 transition ${
+                easyMode
+                  ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+                  : "bg-purple-500/15 text-purple-100 ring-purple-300/20 hover:bg-purple-500/25"
+              }`}
+            >
+              {easyMode ? "Easy Mode On" : "Switch to Easy Mode"}
+            </button>
+          </div>
+          <p className="mt-1 text-xs font-bold text-white/45">
+            {easyMode
+              ? "Easy Mode shows the main payment details only. Switch it off to see advanced columns and tools."
+              : "Full Mode is on. Advanced columns, filters and tools are visible."}
+          </p>
           <p className="text-sm text-white/50">
-            {visibleTrackingRows.length} entr{visibleTrackingRows.length === 1 ? "y" : "ies"} showing for {selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)}
+            {visibleTrackingRows.length} entr
+            {visibleTrackingRows.length === 1 ? "y" : "ies"} showing for{" "}
+            {selectedViewMonth === "all"
+              ? selectedYear
+              : monthNameFromKey(selectedViewMonth)}
           </p>
           <p className="mt-1 text-xs text-white/40">
-            Sorted by {sortKey} ({sortDirection}). Selected: {selectedTransactions.length}. Transactions: {visibleTransactions.length}. Refunds: {visibleRefunds.length}.
+            Sorted by {sortKey} ({sortDirection}). Selected:{" "}
+            {selectedTransactions.length}. Transactions:{" "}
+            {visibleTransactions.length}. Refunds: {visibleRefunds.length}.
           </p>
         </div>
 
         <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-3 2xl:flex 2xl:flex-wrap 2xl:justify-end">
-          <select value={selectedPrintMonth} onChange={(event) => setSelectedPrintMonth(event.target.value)} className="min-w-0 rounded-xl bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20 focus:ring-sky-300/50" title="Choose print/export month">
+          <select
+            value={selectedPrintMonth}
+            onChange={(event) => setSelectedPrintMonth(event.target.value)}
+            className="min-w-0 rounded-xl bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20 focus:ring-sky-300/50"
+            title="Choose print/export month"
+          >
             {printMonthOptions.map((month) => (
-              <option key={month.key} value={month.key} className="bg-[#11111f] text-white">Print / Export {month.label} ({month.count})</option>
+              <option
+                key={month.key}
+                value={month.key}
+                className="bg-[#11111f] text-white"
+              >
+                Print / Export {month.label} ({month.count})
+              </option>
             ))}
           </select>
 
-          <button type="button" onClick={onPrint} disabled={printTransactionsList.length === 0} className={`${topActionButtonBase} bg-sky-500/15 text-sky-200 ring-sky-300/20 hover:bg-sky-500/25`}>
-            <Printer className="h-4 w-4" /> {selectedPrintMonth === "all" ? "Print Year" : `Print ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
+          <button
+            type="button"
+            onClick={onPrint}
+            disabled={printTransactionsList.length === 0}
+            className={`${topActionButtonBase} bg-sky-500/15 text-sky-200 ring-sky-300/20 hover:bg-sky-500/25`}
+          >
+            <Printer className="h-4 w-4" />{" "}
+            {selectedPrintMonth === "all"
+              ? "Print Year"
+              : `Print ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
           </button>
 
-          <button type="button" onClick={onExportExcel} disabled={printTransactionsList.length === 0} className={`${topActionButtonBase} bg-emerald-500/15 text-emerald-200 ring-emerald-300/20 hover:bg-emerald-500/25`}>
-            <Download className="h-4 w-4" /> {selectedPrintMonth === "all" ? "Export Excel" : `Export ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
+          <button
+            type="button"
+            onClick={onExportExcel}
+            disabled={printTransactionsList.length === 0}
+            className={`${topActionButtonBase} bg-emerald-500/15 text-emerald-200 ring-emerald-300/20 hover:bg-emerald-500/25`}
+          >
+            <Download className="h-4 w-4" />{" "}
+            {selectedPrintMonth === "all"
+              ? "Export Excel"
+              : `Export ${monthNameFromKey(selectedPrintMonth).split(" ")[0]}`}
           </button>
 
-          <button type="button" onClick={onExportYearlyReport} disabled={yearTransactions.length === 0} className={`${topActionButtonBase} bg-purple-500/15 text-purple-200 ring-purple-300/20 hover:bg-purple-500/25`}>
+          <button
+            type="button"
+            onClick={onExportYearlyReport}
+            disabled={yearTransactions.length === 0}
+            className={`${easyMode ? "hidden" : ""} ${topActionButtonBase} bg-purple-500/15 text-purple-200 ring-purple-300/20 hover:bg-purple-500/25`}
+          >
             <FileText className="h-4 w-4" /> Yearly Report
           </button>
 
-          <button type="button" onClick={onOpenDeleteYear} disabled={yearTransactions.length === 0 || deletingYear} className={`${topActionButtonBase} bg-orange-500/15 text-orange-200 ring-orange-300/20 hover:bg-orange-500/25`}>
+          <button
+            type="button"
+            onClick={onOpenDeleteYear}
+            disabled={
+              yearTransactions.length === 0 ||
+              deletingYear ||
+              selectedYearIsLocked
+            }
+            title={
+              selectedYearIsLocked
+                ? `${selectedYear} is locked. Unlock the year before deleting it.`
+                : `Delete ${selectedYear}`
+            }
+            className={`${easyMode ? "hidden" : ""} ${topActionButtonBase} bg-orange-500/15 text-orange-200 ring-orange-300/20 hover:bg-orange-500/25`}
+          >
             <Trash2 className="h-4 w-4" /> Delete {selectedYear}
           </button>
 
-          <button type="button" onClick={onOpenDeleteAll} disabled={transactions.length === 0 || deletingAll} className={`${topActionButtonBase} bg-red-500/15 text-red-200 ring-red-300/20 hover:bg-red-500/25`}>
+          <button
+            type="button"
+            onClick={onOpenDeleteAll}
+            disabled={
+              transactions.length === 0 || deletingAll || hasAnyLockedPeriod
+            }
+            title={
+              hasAnyLockedPeriod
+                ? "Unlock all locked months and years before deleting all transactions."
+                : "Delete all transactions"
+            }
+            className={`${easyMode ? "hidden" : ""} ${topActionButtonBase} bg-red-500/15 text-red-200 ring-red-300/20 hover:bg-red-500/25`}
+          >
             <Trash2 className="h-4 w-4" /> Delete All
           </button>
         </div>
       </div>
 
+      {selectedViewIsLocked && (
+        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-red-300/30 bg-red-500/15 px-4 py-4 text-red-100 shadow-xl shadow-red-950/20 sm:flex-row sm:items-center">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/20 ring-1 ring-red-300/30">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="inline-flex rounded-full border border-red-300/30 bg-red-500/20 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-red-50">
+              {selectedYearIsLocked
+                ? "This year is locked"
+                : "This month is locked"}
+            </div>
+
+            <p className="mt-2 text-sm font-black leading-6 text-white">
+              {selectedYearIsLocked
+                ? `${selectedYear} is locked. Transactions cannot be edited, checked, hidden, repaid, or changed until the year is unlocked.`
+                : `${monthNameFromKey(selectedViewMonth)} is locked. Transactions cannot be edited, checked, hidden, repaid, or changed until the month is unlocked.`}
+            </p>
+          </div>
+        </div>
+      )}
+
       {toast && (
-        <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${toast.type === "success" ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-100" : "border-red-300/20 bg-red-500/10 text-red-100"}`}>
+        <div
+          className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-bold ${toast.type === "success" ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-100" : "border-red-300/20 bg-red-500/10 text-red-100"}`}
+        >
           {toast.message}
         </div>
       )}
@@ -1622,53 +2484,163 @@ export default function MoneyTransactionsTable({
 
       <div className="mb-4 grid gap-3 xl:grid-cols-[1fr_auto]">
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <button type="button" onClick={() => setFiltersOpen((prev) => !prev)} className="flex w-full items-center justify-between text-left text-sm font-black text-white">
-            <span className="inline-flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" /> Filters and search</span>
-            {filtersOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((prev) => !prev)}
+            className="flex w-full items-center justify-between text-left text-sm font-black text-white"
+          >
+            <span className="inline-flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4" /> Filters and search
+            </span>
+            {filtersOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
           </button>
 
           {filtersOpen && (
             <div className="mt-3 space-y-3">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-white/35" />
-                <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={`Search ${selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)} by reference, title, funding, checked, unchecked, missing receipt, bank, amount...`} className="w-full rounded-xl bg-black/30 py-3 pl-10 pr-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40" />
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder={`Search ${selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)} by reference, title, funding, checked, unchecked, missing receipt, bank, amount...`}
+                  className="w-full rounded-xl bg-black/30 py-3 pl-10 pr-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
+                />
               </div>
 
               <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                <select value={selectedViewMonth} onChange={(event) => { setSelectedViewMonth(event.target.value); setSearchTerm(""); }} className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20">
-                  {printMonthOptions.map((month) => <option key={month.key} value={month.key} className="bg-[#11111f] text-white">View {month.label} ({month.count})</option>)}
+                <select
+                  value={selectedViewMonth}
+                  onChange={(event) => {
+                    setSelectedViewMonth(event.target.value);
+                    setSearchTerm("");
+                  }}
+                  className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-sky-300/20"
+                >
+                  {printMonthOptions.map((month) => (
+                    <option
+                      key={month.key}
+                      value={month.key}
+                      className="bg-[#11111f] text-white"
+                    >
+                      View {month.label} ({month.count})
+                    </option>
+                  ))}
                 </select>
 
-                <select value={selectedPaymentMethod} onChange={(event) => setSelectedPaymentMethod(event.target.value)} className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-emerald-300/20">
-                  {paymentMethodFilterOptions.map((method) => <option key={method} value={method} className="bg-[#11111f] text-white">{method === "all" ? "All payment methods" : method}</option>)}
+                <select
+                  value={selectedPaymentMethod}
+                  onChange={(event) =>
+                    setSelectedPaymentMethod(event.target.value)
+                  }
+                  className={`${easyMode ? "hidden" : ""} rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-emerald-300/20`}
+                >
+                  {paymentMethodFilterOptions.map((method) => (
+                    <option
+                      key={method}
+                      value={method}
+                      className="bg-[#11111f] text-white"
+                    >
+                      {method === "all" ? "All payment methods" : method}
+                    </option>
+                  ))}
                 </select>
 
-                <select value={selectedSponsorId} onChange={(event) => { const nextSponsorId = event.target.value; setSelectedSponsorId(nextSponsorId); if (nextSponsorId !== "all") setFilter("sponsorship"); }} className="rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20">
-                  <option className="bg-[#11111f] text-white" value="all">All funding records</option>
-                  {displaySponsors.map((sponsor) => <option className="bg-[#11111f] text-white" key={sponsor.id} value={sponsor.id}>{fundingTypeLabel(sponsor.funding_type)} — {sponsor.sponsor_name}</option>)}
+                <select
+                  value={selectedSponsorId}
+                  onChange={(event) => {
+                    const nextSponsorId = event.target.value;
+                    setSelectedSponsorId(nextSponsorId);
+                    if (nextSponsorId !== "all") setFilter("sponsorship");
+                  }}
+                  className={`${easyMode ? "hidden" : ""} rounded-xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-amber-300/20`}
+                >
+                  <option className="bg-[#11111f] text-white" value="all">
+                    All funding records
+                  </option>
+                  {displaySponsors.map((sponsor) => (
+                    <option
+                      className="bg-[#11111f] text-white"
+                      key={sponsor.id}
+                      value={sponsor.id}
+                    >
+                      {fundingTypeLabel(sponsor.funding_type)} —{" "}
+                      {sponsor.sponsor_name}
+                    </option>
+                  ))}
                 </select>
 
-                <select value={quickFilter} onChange={(event) => setQuickFilter(event.target.value as QuickFilter)} className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-white/10">
-                  <option className="bg-[#11111f] text-white" value="all">Quick filter: All</option>
-                  <option className="bg-[#11111f] text-white" value="unchecked">Unchecked only</option>
-                  <option className="bg-[#11111f] text-white" value="checked">Checked only</option>
-                  <option className="bg-[#11111f] text-white" value="missing_receipts">Missing receipts</option>
-                  <option className="bg-[#11111f] text-white" value="receipt_overdue">Receipt overdue</option>
-                  <option className="bg-[#11111f] text-white" value="finance_queries">Finance queries</option>
-                  <option className="bg-[#11111f] text-white" value="bank_unmatched">Bank unmatched</option>
-                  <option className="bg-[#11111f] text-white" value="personal_unpaid">Personal funds unpaid</option>
-                  <option className="bg-[#11111f] text-white" value="funding">Funding linked</option>
-                  <option className="bg-[#11111f] text-white" value="refunds">Refunds only</option>
+                <select
+                  value={quickFilter}
+                  onChange={(event) =>
+                    setQuickFilter(event.target.value as QuickFilter)
+                  }
+                  className={`${easyMode ? "hidden" : ""} rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-white/10`}
+                >
+                  <option className="bg-[#11111f] text-white" value="all">
+                    Quick filter: All
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="unchecked">
+                    Unchecked only
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="checked">
+                    Checked only
+                  </option>
+                  <option
+                    className="bg-[#11111f] text-white"
+                    value="missing_receipts"
+                  >
+                    Missing receipts
+                  </option>
+                  <option
+                    className="bg-[#11111f] text-white"
+                    value="receipt_overdue"
+                  >
+                    Receipt overdue
+                  </option>
+                  <option
+                    className="bg-[#11111f] text-white"
+                    value="finance_queries"
+                  >
+                    Finance queries
+                  </option>
+                  <option
+                    className="bg-[#11111f] text-white"
+                    value="bank_unmatched"
+                  >
+                    Bank unmatched
+                  </option>
+                  <option
+                    className="bg-[#11111f] text-white"
+                    value="personal_unpaid"
+                  >
+                    Personal funds unpaid
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="funding">
+                    Funding linked
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="refunds">
+                    Refunds only
+                  </option>
                 </select>
 
                 <select
                   value={activeReceiptReminderDays}
-                  onChange={(event) => setLocalReceiptReminderDays(Number(event.target.value))}
-                  className="rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-red-300/20"
+                  onChange={(event) =>
+                    setLocalReceiptReminderDays(Number(event.target.value))
+                  }
+                  className={`${easyMode ? "hidden" : ""} rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-red-300/20`}
                   title="Receipt reminder days"
                 >
                   {receiptReminderDayOptions.map((days) => (
-                    <option key={days} className="bg-[#11111f] text-white" value={days}>
+                    <option
+                      key={days}
+                      className="bg-[#11111f] text-white"
+                      value={days}
+                    >
                       Receipt overdue after {days} day{days === 1 ? "" : "s"}
                     </option>
                   ))}
@@ -1676,13 +2648,45 @@ export default function MoneyTransactionsTable({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {(["all", "income", "expense", "personal", "sponsorship"] as const).map((item) => (
-                  <button key={item} type="button" onClick={() => setFilter(item)} className={`rounded-xl px-4 py-2 text-sm font-bold ${filter === item ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"}`}>
-                    {item === "all" ? "All" : item === "income" ? "Money In" : item === "expense" ? "Money Out" : item === "personal" ? "Personal Funds" : "Funding"}
+                {(
+                  [
+                    "all",
+                    "income",
+                    "expense",
+                    "personal",
+                    "sponsorship",
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setFilter(item)}
+                    className={`rounded-xl px-4 py-2 text-sm font-bold ${filter === item ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"}`}
+                  >
+                    {item === "all"
+                      ? "All"
+                      : item === "income"
+                        ? "Money In"
+                        : item === "expense"
+                          ? "Money Out"
+                          : item === "personal"
+                            ? "Personal Funds"
+                            : "Funding"}
                   </button>
                 ))}
 
-                <button type="button" onClick={() => { setSearchTerm(""); setFilter("all"); setSelectedSponsorId("all"); setSelectedPaymentMethod("all"); setQuickFilter("all"); setLocalReceiptReminderDays(receiptReminderDaysSafe); }} className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm("");
+                    setFilter("all");
+                    setSelectedSponsorId("all");
+                    setSelectedPaymentMethod("all");
+                    setQuickFilter("all");
+                    setLocalReceiptReminderDays(receiptReminderDaysSafe);
+                  }}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-white hover:bg-white/20"
+                >
                   Clear all
                 </button>
               </div>
@@ -1690,23 +2694,52 @@ export default function MoneyTransactionsTable({
           )}
         </div>
 
-        <div className="relative rounded-2xl border border-white/10 bg-black/20 p-3">
-          <button type="button" onClick={() => setColumnsOpen((prev) => !prev)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20 xl:w-auto">
+        <div
+          className={`${easyMode ? "hidden" : "relative rounded-2xl border border-white/10 bg-black/20 p-3"}`}
+        >
+          <button
+            type="button"
+            onClick={() => setColumnsOpen((prev) => !prev)}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20 xl:w-auto"
+          >
             <Columns3 className="h-4 w-4" /> Columns
           </button>
 
-          {columnsOpen && (
+          {!easyMode && columnsOpen && (
             <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-2xl border border-white/10 bg-[#11111f] p-3 shadow-2xl shadow-black">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm font-black text-white">Show columns</p>
-                <button type="button" onClick={() => setColumnsOpen(false)} className="rounded-lg bg-white/10 p-1 text-white"><X className="h-4 w-4" /></button>
+                <button
+                  type="button"
+                  onClick={() => setColumnsOpen(false)}
+                  className="rounded-lg bg-white/10 p-1 text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
               <div className="grid gap-2">
                 {columnOptions.map((column) => (
-                  <label key={column.key} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm font-bold text-white/75">
-                    <input type="checkbox" checked={visibleColumns[column.key]} disabled={column.locked} onChange={() => setVisibleColumns((prev) => ({ ...prev, [column.key]: !prev[column.key] }))} />
+                  <label
+                    key={column.key}
+                    className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2 text-sm font-bold text-white/75"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns[column.key]}
+                      disabled={column.locked}
+                      onChange={() =>
+                        setVisibleColumns((prev) => ({
+                          ...prev,
+                          [column.key]: !prev[column.key],
+                        }))
+                      }
+                    />
                     {column.label}
-                    {column.locked && <span className="ml-auto text-[10px] text-white/35">locked</span>}
+                    {column.locked && (
+                      <span className="ml-auto text-[10px] text-white/35">
+                        locked
+                      </span>
+                    )}
                   </label>
                 ))}
               </div>
@@ -1715,11 +2748,23 @@ export default function MoneyTransactionsTable({
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-8">
-        <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20">
-          <p className="text-xs font-black text-emerald-100/70">
-            Money In
+      {easyMode && (
+        <div className="mb-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          <p className="font-black">Easy Mode is on</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-100/75">
+            The table is showing the main details only: reference, date, title,
+            type, amount, payment, checked status and actions. Use Full Mode
+            when you need funding, supplier, repayment, bank, receipt or finance
+            columns.
           </p>
+        </div>
+      )}
+
+      <div
+        className={`mb-4 grid gap-3 md:grid-cols-2 ${easyMode ? "xl:grid-cols-3" : "xl:grid-cols-8"}`}
+      >
+        <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20">
+          <p className="text-xs font-black text-emerald-100/70">Money In</p>
 
           <p className="mt-1 text-lg font-black text-white">
             {money(moneyInIncludingCompletedRefunds)}
@@ -1734,9 +2779,7 @@ export default function MoneyTransactionsTable({
         </div>
 
         <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20">
-          <p className="text-xs font-black text-red-100/70">
-            Money Out
-          </p>
+          <p className="text-xs font-black text-red-100/70">Money Out</p>
 
           <p className="mt-1 text-lg font-black text-white">
             {money(moneyOutIncludingCompletedRefunds)}
@@ -1761,7 +2804,9 @@ export default function MoneyTransactionsTable({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-cyan-500/10 p-3 ring-1 ring-cyan-300/20">
+        <div
+          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-cyan-500/10 p-3 ring-1 ring-cyan-300/20`}
+        >
           <p className="text-xs font-black text-cyan-100/70">
             Refunds received back
           </p>
@@ -1775,7 +2820,9 @@ export default function MoneyTransactionsTable({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-purple-500/10 p-3 ring-1 ring-purple-300/20">
+        <div
+          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-purple-500/10 p-3 ring-1 ring-purple-300/20`}
+        >
           <p className="text-xs font-black text-purple-100/70">
             Refunds sent back
           </p>
@@ -1789,20 +2836,20 @@ export default function MoneyTransactionsTable({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20">
-          <p className="text-xs font-black text-amber-100/70">
-            Unchecked
-          </p>
+        <div
+          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20`}
+        >
+          <p className="text-xs font-black text-amber-100/70">Unchecked</p>
 
           <p className="mt-1 text-lg font-black text-white">
             {totals.unchecked}
           </p>
         </div>
 
-        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20">
-          <p className="text-xs font-black text-red-100/70">
-            Receipt overdue
-          </p>
+        <div
+          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20`}
+        >
+          <p className="text-xs font-black text-red-100/70">Receipt overdue</p>
 
           <p className="mt-1 text-lg font-black text-white">
             {totals.overdueReceipts}
@@ -1813,7 +2860,9 @@ export default function MoneyTransactionsTable({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20">
+        <div
+          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20`}
+        >
           <p className="text-xs font-black text-orange-100/70">
             Unpaid personal
           </p>
@@ -1835,11 +2884,84 @@ export default function MoneyTransactionsTable({
               {selectedTransactions.length} selected
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={bulkBusy} onClick={() => bulkAction("Mark checked", (item) => !item.checked_at ? onMarkTransactionChecked(item) : undefined)} className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-50">Bulk mark checked</button>
-              <button type="button" disabled={bulkBusy} onClick={() => bulkAction("Mark bank matched", (item) => onUpdateBankReconciliationStatus(item, "matched"))} className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:opacity-50">Bulk bank matched</button>
-              <button type="button" disabled={bulkBusy} onClick={() => exportSelectedTransactionsCsv(selectedTransactions)} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:opacity-50">Export selected CSV</button>
-              <button type="button" disabled={bulkBusy || deleting} onClick={() => bulkAction("Hide selected", (item) => onHideTransaction(item.id))} className="rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:opacity-50">Hide selected</button>
-              <button type="button" onClick={() => setSelectedIds(new Set())} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white hover:bg-white/20">Clear selected</button>
+              <button
+                type="button"
+                disabled={
+                  bulkBusy ||
+                  selectedViewIsLocked ||
+                  selectedEditableTransactions.length === 0
+                }
+                onClick={() =>
+                  runPeriodAction(() =>
+                    bulkAction("Mark checked", (item) =>
+                      !item.checked_at
+                        ? onMarkTransactionChecked(item)
+                        : undefined,
+                    ),
+                  )
+                }
+                className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+              >
+                Bulk mark checked
+              </button>
+              <button
+                type="button"
+                disabled={
+                  bulkBusy ||
+                  selectedViewIsLocked ||
+                  selectedEditableTransactions.length === 0
+                }
+                onClick={() =>
+                  runPeriodAction(() =>
+                    bulkAction("Mark bank matched", (item) =>
+                      onUpdateBankReconciliationStatus(item, "matched"),
+                    ),
+                  )
+                }
+                className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+              >
+                Bulk bank matched
+              </button>
+              <button
+                type="button"
+                disabled={bulkBusy}
+                onClick={() =>
+                  exportSelectedTransactionsCsv(selectedTransactions)
+                }
+                className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+              >
+                Export selected CSV
+              </button>
+              <button
+                type="button"
+                disabled={
+                  bulkBusy ||
+                  deleting ||
+                  selectedViewIsLocked ||
+                  selectedEditableTransactions.length === 0
+                }
+                onClick={() =>
+                  runPeriodAction(() =>
+                    bulkAction("Hide selected", (item) =>
+                      onHideTransaction(item.id),
+                    ),
+                  )
+                }
+                title={
+                  getSelectedViewLockReason() ||
+                  "Locked transactions cannot be hidden."
+                }
+                className="rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+              >
+                Hide selected
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white hover:bg-white/20"
+              >
+                Clear selected
+              </button>
             </div>
           </div>
         </div>
@@ -1847,12 +2969,21 @@ export default function MoneyTransactionsTable({
 
       {loading || refundsLoading ? (
         <div className="space-y-3">
-          {[1, 2, 3].map((item) => <div key={item} className="h-24 animate-pulse rounded-2xl bg-white/10" />)}
+          {[1, 2, 3].map((item) => (
+            <div
+              key={item}
+              className="h-24 animate-pulse rounded-2xl bg-white/10"
+            />
+          ))}
         </div>
       ) : visibleTrackingRows.length === 0 ? (
         <div className="rounded-2xl bg-black/20 p-8 text-center text-sm text-white/60">
           <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-white/35" />
-          No transactions found for {selectedViewMonth === "all" ? selectedYear : monthNameFromKey(selectedViewMonth)}.
+          No transactions found for{" "}
+          {selectedViewMonth === "all"
+            ? selectedYear
+            : monthNameFromKey(selectedViewMonth)}
+          .
         </div>
       ) : (
         <>
@@ -1860,32 +2991,138 @@ export default function MoneyTransactionsTable({
             {visibleTrackingRows.map((row) =>
               row.kind === "transaction"
                 ? renderMobileCard(row.item)
-                : renderMobileRefundCard(row.item)
+                : renderMobileRefundCard(row.item),
             )}
           </div>
 
           <div className="hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full">
-            <table className="w-full min-w-[2250px] text-sm">
+            <table
+              className={`w-full text-sm ${easyMode ? "min-w-[1200px]" : "min-w-[2250px]"}`}
+            >
               <thead className="bg-white/10 text-white/60">
                 <tr>
-                  <ColumnHeader column="select" className="p-3 text-left"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} /></ColumnHeader>
-                  <ColumnHeader column="reference" className="p-3 text-left">Reference</ColumnHeader>
-                  <ColumnHeader column="date" className="p-3 text-left"><SortButton label="Date" sortKey="date" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="title" className="p-3 text-left"><SortButton label="Title" sortKey="title" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="type" className="p-3 text-left"><SortButton label="Type" sortKey="type" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="amount" className="p-3 text-right"><SortButton label="Amount" sortKey="amount" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="funding" className="p-3 text-left"><SortButton label="Funding" sortKey="funding" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="fundingNote" className="p-3 text-left">Funding Note</ColumnHeader>
-                  <ColumnHeader column="supplier" className="p-3 text-left">Supplier</ColumnHeader>
-                  <ColumnHeader column="personal" className="p-3 text-left">Personal</ColumnHeader>
-                  <ColumnHeader column="paidBy" className="p-3 text-left">Paid By</ColumnHeader>
-                  <ColumnHeader column="repayment" className="p-3 text-left">Repayment</ColumnHeader>
-                  <ColumnHeader column="payment" className="p-3 text-left"><SortButton label="Payment" sortKey="payment" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="bank" className="p-3 text-left"><SortButton label="Bank" sortKey="bank" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="receipt" className="p-3 text-left"><SortButton label="Receipt" sortKey="receipt" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="finance" className="p-3 text-left"><SortButton label="Finance" sortKey="finance" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="checked" className="p-3 text-left"><SortButton label="Checked" sortKey="checked" activeSortKey={sortKey} sortDirection={sortDirection} onSort={handleSort} /></ColumnHeader>
-                  <ColumnHeader column="actions" className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">Action</ColumnHeader>
+                  <ColumnHeader column="select" className="p-3 text-left">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      disabled={visibleIds.length === 0}
+                      onChange={toggleSelectAllVisible}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="reference" className="p-3 text-left">
+                    Reference
+                  </ColumnHeader>
+                  <ColumnHeader column="date" className="p-3 text-left">
+                    <SortButton
+                      label="Date"
+                      sortKey="date"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="title" className="p-3 text-left">
+                    <SortButton
+                      label="Title"
+                      sortKey="title"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="type" className="p-3 text-left">
+                    <SortButton
+                      label="Type"
+                      sortKey="type"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="amount" className="p-3 text-right">
+                    <SortButton
+                      label="Amount"
+                      sortKey="amount"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="funding" className="p-3 text-left">
+                    <SortButton
+                      label="Funding"
+                      sortKey="funding"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="fundingNote" className="p-3 text-left">
+                    Funding Note
+                  </ColumnHeader>
+                  <ColumnHeader column="supplier" className="p-3 text-left">
+                    Supplier
+                  </ColumnHeader>
+                  <ColumnHeader column="personal" className="p-3 text-left">
+                    Personal
+                  </ColumnHeader>
+                  <ColumnHeader column="paidBy" className="p-3 text-left">
+                    Paid By
+                  </ColumnHeader>
+                  <ColumnHeader column="repayment" className="p-3 text-left">
+                    Repayment
+                  </ColumnHeader>
+                  <ColumnHeader column="payment" className="p-3 text-left">
+                    <SortButton
+                      label="Payment"
+                      sortKey="payment"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="bank" className="p-3 text-left">
+                    <SortButton
+                      label="Bank"
+                      sortKey="bank"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="receipt" className="p-3 text-left">
+                    <SortButton
+                      label="Receipt"
+                      sortKey="receipt"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="finance" className="p-3 text-left">
+                    <SortButton
+                      label="Finance"
+                      sortKey="finance"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader column="checked" className="p-3 text-left">
+                    <SortButton
+                      label="Checked"
+                      sortKey="checked"
+                      activeSortKey={sortKey}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                    />
+                  </ColumnHeader>
+                  <ColumnHeader
+                    column="actions"
+                    className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                  >
+                    Action
+                  </ColumnHeader>
                 </tr>
               </thead>
 
@@ -1903,17 +3140,26 @@ export default function MoneyTransactionsTable({
                           <span className="text-white/25">—</span>
                         </ColumnCell>
 
-                        <ColumnCell column="reference" className="whitespace-nowrap p-3 align-top">
+                        <ColumnCell
+                          column="reference"
+                          className="whitespace-nowrap p-3 align-top"
+                        >
                           <span className="inline-flex rounded-xl bg-cyan-500/15 px-3 py-1 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20">
                             {refundReference(refund)}
                           </span>
                         </ColumnCell>
 
-                        <ColumnCell column="date" className="whitespace-nowrap p-3 align-top">
+                        <ColumnCell
+                          column="date"
+                          className="whitespace-nowrap p-3 align-top"
+                        >
                           {none(refund.refund_date)}
                         </ColumnCell>
 
-                        <ColumnCell column="title" className="max-w-[240px] p-3 align-top">
+                        <ColumnCell
+                          column="title"
+                          className="max-w-[240px] p-3 align-top"
+                        >
                           <p className="break-words font-semibold text-white">
                             {refund.title}
                           </p>
@@ -1929,19 +3175,27 @@ export default function MoneyTransactionsTable({
                               {refundTypeLabel(refund)}
                             </Badge>
 
-                            <Badge className={refundStatusBadgeClass(refund.status)}>
+                            <Badge
+                              className={refundStatusBadgeClass(refund.status)}
+                            >
                               {refundStatusLabel(refund.status)}
                             </Badge>
                           </div>
                         </ColumnCell>
 
-                        <ColumnCell column="type" className="whitespace-nowrap p-3 align-top">
+                        <ColumnCell
+                          column="type"
+                          className="whitespace-nowrap p-3 align-top"
+                        >
                           <span className="font-bold text-cyan-100">
                             {refundTypeLabel(refund)}
                           </span>
                         </ColumnCell>
 
-                        <ColumnCell column="amount" className="whitespace-nowrap p-3 text-right align-top font-bold text-cyan-100">
+                        <ColumnCell
+                          column="amount"
+                          className="whitespace-nowrap p-3 text-right align-top font-bold text-cyan-100"
+                        >
                           <div>{money(refund.amount_pence)}</div>
                           <div className="mt-1 text-xs font-semibold text-cyan-200/70">
                             Separate refund total
@@ -1952,11 +3206,17 @@ export default function MoneyTransactionsTable({
                           <span className="text-white/40">None</span>
                         </ColumnCell>
 
-                        <ColumnCell column="fundingNote" className="p-3 align-top">
+                        <ColumnCell
+                          column="fundingNote"
+                          className="p-3 align-top"
+                        >
                           <span className="text-white/40">None</span>
                         </ColumnCell>
 
-                        <ColumnCell column="supplier" className="max-w-[220px] p-3 align-top">
+                        <ColumnCell
+                          column="supplier"
+                          className="max-w-[220px] p-3 align-top"
+                        >
                           {refund.supplier?.supplier_name ? (
                             <p className="break-words text-xs font-semibold text-white/85">
                               {refund.supplier.supplier_name}
@@ -1974,16 +3234,24 @@ export default function MoneyTransactionsTable({
                           <span className="text-white/40">None</span>
                         </ColumnCell>
 
-                        <ColumnCell column="repayment" className="p-3 align-top">
+                        <ColumnCell
+                          column="repayment"
+                          className="p-3 align-top"
+                        >
                           <span className="text-white/40">Not applicable</span>
                         </ColumnCell>
 
-                        <ColumnCell column="payment" className="whitespace-nowrap p-3 align-top">
+                        <ColumnCell
+                          column="payment"
+                          className="whitespace-nowrap p-3 align-top"
+                        >
                           Refund
                         </ColumnCell>
 
                         <ColumnCell column="bank" className="p-3 align-top">
-                          <span className="text-white/40">Managed in Refund Tracker</span>
+                          <span className="text-white/40">
+                            Managed in Refund Tracker
+                          </span>
                         </ColumnCell>
 
                         <ColumnCell column="receipt" className="p-3 align-top">
@@ -2001,17 +3269,24 @@ export default function MoneyTransactionsTable({
                               </p>
                             </div>
                           ) : (
-                            <span className="text-white/40">No linked transaction</span>
+                            <span className="text-white/40">
+                              No linked transaction
+                            </span>
                           )}
                         </ColumnCell>
 
                         <ColumnCell column="checked" className="p-3 align-top">
-                          <Badge className={refundStatusBadgeClass(refund.status)}>
+                          <Badge
+                            className={refundStatusBadgeClass(refund.status)}
+                          >
                             {refundStatusLabel(refund.status)}
                           </Badge>
                         </ColumnCell>
 
-                        <ColumnCell column="actions" className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">
+                        <ColumnCell
+                          column="actions"
+                          className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                        >
                           <Link
                             href="/admin/money/refunds"
                             className="inline-flex items-center justify-center rounded-xl bg-cyan-500/15 p-2 text-cyan-100 transition hover:bg-cyan-500/25"
@@ -2033,53 +3308,158 @@ export default function MoneyTransactionsTable({
                   const shortLabel = fundingShortLabel(fundingType);
                   const files = getTransactionFiles(item);
                   const missingReceipt = hasMissingReceiptWarning(item);
-                  const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
+                  const receiptOverdue = isReceiptOverdue(
+                    item,
+                    activeReceiptReminderDays,
+                  );
                   const proofFiles = repaymentProofFiles[item.id] || [];
-                  const bankStatus = item.bank_reconciliation_status || "unmatched";
+                  const bankStatus =
+                    item.bank_reconciliation_status || "unmatched";
                   const financeDraft = getFinanceDraft(item);
                   const financeStatus = item.finance_note_status || "none";
-                  const financeNoteChanged = financeDraft.status !== financeStatus || financeDraft.note !== (item.finance_note || "");
+                  const financeNoteChanged =
+                    financeDraft.status !== financeStatus ||
+                    financeDraft.note !== (item.finance_note || "");
+                  const lockReason = getTransactionLockReason(item);
+                  const locked = Boolean(lockReason);
 
                   return (
-                    <tr key={item.id} className={`border-t border-white/10 ${receiptOverdue ? "bg-red-500/[0.07]" : missingReceipt ? "bg-red-500/[0.03]" : ""}`}>
-                      <ColumnCell column="select" className="p-3 align-top"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} /></ColumnCell>
-
-                      <ColumnCell column="reference" className="whitespace-nowrap p-3 align-top">
-                        {item.transaction_reference ? <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">{item.transaction_reference}</span> : <span className="text-white/40">Pending</span>}
+                    <tr
+                      key={item.id}
+                      className={`border-t border-white/10 ${locked ? "bg-red-500/[0.05]" : receiptOverdue ? "bg-red-500/[0.07]" : missingReceipt ? "bg-red-500/[0.03]" : ""}`}
+                    >
+                      <ColumnCell column="select" className="p-3 align-top">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(item.id)}
+                          disabled={locked}
+                          onChange={() => toggleSelect(item.id)}
+                          title={locked ? lockReason : "Select transaction"}
+                        />
                       </ColumnCell>
 
-                      <ColumnCell column="date" className="whitespace-nowrap p-3 align-top">{none(item.transaction_date)}</ColumnCell>
-
-                      <ColumnCell column="title" className="max-w-[240px] p-3 align-top">
-                        <button type="button" onClick={() => setDetailsItem(item)} className="break-words text-left font-semibold text-white hover:text-sky-200">{item.title}</button>
-                        {item.description && <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">{item.description}</p>}
-                        <WarningBadges item={item} receiptReminderDays={activeReceiptReminderDays} />
+                      <ColumnCell
+                        column="reference"
+                        className="whitespace-nowrap p-3 align-top"
+                      >
+                        {item.transaction_reference ? (
+                          <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">
+                            {item.transaction_reference}
+                          </span>
+                        ) : (
+                          <span className="text-white/40">Pending</span>
+                        )}
                       </ColumnCell>
 
-                      <ColumnCell column="type" className="whitespace-nowrap p-3 align-top">{item.type === "income" ? "Money In" : "Money Out"}</ColumnCell>
+                      <ColumnCell
+                        column="date"
+                        className="whitespace-nowrap p-3 align-top"
+                      >
+                        {none(item.transaction_date)}
+                      </ColumnCell>
 
-                      <ColumnCell column="amount" className="whitespace-nowrap p-3 text-right align-top font-bold">
+                      <ColumnCell
+                        column="title"
+                        className="max-w-[240px] p-3 align-top"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setDetailsItem(item)}
+                          className="break-words text-left font-semibold text-white hover:text-sky-200"
+                        >
+                          {item.title}
+                        </button>
+                        {item.description && (
+                          <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
+                            {item.description}
+                          </p>
+                        )}
+                        <WarningBadges
+                          item={item}
+                          receiptReminderDays={activeReceiptReminderDays}
+                        />
+                        {locked && (
+                          <p className="mt-2 rounded-xl bg-red-500/10 px-2 py-1 text-[11px] font-bold text-red-100 ring-1 ring-red-300/20">
+                            {lockReason}
+                          </p>
+                        )}
+                      </ColumnCell>
+
+                      <ColumnCell
+                        column="type"
+                        className="whitespace-nowrap p-3 align-top"
+                      >
+                        {item.type === "income" ? "Money In" : "Money Out"}
+                      </ColumnCell>
+
+                      <ColumnCell
+                        column="amount"
+                        className="whitespace-nowrap p-3 text-right align-top font-bold"
+                      >
                         <div>{money(item.amount_pence)}</div>
-                        {hasFunding && <div className="mt-1 text-xs font-semibold text-amber-300">{item.type === "income" ? `${fundingLabel} in` : `${shortLabel}-funded spend`}</div>}
-                        {isPersonal && item.personal_funds_repaid && <div className="mt-1 text-xs font-semibold text-emerald-300">Taken from balance</div>}
-                        {isPersonal && !item.personal_funds_repaid && <div className="mt-1 text-xs font-semibold text-orange-300">Not taken yet</div>}
+                        {hasFunding && (
+                          <div className="mt-1 text-xs font-semibold text-amber-300">
+                            {item.type === "income"
+                              ? `${fundingLabel} in`
+                              : `${shortLabel}-funded spend`}
+                          </div>
+                        )}
+                        {isPersonal && item.personal_funds_repaid && (
+                          <div className="mt-1 text-xs font-semibold text-emerald-300">
+                            Taken from balance
+                          </div>
+                        )}
+                        {isPersonal && !item.personal_funds_repaid && (
+                          <div className="mt-1 text-xs font-semibold text-orange-300">
+                            Not taken yet
+                          </div>
+                        )}
                       </ColumnCell>
 
-                      <ColumnCell column="funding" className="max-w-[180px] p-3 align-top">
+                      <ColumnCell
+                        column="funding"
+                        className="max-w-[180px] p-3 align-top"
+                      >
                         {hasFunding ? (
                           <div className="space-y-2">
-                            <Badge className={fundingBadgeClass(fundingType)}>{fundingLabel}</Badge>
-                            <p className="break-words text-xs font-semibold text-white/80">{item.sponsor_name || fundingRecord?.sponsor_name || "Funding record"}</p>
+                            <Badge className={fundingBadgeClass(fundingType)}>
+                              {fundingLabel}
+                            </Badge>
+                            <p className="break-words text-xs font-semibold text-white/80">
+                              {item.sponsor_name ||
+                                fundingRecord?.sponsor_name ||
+                                "Funding record"}
+                            </p>
                           </div>
-                        ) : <span className="text-white/40">None</span>}
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
                       </ColumnCell>
 
-                      <ColumnCell column="fundingNote" className="max-w-[220px] p-3 align-top">{item.sponsorship_note ? <span className="line-clamp-3 break-words text-sm text-amber-100">{item.sponsorship_note}</span> : <span className="text-white/40">None</span>}</ColumnCell>
+                      <ColumnCell
+                        column="fundingNote"
+                        className="max-w-[220px] p-3 align-top"
+                      >
+                        {item.sponsorship_note ? (
+                          <span className="line-clamp-3 break-words text-sm text-amber-100">
+                            {item.sponsorship_note}
+                          </span>
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
+                      </ColumnCell>
 
-                      <ColumnCell column="supplier" className="max-w-[220px] p-3 align-top">
+                      <ColumnCell
+                        column="supplier"
+                        className="max-w-[220px] p-3 align-top"
+                      >
                         {hasSupplierLinked(item) ? (
                           <div className="space-y-2">
-                            <Badge className={supplierBadgeClass(getSupplierCategory(item))}>
+                            <Badge
+                              className={supplierBadgeClass(
+                                getSupplierCategory(item),
+                              )}
+                            >
                               {getSupplierCategory(item) || "Supplier"}
                             </Badge>
 
@@ -2092,96 +3472,416 @@ export default function MoneyTransactionsTable({
                         )}
                       </ColumnCell>
 
-                      <ColumnCell column="personal" className="p-3 align-top">{isPersonal ? <Badge className="bg-sky-500/20 text-sky-100 ring-sky-300/20">Personal funds</Badge> : <span className="text-white/40">None</span>}</ColumnCell>
+                      <ColumnCell column="personal" className="p-3 align-top">
+                        {isPersonal ? (
+                          <Badge className="bg-sky-500/20 text-sky-100 ring-sky-300/20">
+                            Personal funds
+                          </Badge>
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
+                      </ColumnCell>
 
-                      <ColumnCell column="paidBy" className="max-w-[160px] p-3 align-top">{item.personal_funds_name ? <span className="break-words font-semibold text-sky-200">{item.personal_funds_name}</span> : <span className="text-white/40">None</span>}</ColumnCell>
+                      <ColumnCell
+                        column="paidBy"
+                        className="max-w-[160px] p-3 align-top"
+                      >
+                        {item.personal_funds_name ? (
+                          <span className="break-words font-semibold text-sky-200">
+                            {item.personal_funds_name}
+                          </span>
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
+                      </ColumnCell>
 
-                      <ColumnCell column="repayment" className="min-w-[190px] p-3 align-top">
+                      <ColumnCell
+                        column="repayment"
+                        className="min-w-[190px] p-3 align-top"
+                      >
                         {isPersonal ? (
                           <div className="space-y-2">
-                            {item.personal_funds_repaid ? <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">Paid back{item.personal_funds_repaid_at && <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">{formatDate(item.personal_funds_repaid_at)}</div>}</div> : <div className="rounded-2xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20">Not paid back</div>}
-
-                            {!item.personal_funds_repaid && (
-                              <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
-                                <label className="mb-1 block text-[11px] font-bold text-white/60">Upload proof before payback</label>
-                                <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg" onChange={(event) => { const selectedFiles = Array.from(event.target.files || []); setRepaymentProofFiles((prev) => ({ ...prev, [item.id]: selectedFiles })); }} className="w-full text-[11px] text-white/60 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-2 file:py-1 file:text-[11px] file:font-bold file:text-white hover:file:bg-emerald-400" />
-                                {proofFiles.length > 0 && <p className="mt-2 text-[11px] font-semibold text-emerald-200">{proofFiles.length} proof file{proofFiles.length === 1 ? "" : "s"} selected</p>}
+                            {item.personal_funds_repaid ? (
+                              <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
+                                Paid back
+                                {item.personal_funds_repaid_at && (
+                                  <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+                                    {formatDate(item.personal_funds_repaid_at)}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="rounded-2xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20">
+                                Not paid back
                               </div>
                             )}
 
-                            <button type="button" disabled={repayingId === item.id} onClick={async () => { await onTogglePersonalFundsRepaid(item, proofFiles); setRepaymentProofFiles((prev) => ({ ...prev, [item.id]: [] })); }} className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:opacity-60 ${item.personal_funds_repaid ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25" : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"}`}>
-                              {repayingId === item.id ? "Updating..." : item.personal_funds_repaid ? "Mark not paid back" : "Mark paid back"}
+                            {!item.personal_funds_repaid && (
+                              <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                                <label className="mb-1 block text-[11px] font-bold text-white/60">
+                                  Upload proof before payback
+                                </label>
+                                <input
+                                  type="file"
+                                  disabled={locked}
+                                  multiple
+                                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
+                                  onChange={(event) => {
+                                    const selectedFiles = Array.from(
+                                      event.target.files || [],
+                                    );
+                                    setRepaymentProofFiles((prev) => ({
+                                      ...prev,
+                                      [item.id]: selectedFiles,
+                                    }));
+                                  }}
+                                  className="w-full text-[11px] text-white/60 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-2 file:py-1 file:text-[11px] file:font-bold file:text-white hover:file:bg-emerald-400"
+                                />
+                                {proofFiles.length > 0 && (
+                                  <p className="mt-2 text-[11px] font-semibold text-emerald-200">
+                                    {proofFiles.length} proof file
+                                    {proofFiles.length === 1 ? "" : "s"}{" "}
+                                    selected
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={locked || repayingId === item.id}
+                              onClick={() =>
+                                runTransactionAction(item, async () => {
+                                  await onTogglePersonalFundsRepaid(
+                                    item,
+                                    proofFiles,
+                                  );
+                                  setRepaymentProofFiles((prev) => ({
+                                    ...prev,
+                                    [item.id]: [],
+                                  }));
+                                })
+                              }
+                              className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 ${item.personal_funds_repaid ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25" : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"}`}
+                            >
+                              {repayingId === item.id
+                                ? "Updating..."
+                                : item.personal_funds_repaid
+                                  ? "Mark not paid back"
+                                  : "Mark paid back"}
                             </button>
                           </div>
-                        ) : <span className="text-white/40">None</span>}
+                        ) : (
+                          <span className="text-white/40">None</span>
+                        )}
                       </ColumnCell>
 
-                      <ColumnCell column="payment" className="whitespace-nowrap p-3 align-top">{hasFunding ? "Funding Money" : item.payment_method || "None"}</ColumnCell>
+                      <ColumnCell
+                        column="payment"
+                        className="whitespace-nowrap p-3 align-top"
+                      >
+                        {hasFunding
+                          ? "Funding Money"
+                          : item.payment_method || "None"}
+                      </ColumnCell>
 
-                      <ColumnCell column="bank" className="min-w-[230px] p-3 align-top">
+                      <ColumnCell
+                        column="bank"
+                        className="min-w-[230px] p-3 align-top"
+                      >
                         <div className="space-y-2">
-                          <Badge className={bankReconciliationBadgeClass(bankStatus)}>{bankReconciliationLabel(bankStatus)}</Badge>
-                          {item.bank_reconciled_by && <p className="text-[11px] font-semibold text-white/50">By {item.bank_reconciled_by}</p>}
-                          {item.bank_reconciled_at && <p className="text-[11px] font-semibold text-white/50">{formatDate(item.bank_reconciled_at)}</p>}
-                          {item.bank_reconciliation_note && <p className="line-clamp-2 text-[11px] text-white/45">{item.bank_reconciliation_note}</p>}
+                          <Badge
+                            className={bankReconciliationBadgeClass(bankStatus)}
+                          >
+                            {bankReconciliationLabel(bankStatus)}
+                          </Badge>
+                          {item.bank_reconciled_by && (
+                            <p className="text-[11px] font-semibold text-white/50">
+                              By {item.bank_reconciled_by}
+                            </p>
+                          )}
+                          {item.bank_reconciled_at && (
+                            <p className="text-[11px] font-semibold text-white/50">
+                              {formatDate(item.bank_reconciled_at)}
+                            </p>
+                          )}
+                          {item.bank_reconciliation_note && (
+                            <p className="line-clamp-2 text-[11px] text-white/45">
+                              {item.bank_reconciliation_note}
+                            </p>
+                          )}
                           <div className="grid grid-cols-2 gap-1">
-                            <button type="button" disabled={bankReconcilingId === item.id} onClick={() => onUpdateBankReconciliationStatus(item, "matched")} className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-50">{bankReconcilingId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />} Matched</button>
-                            <button type="button" disabled={bankReconcilingId === item.id} onClick={() => onUpdateBankReconciliationStatus(item, "needs_review")} className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25 disabled:opacity-50"><ShieldAlert className="h-3 w-3" /> Review</button>
-                            <button type="button" disabled={bankReconcilingId === item.id} onClick={() => onUpdateBankReconciliationStatus(item, "ignored")} className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1.5 text-[11px] font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:opacity-50">Ignore</button>
-                            <button type="button" disabled={bankReconcilingId === item.id} onClick={() => onUpdateBankReconciliationStatus(item, "unmatched")} className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1.5 text-[11px] font-black text-white/70 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-50"><RefreshCcw className="h-3 w-3" /> Unmatched</button>
+                            <button
+                              type="button"
+                              disabled={locked || bankReconcilingId === item.id}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onUpdateBankReconciliationStatus(
+                                    item,
+                                    "matched",
+                                  ),
+                                )
+                              }
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            >
+                              {bankReconcilingId === item.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}{" "}
+                              Matched
+                            </button>
+                            <button
+                              type="button"
+                              disabled={locked || bankReconcilingId === item.id}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onUpdateBankReconciliationStatus(
+                                    item,
+                                    "needs_review",
+                                  ),
+                                )
+                              }
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            >
+                              <ShieldAlert className="h-3 w-3" /> Review
+                            </button>
+                            <button
+                              type="button"
+                              disabled={locked || bankReconcilingId === item.id}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onUpdateBankReconciliationStatus(
+                                    item,
+                                    "ignored",
+                                  ),
+                                )
+                              }
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1.5 text-[11px] font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            >
+                              Ignore
+                            </button>
+                            <button
+                              type="button"
+                              disabled={locked || bankReconcilingId === item.id}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onUpdateBankReconciliationStatus(
+                                    item,
+                                    "unmatched",
+                                  ),
+                                )
+                              }
+                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1.5 text-[11px] font-black text-white/70 ring-1 ring-white/10 hover:bg-white/15 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            >
+                              <RefreshCcw className="h-3 w-3" /> Unmatched
+                            </button>
                           </div>
                         </div>
                       </ColumnCell>
 
-                      <ColumnCell column="receipt" className="min-w-[230px] p-3 align-top">
+                      <ColumnCell
+                        column="receipt"
+                        className="min-w-[230px] p-3 align-top"
+                      >
                         {missingReceipt ? (
-                          <div className={`rounded-2xl border px-3 py-2 text-xs text-red-100 ${receiptOverdue ? "border-red-300/30 bg-red-500/15" : "border-red-300/20 bg-red-500/10"}`}>
+                          <div
+                            className={`rounded-2xl border px-3 py-2 text-xs text-red-100 ${receiptOverdue ? "border-red-300/30 bg-red-500/15" : "border-red-300/20 bg-red-500/10"}`}
+                          >
                             <div className="flex items-center gap-2 font-black">
-                              {receiptOverdue ? <CalendarClock className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-                              {receiptOverdue ? "Receipt overdue" : "Missing receipt"}
+                              {receiptOverdue ? (
+                                <CalendarClock className="h-4 w-4" />
+                              ) : (
+                                <AlertTriangle className="h-4 w-4" />
+                              )}
+                              {receiptOverdue
+                                ? "Receipt overdue"
+                                : "Missing receipt"}
                             </div>
                             <div className="mt-1 text-red-100/70">
-                              {receiptReminderLabel(item, activeReceiptReminderDays)}
+                              {receiptReminderLabel(
+                                item,
+                                activeReceiptReminderDays,
+                              )}
                             </div>
                             <div className="mt-2 rounded-xl bg-black/20 px-2 py-1 text-[11px] font-bold text-red-100/75">
-                              Rule: upload receipt within {activeReceiptReminderDays} day{activeReceiptReminderDays === 1 ? "" : "s"} of the expense.
+                              Rule: upload receipt within{" "}
+                              {activeReceiptReminderDays} day
+                              {activeReceiptReminderDays === 1 ? "" : "s"} of
+                              the expense.
                             </div>
                           </div>
                         ) : files.length > 0 ? (
                           <div className="space-y-2">
-                            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100"><div className="font-black">Receipt / proof attached</div><div className="mt-1 text-emerald-100/70">{files.length} file{files.length === 1 ? "" : "s"} attached.</div></div>
+                            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                              <div className="font-black">
+                                Receipt / proof attached
+                              </div>
+                              <div className="mt-1 text-emerald-100/70">
+                                {files.length} file
+                                {files.length === 1 ? "" : "s"} attached.
+                              </div>
+                            </div>
                             <div className="space-y-1">
-                              {files.slice(0, 3).map((file, index) => <a key={file.id || `${file.file_url}-${index}`} href={file.file_url} target="_blank" rel="noopener noreferrer" className="block max-w-[220px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20" title={file.file_name || `Attachment ${index + 1}`}><FileText className="mr-1 inline h-3 w-3" />{file.file_name || `Attachment ${index + 1}`}{file.file_size ? ` (${formatFileSize(file.file_size)})` : ""}</a>)}
-                              {files.length > 3 && <p className="text-xs text-white/40">+{files.length - 3} more file{files.length - 3 === 1 ? "" : "s"}</p>}
+                              {files.slice(0, 3).map((file, index) => (
+                                <a
+                                  key={file.id || `${file.file_url}-${index}`}
+                                  href={file.file_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block max-w-[220px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
+                                  title={
+                                    file.file_name || `Attachment ${index + 1}`
+                                  }
+                                >
+                                  <FileText className="mr-1 inline h-3 w-3" />
+                                  {file.file_name || `Attachment ${index + 1}`}
+                                  {file.file_size
+                                    ? ` (${formatFileSize(file.file_size)})`
+                                    : ""}
+                                </a>
+                              ))}
+                              {files.length > 3 && (
+                                <p className="text-xs text-white/40">
+                                  +{files.length - 3} more file
+                                  {files.length - 3 === 1 ? "" : "s"}
+                                </p>
+                              )}
                             </div>
                           </div>
-                        ) : <span className="text-white/30">NOT UPLOAD YET</span>}
+                        ) : (
+                          <span className="text-white/30">NOT UPLOAD YET</span>
+                        )}
                       </ColumnCell>
 
-                      <ColumnCell column="finance" className="min-w-[260px] p-3 align-top">
+                      <ColumnCell
+                        column="finance"
+                        className="min-w-[260px] p-3 align-top"
+                      >
                         <div className="space-y-2">
-                          <Badge className={financeNoteBadgeClass(financeStatus)}>{financeNoteStatusLabel(financeStatus)}</Badge>
-                          {item.finance_note && <p className="line-clamp-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-white/65 ring-1 ring-white/10">{item.finance_note}</p>}
-                          {item.finance_note_updated_by && <p className="text-[11px] font-semibold text-white/45">By {item.finance_note_updated_by}</p>}
-                          {item.finance_note_updated_at && <p className="text-[11px] font-semibold text-white/45">{formatDate(item.finance_note_updated_at)}</p>}
+                          <Badge
+                            className={financeNoteBadgeClass(financeStatus)}
+                          >
+                            {financeNoteStatusLabel(financeStatus)}
+                          </Badge>
+                          {item.finance_note && (
+                            <p className="line-clamp-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-white/65 ring-1 ring-white/10">
+                              {item.finance_note}
+                            </p>
+                          )}
+                          {item.finance_note_updated_by && (
+                            <p className="text-[11px] font-semibold text-white/45">
+                              By {item.finance_note_updated_by}
+                            </p>
+                          )}
+                          {item.finance_note_updated_at && (
+                            <p className="text-[11px] font-semibold text-white/45">
+                              {formatDate(item.finance_note_updated_at)}
+                            </p>
+                          )}
                           <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
-                            <label className="mb-1 block text-[11px] font-bold text-white/50">Update finance query</label>
-                            <select value={financeDraft.status} onChange={(event) => setFinanceDraftStatus(item, event.target.value as FinanceNoteStatus)} className="w-full rounded-lg bg-black/30 px-2 py-2 text-xs font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40">
-                              {financeNoteOptions.map((option) => <option key={option.value} value={option.value} className="bg-[#11111f] text-white">{option.label}</option>)}
+                            <label className="mb-1 block text-[11px] font-bold text-white/50">
+                              Update finance query
+                            </label>
+                            <select
+                              value={financeDraft.status}
+                              disabled={locked}
+                              onChange={(event) =>
+                                setFinanceDraftStatus(
+                                  item,
+                                  event.target.value as FinanceNoteStatus,
+                                )
+                              }
+                              className="w-full rounded-lg bg-black/30 px-2 py-2 text-xs font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
+                            >
+                              {financeNoteOptions.map((option) => (
+                                <option
+                                  key={option.value}
+                                  value={option.value}
+                                  className="bg-[#11111f] text-white"
+                                >
+                                  {option.label}
+                                </option>
+                              ))}
                             </select>
-                            <textarea value={financeDraft.note} onChange={(event) => setFinanceDraftNote(item, event.target.value)} placeholder="Add finance note..." className="mt-2 min-h-16 w-full rounded-lg bg-black/30 px-2 py-2 text-xs text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40" />
-                            <button type="button" disabled={financeNoteUpdatingId === item.id || !financeNoteChanged} onClick={() => saveFinanceDraft(item)} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-50">{financeNoteUpdatingId === item.id && <Loader2 className="h-3 w-3 animate-spin" />} Save finance note</button>
+                            <textarea
+                              value={financeDraft.note}
+                              disabled={locked}
+                              onChange={(event) =>
+                                setFinanceDraftNote(item, event.target.value)
+                              }
+                              placeholder="Add finance note..."
+                              className="mt-2 min-h-16 w-full rounded-lg bg-black/30 px-2 py-2 text-xs text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                            />
+                            <button
+                              type="button"
+                              disabled={
+                                locked ||
+                                financeNoteUpdatingId === item.id ||
+                                !financeNoteChanged
+                              }
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  saveFinanceDraft(item),
+                                )
+                              }
+                              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            >
+                              {financeNoteUpdatingId === item.id && (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              )}{" "}
+                              Save finance note
+                            </button>
                           </div>
                         </div>
                       </ColumnCell>
 
-                      <ColumnCell column="checked" className="min-w-[210px] p-3 align-top">{renderCheckedCell(item)}</ColumnCell>
+                      <ColumnCell
+                        column="checked"
+                        className="min-w-[210px] p-3 align-top"
+                      >
+                        {renderCheckedCell(item)}
+                      </ColumnCell>
 
-                      <ColumnCell column="actions" className="sticky right-0 z-10 bg-[#11111f] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]">
+                      <ColumnCell
+                        column="actions"
+                        className="sticky right-0 z-10 bg-[#11111f] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                      >
                         <div className="inline-flex items-center justify-end gap-2">
-                          <button type="button" onClick={() => setDetailsItem(item)} className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20" title="View details"><Eye className="h-4 w-4" /></button>
-                          <button type="button" onClick={() => onEditTransaction(item)} className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25" title="Edit transaction"><Pencil className="h-4 w-4" /></button>
-                          <button type="button" disabled={deleting} onClick={() => onHideTransaction(item.id)} className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:opacity-50" title="Hide transaction"><Trash2 className="h-4 w-4" /></button>
+                          <button
+                            type="button"
+                            onClick={() => setDetailsItem(item)}
+                            className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20"
+                            title="View details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={locked}
+                            onClick={() =>
+                              runTransactionAction(item, () =>
+                                onEditTransaction(item),
+                              )
+                            }
+                            className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            title={locked ? lockReason : "Edit transaction"}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={locked || deleting}
+                            onClick={() =>
+                              runTransactionAction(item, () =>
+                                onHideTransaction(item.id),
+                              )
+                            }
+                            className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                            title={locked ? lockReason : "Hide transaction"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </ColumnCell>
                     </tr>
@@ -2198,30 +3898,142 @@ export default function MoneyTransactionsTable({
           <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[#10101f] p-5 shadow-2xl shadow-black">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-white/40">Transaction details</p>
-                <h3 className="mt-1 break-words text-2xl font-black text-white">{detailsItem.title}</h3>
-                <p className="mt-1 text-sm text-white/45">{detailsItem.transaction_reference || "No reference"}</p>
+                <p className="text-xs font-black uppercase tracking-wide text-white/40">
+                  Transaction details
+                </p>
+                <h3 className="mt-1 break-words text-2xl font-black text-white">
+                  {detailsItem.title}
+                </h3>
+                <p className="mt-1 text-sm text-white/45">
+                  {detailsItem.transaction_reference || "No reference"}
+                </p>
               </div>
-              <button type="button" onClick={() => setDetailsItem(null)} className="rounded-2xl bg-white/10 p-3 text-white hover:bg-white/20"><X className="h-5 w-5" /></button>
+              <button
+                type="button"
+                onClick={() => setDetailsItem(null)}
+                className="rounded-2xl bg-white/10 p-3 text-white hover:bg-white/20"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Date</p><p className="mt-1 font-bold text-white">{none(detailsItem.transaction_date)}</p></div>
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Amount</p><p className="mt-1 font-bold text-white">{money(detailsItem.amount_pence)}</p></div>
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Type</p><p className="mt-1 font-bold text-white">{detailsItem.type === "income" ? "Money In" : "Money Out"}</p></div>
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Payment</p><p className="mt-1 font-bold text-white">{detailsItem.payment_method || "None"}</p></div>
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Bank</p><p className="mt-1 font-bold text-white">{bankReconciliationLabel(detailsItem.bank_reconciliation_status || "unmatched")}</p></div>
-              <div className="rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Checked</p><p className="mt-1 font-bold text-white">{detailsItem.checked_at ? `Checked by ${getCheckedByDisplayName(detailsItem)}` : "Not checked"}</p></div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Date</p>
+                <p className="mt-1 font-bold text-white">
+                  {none(detailsItem.transaction_date)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Amount</p>
+                <p className="mt-1 font-bold text-white">
+                  {money(detailsItem.amount_pence)}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Type</p>
+                <p className="mt-1 font-bold text-white">
+                  {detailsItem.type === "income" ? "Money In" : "Money Out"}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Payment</p>
+                <p className="mt-1 font-bold text-white">
+                  {detailsItem.payment_method || "None"}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Bank</p>
+                <p className="mt-1 font-bold text-white">
+                  {bankReconciliationLabel(
+                    detailsItem.bank_reconciliation_status || "unmatched",
+                  )}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Checked</p>
+                <p className="mt-1 font-bold text-white">
+                  {detailsItem.checked_at
+                    ? `Checked by ${getCheckedByDisplayName(detailsItem)}`
+                    : "Not checked"}
+                </p>
+              </div>
             </div>
 
-            {detailsItem.description && <div className="mt-4 rounded-2xl bg-white/5 p-4"><p className="text-xs font-black text-white/40">Description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/70">{detailsItem.description}</p></div>}
-            {detailsItem.sponsorship_note && <div className="mt-4 rounded-2xl bg-amber-500/10 p-4 ring-1 ring-amber-300/20"><p className="text-xs font-black text-amber-100/70">Funding note</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-100/80">{detailsItem.sponsorship_note}</p></div>}
-            {detailsItem.finance_note && <div className="mt-4 rounded-2xl bg-cyan-500/10 p-4 ring-1 ring-cyan-300/20"><p className="text-xs font-black text-cyan-100/70">Finance note</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-cyan-100/80">{detailsItem.finance_note}</p></div>}
+            {isTransactionLocked(detailsItem) && (
+              <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">
+                {getTransactionLockReason(detailsItem)}
+              </div>
+            )}
+
+            {detailsItem.description && (
+              <div className="mt-4 rounded-2xl bg-white/5 p-4">
+                <p className="text-xs font-black text-white/40">Description</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/70">
+                  {detailsItem.description}
+                </p>
+              </div>
+            )}
+            {detailsItem.sponsorship_note && (
+              <div className="mt-4 rounded-2xl bg-amber-500/10 p-4 ring-1 ring-amber-300/20">
+                <p className="text-xs font-black text-amber-100/70">
+                  Funding note
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-100/80">
+                  {detailsItem.sponsorship_note}
+                </p>
+              </div>
+            )}
+            {detailsItem.finance_note && (
+              <div className="mt-4 rounded-2xl bg-cyan-500/10 p-4 ring-1 ring-cyan-300/20">
+                <p className="text-xs font-black text-cyan-100/70">
+                  Finance note
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-cyan-100/80">
+                  {detailsItem.finance_note}
+                </p>
+              </div>
+            )}
 
             <div className="mt-5 flex flex-wrap gap-2">
-              <button type="button" onClick={() => onEditTransaction(detailsItem)} className="rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25">Edit transaction</button>
-              <button type="button" onClick={() => onMarkTransactionChecked(detailsItem)} className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25">{detailsItem.checked_at ? "Undo checked" : "Mark checked"}</button>
-              <button type="button" onClick={() => setDetailsItem(null)} className="rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20">Close</button>
+              <button
+                type="button"
+                disabled={isTransactionLocked(detailsItem)}
+                onClick={() =>
+                  runTransactionAction(detailsItem, () =>
+                    onEditTransaction(detailsItem),
+                  )
+                }
+                className="rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                title={
+                  getTransactionLockReason(detailsItem) || "Edit transaction"
+                }
+              >
+                Edit transaction
+              </button>
+              <button
+                type="button"
+                disabled={isTransactionLocked(detailsItem)}
+                onClick={() =>
+                  runTransactionAction(detailsItem, () =>
+                    onMarkTransactionChecked(detailsItem),
+                  )
+                }
+                className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                title={
+                  getTransactionLockReason(detailsItem) ||
+                  (detailsItem.checked_at ? "Undo checked" : "Mark checked")
+                }
+              >
+                {detailsItem.checked_at ? "Undo checked" : "Mark checked"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailsItem(null)}
+                className="rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

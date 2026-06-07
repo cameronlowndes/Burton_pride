@@ -16,6 +16,8 @@ import {
   Plus,
   RefreshCcw,
   Search,
+  Settings2,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -68,6 +70,8 @@ const EMPTY_FORM: SupplierForm = {
   notes: "",
   isActive: true,
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-money-suppliers-easy-mode";
 
 const DELETED_SUPPLIERS_PATH =
   "/Admin/MoneyManagement/TrackingMoney/Suppliers/Deleted";
@@ -152,6 +156,13 @@ function getCategoryList(apiCategories: string[], suppliers: Supplier[]) {
 export default function MoneySuppliersPage() {
   const router = useRouter();
 
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [apiCategories, setApiCategories] = useState<string[]>([]);
 
@@ -172,6 +183,40 @@ export default function MoneySuppliersPage() {
   const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
 
   const [deleteSupplier, setDeleteSupplier] = useState<Supplier | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      if (next) {
+        // Do not leave hidden advanced filters active.
+        setStatusFilter("active");
+        setCategoryFilter("all");
+      }
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   const categories = useMemo(
     () => getCategoryList(apiCategories, suppliers),
@@ -406,11 +451,9 @@ export default function MoneySuppliersPage() {
                   </h1>
 
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
-                    View, add, edit and archive regular suppliers such as
-                    printers, venues, insurance providers, entertainers, food
-                    vendors, security, equipment hire and custom contacts.
-                    Payments can be linked to these suppliers from the
-                    transaction form.
+                    {easyMode
+                      ? "Add and manage the main supplier details used by your money tracker."
+                      : "View, add, edit and archive regular suppliers such as printers, venues, insurance providers, entertainers, food vendors, security, equipment hire and custom contacts. Payments can be linked to these suppliers from the transaction form."}
                   </p>
                 </div>
               </div>
@@ -429,21 +472,25 @@ export default function MoneySuppliersPage() {
                 Refresh
               </button>
 
-              <Link
-                href="/Admin/MoneyManagement/TrackingMoney/Suppliers/Logs"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-100 hover:bg-sky-500/20"
-              >
-                <ClipboardList className="h-4 w-4" />
-                Supplier Logs
-              </Link>
+              {!easyMode && (
+                <>
+                  <Link
+                    href="/Admin/MoneyManagement/TrackingMoney/Suppliers/Logs"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-100 hover:bg-sky-500/20"
+                  >
+                    <ClipboardList className="h-4 w-4" />
+                    Supplier Logs
+                  </Link>
 
-              <Link
-                href="/Admin/MoneyManagement/TrackingMoney/Suppliers/Deleted"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-100 hover:bg-red-500/20"
-              >
-                <Trash2 className="h-4 w-4" />
-                Deleted Suppliers
-              </Link>
+                  <Link
+                    href="/Admin/MoneyManagement/TrackingMoney/Suppliers/Deleted"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-100 hover:bg-red-500/20"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Deleted Suppliers
+                  </Link>
+                </>
+              )}
 
               <button
                 type="button"
@@ -457,7 +504,58 @@ export default function MoneySuppliersPage() {
           </div>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-cyan-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps the supplier tracker focused on names, contact details, search, edit, and archive actions."
+                  : "Full Mode shows supplier logs, deleted suppliers, filters, websites, notes, archive status, and advanced form options."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20 hover:bg-cyan-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        <section
+          className={`grid gap-4 ${
+            easyMode ? "md:grid-cols-1" : "md:grid-cols-3"
+          }`}
+        >
           <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5">
             <p className="text-xs font-black uppercase tracking-wide text-emerald-100/80">
               Active suppliers
@@ -465,23 +563,27 @@ export default function MoneySuppliersPage() {
             <p className="mt-2 text-3xl font-black text-white">{activeCount}</p>
           </div>
 
-          <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
-            <p className="text-xs font-black uppercase tracking-wide text-sky-100/80">
-              Categories
-            </p>
-            <p className="mt-2 text-3xl font-black text-white">
-              {categories.length}
-            </p>
-          </div>
+          {!easyMode && (
+            <>
+              <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
+                <p className="text-xs font-black uppercase tracking-wide text-sky-100/80">
+                  Categories
+                </p>
+                <p className="mt-2 text-3xl font-black text-white">
+                  {categories.length}
+                </p>
+              </div>
 
-          <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
-            <p className="text-xs font-black uppercase tracking-wide text-amber-100/80">
-              Archived suppliers
-            </p>
-            <p className="mt-2 text-3xl font-black text-white">
-              {archivedCount}
-            </p>
-          </div>
+              <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
+                <p className="text-xs font-black uppercase tracking-wide text-amber-100/80">
+                  Archived suppliers
+                </p>
+                <p className="mt-2 text-3xl font-black text-white">
+                  {archivedCount}
+                </p>
+              </div>
+            </>
+          )}
         </section>
 
         {error && (
@@ -503,7 +605,11 @@ export default function MoneySuppliersPage() {
         )}
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+          <div
+            className={`grid gap-3 ${
+              easyMode ? "" : "lg:grid-cols-[minmax(0,1fr)_220px_220px]"
+            }`}
+          >
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
               <input
@@ -514,43 +620,47 @@ export default function MoneySuppliersPage() {
               />
             </label>
 
-            <select
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as "active" | "archived" | "all")
-              }
-              className="rounded-2xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
-            >
-              <option className="bg-[#070716] text-white" value="active">
-                Active only
-              </option>
-              <option className="bg-[#070716] text-white" value="archived">
-                Archived only
-              </option>
-              <option className="bg-[#070716] text-white" value="all">
-                All suppliers
-              </option>
-            </select>
-
-            <select
-              value={categoryFilter}
-              onChange={(event) => setCategoryFilter(event.target.value)}
-              className="rounded-2xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
-            >
-              <option className="bg-[#070716] text-white" value="all">
-                All categories
-              </option>
-
-              {categories.map((category) => (
-                <option
-                  key={category}
-                  className="bg-[#070716] text-white"
-                  value={category}
+            {!easyMode && (
+              <>
+                <select
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(event.target.value as "active" | "archived" | "all")
+                  }
+                  className="rounded-2xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
                 >
-                  {category}
-                </option>
-              ))}
-            </select>
+                  <option className="bg-[#070716] text-white" value="active">
+                    Active only
+                  </option>
+                  <option className="bg-[#070716] text-white" value="archived">
+                    Archived only
+                  </option>
+                  <option className="bg-[#070716] text-white" value="all">
+                    All suppliers
+                  </option>
+                </select>
+
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  className="rounded-2xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
+                >
+                  <option className="bg-[#070716] text-white" value="all">
+                    All categories
+                  </option>
+
+                  {categories.map((category) => (
+                    <option
+                      key={category}
+                      className="bg-[#070716] text-white"
+                      value={category}
+                    >
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
           </div>
         </section>
 
@@ -614,9 +724,11 @@ export default function MoneySuppliersPage() {
                         )}
                       </div>
 
-                      <p className="mt-1 text-xs text-white/40">
-                        Added {formatDate(supplier.created_at)}
-                      </p>
+                      {!easyMode && (
+                        <p className="mt-1 text-xs text-white/40">
+                          Added {formatDate(supplier.created_at)}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex shrink-0 gap-2">
@@ -684,7 +796,7 @@ export default function MoneySuppliersPage() {
                       </a>
                     )}
 
-                    {supplier.website && (
+                    {!easyMode && supplier.website && (
                       <a
                         href={supplier.website}
                         target="_blank"
@@ -701,7 +813,7 @@ export default function MoneySuppliersPage() {
                     )}
                   </div>
 
-                  {supplier.notes && (
+                  {!easyMode && supplier.notes && (
                     <div className="mt-3 rounded-2xl bg-black/20 p-3 text-sm leading-6 text-white/60">
                       {supplier.notes}
                     </div>
@@ -725,6 +837,13 @@ export default function MoneySuppliersPage() {
                   Save supplier details here, then link payments to them from
                   the transaction form.
                 </p>
+
+                {easyMode && (
+                  <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-xs leading-5 text-cyan-100">
+                    Easy Mode hides the website, notes, and active-status
+                    controls. Switch back to Full Mode to edit those details.
+                  </p>
+                )}
               </div>
 
               <button
@@ -784,14 +903,16 @@ export default function MoneySuppliersPage() {
                 />
               </div>
 
-              <input
-                value={form.website}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, website: event.target.value }))
-                }
-                placeholder="Website"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
+              {!easyMode && (
+                <input
+                  value={form.website}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, website: event.target.value }))
+                  }
+                  placeholder="Website"
+                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                />
+              )}
 
               <div>
                 <label className="mb-2 block text-sm font-bold text-white/80">
@@ -854,37 +975,41 @@ export default function MoneySuppliersPage() {
                 )}
               </div>
 
-              <textarea
-                value={form.notes}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, notes: event.target.value }))
-                }
-                placeholder="Notes, quote details, payment terms, contact history..."
-                className="min-h-28 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
-
-              <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                <input
-                  type="checkbox"
-                  checked={form.isActive}
+              {!easyMode && (
+                <textarea
+                  value={form.notes}
                   onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      isActive: event.target.checked,
-                    }))
+                    setForm((prev) => ({ ...prev, notes: event.target.value }))
                   }
-                  className="mt-1 h-4 w-4 rounded border-white/20"
+                  placeholder="Notes, quote details, payment terms, contact history..."
+                  className="min-h-28 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
                 />
+              )}
 
-                <span>
-                  <span className="block text-sm font-bold text-white">
-                    Active supplier
+              {!easyMode && (
+                <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <input
+                    type="checkbox"
+                    checked={form.isActive}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        isActive: event.target.checked,
+                      }))
+                    }
+                    className="mt-1 h-4 w-4 rounded border-white/20"
+                  />
+
+                  <span>
+                    <span className="block text-sm font-bold text-white">
+                      Active supplier
+                    </span>
+                    <span className="block text-xs leading-5 text-white/50">
+                      Turn this off if you want to archive it but keep old records.
+                    </span>
                   </span>
-                  <span className="block text-xs leading-5 text-white/50">
-                    Turn this off if you want to archive it but keep old records.
-                  </span>
-                </span>
-              </label>
+                </label>
+              )}
 
               <div className="flex flex-col justify-end gap-3 sm:flex-row">
                 <button

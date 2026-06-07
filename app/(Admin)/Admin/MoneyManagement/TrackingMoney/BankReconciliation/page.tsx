@@ -10,7 +10,9 @@ import {
   Loader2,
   RefreshCcw,
   Search,
+  Settings2,
   ShieldAlert,
+  Sparkles,
   UploadCloud,
   XCircle,
 } from "lucide-react";
@@ -129,7 +131,16 @@ function confidenceClass(confidence: MatchCandidate["confidence"]) {
   return "bg-red-500/15 text-red-100 ring-red-300/20";
 }
 
+const EASY_MODE_STORAGE_KEY = "burton-pride-bank-reconciliation-easy-mode";
+
 export default function BankReconciliationPage() {
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [imports, setImports] = useState<BankImport[]>([]);
   const [selectedImport, setSelectedImport] = useState<BankImport | null>(null);
   const [rows, setRows] = useState<BankImportRow[]>([]);
@@ -149,6 +160,34 @@ export default function BankReconciliationPage() {
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   async function loadImports() {
     try {
@@ -393,9 +432,9 @@ export default function BankReconciliationPage() {
               </h1>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
-                Upload a bank CSV, compare it against the money tracker, match
-                rows, mark rows as ignored, or send rows to needs review. All
-                match actions go through the API so they can be logged.
+                {easyMode
+                  ? "Upload a bank CSV and match each row with the correct money tracker transaction."
+                  : "Upload a bank CSV, compare it against the money tracker, match rows, mark rows as ignored, or send rows to needs review. All match actions go through the API so they can be logged."}
               </p>
             </div>
 
@@ -412,6 +451,53 @@ export default function BankReconciliationPage() {
             </button>
           </div>
         </div>
+
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-purple-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps bank matching focused on upload, totals, search, review actions, and suggested matches."
+                  : "Full Mode shows source details, import metadata, review notes, money-in and money-out breakdowns, and technical match reasons."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-purple-500/15 text-purple-100 ring-purple-300/20 hover:bg-purple-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
 
         {message && (
           <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-100">
@@ -431,12 +517,18 @@ export default function BankReconciliationPage() {
           <h2 className="text-2xl font-black text-white">Upload bank CSV</h2>
 
           <p className="mt-2 text-sm leading-6 text-white/60">
-            The CSV can include columns like Date, Description, Amount, Money
-            In, Money Out, Balance, and Reference. The API will try to detect
-            the right columns automatically.
+            {easyMode
+              ? "Choose your bank statement CSV file and import it."
+              : "The CSV can include columns like Date, Description, Amount, Money In, Money Out, Balance, and Reference. The API will try to detect the right columns automatically."}
           </p>
 
-          <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_180px_220px_auto]">
+          <div
+            className={`mt-5 grid gap-3 ${
+              easyMode
+                ? "lg:grid-cols-[1fr_180px_auto]"
+                : "lg:grid-cols-[1fr_180px_220px_auto]"
+            }`}
+          >
             <label className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-4">
               <div className="flex items-center gap-3">
                 <UploadCloud className="h-6 w-6 text-purple-200" />
@@ -472,17 +564,19 @@ export default function BankReconciliationPage() {
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-black text-white/45">
-                Source name
-              </label>
+            {!easyMode && (
+              <div>
+                <label className="mb-1 block text-xs font-black text-white/45">
+                  Source name
+                </label>
 
-              <input
-                value={sourceName}
-                onChange={(event) => setSourceName(event.target.value)}
-                className="w-full rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
-              />
-            </div>
+                <input
+                  value={sourceName}
+                  onChange={(event) => setSourceName(event.target.value)}
+                  className="w-full rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
+                />
+              </div>
+            )}
 
             <button
               type="button"
@@ -546,8 +640,13 @@ export default function BankReconciliationPage() {
 
                       <div className="mt-3 grid gap-2 text-xs text-white/55">
                         <div>Year: {item.year || "Unknown"}</div>
-                        <div>Imported: {formatDate(item.created_at)}</div>
-                        <div>By: {item.imported_by_name || "Unknown admin"}</div>
+
+                        {!easyMode && (
+                          <>
+                            <div>Imported: {formatDate(item.created_at)}</div>
+                            <div>By: {item.imported_by_name || "Unknown admin"}</div>
+                          </>
+                        )}
                       </div>
                     </button>
                   );
@@ -587,7 +686,11 @@ export default function BankReconciliationPage() {
                     </button>
                   </div>
 
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <div
+                    className={`mt-5 grid gap-3 sm:grid-cols-2 ${
+                      easyMode ? "xl:grid-cols-4" : "xl:grid-cols-5"
+                    }`}
+                  >
                     <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20">
                       <p className="text-xs font-black text-emerald-100/70">
                         Money In
@@ -624,19 +727,25 @@ export default function BankReconciliationPage() {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
-                      <p className="text-xs font-black text-white/50">
-                        Unmatched
-                      </p>
-                      <p className="mt-1 text-lg font-black text-white">
-                        {totals.unmatched}
-                      </p>
-                    </div>
+                    {!easyMode && (
+                      <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/10">
+                        <p className="text-xs font-black text-white/50">
+                          Unmatched
+                        </p>
+                        <p className="mt-1 text-lg font-black text-white">
+                          {totals.unmatched}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </section>
 
                 <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
-                  <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+                  <div
+                    className={`grid gap-3 ${
+                      easyMode ? "" : "lg:grid-cols-[1fr_220px]"
+                    }`}
+                  >
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-white/35" />
 
@@ -648,40 +757,50 @@ export default function BankReconciliationPage() {
                       />
                     </div>
 
-                    <select
-                      value={statusFilter}
-                      onChange={(event) => setStatusFilter(event.target.value)}
-                      className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
-                    >
-                      <option className="bg-[#11111f] text-white" value="all">
-                        All rows
-                      </option>
-                      <option
-                        className="bg-[#11111f] text-white"
-                        value="unmatched"
+                    {!easyMode && (
+                      <select
+                        value={statusFilter}
+                        onChange={(event) => setStatusFilter(event.target.value)}
+                        className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
                       >
-                        Unmatched
-                      </option>
-                      <option
-                        className="bg-[#11111f] text-white"
-                        value="matched"
-                      >
-                        Matched
-                      </option>
-                      <option
-                        className="bg-[#11111f] text-white"
-                        value="needs_review"
-                      >
-                        Needs review
-                      </option>
-                      <option
-                        className="bg-[#11111f] text-white"
-                        value="ignored"
-                      >
-                        Ignored
-                      </option>
-                    </select>
+                        <option className="bg-[#11111f] text-white" value="all">
+                          All rows
+                        </option>
+                        <option
+                          className="bg-[#11111f] text-white"
+                          value="unmatched"
+                        >
+                          Unmatched
+                        </option>
+                        <option
+                          className="bg-[#11111f] text-white"
+                          value="matched"
+                        >
+                          Matched
+                        </option>
+                        <option
+                          className="bg-[#11111f] text-white"
+                          value="needs_review"
+                        >
+                          Needs review
+                        </option>
+                        <option
+                          className="bg-[#11111f] text-white"
+                          value="ignored"
+                        >
+                          Ignored
+                        </option>
+                      </select>
+                    )}
                   </div>
+
+                  {easyMode && (
+                    <div className="mt-5 rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4 text-sm leading-6 text-purple-100">
+                      Easy Mode hides optional review notes and technical match
+                      reasons. Switch back to Full Mode when you need the extra
+                      details.
+                    </div>
+                  )}
 
                   <div className="mt-5 space-y-4">
                     {loadingRows ? (
@@ -724,7 +843,11 @@ export default function BankReconciliationPage() {
                                 {row.description || "Bank row"}
                               </h3>
 
-                              <div className="mt-3 grid gap-2 text-sm text-white/60 sm:grid-cols-2 xl:grid-cols-4">
+                              <div
+                                className={`mt-3 grid gap-2 text-sm text-white/60 sm:grid-cols-2 ${
+                                  easyMode ? "" : "xl:grid-cols-4"
+                                }`}
+                              >
                                 <div>
                                   Date:{" "}
                                   <strong className="text-white">
@@ -745,19 +868,23 @@ export default function BankReconciliationPage() {
                                   </strong>
                                 </div>
 
-                                <div>
-                                  Money in:{" "}
-                                  <strong className="text-emerald-200">
-                                    {money(row.money_in_pence)}
-                                  </strong>
-                                </div>
+                                {!easyMode && (
+                                  <>
+                                    <div>
+                                      Money in:{" "}
+                                      <strong className="text-emerald-200">
+                                        {money(row.money_in_pence)}
+                                      </strong>
+                                    </div>
 
-                                <div>
-                                  Money out:{" "}
-                                  <strong className="text-red-200">
-                                    {money(row.money_out_pence)}
-                                  </strong>
-                                </div>
+                                    <div>
+                                      Money out:{" "}
+                                      <strong className="text-red-200">
+                                        {money(row.money_out_pence)}
+                                      </strong>
+                                    </div>
+                                  </>
+                                )}
                               </div>
 
                               {row.review_note && (
@@ -769,17 +896,19 @@ export default function BankReconciliationPage() {
                             </div>
 
                             <div className="shrink-0 text-left lg:text-right">
-                              <textarea
-                                value={noteDrafts[row.id] || ""}
-                                onChange={(event) =>
-                                  setNoteDrafts((prev) => ({
-                                    ...prev,
-                                    [row.id]: event.target.value,
-                                  }))
-                                }
-                                placeholder="Add review note..."
-                                className="min-h-20 w-full rounded-2xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-purple-300/40 lg:w-72"
-                              />
+                              {!easyMode && (
+                                <textarea
+                                  value={noteDrafts[row.id] || ""}
+                                  onChange={(event) =>
+                                    setNoteDrafts((prev) => ({
+                                      ...prev,
+                                      [row.id]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="Add review note..."
+                                  className="min-h-20 w-full rounded-2xl bg-black/30 p-3 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-purple-300/40 lg:w-72"
+                                />
+                              )}
 
                               <div className="mt-2 flex flex-wrap gap-2 lg:justify-end">
                                 <button
@@ -864,25 +993,28 @@ export default function BankReconciliationPage() {
                                             Amount:{" "}
                                             {money(candidate.amount_pence)}
                                           </div>
-                                          <div>
-                                            Type: {candidate.type || "Unknown"}
-                                          </div>
+                                          {!easyMode && (
+                                            <div>
+                                              Type: {candidate.type || "Unknown"}
+                                            </div>
+                                          )}
                                         </div>
 
-                                        {candidate.reasons?.length > 0 && (
-                                          <div className="mt-2 flex flex-wrap gap-1">
-                                            {candidate.reasons.map(
-                                              (reason, index) => (
-                                                <span
-                                                  key={`${reason}-${index}`}
-                                                  className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-bold text-white/55"
-                                                >
-                                                  {reason}
-                                                </span>
-                                              ),
-                                            )}
-                                          </div>
-                                        )}
+                                        {!easyMode &&
+                                          candidate.reasons?.length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1">
+                                              {candidate.reasons.map(
+                                                (reason, index) => (
+                                                  <span
+                                                    key={`${reason}-${index}`}
+                                                    className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-bold text-white/55"
+                                                  >
+                                                    {reason}
+                                                  </span>
+                                                ),
+                                              )}
+                                            </div>
+                                          )}
                                       </div>
 
                                       <button

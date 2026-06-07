@@ -1,7 +1,13 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
-const MAIN_ADMIN_EMAILS = ["cameronlowndes@burtonpride.co.uk"];
+const MAIN_ADMIN_EMAILS = [
+  "cameronlowndes@burtonpride.co.uk",
+  "simonwhale@burtonpride.co.uk",
+  "isaactimmins@burtonpride.co.uk",
+  "olga@burtonpride.co.uk",
+  "isaac@burtonpride.co.uk",
+];
 
 export type AdminPermissionResult = {
   userId: string;
@@ -23,36 +29,78 @@ export type AdminPermissionResult = {
   };
 };
 
-function normaliseEmail(email: string | null | undefined) {
+function normaliseEmail(email: unknown) {
   return String(email || "").trim().toLowerCase();
 }
 
-function isMainAdminEmail(email: string | null | undefined) {
+function isMainAdminEmail(email: unknown) {
   return MAIN_ADMIN_EMAILS.map(normaliseEmail).includes(normaliseEmail(email));
 }
 
+async function getCookieValue(names: string[]) {
+  const cookieStore = await cookies();
+
+  for (const name of names) {
+    const value = cookieStore.get(name)?.value;
+    if (value) return value;
+  }
+
+  return "";
+}
+
 export async function getCurrentAdminPermissions(): Promise<AdminPermissionResult> {
-  const supabase = await createSupabaseServerClient();
+  const adminId = await getCookieValue([
+    "admin_user_id",
+    "adminId",
+    "admin_id",
+    "bp_admin_id",
+  ]);
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  const adminEmailCookie = await getCookieValue([
+    "admin_email",
+    "adminEmail",
+    "bp_admin_email",
+  ]);
 
-  if (userError || !user?.id) {
+  if (!adminId && !adminEmailCookie) {
     throw new Error("Unauthorized. Please sign in with your admin account.");
   }
 
-  const email = normaliseEmail(user.email);
+  let query = supabaseAdmin
+    .from("admin_users")
+    .select("id, email, is_active")
+    .limit(1);
+
+  if (adminId) {
+    query = query.eq("id", adminId);
+  } else {
+    query = query.eq("email", normaliseEmail(adminEmailCookie));
+  }
+
+  const { data: admin, error } = await query.maybeSingle();
+
+  if (error) {
+    throw new Error(`Admin lookup failed: ${error.message}`);
+  }
+
+  if (!admin?.id) {
+    throw new Error("Unauthorized. Admin account could not be found.");
+  }
+
+  if (admin.is_active === false) {
+    throw new Error("Unauthorized. This admin account is not active.");
+  }
+
+  const email = normaliseEmail(admin.email);
 
   if (!email) {
-    throw new Error("Your signed-in account does not have an email address.");
+    throw new Error("Admin account does not have an email address.");
   }
 
   const isMainAdmin = isMainAdminEmail(email);
 
   return {
-    userId: user.id,
+    userId: String(admin.id),
     email,
     isMainAdmin,
     permissions: {
@@ -75,14 +123,7 @@ export async function getCurrentAdminPermissions(): Promise<AdminPermissionResul
 }
 
 export async function requireAdmin() {
-  const result = await getCurrentAdminPermissions();
-
-  return {
-    userId: result.userId,
-    email: result.email,
-    isMainAdmin: result.isMainAdmin,
-    permissions: result.permissions,
-  };
+  return getCurrentAdminPermissions();
 }
 
 export async function requireMainAdmin() {
@@ -92,12 +133,7 @@ export async function requireMainAdmin() {
     throw new Error("Main admin access required.");
   }
 
-  return {
-    userId: result.userId,
-    email: result.email,
-    isMainAdmin: result.isMainAdmin,
-    permissions: result.permissions,
-  };
+  return result;
 }
 
 export async function requirePermission(
@@ -109,10 +145,5 @@ export async function requirePermission(
     throw new Error("You do not have permission to do this.");
   }
 
-  return {
-    userId: result.userId,
-    email: result.email,
-    isMainAdmin: result.isMainAdmin,
-    permissions: result.permissions,
-  };
+  return result;
 }

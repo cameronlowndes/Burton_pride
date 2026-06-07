@@ -602,7 +602,16 @@ export function useMoneyTransactionsPage() {
         };
       }
 
-      setYearLocks(data.locks || []);
+      const loadedYearLocks = Array.isArray(data.locks)
+        ? data.locks
+        : Array.isArray(data.lockedYears)
+          ? data.lockedYears.map((year: string | number) => ({
+              year: String(year),
+              is_locked: true,
+            }))
+          : [];
+
+      setYearLocks(loadedYearLocks);
     } catch (err: any) {
       setError(err?.message || "Failed to load year locks");
       setErrorDetails(err);
@@ -628,7 +637,17 @@ export function useMoneyTransactionsPage() {
         };
       }
 
-      setMonthLocks(data.locks || []);
+      const loadedMonthLocks = Array.isArray(data.locks)
+        ? data.locks
+        : Array.isArray(data.lockedMonths)
+          ? data.lockedMonths.map((monthKey: string) => ({
+              year: String(monthKey).slice(0, 4),
+              month_key: String(monthKey),
+              is_locked: true,
+            }))
+          : [];
+
+      setMonthLocks(loadedMonthLocks);
     } catch (err: any) {
       setError(err?.message || "Failed to load month locks");
       setErrorDetails(err);
@@ -814,6 +833,24 @@ export function useMoneyTransactionsPage() {
   }, [monthLocks, selectedLockMonth]);
 
   const selectedMonthLocked = Boolean(selectedMonthLock?.is_locked);
+
+  /**
+   * These simple arrays are passed into the transactions grid and table.
+   * They keep the top lock banner, row buttons and read-only checks in sync.
+   */
+  const lockedYears = useMemo(() => {
+    return yearLocks
+      .filter((item) => item.is_locked === true)
+      .map((item) => String(item.year))
+      .filter(Boolean);
+  }, [yearLocks]);
+
+  const lockedMonths = useMemo(() => {
+    return monthLocks
+      .filter((item) => item.is_locked === true)
+      .map((item) => String(item.month_key))
+      .filter(Boolean);
+  }, [monthLocks]);
 
   function isYearLocked(year: string) {
     return yearLocks.some(
@@ -2420,20 +2457,38 @@ export function useMoneyTransactionsPage() {
     return true;
   }
 
-  async function updateYearLock(action: "lock" | "unlock") {
+  async function updateYearLock(
+    action: "lock" | "unlock",
+    passwordFromPanel?: string
+  ) {
+    const scrollTop =
+      typeof window !== "undefined" ? window.scrollY : 0;
+
     try {
       setLockingYear(true);
       setError("");
       setErrorDetails(null);
 
-      const cleanPassword = yearLockPassword.trim();
+      /**
+       * IMPORTANT:
+       * MoneyYearLockPanel passes the password directly into onLockYear() and
+       * onUnlockYear(). Use that value first because React state updates are
+       * asynchronous and yearLockPassword may still contain the previous
+       * value during the same click.
+       */
+      const cleanPassword = String(
+        passwordFromPanel || yearLockPassword || ""
+      ).trim();
 
       if (!cleanPassword) {
         setError("Please enter the main admin password.");
-        setLockingYear(false);
         return;
       }
 
+      /**
+       * Keep the fast validation check for a clearer message in the UI.
+       * The year-lock API verifies the password again on the server.
+       */
       await verifyMainAdminDeletePassword(cleanPassword);
 
       const res = await fetch("/api/admin/money/year-locks", {
@@ -2441,9 +2496,17 @@ export function useMoneyTransactionsPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        cache: "no-store",
         body: JSON.stringify({
           year: selectedYear,
+          selectedYear,
+          yearKey: selectedYear,
+          periodKey: selectedYear,
+          lockType: "year",
           action,
+          password: cleanPassword,
+          mainAdminPassword: cleanPassword,
+          yearLockPassword: cleanPassword,
         }),
       });
 
@@ -2462,30 +2525,64 @@ export function useMoneyTransactionsPage() {
       }
 
       setYearLockPassword("");
-      await loadYearLocks();
+
+      /**
+       * Reload all lock information immediately so the page banner and every
+       * transaction button update without requiring a manual refresh.
+       */
+      await Promise.all([
+        loadYearLocks(),
+        loadMonthLocks(),
+        loadTransactions(),
+      ]);
+
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          window.scrollTo({
+            top: scrollTop,
+            left: 0,
+            behavior: "auto",
+          });
+        });
+      }
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
+
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          window.scrollTo({
+            top: scrollTop,
+            left: 0,
+            behavior: "auto",
+          });
+        });
+      }
     } finally {
       setLockingYear(false);
     }
   }
 
-  async function lockSelectedYear() {
-    await updateYearLock("lock");
+  async function lockSelectedYear(passwordFromPanel?: string) {
+    await updateYearLock("lock", passwordFromPanel);
   }
 
-  async function unlockSelectedYear() {
-    await updateYearLock("unlock");
+  async function unlockSelectedYear(passwordFromPanel?: string) {
+    await updateYearLock("unlock", passwordFromPanel);
   }
 
-  async function updateMonthLock(action: "lock" | "unlock") {
+  async function updateMonthLock(
+    action: "lock" | "unlock",
+    passwordFromPanel?: string
+  ) {
     try {
       setLockingMonth(true);
       setError("");
       setErrorDetails(null);
 
-      const cleanPassword = monthLockPassword.trim();
+      const cleanPassword = String(
+        passwordFromPanel || monthLockPassword || ""
+      ).trim();
 
       if (!cleanPassword) {
         setError("Please enter the main admin password.");
@@ -2506,10 +2603,16 @@ export function useMoneyTransactionsPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        cache: "no-store",
         body: JSON.stringify({
           year: selectedYear,
           monthKey: selectedLockMonth,
+          periodKey: selectedLockMonth,
+          lockType: "month",
           action,
+          password: cleanPassword,
+          mainAdminPassword: cleanPassword,
+          monthLockPassword: cleanPassword,
         }),
       });
 
@@ -2528,7 +2631,12 @@ export function useMoneyTransactionsPage() {
       }
 
       setMonthLockPassword("");
-      await loadMonthLocks();
+
+      await Promise.all([
+        loadMonthLocks(),
+        loadYearLocks(),
+        loadTransactions(),
+      ]);
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -2537,12 +2645,12 @@ export function useMoneyTransactionsPage() {
     }
   }
 
-  async function lockSelectedMonth() {
-    await updateMonthLock("lock");
+  async function lockSelectedMonth(passwordFromPanel?: string) {
+    await updateMonthLock("lock", passwordFromPanel);
   }
 
-  async function unlockSelectedMonth() {
-    await updateMonthLock("unlock");
+  async function unlockSelectedMonth(passwordFromPanel?: string) {
+    await updateMonthLock("unlock", passwordFromPanel);
   }
 
   async function deleteSelectedYearTransactions() {
@@ -3238,6 +3346,7 @@ export function useMoneyTransactionsPage() {
     saveBudgetItems,
 
     yearLocks,
+    lockedYears,
     selectedYearLock,
     selectedYearLocked,
     yearLockPassword,
@@ -3245,6 +3354,7 @@ export function useMoneyTransactionsPage() {
     lockingYear,
 
     monthLocks,
+    lockedMonths,
     selectedLockMonth,
     setSelectedLockMonth,
     selectedMonthLock,

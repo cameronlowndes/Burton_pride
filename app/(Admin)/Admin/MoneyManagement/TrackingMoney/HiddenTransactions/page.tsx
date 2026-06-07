@@ -8,6 +8,8 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  Settings2,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -46,6 +48,8 @@ type Transaction = {
   deleted_at: string | null;
   deleted_by?: string | null;
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-hidden-transactions-easy-mode";
 
 function money(amountPence: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -134,6 +138,13 @@ function isSponsorshipTransaction(item: Transaction) {
 }
 
 export default function HiddenTransactionsPage() {
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is only enabled after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -145,6 +156,34 @@ export default function HiddenTransactionsPage() {
 
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   async function loadHiddenTransactions() {
     try {
@@ -355,6 +394,53 @@ export default function HiddenTransactionsPage() {
           </div>
         </section>
 
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-emerald-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps the hidden-payments table focused on the main details and actions."
+                  : "Full Mode shows every saved detail, including hidden admin, source, sponsor, supplier, personal-funds information, and invoice links."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
         {error && (
           <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5">
             <div className="flex items-center gap-2 font-bold text-red-100">
@@ -394,8 +480,9 @@ export default function HiddenTransactionsPage() {
             <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold">Hidden Payments</h2>
               <p className="text-sm text-white/50">
-                Restore a payment to bring it back into the main tracker. The
-                Hidden By column shows which admin hid it.
+                {easyMode
+                  ? "Restore a payment to bring it back into the main tracker, or permanently delete it when it is no longer needed."
+                  : "Restore a payment to bring it back into the main tracker. The Hidden By column shows which admin hid it."}
               </p>
             </div>
 
@@ -420,20 +507,38 @@ export default function HiddenTransactionsPage() {
             </div>
           ) : (
             <div className="w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
-              <table className="w-full min-w-[1650px] text-sm">
+              <table
+                className={`w-full text-sm ${
+                  easyMode ? "min-w-[900px]" : "min-w-[1650px]"
+                }`}
+              >
                 <thead className="bg-white/10 text-white/60">
                   <tr>
                     <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Hidden On</th>
-                    <th className="p-3 text-left">Hidden By</th>
+                    {!easyMode && (
+                      <th className="p-3 text-left">Hidden On</th>
+                    )}
+                    {!easyMode && (
+                      <th className="p-3 text-left">Hidden By</th>
+                    )}
                     <th className="p-3 text-left">Title</th>
                     <th className="p-3 text-left">Type</th>
-                    <th className="p-3 text-left">Source</th>
-                    <th className="p-3 text-left">Sponsor</th>
-                    <th className="p-3 text-left">Supplier</th>
-                    <th className="p-3 text-left">Personal</th>
+                    {!easyMode && (
+                      <th className="p-3 text-left">Source</th>
+                    )}
+                    {!easyMode && (
+                      <th className="p-3 text-left">Sponsor</th>
+                    )}
+                    {!easyMode && (
+                      <th className="p-3 text-left">Supplier</th>
+                    )}
+                    {!easyMode && (
+                      <th className="p-3 text-left">Personal</th>
+                    )}
                     <th className="p-3 text-left">Payment</th>
-                    <th className="p-3 text-left">Invoice</th>
+                    {!easyMode && (
+                      <th className="p-3 text-left">Invoice</th>
+                    )}
                     <th className="p-3 text-right">Amount</th>
                     <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
                       Action
@@ -452,18 +557,22 @@ export default function HiddenTransactionsPage() {
                           {formatDate(item.transaction_date || item.created_at)}
                         </td>
 
-                        <td className="whitespace-nowrap p-3 text-red-200">
-                          {formatDate(item.deleted_at)}
-                        </td>
+                        {!easyMode && (
+                          <td className="whitespace-nowrap p-3 text-red-200">
+                            {formatDate(item.deleted_at)}
+                          </td>
+                        )}
 
-                        <td className="max-w-[190px] p-3">
-                          <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
-                            <p className="font-bold">Hidden by</p>
-                            <p className="mt-1 break-words">
-                              {displayAdminName(item.deleted_by)}
-                            </p>
-                          </div>
-                        </td>
+                        {!easyMode && (
+                          <td className="max-w-[190px] p-3">
+                            <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
+                              <p className="font-bold">Hidden by</p>
+                              <p className="mt-1 break-words">
+                                {displayAdminName(item.deleted_by)}
+                              </p>
+                            </div>
+                          </td>
+                        )}
 
                         <td className="max-w-[240px] p-3">
                           <p className="break-words font-semibold">
@@ -481,6 +590,13 @@ export default function HiddenTransactionsPage() {
                               {item.sponsorship_note}
                             </p>
                           )}
+
+                          {easyMode && (
+                            <p className="mt-2 text-xs text-white/45">
+                              Hidden {formatDate(item.deleted_at)} by{" "}
+                              {displayAdminName(item.deleted_by)}
+                            </p>
+                          )}
                         </td>
 
                         <td className="whitespace-nowrap p-3">
@@ -495,75 +611,85 @@ export default function HiddenTransactionsPage() {
                           </span>
                         </td>
 
-                        <td className="whitespace-nowrap p-3">
-                          {sourceLabel(item.source)}
-                        </td>
+                        {!easyMode && (
+                          <td className="whitespace-nowrap p-3">
+                            {sourceLabel(item.source)}
+                          </td>
+                        )}
 
-                        <td className="max-w-[180px] p-3">
-                          {hasSponsor ? (
-                            <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
-                              {item.sponsor_name || "Sponsor"}
-                            </span>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
-
-                        <td className="max-w-[200px] p-3">
-                          {item.supplier_name ? (
-                            <div className="space-y-1">
-                              <span className="inline-flex rounded-2xl bg-cyan-500/15 px-3 py-1 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20">
-                                {item.supplier_name}
+                        {!easyMode && (
+                          <td className="max-w-[180px] p-3">
+                            {hasSponsor ? (
+                              <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
+                                {item.sponsor_name || "Sponsor"}
                               </span>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
+                        )}
 
-                              {item.supplier_category && (
-                                <p className="text-xs text-cyan-100/65">
-                                  {item.supplier_category}
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
+                        {!easyMode && (
+                          <td className="max-w-[200px] p-3">
+                            {item.supplier_name ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex rounded-2xl bg-cyan-500/15 px-3 py-1 text-xs font-bold text-cyan-100 ring-1 ring-cyan-300/20">
+                                  {item.supplier_name}
+                                </span>
 
-                        <td className="p-3">
-                          {isPersonal ? (
-                            <div className="space-y-1">
-                              <span className="inline-flex whitespace-nowrap rounded-2xl bg-sky-500/20 px-3 py-1 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20">
-                                Personal funds
-                              </span>
+                                {item.supplier_category && (
+                                  <p className="text-xs text-cyan-100/65">
+                                    {item.supplier_category}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
+                        )}
 
-                              {item.personal_funds_name && (
-                                <p className="text-xs text-sky-100/70">
-                                  {item.personal_funds_name}
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
+                        {!easyMode && (
+                          <td className="p-3">
+                            {isPersonal ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex whitespace-nowrap rounded-2xl bg-sky-500/20 px-3 py-1 text-xs font-bold text-sky-100 ring-1 ring-sky-300/20">
+                                  Personal funds
+                                </span>
+
+                                {item.personal_funds_name && (
+                                  <p className="text-xs text-sky-100/70">
+                                    {item.personal_funds_name}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
+                        )}
 
                         <td className="whitespace-nowrap p-3">
                           {item.payment_method || "—"}
                         </td>
 
-                        <td className="p-3">
-                          {item.invoice_image_url ? (
-                            <a
-                              href={item.invoice_image_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
-                            >
-                              <FileText className="h-4 w-4" />
-                              View
-                            </a>
-                          ) : (
-                            <span className="text-white/40">—</span>
-                          )}
-                        </td>
+                        {!easyMode && (
+                          <td className="p-3">
+                            {item.invoice_image_url ? (
+                              <a
+                                href={item.invoice_image_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+                              >
+                                <FileText className="h-4 w-4" />
+                                View
+                              </a>
+                            ) : (
+                              <span className="text-white/40">—</span>
+                            )}
+                          </td>
+                        )}
 
                         <td className="whitespace-nowrap p-3 text-right font-bold">
                           {money(item.amount_pence)}

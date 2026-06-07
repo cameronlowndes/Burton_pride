@@ -257,6 +257,7 @@ type MoneyTransactionFormProps = {
 
 const paymentMethods = [
   "Stripe",
+  "Received Donation",
   "Online Payment",
   "Cash",
   "Bank Transfer",
@@ -265,15 +266,24 @@ const paymentMethods = [
   "Personal Funds",
   "Item Donation",
   "Other Types",
+  "Ticket Sales",
+  "Refund Received",
+  "Cheque",
+  "Direct Debit"
 ];
 
 const loanRepaymentPaymentMethods = [
   "Bank Transfer",
+  "Received Donation",
   "Online Payment",
   "Cash",
   "Card Machine",
   "PayPal",
   "Other Types",
+  "Ticket Sales",
+  "Refund Received",
+  "Cheque",
+  "Direct Debit"
 ];
 
 const loanTransactionModes = [
@@ -414,6 +424,7 @@ export default function MoneyTransactionForm({
   const [fundingOverspendWarningOpen, setFundingOverspendWarningOpen] =
     useState(false);
   const [testMessageOpen, setTestMessageOpen] = useState(false);
+  const [easyMode, setEasyMode] = useState(true);
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
@@ -453,6 +464,17 @@ export default function MoneyTransactionForm({
   );
   const isPersonalFundsPayment =
     form.paymentMethod === "Personal Funds" || Boolean(form.isPersonalFunds);
+
+  const hasAdvancedValues = Boolean(
+    form.sponsorId ||
+      selectedSupplierId ||
+      selectedSupplierName ||
+      selectedBudgetCategory ||
+      (form.financeNoteStatus && form.financeNoteStatus !== "none") ||
+      form.financeNote?.trim() ||
+      form.isRepeating ||
+      selectedReceiptDueDate,
+  );
 
   const canManuallyLinkBudget = !isItemDonation && !isPersonalFundsPayment;
 
@@ -719,10 +741,23 @@ export default function MoneyTransactionForm({
   }
 
   function resetWarnings() {
-    setDuplicateWarning(null);
-    setDuplicateError(null);
-    setMissingReceiptWarningOpen(false);
-    setFundingOverspendWarningOpen(false);
+    // Keep typing fast: do not fire four state updates on every key press
+    // when the warnings are already closed/empty.
+    if (duplicateWarning) {
+      setDuplicateWarning(null);
+    }
+
+    if (duplicateError) {
+      setDuplicateError(null);
+    }
+
+    if (missingReceiptWarningOpen) {
+      setMissingReceiptWarningOpen(false);
+    }
+
+    if (fundingOverspendWarningOpen) {
+      setFundingOverspendWarningOpen(false);
+    }
   }
 
   return (
@@ -763,6 +798,37 @@ export default function MoneyTransactionForm({
               This is a test
             </div>
           )}
+        </div>
+
+        <div className="mb-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-black text-sky-100">
+                {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-sky-100/70">
+                {easyMode
+                  ? "Only the main transaction fields are shown. Use Full Mode when you need funding, supplier, budget, finance note, repeating payment, or receipt due date options."
+                  : "All transaction options are shown."}
+              </p>
+
+              {easyMode && hasAdvancedValues && (
+                <p className="mt-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs font-bold leading-5 text-amber-100 ring-1 ring-amber-300/20">
+                  This transaction already contains advanced details. They are
+                  still saved, but hidden while Easy Mode is on.
+                </p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setEasyMode((previous) => !previous)}
+              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-500 px-4 py-3 text-sm font-black text-black transition hover:bg-sky-400"
+            >
+              {easyMode ? "Show Full Mode" : "Use Easy Mode"}
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -923,7 +989,7 @@ export default function MoneyTransactionForm({
             )}
           </div>
 
-          {isItemDonation ? (
+          {!easyMode && (isItemDonation ? (
             <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
               <p className="font-black text-white">Item donation record</p>
 
@@ -1245,7 +1311,7 @@ export default function MoneyTransactionForm({
                 Add New Funding
               </button>
             </div>
-          )}
+          ))}
 
           {form.sponsorId && (!isLoanFunding || isLoanSpending) ? (
             <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm text-amber-100">
@@ -1429,7 +1495,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!isItemDonation && !isPersonalFundsPayment && (
+          {!easyMode && !isItemDonation && !isPersonalFundsPayment && (
             <div className="rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
               <label className="mb-1 flex items-center gap-2 text-sm font-black text-violet-100">
                 <Building2 className="h-4 w-4" />
@@ -1550,7 +1616,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {canManuallyLinkBudget && (
+          {!easyMode && canManuallyLinkBudget && (
             <div className="rounded-xl border border-pink-300/25 bg-pink-500/10 p-3 ring-1 ring-pink-300/10">
               <label className="mb-1 block text-sm font-black text-pink-100">
                 Which budget is this going to?
@@ -1627,7 +1693,8 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
+          {!easyMode && (
+            <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
             <label className="mb-1 block text-sm font-bold text-cyan-100">
               Finance notes and queries
             </label>
@@ -1695,9 +1762,10 @@ export default function MoneyTransactionForm({
                 Tip: add a short note so another admin knows what needs doing.
               </p>
             )}
-          </div>
+            </div>
+          )}
 
-          {!editingTransaction && (
+          {!easyMode && !editingTransaction && (
             <div className="rounded-xl border border-purple-300/20 bg-purple-500/10 p-3">
               <label className="flex items-start gap-3">
                 <input
@@ -1805,7 +1873,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {editingTransaction && (
+          {!easyMode && editingTransaction && (
             <div className="rounded-xl border border-purple-300/20 bg-purple-500/10 p-3 text-xs text-purple-100/80">
               Repeating payments can only be created when adding a new
               transaction, not while editing an existing one.
@@ -1904,7 +1972,7 @@ export default function MoneyTransactionForm({
             </p>
           </div>
 
-          {!isItemDonation && (
+          {!easyMode && !isItemDonation && (
             <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
               <label className="mb-1 block text-sm font-black text-amber-100">
                 Receipt due date

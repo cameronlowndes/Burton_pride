@@ -50,6 +50,16 @@ function createSessionToken() {
   return Buffer.from(`${Date.now()}:${random}`).toString("base64url");
 }
 
+function getCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 12,
+  };
+}
+
 async function checkSupabaseAuthPassword(email: string, password: string) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -129,7 +139,7 @@ export async function POST(req: Request) {
         status: 500,
         error: "The admin login system could not read the admin_users table.",
         likelyFix:
-          "Check Supabase. Make sure the admin_users table exists and has id, email, password_hash, role and is_active columns.",
+          "Check Supabase. Make sure the admin_users table exists and has id, email, password_hash, role, is_active and supabase_user_id columns.",
         debug: adminError,
       });
     }
@@ -139,7 +149,7 @@ export async function POST(req: Request) {
         status: 401,
         error: "Invalid login credentials.",
         likelyFix:
-          "No admin account was found with that email address in admin_users. Add this email to admin_users first.",
+          "No admin account was found with that email address in admin_users.",
       });
     }
 
@@ -153,8 +163,10 @@ export async function POST(req: Request) {
     }
 
     let passwordOk = false;
-    let loginMethod: "admin_users_password_hash" | "supabase_auth_password" | null =
-      null;
+    let loginMethod:
+      | "admin_users_password_hash"
+      | "supabase_auth_password"
+      | null = null;
 
     if (admin.password_hash) {
       passwordOk = await bcrypt.compare(password, admin.password_hash);
@@ -165,7 +177,10 @@ export async function POST(req: Request) {
     }
 
     if (!passwordOk) {
-      const supabaseAuthResult = await checkSupabaseAuthPassword(email, password);
+      const supabaseAuthResult = await checkSupabaseAuthPassword(
+        email,
+        password
+      );
 
       if (supabaseAuthResult.ok) {
         passwordOk = true;
@@ -191,44 +206,33 @@ export async function POST(req: Request) {
         status: 401,
         error: "Invalid login credentials.",
         likelyFix:
-          "Password did not match admin_users.password_hash or Supabase Authentication Users. Try the password from Supabase Auth, or set admin_users.password_hash from the Admin Portal.",
+          "Password did not match admin_users.password_hash or Supabase Auth.",
       });
     }
 
     const cookieStore = await cookies();
     const sessionToken = createSessionToken();
+    const cookieOptions = getCookieOptions();
+    const adminId = String(admin.id);
+    const adminEmail = cleanEmail(admin.email);
 
-    cookieStore.set(SESSION_COOKIE, sessionToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 12,
-    });
+    cookieStore.set(SESSION_COOKIE, sessionToken, cookieOptions);
+    cookieStore.set(ADMIN_ID_COOKIE, adminId, cookieOptions);
+    cookieStore.set(ADMIN_EMAIL_COOKIE, adminEmail, cookieOptions);
 
-    cookieStore.set(ADMIN_ID_COOKIE, String(admin.id), {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 12,
-    });
-
-    cookieStore.set(ADMIN_EMAIL_COOKIE, String(admin.email), {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 12,
-    });
+    cookieStore.set("admin_user_id", adminId, cookieOptions);
+    cookieStore.set("admin_id", adminId, cookieOptions);
+    cookieStore.set("admin_email", adminEmail, cookieOptions);
+    cookieStore.set("bp_admin_id", adminId, cookieOptions);
+    cookieStore.set("bp_admin_email", adminEmail, cookieOptions);
 
     return NextResponse.json({
       ok: true,
       message: "Signed in successfully.",
       loginMethod,
       admin: {
-        id: String(admin.id),
-        email: String(admin.email),
+        id: adminId,
+        email: adminEmail,
         full_name: admin.full_name ?? null,
         role: admin.role ?? null,
       },
@@ -240,7 +244,7 @@ export async function POST(req: Request) {
       status: 500,
       error: error?.message || "Something went wrong while signing in.",
       likelyFix:
-        "Check the Next.js terminal logs. Also make sure bcryptjs is installed and Supabase env vars are set.",
+        "Check the Next.js terminal logs. Make sure bcryptjs is installed and Supabase env vars are set.",
       debug: error,
     });
   }

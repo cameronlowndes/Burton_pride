@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ElementType } from "react";
 import {
   AlertTriangle,
@@ -26,6 +26,7 @@ import {
   RotateCcw,
   ScrollText,
   Search,
+  Settings2,
   ShieldCheck,
   Sparkles,
   Star,
@@ -85,6 +86,8 @@ type Props = {
   defaultYear: number;
   exportItems: ExportItem[];
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-money-exports-easy-mode";
 
 const ICONS: Record<IconKey, ElementType> = {
   archive: FileArchive,
@@ -766,6 +769,13 @@ export default function MoneyExportsClient({
   defaultYear,
   exportItems,
 }: Props) {
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] =
@@ -774,6 +784,41 @@ export default function MoneyExportsClient({
   const [status, setStatus] = useState<PageStatus>(null);
   const [showGuide, setShowGuide] = useState(true);
   const [compactMode, setCompactMode] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      if (next) {
+        // Avoid leaving hidden advanced filters active.
+        setSearch("");
+        setSelectedCategory("all");
+        setShowGuide(false);
+      }
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   const years = useMemo(() => {
     const current = new Date().getFullYear();
@@ -1067,6 +1112,7 @@ export default function MoneyExportsClient({
   }
 
   const hasFilters = search.trim() || selectedCategory !== "all";
+  const useCompactCards = easyMode || compactMode;
 
   return (
     <>
@@ -1223,50 +1269,53 @@ export default function MoneyExportsClient({
               </h2>
 
               <p className="mt-3 max-w-5xl text-sm leading-6 text-white/75 sm:text-base">
-                The Accountant Export Pack is the easiest option. It creates one
-                ZIP file with the yearly report, transaction list, receipts
-                index, audit logs, funding breakdown, personal funds report, CSV
-                import history, and refund tracker report.
+                {easyMode
+                  ? "Download the full accountant pack when you want everything together in one ZIP file."
+                  : "The Accountant Export Pack is the easiest option. It creates one ZIP file with the yearly report, transaction list, receipts index, audit logs, funding breakdown, personal funds report, CSV import history, and refund tracker report."}
               </p>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                  <div className="text-2xl font-black text-white">
-                    {exportStats.total}
+              {!easyMode && (
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                    <div className="text-2xl font-black text-white">
+                      {exportStats.total}
+                    </div>
+                    <div className="text-xs font-bold text-white/50">
+                      Export options
+                    </div>
                   </div>
-                  <div className="text-xs font-bold text-white/50">
-                    Export options
+
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                    <div className="text-2xl font-black text-white">
+                      {exportStats.excel}
+                    </div>
+                    <div className="text-xs font-bold text-white/50">
+                      Excel reports
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                    <div className="text-2xl font-black text-white">
+                      {exportStats.zip}
+                    </div>
+                    <div className="text-xs font-bold text-white/50">
+                      ZIP packs
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                  <div className="text-2xl font-black text-white">
-                    {exportStats.excel}
-                  </div>
-                  <div className="text-xs font-bold text-white/50">
-                    Excel reports
-                  </div>
+              {!easyMode && (
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <Link
+                    href="/Admin/MoneyManagement/TrackingMoney/Exports/Logs"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                  >
+                    <History className="h-4 w-4" />
+                    View export logs
+                  </Link>
                 </div>
-
-                <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                  <div className="text-2xl font-black text-white">
-                    {exportStats.zip}
-                  </div>
-                  <div className="text-xs font-bold text-white/50">
-                    ZIP packs
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/Exports/Logs"
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/15"
-                >
-                  <History className="h-4 w-4" />
-                  View export logs
-                </Link>
-              </div>
+              )}
             </div>
 
             <div className="rounded-[1.75rem] border border-white/10 bg-slate-950/30 p-4">
@@ -1292,7 +1341,54 @@ export default function MoneyExportsClient({
           </div>
         </section>
 
-        {showGuide && <HelpPanel />}
+        <section className="money-print-hidden rounded-[2rem] border border-white/10 bg-white/10 p-4 shadow-2xl backdrop-blur-xl sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-emerald-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps exports simple: choose the year, download the accountant pack, or download an individual report."
+                  : "Full Mode shows search, categories, print tools, export logs, help panels, and full report contents."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
+        {!easyMode && showGuide && <HelpPanel />}
 
         <section className="money-print-hidden w-full rounded-[2rem] border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur-xl">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end">
@@ -1317,107 +1413,115 @@ export default function MoneyExportsClient({
               </select>
             </label>
 
-            <label className="block flex-1">
-              <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
-                <Search className="h-4 w-4 text-blue-200" />
-                Search exports
-              </span>
+            {!easyMode && (
+              <label className="block flex-1">
+                <span className="mb-2 flex items-center gap-2 text-sm font-black text-white">
+                  <Search className="h-4 w-4 text-blue-200" />
+                  Search exports
+                </span>
 
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search accountant, receipts, refunds, audit logs, funding, personal funds..."
-                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-blue-300/30 placeholder:text-white/35 focus:ring-4"
-              />
-            </label>
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search accountant, receipts, refunds, audit logs, funding, personal funds..."
+                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm font-bold text-white outline-none ring-blue-300/30 placeholder:text-white/35 focus:ring-4"
+                />
+              </label>
+            )}
 
-            <div className="grid gap-3 sm:grid-cols-5 xl:w-auto">
-              <button
-                type="button"
-                onClick={printExportPage}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-white/90"
-              >
-                <Printer className="h-4 w-4" />
-                Print page
-              </button>
+            {!easyMode && (
+              <div className="grid gap-3 sm:grid-cols-5 xl:w-auto">
+                <button
+                  type="button"
+                  onClick={printExportPage}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-slate-950 transition hover:bg-white/90"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print page
+                </button>
 
-              <Link
-                href="/Admin/Money/ExportLogs"
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
-              >
-                <History className="h-4 w-4" />
-                Logs
-              </Link>
+                <Link
+                  href="/Admin/Money/ExportLogs"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                >
+                  <History className="h-4 w-4" />
+                  Logs
+                </Link>
 
-              <button
-                type="button"
-                onClick={() => setCompactMode((value) => !value)}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
-              >
-                <Filter className="h-4 w-4" />
-                {compactMode ? "Big cards" : "Compact"}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setCompactMode((value) => !value)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                >
+                  <Filter className="h-4 w-4" />
+                  {compactMode ? "Big cards" : "Compact"}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => setShowGuide((value) => !value)}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
-              >
-                <Info className="h-4 w-4" />
-                {showGuide ? "Hide guide" : "Show guide"}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowGuide((value) => !value)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
+                >
+                  <Info className="h-4 w-4" />
+                  {showGuide ? "Hide guide" : "Show guide"}
+                </button>
 
-              <button
-                type="button"
-                onClick={resetFilters}
-                disabled={!hasFilters}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Reset
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            {(Object.keys(CATEGORY_LABELS) as ExportCategory[]).map(
-              (category) => {
-                const active = selectedCategory === category;
-
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => setSelectedCategory(category)}
-                    title={CATEGORY_HELP[category]}
-                    className={classNames(
-                      "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black transition",
-                      active
-                        ? "border-emerald-300 bg-emerald-300 text-emerald-950"
-                        : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
-                    )}
-                  >
-                    {active && <BadgeCheck className="h-3.5 w-3.5" />}
-                    {CATEGORY_LABELS[category]}
-                  </button>
-                );
-              }
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  disabled={!hasFilters}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Reset
+                </button>
+              </div>
             )}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-white/65">
-            <div className="flex items-start gap-2">
-              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
+          {!easyMode && (
+            <>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {(Object.keys(CATEGORY_LABELS) as ExportCategory[]).map(
+                  (category) => {
+                    const active = selectedCategory === category;
 
-              <div>
-                <span className="font-black text-white">
-                  Showing {filteredItems.length} of {exportItems.length}{" "}
-                  exports.
-                </span>{" "}
-                {CATEGORY_HELP[selectedCategory]}
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => setSelectedCategory(category)}
+                        title={CATEGORY_HELP[category]}
+                        className={classNames(
+                          "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-black transition",
+                          active
+                            ? "border-emerald-300 bg-emerald-300 text-emerald-950"
+                            : "border-white/10 bg-white/10 text-white/75 hover:bg-white/15"
+                        )}
+                      >
+                        {active && <BadgeCheck className="h-3.5 w-3.5" />}
+                        {CATEGORY_LABELS[category]}
+                      </button>
+                    );
+                  }
+                )}
               </div>
-            </div>
-          </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm text-white/65">
+                <div className="flex items-start gap-2">
+                  <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
+
+                  <div>
+                    <span className="font-black text-white">
+                      Showing {filteredItems.length} of {exportItems.length}{" "}
+                      exports.
+                    </span>{" "}
+                    {CATEGORY_HELP[selectedCategory]}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           <StatusBox status={status} onClear={() => setStatus(null)} />
         </section>
@@ -1429,7 +1533,7 @@ export default function MoneyExportsClient({
         <section
           className={classNames(
             "money-print-grid grid w-full gap-5",
-            compactMode
+            useCompactCards
               ? "md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
               : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
           )}
@@ -1446,7 +1550,7 @@ export default function MoneyExportsClient({
                 key={item.key}
                 className={classNames(
                   "money-print-card group relative flex flex-col overflow-hidden rounded-[2rem] border p-5 shadow-2xl backdrop-blur-xl transition duration-200 hover:-translate-y-1 hover:bg-white/[0.13]",
-                  compactMode ? "min-h-[250px]" : "min-h-[370px]",
+                  useCompactCards ? "min-h-[250px]" : "min-h-[370px]",
                   item.colour
                 )}
               >
@@ -1478,9 +1582,11 @@ export default function MoneyExportsClient({
                   {item.title}
                 </h2>
 
-                <p className="relative mt-3 text-sm leading-6 text-white/70">
-                  {item.description}
-                </p>
+                {!easyMode && (
+                  <p className="relative mt-3 text-sm leading-6 text-white/70">
+                    {item.description}
+                  </p>
+                )}
 
                 <div className="relative mt-4 rounded-2xl border border-white/10 bg-slate-950/30 p-3 text-sm font-bold leading-5 text-white/80">
                   <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/45">
@@ -1490,22 +1596,24 @@ export default function MoneyExportsClient({
                   {getSimpleUse(item)}
                 </div>
 
-                <div className="relative mt-4">
-                  <div className="mb-2 text-xs font-black uppercase tracking-wide text-white/45">
-                    Includes
-                  </div>
+                {!easyMode && (
+                  <div className="relative mt-4">
+                    <div className="mb-2 text-xs font-black uppercase tracking-wide text-white/45">
+                      Includes
+                    </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {contents.map((content) => (
-                      <span
-                        key={content}
-                        className="money-print-badge rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-white/65"
-                      >
-                        {content}
-                      </span>
-                    ))}
+                    <div className="flex flex-wrap gap-2">
+                      {contents.map((content) => (
+                        <span
+                          key={content}
+                          className="money-print-badge rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-white/65"
+                        >
+                          {content}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="money-print-only mt-4 space-y-1">
                   <p className="money-print-small">
@@ -1539,16 +1647,18 @@ export default function MoneyExportsClient({
                     {isDownloading ? "Downloading..." : item.buttonText}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      printSingleExportItem(item, selectedYear, defaultYear)
-                    }
-                    className="relative mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/15"
-                  >
-                    <Printer className="h-4 w-4" />
-                    Print version
-                  </button>
+                  {!easyMode && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        printSingleExportItem(item, selectedYear, defaultYear)
+                      }
+                      className="relative mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/15"
+                    >
+                      <Printer className="h-4 w-4" />
+                      Print version
+                    </button>
+                  )}
                 </div>
               </article>
             );

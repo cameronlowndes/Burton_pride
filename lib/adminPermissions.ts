@@ -110,9 +110,26 @@ export type AdminLookupResult =
       details?: Record<string, unknown>;
     };
 
-const ADMIN_ID_COOKIE = "burton_admin_id";
-const ADMIN_EMAIL_COOKIE = "burton_admin_email";
-const SESSION_COOKIE = "burton_admin_session";
+const ADMIN_ID_COOKIES = [
+  "burton_admin_id",
+  "admin_user_id",
+  "admin_id",
+  "adminId",
+  "bp_admin_id",
+];
+
+const ADMIN_EMAIL_COOKIES = [
+  "burton_admin_email",
+  "admin_email",
+  "adminEmail",
+  "bp_admin_email",
+];
+
+const SESSION_COOKIES = [
+  "burton_admin_session",
+  "admin_session",
+  "bp_admin_session",
+];
 
 export const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -202,6 +219,14 @@ const MAIN_ADMIN_PERMISSIONS: AdminPermissions = Object.keys(
   return acc;
 }, {} as AdminPermissions);
 
+function clean(value: unknown) {
+  return String(value || "").trim();
+}
+
+function normaliseEmail(value: unknown) {
+  return clean(value).toLowerCase();
+}
+
 function permissionKeysToPermissionObject(
   keys: AdminPermissionKey[]
 ): AdminPermissions {
@@ -242,20 +267,34 @@ function maskValue(value: string | null | undefined) {
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
+function getFirstCookie(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  names: string[]
+) {
+  for (const name of names) {
+    const value = cookieStore.get(name)?.value;
+    if (value) return value;
+  }
+
+  return "";
+}
+
 export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
   const cookieStore = await cookies();
 
-  const adminId = cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
-  const adminEmail = cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
-  const sessionToken = cookieStore.get(SESSION_COOKIE)?.value || "";
+  const adminId = clean(getFirstCookie(cookieStore, ADMIN_ID_COOKIES));
+  const adminEmail = normaliseEmail(
+    getFirstCookie(cookieStore, ADMIN_EMAIL_COOKIES)
+  );
+  const sessionToken = clean(getFirstCookie(cookieStore, SESSION_COOKIES));
 
-  if (!adminId || !adminEmail || !sessionToken) {
+  if (!adminId && !adminEmail) {
     return {
       ok: false,
       reason: "missing_custom_admin_session",
       userId: null,
       sessionId: null,
-      email: adminEmail || null,
+      email: null,
       message: "No active Burton Pride admin session was received.",
       likelyFix:
         "Sign in again using the Admin Portal login page. The login route must set burton_admin_id, burton_admin_email and burton_admin_session cookies.",
@@ -263,18 +302,29 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
         hasAdminIdCookie: Boolean(adminId),
         hasAdminEmailCookie: Boolean(adminEmail),
         hasSessionCookie: Boolean(sessionToken),
+        acceptedIdCookies: ADMIN_ID_COOKIES,
+        acceptedEmailCookies: ADMIN_EMAIL_COOKIES,
+        acceptedSessionCookies: SESSION_COOKIES,
       },
     };
   }
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("admin_users")
     .select(
       "id, supabase_user_id, clerk_user_id, email, full_name, role, is_active"
     )
-    .eq("id", adminId)
-    .eq("email", adminEmail)
     .limit(2);
+
+  if (adminId && adminEmail) {
+    query = query.eq("id", adminId).eq("email", adminEmail);
+  } else if (adminId) {
+    query = query.eq("id", adminId);
+  } else {
+    query = query.eq("email", adminEmail);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("getCurrentAdminLookup admin_users query failed:", error);
@@ -282,9 +332,9 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_users_query_failed",
-      userId: adminId,
+      userId: adminId || null,
       sessionId: maskValue(sessionToken),
-      email: adminEmail,
+      email: adminEmail || null,
       message: "The admin user lookup failed in Supabase.",
       likelyFix:
         "Check public.admin_users exists and includes id, email, full_name, role and is_active.",
@@ -304,14 +354,15 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_duplicate",
-      userId: adminId,
+      userId: adminId || null,
       sessionId: maskValue(sessionToken),
-      email: adminEmail,
-      message: "More than one admin record exists for this admin ID and email.",
+      email: adminEmail || null,
+      message: "More than one admin record matched this login session.",
       likelyFix:
-        "Remove duplicate rows from public.admin_users and make id unique.",
+        "Remove duplicate rows from public.admin_users. Keep one row per admin account.",
       details: {
         maskedAdminId: maskValue(adminId),
+        signedInEmail: adminEmail,
         matchingRows: rows.length,
       },
     };
@@ -323,13 +374,13 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_missing",
-      userId: adminId,
+      userId: adminId || null,
       sessionId: maskValue(sessionToken),
-      email: adminEmail,
+      email: adminEmail || null,
       message:
         "Your admin session exists, but no matching admin record exists.",
       likelyFix:
-        "Check public.admin_users. Make sure the id and email match the cookies and is_active is true.",
+        "Check public.admin_users. Make sure the id/email in the cookies matches the admin_users row and is_active is true.",
       details: {
         signedInEmail: adminEmail,
         maskedAdminId: maskValue(adminId),
@@ -341,13 +392,14 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_record_inactive",
-      userId: adminId,
+      userId: String(admin.id),
       sessionId: maskValue(sessionToken),
-      email: adminEmail,
+      email: admin.email || adminEmail || null,
       message: "Your admin record exists but is inactive.",
       likelyFix: "Set public.admin_users.is_active to true for this user.",
       details: {
         adminId: admin.id,
+        email: admin.email,
       },
     };
   }
@@ -356,9 +408,9 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
     return {
       ok: false,
       reason: "admin_role_invalid",
-      userId: adminId,
+      userId: String(admin.id),
       sessionId: maskValue(sessionToken),
-      email: adminEmail,
+      email: admin.email || adminEmail || null,
       message: "Your admin record has an invalid role value.",
       likelyFix:
         'Set public.admin_users.role to "main_admin", "admin" or "editor".',
@@ -372,13 +424,16 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
   return {
     ok: true,
     reason: "ok",
-    userId: admin.id,
+    userId: String(admin.id),
     sessionId: maskValue(sessionToken),
     email: admin.email || adminEmail,
     admin: {
       ...admin,
+      id: String(admin.id),
       supabase_user_id: admin.supabase_user_id || null,
+      clerk_user_id: admin.clerk_user_id || null,
       email: admin.email || adminEmail,
+      full_name: admin.full_name || null,
     },
   };
 }
@@ -390,6 +445,7 @@ export async function getCurrentAdmin(): Promise<CurrentAdmin | null> {
     console.warn("getCurrentAdmin denied access:", {
       reason: result.reason,
       message: result.message,
+      likelyFix: result.likelyFix,
       details: result.details || null,
     });
 
@@ -501,6 +557,12 @@ export async function requireAdmin() {
   const admin = await getCurrentAdminPermissions();
 
   if (!admin) {
+    const lookup = await getCurrentAdminLookup();
+
+    if (!lookup.ok) {
+      throw new Error(`${lookup.message} ${lookup.likelyFix}`);
+    }
+
     throw new Error("Unauthorized. Burton Pride admin session was not found.");
   }
 

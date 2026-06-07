@@ -11,6 +11,8 @@ import {
   Loader2,
   RefreshCcw,
   Search,
+  Settings2,
+  Sparkles,
   TrendingDown,
   TrendingUp,
   UserRound,
@@ -53,6 +55,8 @@ type BatchDetails = {
   batch: ImportBatch;
   failedRows: FailedRow[];
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-import-history-easy-mode";
 
 function money(pence: number | null | undefined) {
   const value = Number(pence || 0) / 100;
@@ -148,6 +152,13 @@ function downloadFailedRowsCsv(details: BatchDetails) {
 }
 
 export default function ImportHistoryClient() {
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [imports, setImports] = useState<ImportBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -161,6 +172,34 @@ export default function ImportHistoryClient() {
   );
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   async function loadImports() {
     try {
@@ -267,7 +306,58 @@ export default function ImportHistoryClient() {
 
   return (
     <>
-      <section className="grid w-full max-w-none gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="mb-5 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-xl sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {easyMode ? (
+                <Sparkles className="h-5 w-5 text-emerald-200" />
+              ) : (
+                <Settings2 className="h-5 w-5 text-sky-200" />
+              )}
+
+              <h2 className="text-lg font-black text-white">
+                {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+              </h2>
+            </div>
+
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+              {easyMode
+                ? "Easy Mode keeps the CSV import history focused on batches, totals, failed rows, and downloads."
+                : "Full Mode shows admin details, net totals, and the original JSON data for failed rows."}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleEasyMode}
+            disabled={!modeLoaded}
+            className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+              easyMode
+                ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+            }`}
+          >
+            {easyMode ? (
+              <>
+                <Settings2 className="h-4 w-4" />
+                Show Full Mode
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Turn on Easy Mode
+              </>
+            )}
+          </button>
+        </div>
+      </section>
+
+      <section
+        className={`grid w-full max-w-none gap-4 sm:grid-cols-2 ${
+          easyMode ? "xl:grid-cols-4" : "xl:grid-cols-5"
+        }`}
+      >
         <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-white/60">Total imports</p>
@@ -276,13 +366,15 @@ export default function ImportHistoryClient() {
           <p className="mt-3 text-3xl font-black">{totals.imports}</p>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-bold text-white/60">Rows imported</p>
-            <CheckCircle2 className="h-5 w-5 text-emerald-200" />
+        {!easyMode && (
+          <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-white/60">Rows imported</p>
+              <CheckCircle2 className="h-5 w-5 text-emerald-200" />
+            </div>
+            <p className="mt-3 text-3xl font-black">{totals.rows}</p>
           </div>
-          <p className="mt-3 text-3xl font-black">{totals.rows}</p>
-        </div>
+        )}
 
         <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-xl">
           <div className="flex items-center justify-between">
@@ -371,17 +463,25 @@ export default function ImportHistoryClient() {
             </div>
           ) : (
             <div className="w-full max-w-none overflow-x-auto">
-              <table className="w-full min-w-[1200px] text-left text-sm">
+              <table
+                className={`w-full text-left text-sm ${
+                  easyMode ? "min-w-[950px]" : "min-w-[1200px]"
+                }`}
+              >
                 <thead className="bg-black/30 text-xs uppercase tracking-[0.18em] text-white/45">
                   <tr>
                     <th className="px-4 py-4">Date</th>
                     <th className="px-4 py-4">File</th>
-                    <th className="px-4 py-4">Imported by</th>
+                    {!easyMode && (
+                      <th className="px-4 py-4">Imported by</th>
+                    )}
                     <th className="px-4 py-4">Rows</th>
                     <th className="px-4 py-4">Failed</th>
                     <th className="px-4 py-4">Money in</th>
                     <th className="px-4 py-4">Money out</th>
-                    <th className="px-4 py-4">Net</th>
+                    {!easyMode && (
+                      <th className="px-4 py-4">Net</th>
+                    )}
                     <th className="px-4 py-4">Status</th>
                     <th className="px-4 py-4 text-right">View</th>
                   </tr>
@@ -406,19 +506,21 @@ export default function ImportHistoryClient() {
                         </p>
                       </td>
 
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-2">
-                          <UserRound className="h-4 w-4 text-white/35" />
-                          <div>
-                            <p className="font-bold text-white">
-                              {item.imported_by_name || "Unknown admin"}
-                            </p>
-                            <p className="text-xs text-white/45">
-                              {item.imported_by_email || "No email saved"}
-                            </p>
+                      {!easyMode && (
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-2">
+                            <UserRound className="h-4 w-4 text-white/35" />
+                            <div>
+                              <p className="font-bold text-white">
+                                {item.imported_by_name || "Unknown admin"}
+                              </p>
+                              <p className="text-xs text-white/45">
+                                {item.imported_by_email || "No email saved"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
+                      )}
 
                       <td className="px-4 py-4">
                         <p className="font-black text-white">
@@ -449,9 +551,11 @@ export default function ImportHistoryClient() {
                         {money(item.total_money_out_pence)}
                       </td>
 
-                      <td className="px-4 py-4 font-black text-white">
-                        {money(item.net_total_pence)}
-                      </td>
+                      {!easyMode && (
+                        <td className="px-4 py-4 font-black text-white">
+                          {money(item.net_total_pence)}
+                        </td>
+                      )}
 
                       <td className="px-4 py-4">
                         <span
@@ -521,7 +625,11 @@ export default function ImportHistoryClient() {
                 </div>
               ) : selectedDetails ? (
                 <div className="space-y-5">
-                  <section className="grid w-full max-w-none gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <section
+                    className={`grid w-full max-w-none gap-4 sm:grid-cols-2 ${
+                      easyMode ? "lg:grid-cols-2" : "lg:grid-cols-4"
+                    }`}
+                  >
                     <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                       <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
                         File
@@ -531,28 +639,32 @@ export default function ImportHistoryClient() {
                       </p>
                     </div>
 
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
-                        Imported by
-                      </p>
-                      <p className="mt-2 text-lg font-black">
-                        {selectedDetails.batch.imported_by_name ||
-                          "Unknown admin"}
-                      </p>
-                      <p className="mt-1 text-xs text-white/45">
-                        {selectedDetails.batch.imported_by_email ||
-                          "No email saved"}
-                      </p>
-                    </div>
+                    {!easyMode && (
+                      <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
+                          Imported by
+                        </p>
+                        <p className="mt-2 text-lg font-black">
+                          {selectedDetails.batch.imported_by_name ||
+                            "Unknown admin"}
+                        </p>
+                        <p className="mt-1 text-xs text-white/45">
+                          {selectedDetails.batch.imported_by_email ||
+                            "No email saved"}
+                        </p>
+                      </div>
+                    )}
 
-                    <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
-                        Date
-                      </p>
-                      <p className="mt-2 text-lg font-black">
-                        {formatDate(selectedDetails.batch.created_at)}
-                      </p>
-                    </div>
+                    {!easyMode && (
+                      <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
+                          Date
+                        </p>
+                        <p className="mt-2 text-lg font-black">
+                          {formatDate(selectedDetails.batch.created_at)}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                       <p className="text-xs font-black uppercase tracking-[0.18em] text-white/45">
@@ -619,6 +731,14 @@ export default function ImportHistoryClient() {
                     </div>
                   </section>
 
+                  {easyMode && (
+                    <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-100">
+                      Easy Mode hides the importing-admin details and raw JSON
+                      row data. Switch back to Full Mode to view the technical
+                      information.
+                    </div>
+                  )}
+
                   <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.06] p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
@@ -654,12 +774,18 @@ export default function ImportHistoryClient() {
                         </div>
                       ) : (
                         <div className="w-full max-w-none overflow-x-auto">
-                          <table className="w-full min-w-[950px] text-left text-sm">
+                          <table
+                            className={`w-full text-left text-sm ${
+                              easyMode ? "min-w-[640px]" : "min-w-[950px]"
+                            }`}
+                          >
                             <thead className="bg-black/30 text-xs uppercase tracking-[0.18em] text-white/45">
                               <tr>
                                 <th className="px-4 py-4">Row</th>
                                 <th className="px-4 py-4">Reason</th>
-                                <th className="px-4 py-4">Original data</th>
+                                {!easyMode && (
+                                  <th className="px-4 py-4">Original data</th>
+                                )}
                               </tr>
                             </thead>
 
@@ -674,11 +800,13 @@ export default function ImportHistoryClient() {
                                     {row.error_message}
                                   </td>
 
-                                  <td className="px-4 py-4">
-                                    <pre className="max-h-32 overflow-auto rounded-2xl bg-black/30 p-3 text-xs text-white/70">
-                                      {JSON.stringify(row.row_data || {}, null, 2)}
-                                    </pre>
-                                  </td>
+                                  {!easyMode && (
+                                    <td className="px-4 py-4">
+                                      <pre className="max-h-32 overflow-auto rounded-2xl bg-black/30 p-3 text-xs text-white/70">
+                                        {JSON.stringify(row.row_data || {}, null, 2)}
+                                      </pre>
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>

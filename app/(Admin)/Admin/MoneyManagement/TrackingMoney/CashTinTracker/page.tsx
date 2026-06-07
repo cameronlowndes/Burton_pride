@@ -11,6 +11,8 @@ import {
   PlusCircle,
   RefreshCcw,
   Save,
+  Settings2,
+  Sparkles,
   TestTube2,
   Trash2,
   X,
@@ -57,6 +59,8 @@ type CashTinForm = {
   bankedAt: string;
   notes: string;
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-cash-tin-tracker-easy-mode";
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -121,6 +125,13 @@ function formDifferencePence(form: CashTinForm) {
 export default function CashTinTrackerPage() {
   const moneyPage = useMoneyTransactionsPage();
 
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [cashTinDays, setCashTinDays] = useState<CashTinDay[]>([]);
   const [form, setForm] = useState<CashTinForm>(initialForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -133,6 +144,34 @@ export default function CashTinTrackerPage() {
 
   const [cashTinError, setCashTinError] = useState("");
   const [cashTinMessage, setCashTinMessage] = useState("");
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The page should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   async function loadCashTinDays() {
     try {
@@ -386,6 +425,53 @@ export default function CashTinTrackerPage() {
           }}
         />
 
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-amber-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                {easyMode
+                  ? "Easy Mode keeps the cash tin form focused on the main details needed for a fundraising day."
+                  : "Full Mode shows every cash tin field, including banking details, extra counters, location, starting cash, and notes."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                  : "bg-amber-500/15 text-amber-100 ring-amber-300/20 hover:bg-amber-500/25"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+
         <section className="w-full max-w-none overflow-hidden rounded-[2rem] border border-amber-300/20 bg-gradient-to-br from-amber-500/15 via-white/[0.04] to-white/[0.02] p-5 shadow-2xl sm:p-6 lg:p-8">
           <div className="flex min-w-0 flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0 flex-1">
@@ -399,9 +485,9 @@ export default function CashTinTrackerPage() {
               </h1>
 
               <p className="mt-3 max-w-5xl text-sm leading-6 text-white/65 sm:text-base">
-                Track cash fundraising days, starting cash, money received, cash
-                spent, money banked, who counted it, who banked it, and any
-                difference.
+                {easyMode
+                  ? "Add the main cash totals for each fundraising day and quickly check whether the banked amount matches."
+                  : "Track cash fundraising days, starting cash, money received, cash spent, money banked, who counted it, who banked it, and any difference."}
               </p>
 
               <div className="mt-5 flex flex-wrap gap-3">
@@ -480,14 +566,16 @@ export default function CashTinTrackerPage() {
           </div>
         </section>
 
-        <MoneyPageStatus
-          error={moneyPage.error || cashTinError}
-          errorDetails={moneyPage.errorDetails}
-          selectedYear={moneyPage.selectedYear}
-          selectedViewMonth={moneyPage.selectedViewMonth}
-          filteredTransactionsLength={moneyPage.filteredTransactions.length}
-          yearTransactionsLength={moneyPage.yearTransactions.length}
-        />
+        {(moneyPage.error || cashTinError || !easyMode) && (
+          <MoneyPageStatus
+            error={moneyPage.error || cashTinError}
+            errorDetails={moneyPage.errorDetails}
+            selectedYear={moneyPage.selectedYear}
+            selectedViewMonth={moneyPage.selectedViewMonth}
+            filteredTransactionsLength={moneyPage.filteredTransactions.length}
+            yearTransactionsLength={moneyPage.yearTransactions.length}
+          />
+        )}
 
         {cashTinMessage && (
           <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
@@ -506,18 +594,28 @@ export default function CashTinTrackerPage() {
                 Difference is calculated as: money banked minus cash received
                 after any cash spent.
               </p>
+
+              {easyMode && (
+                <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  Easy Mode hides optional fields. Switch back to Full Mode to
+                  add starting cash, location, banking details, a second
+                  counter, or notes.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={fillTestCashTinDay}
-                disabled={savingCashTin}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-3 text-sm font-black text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <TestTube2 className="h-4 w-4" />
-                Fill test cash tin
-              </button>
+              {!easyMode && (
+                <button
+                  type="button"
+                  onClick={fillTestCashTinDay}
+                  disabled={savingCashTin}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-3 text-sm font-black text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <TestTube2 className="h-4 w-4" />
+                  Fill test cash tin
+                </button>
+              )}
 
               {editingId && (
                 <button
@@ -558,34 +656,38 @@ export default function CashTinTrackerPage() {
               />
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Location
-              </label>
-              <input
-                type="text"
-                value={form.location}
-                onChange={(event) => updateForm("location", event.target.value)}
-                placeholder="Cooper Square, Boots, etc."
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Location
+                </label>
+                <input
+                  type="text"
+                  value={form.location}
+                  onChange={(event) => updateForm("location", event.target.value)}
+                  placeholder="Cooper Square, Boots, etc."
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Starting cash
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.startingCash}
-                onChange={(event) =>
-                  updateForm("startingCash", event.target.value)
-                }
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Starting cash
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.startingCash}
+                  onChange={(event) =>
+                    updateForm("startingCash", event.target.value)
+                  }
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-bold text-white/80">
@@ -665,58 +767,66 @@ export default function CashTinTrackerPage() {
               />
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Second counter
-              </label>
-              <input
-                type="text"
-                value={form.secondCounter}
-                onChange={(event) =>
-                  updateForm("secondCounter", event.target.value)
-                }
-                placeholder="Optional"
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Second counter
+                </label>
+                <input
+                  type="text"
+                  value={form.secondCounter}
+                  onChange={(event) =>
+                    updateForm("secondCounter", event.target.value)
+                  }
+                  placeholder="Optional"
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Banked by
-              </label>
-              <input
-                type="text"
-                value={form.bankedBy}
-                onChange={(event) => updateForm("bankedBy", event.target.value)}
-                placeholder="Who banked it?"
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Banked by
+                </label>
+                <input
+                  type="text"
+                  value={form.bankedBy}
+                  onChange={(event) => updateForm("bankedBy", event.target.value)}
+                  placeholder="Who banked it?"
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Date banked
-              </label>
-              <input
-                type="date"
-                value={form.bankedAt}
-                onChange={(event) => updateForm("bankedAt", event.target.value)}
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div>
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Date banked
+                </label>
+                <input
+                  type="date"
+                  value={form.bankedAt}
+                  onChange={(event) => updateForm("bankedAt", event.target.value)}
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
-            <div className="md:col-span-2 xl:col-span-4">
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Notes
-              </label>
-              <textarea
-                value={form.notes}
-                onChange={(event) => updateForm("notes", event.target.value)}
-                placeholder="Add any notes, reason for difference, cash spent details, or banking reference..."
-                rows={3}
-                className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
-              />
-            </div>
+            {!easyMode && (
+              <div className="md:col-span-2 xl:col-span-4">
+                <label className="mb-2 block text-sm font-bold text-white/80">
+                  Notes
+                </label>
+                <textarea
+                  value={form.notes}
+                  onChange={(event) => updateForm("notes", event.target.value)}
+                  placeholder="Add any notes, reason for difference, cash spent details, or banking reference..."
+                  rows={3}
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-amber-300/40"
+                />
+              </div>
+            )}
 
             <div className="md:col-span-2 xl:col-span-4">
               <button
@@ -764,18 +874,26 @@ export default function CashTinTrackerPage() {
           ) : (
             <div className="w-full max-w-none overflow-hidden rounded-2xl border border-white/10">
               <div className="w-full max-w-none overflow-x-auto">
-                <table className="w-full min-w-[1200px] text-left text-sm">
+                <table
+                  className={`w-full text-left text-sm ${
+                    easyMode ? "min-w-[860px]" : "min-w-[1200px]"
+                  }`}
+                >
                   <thead className="bg-white/10 text-xs uppercase tracking-wide text-white/55">
                     <tr>
                       <th className="px-4 py-3">Date</th>
                       <th className="px-4 py-3">Title</th>
-                      <th className="px-4 py-3">Starting</th>
+                      {!easyMode && (
+                        <th className="px-4 py-3">Starting</th>
+                      )}
                       <th className="px-4 py-3">Received</th>
                       <th className="px-4 py-3">Spent</th>
                       <th className="px-4 py-3">Banked</th>
                       <th className="px-4 py-3">Difference</th>
                       <th className="px-4 py-3">Counted by</th>
-                      <th className="px-4 py-3">Banked by</th>
+                      {!easyMode && (
+                        <th className="px-4 py-3">Banked by</th>
+                      )}
                       <th className="px-4 py-3">Actions</th>
                     </tr>
                   </thead>
@@ -807,9 +925,11 @@ export default function CashTinTrackerPage() {
                             )}
                           </td>
 
-                          <td className="px-4 py-4 font-bold text-white">
-                            {money(item.starting_cash_pence)}
-                          </td>
+                          {!easyMode && (
+                            <td className="px-4 py-4 font-bold text-white">
+                              {money(item.starting_cash_pence)}
+                            </td>
+                          )}
 
                           <td className="px-4 py-4 font-bold text-emerald-100">
                             {money(item.money_received_pence)}
@@ -847,14 +967,16 @@ export default function CashTinTrackerPage() {
                             )}
                           </td>
 
-                          <td className="px-4 py-4 text-white/75">
-                            <p>{item.banked_by || "Not added"}</p>
-                            {item.banked_at && (
-                              <p className="text-xs text-white/45">
-                                {item.banked_at}
-                              </p>
-                            )}
-                          </td>
+                          {!easyMode && (
+                            <td className="px-4 py-4 text-white/75">
+                              <p>{item.banked_by || "Not added"}</p>
+                              {item.banked_at && (
+                                <p className="text-xs text-white/45">
+                                  {item.banked_at}
+                                </p>
+                              )}
+                            </td>
+                          )}
 
                           <td className="px-4 py-4">
                             <div className="flex flex-wrap gap-2">
@@ -888,23 +1010,25 @@ export default function CashTinTrackerPage() {
           )}
         </section>
 
-        <div className="flex w-full flex-wrap gap-3">
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts"
-            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
-          >
-            <Home className="h-4 w-4" />
-            Dashboard
-          </Link>
+        {!easyMode && (
+          <div className="flex w-full flex-wrap gap-3">
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts"
+              className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
+            >
+              <Home className="h-4 w-4" />
+              Dashboard
+            </Link>
 
-          <Link
-            href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Transactions"
-            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Transactions
-          </Link>
-        </div>
+            <Link
+              href="/Admin/MoneyManagement/TrackingMoney/MoneyDashboardCharts/Transactions"
+              className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Transactions
+            </Link>
+          </div>
+        )}
       </div>
 
       {deleteConfirmItem && (

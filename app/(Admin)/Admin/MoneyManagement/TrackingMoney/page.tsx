@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -9,6 +10,8 @@ import {
   Coins,
   RefreshCcw,
   RotateCcw,
+  Settings2,
+  Sparkles,
 } from "lucide-react";
 
 import MoneyHeader from "../../components/money/MoneyHeader";
@@ -25,6 +28,7 @@ import MoneyPageModals from "../../components/money/MoneyPageModals";
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 const RECEIPT_REMINDER_DAYS = 7;
+const EASY_MODE_STORAGE_KEY = "burton-pride-money-tracker-easy-mode";
 
 function safeString(value: unknown) {
   if (typeof value === "string") return value;
@@ -39,6 +43,60 @@ function safeString(value: unknown) {
 
 function getHelpfulErrorMessage(message: string) {
   const lower = message.toLowerCase();
+
+  /**
+   * Check password-specific messages before the generic 403 permission check.
+   * A wrong lock password may correctly return HTTP 403, but that does not
+   * mean the signed-in admin account is missing money tracker permissions.
+   */
+  if (
+    lower.includes("main admin password is wrong") ||
+    lower.includes("password is wrong") ||
+    lower.includes("incorrect password")
+  ) {
+    return {
+      title: "Main admin password is wrong",
+      summary:
+        "The lock request reached the server, but the password entered does not match the saved main admin password.",
+      checks: [
+        "Enter the main admin password again carefully.",
+        "Make sure Caps Lock is not turned on.",
+        "Use the password configured in the Main Admin Delete Password page.",
+        "If the password was changed recently, refresh the page and try again.",
+      ],
+    };
+  }
+
+  if (
+    lower.includes("please enter the main admin password") ||
+    lower.includes("missing password")
+  ) {
+    return {
+      title: "Enter the main admin password",
+      summary:
+        "The lock request was blocked because no main admin password was entered.",
+      checks: [
+        "Enter the main admin password in the lock panel.",
+        "Then press the lock or unlock button again.",
+      ],
+    };
+  }
+
+  if (
+    lower.includes("no main admin password has been set") ||
+    lower.includes("password setting")
+  ) {
+    return {
+      title: "Main admin password has not been set",
+      summary:
+        "The yearly lock cannot be changed until a main admin password has been configured.",
+      checks: [
+        "Open the Main Admin Delete Password page.",
+        "Create or update the main admin password.",
+        "Return to the money tracker and try again.",
+      ],
+    };
+  }
 
   if (lower.includes("clerk") || lower.includes("@clerk/nextjs")) {
     return {
@@ -67,7 +125,11 @@ function getHelpfulErrorMessage(message: string) {
     };
   }
 
-  if (lower.includes("permission") || lower.includes("403")) {
+  if (
+    lower.includes("main admin access required") ||
+    lower.includes("permission") ||
+    lower.includes("403")
+  ) {
     return {
       title: "Permission missing",
       summary:
@@ -75,6 +137,7 @@ function getHelpfulErrorMessage(message: string) {
       checks: [
         "Open Admin Users & Permissions.",
         "Make sure your account has money:view.",
+        "Make sure your account is set as main_admin for lock and unlock actions.",
         "For website sync, make sure you have money:sync_website_payments.",
       ],
     };
@@ -176,6 +239,23 @@ function DetailedErrorBox({
 
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
+  const [easyMode, setEasyMode] = useState(false);
+
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+    if (savedMode === "full") {
+      setEasyMode(false);
+    }
+  }, []);
+
+  function changeEasyMode(nextEasyMode: boolean) {
+    setEasyMode(nextEasyMode);
+    window.localStorage.setItem(
+      EASY_MODE_STORAGE_KEY,
+      nextEasyMode ? "easy" : "full",
+    );
+  }
 
   return (
     <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
@@ -187,6 +267,59 @@ export default function MoneyTransactionsPage() {
           onRefresh={money.refreshAll}
         />
 
+        <section className="rounded-3xl border border-pink-300/20 bg-pink-500/10 p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-pink-500/20 text-pink-100 ring-1 ring-pink-300/20">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5" />
+                ) : (
+                  <Settings2 className="h-5 w-5" />
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-pink-100/65">
+                  Display mode
+                </p>
+
+                <h2 className="mt-1 text-xl font-black text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-white/65">
+                  {easyMode
+                    ? "The page is showing the main money tracker only. Advanced reports, syncing, account locks and management tools are hidden to keep the page simple."
+                    : "All money tracker tools are visible, including reports, website sync, alerts, account locks, funding details and monthly breakdowns."}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => changeEasyMode(!easyMode)}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-pink-100 lg:w-auto"
+            >
+              {easyMode ? (
+                <Settings2 className="h-4 w-4" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {easyMode ? "Show Full Mode" : "Use Easy Mode"}
+            </button>
+          </div>
+        </section>
+
+        {money.error ? (
+          <DetailedErrorBox
+            title="Money tracker error"
+            error={money.error}
+            details={money.errorDetails}
+          />
+        ) : null}
+
+        {!easyMode ? (
+          <>
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
@@ -236,14 +369,6 @@ export default function MoneyTransactionsPage() {
             </div>
           ) : null}
         </section>
-
-        {money.error ? (
-          <DetailedErrorBox
-            title="Money tracker error"
-            error={money.error}
-            details={money.errorDetails}
-          />
-        ) : null}
 
         <MoneyPageStatus
           error={money.error}
@@ -362,11 +487,6 @@ export default function MoneyTransactionsPage() {
           selectedLockMonth={money.selectedLockMonth}
           setSelectedLockMonth={money.setSelectedLockMonth}
           selectedMonthLocked={money.selectedMonthLocked}
-          monthLockPassword={money.monthLockPassword}
-          setMonthLockPassword={money.setMonthLockPassword}
-          lockingMonth={money.lockingMonth}
-          onLockMonth={money.lockSelectedMonth}
-          onUnlockMonth={money.unlockSelectedMonth}
         />
 
         <MoneyStatsCards totals={money.totals} />
@@ -388,6 +508,10 @@ export default function MoneyTransactionsPage() {
           selectedYear={money.selectedYear}
           transactions={money.transactions}
         />
+          </>
+        ) : (
+          <MoneyStatsCards totals={money.totals} />
+        )}
 
         <div id="money-transactions-table" data-money-transactions-table>
           <MoneyMainGrid

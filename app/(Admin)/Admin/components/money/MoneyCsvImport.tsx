@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -12,7 +12,9 @@ import {
   Loader2,
   RefreshCcw,
   Search,
+  Settings2,
   ShieldAlert,
+  Sparkles,
   Upload,
   X,
 } from "lucide-react";
@@ -73,6 +75,8 @@ type PreviewRow = {
   stripeCustomerId: string;
   stripePaymentIntentId: string;
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-money-csv-import-easy-mode";
 
 const DEFAULT_CATEGORIES = [
   "Bank Import",
@@ -553,6 +557,13 @@ function validatePreparedRow(row: ReturnType<typeof prepareRowForImport>) {
 export default function MoneyCsvImport() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is enabled only after the user turns it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<PreviewRow[]>([]);
   const [query, setQuery] = useState("");
@@ -560,6 +571,34 @@ export default function MoneyCsvImport() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The CSV importer should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   const filteredRows = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -1157,13 +1196,15 @@ export default function MoneyCsvImport() {
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Link
-            href="/admin/money/import-history"
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
-          >
-            <FileClock className="h-4 w-4" />
-            Import History
-          </Link>
+          {!easyMode && (
+            <Link
+              href="/admin/money/import-history"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
+            >
+              <FileClock className="h-4 w-4" />
+              Import History
+            </Link>
+          )}
 
           <input
             ref={inputRef}
@@ -1193,6 +1234,53 @@ export default function MoneyCsvImport() {
           </button>
         </div>
       </div>
+
+      <section className="mt-5 rounded-3xl border border-white/10 bg-black/20 p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              {easyMode ? (
+                <Sparkles className="h-5 w-5 text-emerald-200" />
+              ) : (
+                <Settings2 className="h-5 w-5 text-sky-200" />
+              )}
+
+              <h3 className="text-lg font-black text-white">
+                {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+              </h3>
+            </div>
+
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+              {easyMode
+                ? "Easy Mode shows the main CSV import fields only: title, type, amount and date. Duplicate warnings and import checks still stay visible."
+                : "Full Mode shows every CSV row field, including notes, categories, payment methods, sponsor details and personal-funds options."}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleEasyMode}
+            disabled={!modeLoaded}
+            className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+              easyMode
+                ? "bg-sky-500/15 text-sky-100 ring-sky-300/20 hover:bg-sky-500/25"
+                : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+            }`}
+          >
+            {easyMode ? (
+              <>
+                <Settings2 className="h-4 w-4" />
+                Show Full Mode
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Turn on Easy Mode
+              </>
+            )}
+          </button>
+        </div>
+      </section>
 
       {fileName && (
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
@@ -1335,15 +1423,17 @@ export default function MoneyCsvImport() {
                 Deselect all
               </button>
 
-              <button
-                type="button"
-                onClick={recheckDuplicates}
-                disabled={checkingDuplicates}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"
-              >
-                <RefreshCcw className="h-4 w-4" />
-                Recheck duplicates
-              </button>
+              {!easyMode && (
+                <button
+                  type="button"
+                  onClick={recheckDuplicates}
+                  disabled={checkingDuplicates}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-100 hover:bg-sky-500/20 disabled:opacity-50"
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  Recheck duplicates
+                </button>
+              )}
 
               {invalidRows.length > 0 && (
                 <button
@@ -1377,6 +1467,14 @@ export default function MoneyCsvImport() {
               {blockedDuplicateRows.length} selected duplicate row
               {blockedDuplicateRows.length === 1 ? "" : "s"} will be skipped
               unless you click <span className="font-black">Import anyway</span>.
+            </div>
+          )}
+
+          {easyMode && (
+            <div className="mt-5 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-100">
+              Easy Mode hides optional row fields. Switch back to Full Mode to
+              edit descriptions, categories, payment methods, sponsor details,
+              or personal-funds information.
             </div>
           )}
 
@@ -1478,8 +1576,14 @@ export default function MoneyCsvImport() {
                   </div>
                 )}
 
-                <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr]">
-                  <div className="xl:col-span-2">
+                <div
+                  className={`mt-5 grid gap-4 ${
+                    easyMode
+                      ? "md:grid-cols-2 xl:grid-cols-4"
+                      : "xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr]"
+                  }`}
+                >
+                  <div className={easyMode ? "" : "xl:col-span-2"}>
                     <FieldLabel>Transaction title</FieldLabel>
                     <input
                       value={row.title}
@@ -1490,17 +1594,21 @@ export default function MoneyCsvImport() {
                       placeholder="Transaction title"
                     />
 
-                    <FieldLabel>Description / notes</FieldLabel>
-                    <textarea
-                      value={row.description}
-                      onChange={(event) =>
-                        updateRow(row.id, {
-                          description: event.target.value,
-                        })
-                      }
-                      className="min-h-24 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80 outline-none placeholder:text-white/35 focus:border-emerald-300/40"
-                      placeholder="Description / notes"
-                    />
+                    {!easyMode && (
+                      <>
+                        <FieldLabel>Description / notes</FieldLabel>
+                        <textarea
+                          value={row.description}
+                          onChange={(event) =>
+                            updateRow(row.id, {
+                              description: event.target.value,
+                            })
+                          }
+                          className="min-h-24 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80 outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                          placeholder="Description / notes"
+                        />
+                      </>
+                    )}
                   </div>
 
                   <div>
@@ -1529,26 +1637,28 @@ export default function MoneyCsvImport() {
                     </select>
                   </div>
 
-                  <div>
-                    <FieldLabel>Category</FieldLabel>
-                    <select
-                      value={row.category || "Bank Import"}
-                      onChange={(event) =>
-                        updateRow(row.id, { category: event.target.value })
-                      }
-                      className={SELECT_CLASS}
-                    >
-                      {DEFAULT_CATEGORIES.map((category) => (
-                        <option
+                  {!easyMode && (
+                    <div>
+                      <FieldLabel>Category</FieldLabel>
+                      <select
+                        value={row.category || "Bank Import"}
+                        onChange={(event) =>
+                          updateRow(row.id, { category: event.target.value })
+                        }
+                        className={SELECT_CLASS}
+                      >
+                        {DEFAULT_CATEGORIES.map((category) => (
+                          <option
                             key={category}
                             value={category}
                             className={OPTION_CATEGORY_CLASS}
                           >
                             {category}
                           </option>
-                      ))}
-                    </select>
-                  </div>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <FieldLabel>Amount</FieldLabel>
@@ -1569,31 +1679,33 @@ export default function MoneyCsvImport() {
                     </p>
                   </div>
 
-                  <div>
-                    <FieldLabel>Payment method</FieldLabel>
-                    <select
-                      value={row.paymentMethod}
-                      onChange={(event) =>
-                        updateRow(row.id, {
-                          paymentMethod: event.target.value,
-                        })
-                      }
-                      className={SELECT_CLASS}
-                    >
-                      <option className={OPTION_DEFAULT_CLASS} value="">
-                        Choose
-                      </option>
-                      {PAYMENT_METHODS.map((method) => (
-                        <option
-                          key={method}
-                          value={method}
-                          className={OPTION_METHOD_CLASS}
-                        >
-                          {method}
+                  {!easyMode && (
+                    <div>
+                      <FieldLabel>Payment method</FieldLabel>
+                      <select
+                        value={row.paymentMethod}
+                        onChange={(event) =>
+                          updateRow(row.id, {
+                            paymentMethod: event.target.value,
+                          })
+                        }
+                        className={SELECT_CLASS}
+                      >
+                        <option className={OPTION_DEFAULT_CLASS} value="">
+                          Choose
                         </option>
-                      ))}
-                    </select>
-                  </div>
+                        {PAYMENT_METHODS.map((method) => (
+                          <option
+                            key={method}
+                            value={method}
+                            className={OPTION_METHOD_CLASS}
+                          >
+                            {method}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <FieldLabel>Date</FieldLabel>
@@ -1609,48 +1721,65 @@ export default function MoneyCsvImport() {
                     />
                   </div>
 
-                  <div>
-                    <FieldLabel>Sponsor</FieldLabel>
-                    <input
-                      value={row.sponsorName}
-                      onChange={(event) =>
-                        updateRow(row.id, {
-                          sponsorName: event.target.value,
-                        })
-                      }
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
-                      placeholder="Optional"
-                    />
-                  </div>
-
-                  <div>
-                    <FieldLabel>Personal funds</FieldLabel>
-                    <label className="flex min-h-[48px] items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white/80">
+                  {!easyMode && (
+                    <div>
+                      <FieldLabel>Sponsor</FieldLabel>
                       <input
-                        type="checkbox"
-                        checked={row.isPersonalFunds}
+                        value={row.sponsorName}
                         onChange={(event) =>
                           updateRow(row.id, {
-                            isPersonalFunds: event.target.checked,
+                            sponsorName: event.target.value,
                           })
                         }
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                        placeholder="Optional"
                       />
-                      Personal funds
-                    </label>
+                    </div>
+                  )}
 
-                    {row.isPersonalFunds && (
-                      <input
-                        value={row.personalFundsName}
-                        onChange={(event) =>
-                          updateRow(row.id, {
-                            personalFundsName: event.target.value,
-                          })
-                        }
-                        className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
-                        placeholder="Name"
-                      />
-                    )}
-                  </div>
+                  {!easyMode && (
+                    <div>
+                      <FieldLabel>Personal funds</FieldLabel>
+                      <label className="flex min-h-[48px] items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white/80">
+                        <input
+                          type="checkbox"
+                          checked={row.isPersonalFunds}
+                          onChange={(event) =>
+                            updateRow(row.id, {
+                              isPersonalFunds: event.target.checked,
+                            })
+                          }
+                        />
+                        Personal funds
+                      </label>
+
+                      {row.isPersonalFunds && (
+                        <input
+                          value={row.personalFundsName}
+                          onChange={(event) =>
+                            updateRow(row.id, {
+                              personalFundsName: event.target.value,
+                            })
+                          }
+                          className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-300/40"
+                          placeholder="Name"
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {easyMode && (
+                    <div className="md:col-span-2 xl:col-span-4">
+                      <p className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs leading-5 text-white/55">
+                        Category: {row.category || "Bank Import"} · Payment:{" "}
+                        {row.paymentMethod || "Bank Transfer"}
+                        {row.sponsorName ? ` · Sponsor: ${row.sponsorName}` : ""}
+                        {row.isPersonalFunds
+                          ? ` · Personal funds${row.personalFundsName ? `: ${row.personalFundsName}` : ""}`
+                          : ""}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </article>
             ))}

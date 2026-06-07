@@ -17,6 +17,8 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  Settings2,
+  Sparkles,
   Trash2,
   ExternalLink,
   Table2,
@@ -136,6 +138,8 @@ type ConfirmDialogState = {
   cancelLabel: string;
   tone: ConfirmDialogTone;
 };
+
+const EASY_MODE_STORAGE_KEY = "burton-pride-refund-tracker-easy-mode";
 
 const currentYear = new Date().getFullYear();
 const today = new Date().toISOString().slice(0, 10);
@@ -914,6 +918,13 @@ function TransactionBrowserDialog({
 export default function MoneyRefundTracker() {
   const router = useRouter();
 
+  /**
+   * Full Mode stays as the default.
+   * Easy Mode is only enabled after the user switches it on.
+   */
+  const [easyMode, setEasyMode] = useState(false);
+  const [modeLoaded, setModeLoaded] = useState(false);
+
   const [refunds, setRefunds] = useState<RefundRecord[]>([]);
 
   const [summary, setSummary] =
@@ -975,6 +986,40 @@ export default function MoneyRefundTracker() {
   const confirmResolverRef = useRef<
     ((confirmed: boolean) => void) | null
   >(null);
+
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
+
+      if (savedMode !== null) {
+        setEasyMode(savedMode === "true");
+      }
+    } catch {
+      // Keep Full Mode as the safe default if localStorage is unavailable.
+    } finally {
+      setModeLoaded(true);
+    }
+  }, []);
+
+  function toggleEasyMode() {
+    setEasyMode((previous) => {
+      const next = !previous;
+
+      if (next) {
+        // Do not leave advanced filters silently active while they are hidden.
+        setStatusFilter("all");
+        setTypeFilter("all");
+      }
+
+      try {
+        window.localStorage.setItem(EASY_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // The tracker should still work if localStorage is unavailable.
+      }
+
+      return next;
+    });
+  }
 
   const filteredRefunds = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -1664,47 +1709,51 @@ export default function MoneyRefundTracker() {
                   Refresh
                 </button>
 
-                <button
-                  type="button"
-                  onClick={openTransactionBrowser}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-200 transition hover:bg-cyan-500/20"
-                >
-                  <Table2 className="h-4 w-4" />
-                  View Transactions
-                </button>
+                {!easyMode && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={openTransactionBrowser}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs font-bold text-cyan-200 transition hover:bg-cyan-500/20"
+                    >
+                      <Table2 className="h-4 w-4" />
+                      View Transactions
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => void createTestRefund()}
-                  disabled={isCreatingTest}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isCreatingTest ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <FlaskConical className="h-4 w-4" />
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => void createTestRefund()}
+                      disabled={isCreatingTest}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isCreatingTest ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <FlaskConical className="h-4 w-4" />
+                      )}
 
-                  {isCreatingTest
-                    ? "Creating Test..."
-                    : "Add Test Refund"}
-                </button>
+                      {isCreatingTest
+                        ? "Creating Test..."
+                        : "Add Test Refund"}
+                    </button>
 
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/AuditLogs"
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-xs font-bold text-sky-200 transition hover:bg-sky-500/20"
-                >
-                  <ListChecks className="h-4 w-4" />
-                  Refund Logs
-                </Link>
+                    <Link
+                      href="/Admin/MoneyManagement/TrackingMoney/AuditLogs"
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2 text-xs font-bold text-sky-200 transition hover:bg-sky-500/20"
+                    >
+                      <ListChecks className="h-4 w-4" />
+                      Refund Logs
+                    </Link>
 
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/Refunds/Delete"
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20"
-                >
-                  <FileClock className="h-4 w-4" />
-                  Deleted Refunds
-                </Link>
+                    <Link
+                      href="/Admin/MoneyManagement/TrackingMoney/Refunds/Delete"
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-200 transition hover:bg-rose-500/20"
+                    >
+                      <FileClock className="h-4 w-4" />
+                      Deleted Refunds
+                    </Link>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -1736,6 +1785,53 @@ export default function MoneyRefundTracker() {
             </div>
           </div>
         </header>
+
+        <section className="rounded-[22px] border border-white/10 bg-[#10101f] px-4 py-4 shadow-xl shadow-black/10">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {easyMode ? (
+                  <Sparkles className="h-5 w-5 text-cyan-200" />
+                ) : (
+                  <Settings2 className="h-5 w-5 text-sky-200" />
+                )}
+
+                <h2 className="text-lg font-bold text-white">
+                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                </h2>
+              </div>
+
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+                {easyMode
+                  ? "Easy Mode keeps the Refund Tracker focused on adding, finding, editing, and archiving refunds."
+                  : "Full Mode shows linked suppliers, original transactions, references, test tools, audit links, and advanced filters."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={toggleEasyMode}
+              disabled={!modeLoaded}
+              className={`inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
+                easyMode
+                  ? "border border-sky-400/20 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+                  : "border border-cyan-400/20 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+              }`}
+            >
+              {easyMode ? (
+                <>
+                  <Settings2 className="h-4 w-4" />
+                  Show Full Mode
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Turn on Easy Mode
+                </>
+              )}
+            </button>
+          </div>
+        </section>
 
         <section className="grid gap-3 md:grid-cols-3">
           <SummaryCard
@@ -1784,7 +1880,7 @@ export default function MoneyRefundTracker() {
 
         <section className="rounded-[22px] border border-white/10 bg-[#10101f] p-3 shadow-xl shadow-black/10">
           <div className="grid gap-2 lg:grid-cols-12">
-            <div className="relative lg:col-span-6">
+            <div className={`relative ${easyMode ? "lg:col-span-9" : "lg:col-span-6"}`}>
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
 
               <input
@@ -1818,38 +1914,42 @@ export default function MoneyRefundTracker() {
               </option>
             </select>
 
-            <select
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(
-                  event.target.value as "all" | RefundStatus
-                )
-              }
-              className="h-10 rounded-xl border border-white/10 bg-[#090a17] px-3 text-sm font-semibold text-slate-200 outline-none lg:col-span-2"
-            >
-              <option value="all">All statuses</option>
-              <option value="completed">Completed only</option>
-              <option value="pending">Pending only</option>
-              <option value="cancelled">Cancelled only</option>
-            </select>
+            {!easyMode && (
+              <>
+                <select
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(
+                      event.target.value as "all" | RefundStatus
+                    )
+                  }
+                  className="h-10 rounded-xl border border-white/10 bg-[#090a17] px-3 text-sm font-semibold text-slate-200 outline-none lg:col-span-2"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="completed">Completed only</option>
+                  <option value="pending">Pending only</option>
+                  <option value="cancelled">Cancelled only</option>
+                </select>
 
-            <select
-              value={typeFilter}
-              onChange={(event) =>
-                setTypeFilter(
-                  event.target.value as "all" | RefundType
-                )
-              }
-              className="h-10 rounded-xl border border-white/10 bg-[#090a17] px-3 text-sm font-semibold text-slate-200 outline-none lg:col-span-2"
-            >
-              <option value="all">All refund types</option>
-              <option value="money_received_back">
-                Money received back
-              </option>
-              <option value="money_sent_back">
-                Money sent back
-              </option>
-            </select>
+                <select
+                  value={typeFilter}
+                  onChange={(event) =>
+                    setTypeFilter(
+                      event.target.value as "all" | RefundType
+                    )
+                  }
+                  className="h-10 rounded-xl border border-white/10 bg-[#090a17] px-3 text-sm font-semibold text-slate-200 outline-none lg:col-span-2"
+                >
+                  <option value="all">All refund types</option>
+                  <option value="money_received_back">
+                    Money received back
+                  </option>
+                  <option value="money_sent_back">
+                    Money sent back
+                  </option>
+                </select>
+              </>
+            )}
           </div>
         </section>
 
@@ -1872,22 +1972,24 @@ export default function MoneyRefundTracker() {
               </p>
 
               <div className="mt-4 flex flex-wrap justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void createTestRefund()}
-                  disabled={isCreatingTest}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isCreatingTest ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <FlaskConical className="h-4 w-4" />
-                  )}
+                {!easyMode && (
+                  <button
+                    type="button"
+                    onClick={() => void createTestRefund()}
+                    disabled={isCreatingTest}
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-2 text-xs font-bold text-violet-200 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isCreatingTest ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FlaskConical className="h-4 w-4" />
+                    )}
 
-                  {isCreatingTest
-                    ? "Creating Test..."
-                    : "Add Test Refund"}
-                </button>
+                    {isCreatingTest
+                      ? "Creating Test..."
+                      : "Add Test Refund"}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1901,7 +2003,11 @@ export default function MoneyRefundTracker() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="min-w-[1200px] w-full text-left text-sm">
+              <table
+                className={`w-full text-left text-sm ${
+                  easyMode ? "min-w-[820px]" : "min-w-[1200px]"
+                }`}
+              >
                 <thead className="bg-white/5 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-4 py-3">Refund</th>
@@ -1909,11 +2015,17 @@ export default function MoneyRefundTracker() {
                     <th className="px-4 py-3">Amount</th>
                     <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Supplier</th>
-                    <th className="px-4 py-3">
-                      Original transaction
-                    </th>
-                    <th className="px-4 py-3">Reference</th>
+                    {!easyMode && (
+                      <th className="px-4 py-3">Supplier</th>
+                    )}
+                    {!easyMode && (
+                      <th className="px-4 py-3">
+                        Original transaction
+                      </th>
+                    )}
+                    {!easyMode && (
+                      <th className="px-4 py-3">Reference</th>
+                    )}
                     <th className="px-4 py-3 text-right">
                       Actions
                     </th>
@@ -1934,11 +2046,22 @@ export default function MoneyRefundTracker() {
                             {refund.title}
                           </p>
 
-                          {refund.notes ? (
+                          {refund.notes && !easyMode ? (
                             <p className="mt-1 max-w-xs text-xs text-slate-500">
                               {refund.notes}
                             </p>
                           ) : null}
+
+                          {easyMode && (
+                            <p className="mt-1 max-w-md text-xs text-slate-500">
+                              {refund.supplier?.supplier_name
+                                ? `Supplier: ${refund.supplier.supplier_name}`
+                                : "No supplier linked"}
+                              {refund.reference_number
+                                ? ` · Ref: ${refund.reference_number}`
+                                : ""}
+                            </p>
+                          )}
                         </td>
 
                         <td className="px-4 py-3 text-xs text-slate-300">
@@ -1963,20 +2086,26 @@ export default function MoneyRefundTracker() {
                           <StatusBadge status={refund.status} />
                         </td>
 
-                        <td className="px-4 py-3 text-xs text-slate-400">
-                          {refund.supplier?.supplier_name ||
-                            "Not linked"}
-                        </td>
+                        {!easyMode && (
+                          <td className="px-4 py-3 text-xs text-slate-400">
+                            {refund.supplier?.supplier_name ||
+                              "Not linked"}
+                          </td>
+                        )}
 
-                        <td className="px-4 py-3 text-xs text-slate-400">
-                          {refund.original_transaction?.title ||
-                            "Not linked"}
-                        </td>
+                        {!easyMode && (
+                          <td className="px-4 py-3 text-xs text-slate-400">
+                            {refund.original_transaction?.title ||
+                              "Not linked"}
+                          </td>
+                        )}
 
-                        <td className="px-4 py-3 text-xs text-slate-400">
-                          {refund.reference_number ||
-                            "Not recorded"}
-                        </td>
+                        {!easyMode && (
+                          <td className="px-4 py-3 text-xs text-slate-400">
+                            {refund.reference_number ||
+                              "Not recorded"}
+                          </td>
+                        )}
 
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
@@ -2075,6 +2204,14 @@ export default function MoneyRefundTracker() {
                 <h2 className="mt-1 text-xl font-bold text-white">
                   {editingId ? "Edit Refund" : "Add Refund"}
                 </h2>
+
+                {easyMode && (
+                  <p className="mt-2 max-w-2xl text-xs leading-5 text-slate-400">
+                    Easy Mode shows the main refund details only. Switch back to
+                    Full Mode to add a reference, supplier, original
+                    transaction link, notes, or a different refund year.
+                  </p>
+                )}
               </div>
 
               <button
@@ -2167,23 +2304,25 @@ export default function MoneyRefundTracker() {
                 />
               </label>
 
-              <label className="xl:col-span-2">
-                <span className="text-xs font-bold text-slate-300">
-                  Year
-                </span>
+              {!easyMode && (
+                <label className="xl:col-span-2">
+                  <span className="text-xs font-bold text-slate-300">
+                    Year
+                  </span>
 
-                <input
-                  type="number"
-                  min="2000"
-                  max="2200"
-                  value={form.year}
-                  onChange={(event) =>
-                    updateForm("year", event.target.value)
-                  }
-                  required
-                  className={inputClass}
-                />
-              </label>
+                  <input
+                    type="number"
+                    min="2000"
+                    max="2200"
+                    value={form.year}
+                    onChange={(event) =>
+                      updateForm("year", event.target.value)
+                    }
+                    required
+                    className={inputClass}
+                  />
+                </label>
+              )}
 
               <label className="xl:col-span-3">
                 <span className="text-xs font-bold text-slate-300">
@@ -2223,108 +2362,116 @@ export default function MoneyRefundTracker() {
                 />
               </label>
 
-              <label className="xl:col-span-5">
-                <span className="text-xs font-bold text-slate-300">
-                  Reference number
-                </span>
+              {!easyMode && (
+                <label className="xl:col-span-5">
+                  <span className="text-xs font-bold text-slate-300">
+                    Reference number
+                  </span>
 
-                <input
-                  type="text"
-                  value={form.reference_number}
-                  onChange={(event) =>
-                    updateForm(
-                      "reference_number",
-                      event.target.value
-                    )
-                  }
-                  placeholder="Optional reference number"
-                  className={inputClass}
-                />
-              </label>
+                  <input
+                    type="text"
+                    value={form.reference_number}
+                    onChange={(event) =>
+                      updateForm(
+                        "reference_number",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Optional reference number"
+                    className={inputClass}
+                  />
+                </label>
+              )}
 
-              <label className="xl:col-span-6">
-                <span className="text-xs font-bold text-slate-300">
-                  Link supplier
-                </span>
+              {!easyMode && (
+                <label className="xl:col-span-6">
+                  <span className="text-xs font-bold text-slate-300">
+                    Link supplier
+                  </span>
 
-                <select
-                  value={form.supplier_id}
-                  onChange={(event) =>
-                    updateForm(
-                      "supplier_id",
-                      event.target.value
-                    )
-                  }
-                  disabled={isLoadingOptions}
-                  className={inputClass}
-                >
-                  <option value="">No supplier linked</option>
-
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.supplier_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="xl:col-span-6">
-                <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-300">
-                  <span>Link original transaction</span>
-
-                  <button
-                    type="button"
-                    onClick={openTransactionBrowser}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1.5 text-[11px] font-bold text-cyan-200 transition hover:bg-cyan-500/20"
+                  <select
+                    value={form.supplier_id}
+                    onChange={(event) =>
+                      updateForm(
+                        "supplier_id",
+                        event.target.value
+                      )
+                    }
+                    disabled={isLoadingOptions}
+                    className={inputClass}
                   >
-                    <Table2 className="h-3.5 w-3.5" />
-                    Browse Transactions
-                  </button>
-                </span>
+                    <option value="">No supplier linked</option>
 
-                <select
-                  value={form.original_transaction_id}
-                  onChange={(event) =>
-                    updateForm(
-                      "original_transaction_id",
-                      event.target.value
-                    )
-                  }
-                  disabled={isLoadingOptions}
-                  className={inputClass}
-                >
-                  <option value="">
-                    No original transaction linked
-                  </option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.supplier_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
-                  {transactions.map((transaction) => (
-                    <option
-                      key={transaction.id}
-                      value={transaction.id}
+              {!easyMode && (
+                <label className="xl:col-span-6">
+                  <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-300">
+                    <span>Link original transaction</span>
+
+                    <button
+                      type="button"
+                      onClick={openTransactionBrowser}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1.5 text-[11px] font-bold text-cyan-200 transition hover:bg-cyan-500/20"
                     >
-                      {formatDate(transaction.transaction_date)} —{" "}
-                      {transaction.title} —{" "}
-                      {formatMoney(transaction.amount_pence)}
+                      <Table2 className="h-3.5 w-3.5" />
+                      Browse Transactions
+                    </button>
+                  </span>
+
+                  <select
+                    value={form.original_transaction_id}
+                    onChange={(event) =>
+                      updateForm(
+                        "original_transaction_id",
+                        event.target.value
+                      )
+                    }
+                    disabled={isLoadingOptions}
+                    className={inputClass}
+                  >
+                    <option value="">
+                      No original transaction linked
                     </option>
-                  ))}
-                </select>
-              </label>
 
-              <label className="xl:col-span-12">
-                <span className="text-xs font-bold text-slate-300">
-                  Notes
-                </span>
+                    {transactions.map((transaction) => (
+                      <option
+                        key={transaction.id}
+                        value={transaction.id}
+                      >
+                        {formatDate(transaction.transaction_date)} —{" "}
+                        {transaction.title} —{" "}
+                        {formatMoney(transaction.amount_pence)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
-                <textarea
-                  value={form.notes}
-                  onChange={(event) =>
-                    updateForm("notes", event.target.value)
-                  }
-                  rows={4}
-                  placeholder="Add any useful details about the refund."
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-[#090a17] px-3 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/10"
-                />
-              </label>
+              {!easyMode && (
+                <label className="xl:col-span-12">
+                  <span className="text-xs font-bold text-slate-300">
+                    Notes
+                  </span>
+
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) =>
+                      updateForm("notes", event.target.value)
+                    }
+                    rows={4}
+                    placeholder="Add any useful details about the refund."
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#090a17] px-3 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/10"
+                  />
+                </label>
+              )}
 
               <div className="flex flex-col-reverse gap-2 border-t border-white/10 pt-4 sm:flex-row sm:justify-end xl:col-span-12">
                 <button

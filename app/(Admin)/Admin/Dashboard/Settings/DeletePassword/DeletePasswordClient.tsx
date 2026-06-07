@@ -1,7 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
+import { memo, useCallback, useState } from "react";
+import {
+  Eye,
+  EyeOff,
+  LockKeyhole,
+  ShieldCheck,
+  AlertTriangle,
+} from "lucide-react";
 
 type PasswordInputProps = {
   value: string;
@@ -12,7 +18,122 @@ type PasswordInputProps = {
   name: string;
 };
 
-function PasswordInput({
+type ApiErrorData = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  likelyFix?: string;
+  debug?: unknown;
+  details?: unknown;
+};
+
+type ApiReadResult = {
+  data: ApiErrorData;
+  rawText: string;
+  contentType: string;
+};
+
+function stringifySafe(value: unknown) {
+  try {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildDetailedError({
+  data,
+  status,
+  statusText,
+  url,
+  method,
+  rawText,
+  contentType,
+}: {
+  data: ApiErrorData;
+  status: number;
+  statusText: string;
+  url: string;
+  method: string;
+  rawText: string;
+  contentType: string;
+}) {
+  const parts: string[] = [];
+
+  parts.push(`HTTP status: ${status} ${statusText || ""}`.trim());
+  parts.push(`Request: ${method} ${url}`);
+  parts.push(`Content-Type: ${contentType || "Not returned"}`);
+
+  if (data?.error) parts.push(`Error: ${data.error}`);
+  if (data?.message && data.message !== data.error) {
+    parts.push(`Message: ${data.message}`);
+  }
+  if (data?.likelyFix) parts.push(`Likely fix: ${data.likelyFix}`);
+
+  const details = stringifySafe(data?.details);
+  if (details) parts.push(`Details:\n${details}`);
+
+  const debug = stringifySafe(data?.debug);
+  if (debug) parts.push(`Debug:\n${debug}`);
+
+  if (rawText && !contentType.includes("application/json")) {
+    parts.push(`Raw server response:\n${rawText.slice(0, 2000)}`);
+  }
+
+  if (status === 405) {
+    parts.push(
+      "Possible cause: this API route does not export the HTTP method you are calling."
+    );
+  }
+
+  if (status === 401) {
+    parts.push("Possible cause: admin login cookies are missing or expired.");
+  }
+
+  if (status === 500) {
+    parts.push("Possible cause: server error in the API route.");
+  }
+
+  return parts.join("\n\n");
+}
+
+async function readApiResponse(res: Response): Promise<ApiReadResult> {
+  const contentType = res.headers.get("content-type") || "";
+  const rawText = await res.text();
+
+  if (!rawText) {
+    return {
+      contentType,
+      rawText,
+      data: {
+        ok: false,
+        error: "The server returned an empty response body.",
+      },
+    };
+  }
+
+  try {
+    return {
+      contentType,
+      rawText,
+      data: JSON.parse(rawText) as ApiErrorData,
+    };
+  } catch {
+    return {
+      contentType,
+      rawText,
+      data: {
+        ok: false,
+        error:
+          "The server did not return valid JSON. This normally means the API crashed or returned an HTML error page.",
+      },
+    };
+  }
+}
+
+const PasswordInput = memo(function PasswordInput({
   value,
   onChange,
   placeholder,
@@ -20,15 +141,23 @@ function PasswordInput({
   onToggle,
   name,
 }: PasswordInputProps) {
+  const handleChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      onChange(event.target.value);
+    },
+    [onChange]
+  );
+
   return (
     <div className="relative">
       <input
         type={visible ? "text" : "password"}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={handleChange}
         placeholder={placeholder}
         name={name}
         autoComplete="new-password"
+        spellCheck={false}
         className="w-full rounded-2xl border border-white/40 bg-white px-5 py-4 pr-14 font-bold text-black shadow-lg outline-none placeholder:text-slate-400 focus:border-yellow-300 focus:ring-4 focus:ring-yellow-300/30"
       />
 
@@ -43,7 +172,7 @@ function PasswordInput({
       </button>
     </div>
   );
-}
+});
 
 export default function DeletePasswordClient() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -65,13 +194,33 @@ export default function DeletePasswordClient() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const toggleCurrent = useCallback(
+    () => setShowCurrentPassword((prev) => !prev),
+    []
+  );
+  const toggleNew = useCallback(() => setShowNewPassword((prev) => !prev), []);
+  const toggleConfirm = useCallback(
+    () => setShowConfirmPassword((prev) => !prev),
+    []
+  );
+  const toggleReset = useCallback(
+    () => setShowResetPassword((prev) => !prev),
+    []
+  );
+  const toggleConfirmReset = useCallback(
+    () => setShowConfirmResetPassword((prev) => !prev),
+    []
+  );
+
   async function updatePassword() {
     setSaving(true);
     setMessage("");
     setError("");
 
+    const url = "/api/admin/settings/delete-password/update";
+
     try {
-      const res = await fetch("/api/admin/settings/delete-password/update", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -81,22 +230,36 @@ export default function DeletePasswordClient() {
         }),
       });
 
-      const data = await res.json();
+      const result = await readApiResponse(res);
 
-      if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to update password");
+      if (!res.ok || !result.data.ok) {
+        setError(
+          buildDetailedError({
+            data: result.data,
+            status: res.status,
+            statusText: res.statusText,
+            url,
+            method: "POST",
+            rawText: result.rawText,
+            contentType: result.contentType,
+          })
+        );
         return;
       }
 
-      setMessage("Password updated successfully.");
+      setMessage(result.data.message || "Password updated successfully.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setShowCurrentPassword(false);
       setShowNewPassword(false);
       setShowConfirmPassword(false);
-    } catch {
-      setError("Failed to update password");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Client/network error:\n${err.message}`
+          : "Client/network error: Failed to update password."
+      );
     } finally {
       setSaving(false);
     }
@@ -107,8 +270,10 @@ export default function DeletePasswordClient() {
     setMessage("");
     setError("");
 
+    const url = "/api/admin/settings/delete-password";
+
     try {
-      const res = await fetch("/api/admin/settings/delete-password", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -117,27 +282,41 @@ export default function DeletePasswordClient() {
         }),
       });
 
-      const data = await res.json();
+      const result = await readApiResponse(res);
 
-      if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to reset password");
+      if (!res.ok || !result.data.ok) {
+        setError(
+          buildDetailedError({
+            data: result.data,
+            status: res.status,
+            statusText: res.statusText,
+            url,
+            method: "POST",
+            rawText: result.rawText,
+            contentType: result.contentType,
+          })
+        );
         return;
       }
 
-      setMessage("Password reset successfully.");
+      setMessage(result.data.message || "Password reset successfully.");
       setResetPassword("");
       setConfirmResetPassword("");
       setShowResetPassword(false);
       setShowConfirmResetPassword(false);
-    } catch {
-      setError("Failed to reset password");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Client/network error:\n${err.message}`
+          : "Client/network error: Failed to reset password."
+      );
     } finally {
       setResetting(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br  px-4 py-8 text-white sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-gradient-to-br px-4 py-8 text-white sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <section className="overflow-hidden rounded-[2rem] border border-white/25 bg-white/20 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -165,7 +344,15 @@ export default function DeletePasswordClient() {
 
         {error && (
           <div className="rounded-2xl border border-red-200/40 bg-red-500/30 p-4 font-bold text-red-50 shadow-xl backdrop-blur-xl">
-            {error}
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-black">Something went wrong</p>
+                <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-black/30 p-4 text-xs font-semibold leading-relaxed text-white">
+                  {error}
+                </pre>
+              </div>
+            </div>
           </div>
         )}
 
@@ -193,7 +380,7 @@ export default function DeletePasswordClient() {
               onChange={setCurrentPassword}
               placeholder="Current password"
               visible={showCurrentPassword}
-              onToggle={() => setShowCurrentPassword((prev) => !prev)}
+              onToggle={toggleCurrent}
               name="current-delete-password"
             />
 
@@ -202,7 +389,7 @@ export default function DeletePasswordClient() {
               onChange={setNewPassword}
               placeholder="New password"
               visible={showNewPassword}
-              onToggle={() => setShowNewPassword((prev) => !prev)}
+              onToggle={toggleNew}
               name="new-delete-password"
             />
 
@@ -211,7 +398,7 @@ export default function DeletePasswordClient() {
               onChange={setConfirmPassword}
               placeholder="Confirm new password"
               visible={showConfirmPassword}
-              onToggle={() => setShowConfirmPassword((prev) => !prev)}
+              onToggle={toggleConfirm}
               name="confirm-new-delete-password"
             />
 
@@ -249,7 +436,7 @@ export default function DeletePasswordClient() {
               onChange={setResetPassword}
               placeholder="New reset password"
               visible={showResetPassword}
-              onToggle={() => setShowResetPassword((prev) => !prev)}
+              onToggle={toggleReset}
               name="reset-delete-password"
             />
 
@@ -258,7 +445,7 @@ export default function DeletePasswordClient() {
               onChange={setConfirmResetPassword}
               placeholder="Confirm reset password"
               visible={showConfirmResetPassword}
-              onToggle={() => setShowConfirmResetPassword((prev) => !prev)}
+              onToggle={toggleConfirmReset}
               name="confirm-reset-delete-password"
             />
 
