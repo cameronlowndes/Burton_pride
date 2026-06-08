@@ -99,7 +99,7 @@ export default function HomeClient() {
             </Link>
 
             <Link
-              href="/BurtonPride2026"
+              href="/BurtonPride2026/MainEvent"
               className="rounded-full bg-green-500 px-5 py-2.5 text-base font-extrabold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400 sm:px-6 sm:py-3 sm:text-lg"
             >
               🌈 Burton Pride 2026
