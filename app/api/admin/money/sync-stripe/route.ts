@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
@@ -20,6 +20,24 @@ type WebsitePaymentSource =
   | "ticket_sales"
   | "website_payment";
 
+type SyncResult =
+  | "created"
+  | "updated"
+  | "skipped"
+  | "test_skipped";
+
+type ImportPreviewItem = {
+  id: string;
+  title: string;
+  name: string;
+  type: string;
+  amount: string;
+  amount_pence: number;
+  date: string;
+  email: string;
+  status: string;
+};
+
 const SOURCE_LABELS: Record<WebsitePaymentSource, string> = {
   website_donation: "Website Donation",
   website_monthly_donation: "Monthly Website Donation",
@@ -38,7 +56,12 @@ function toPence(amount: number | null | undefined) {
 
 function formatStripeDate(timestamp: number | null | undefined) {
   if (!timestamp) return new Date().toISOString().slice(0, 10);
+
   return new Date(timestamp * 1000).toISOString().slice(0, 10);
+}
+
+function formatMoney(amountPence: number) {
+  return `£${(amountPence / 100).toFixed(2)}`;
 }
 
 function cleanText(value: unknown) {
@@ -73,19 +96,36 @@ function getCustomerEmail(session: Stripe.Checkout.Session) {
     cleanText(metadata.email) ||
     cleanText(metadata.customer_email) ||
     cleanText(metadata.customerEmail) ||
-    null
+    ""
   );
 }
 
 function normaliseSource(source: string): WebsitePaymentSource {
   const cleanSource = source.toLowerCase().trim();
 
-  if (cleanSource === "monthly_donation") return "website_monthly_donation";
-  if (cleanSource === "donation") return "website_donation";
-  if (cleanSource === "raffle_ticket") return "raffle";
-  if (cleanSource === "window_of_hope") return "windows_of_hope";
-  if (cleanSource === "vendor") return "vendor_pitch";
-  if (cleanSource === "ticket") return "ticket_sales";
+  if (cleanSource === "monthly_donation") {
+    return "website_monthly_donation";
+  }
+
+  if (cleanSource === "donation") {
+    return "website_donation";
+  }
+
+  if (cleanSource === "raffle_ticket") {
+    return "raffle";
+  }
+
+  if (cleanSource === "window_of_hope") {
+    return "windows_of_hope";
+  }
+
+  if (cleanSource === "vendor") {
+    return "vendor_pitch";
+  }
+
+  if (cleanSource === "ticket") {
+    return "ticket_sales";
+  }
 
   if (
     cleanSource === "website_donation" ||
@@ -103,7 +143,9 @@ function normaliseSource(source: string): WebsitePaymentSource {
   return "website_payment";
 }
 
-function getPaymentSource(session: Stripe.Checkout.Session): WebsitePaymentSource {
+function getPaymentSource(
+  session: Stripe.Checkout.Session,
+): WebsitePaymentSource {
   const metadata = getMetadata(session);
 
   const metadataSource =
@@ -122,7 +164,10 @@ function getPaymentSource(session: Stripe.Checkout.Session): WebsitePaymentSourc
   return "website_donation";
 }
 
-function getCategory(session: Stripe.Checkout.Session, source: WebsitePaymentSource) {
+function getCategory(
+  session: Stripe.Checkout.Session,
+  source: WebsitePaymentSource,
+) {
   const metadata = getMetadata(session);
 
   return (
@@ -133,7 +178,10 @@ function getCategory(session: Stripe.Checkout.Session, source: WebsitePaymentSou
   );
 }
 
-function getTitle(session: Stripe.Checkout.Session, source: WebsitePaymentSource) {
+function getTitle(
+  session: Stripe.Checkout.Session,
+  source: WebsitePaymentSource,
+) {
   const metadata = getMetadata(session);
   const customerName = getCustomerName(session);
 
@@ -146,7 +194,10 @@ function getTitle(session: Stripe.Checkout.Session, source: WebsitePaymentSource
   return `${baseTitle} - ${customerName}`;
 }
 
-function getDescription(session: Stripe.Checkout.Session, source: WebsitePaymentSource) {
+function getDescription(
+  session: Stripe.Checkout.Session,
+  source: WebsitePaymentSource,
+) {
   const metadata = getMetadata(session);
   const customerEmail = getCustomerEmail(session);
 
@@ -199,24 +250,90 @@ function getCustomerId(session: Stripe.Checkout.Session) {
     : session.customer?.id || null;
 }
 
-async function syncSession(session: Stripe.Checkout.Session) {
+function canImportSession(session: Stripe.Checkout.Session) {
+  if (session.livemode !== true) return false;
+  if (session.payment_status !== "paid") return false;
+
+  const amountPence = toPence(session.amount_total);
+
+  return amountPence > 0;
+}
+
+async function listAllCheckoutSessions() {
+  const sessions: Stripe.Checkout.Session[] = [];
+  let startingAfter: string | undefined;
+
+  do {
+    const result = await stripe.checkout.sessions.list({
+      limit: 100,
+      starting_after: startingAfter,
+      expand: ["data.payment_intent", "data.subscription"],
+    });
+
+    sessions.push(...result.data);
+
+    startingAfter = result.has_more
+      ? result.data[result.data.length - 1]?.id
+      : undefined;
+  } while (startingAfter);
+
+  return sessions;
+}
+
+async function getExistingTransactionId(stripeSessionId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("money_transactions")
+    .select("id")
+    .eq("stripe_session_id", stripeSessionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Website payment existing check error:", error);
+    return null;
+  }
+
+  return data?.id || null;
+}
+
+async function createPreviewItem(
+  session: Stripe.Checkout.Session,
+): Promise<ImportPreviewItem> {
+  const source = getPaymentSource(session);
+  const amountPence = toPence(session.amount_total);
+  const existingId = await getExistingTransactionId(session.id);
+
+  return {
+    id: session.id,
+    title: getTitle(session, source),
+    name: getCustomerName(session),
+    type: SOURCE_LABELS[source] || "Website Payment",
+    amount: formatMoney(amountPence),
+    amount_pence: amountPence,
+    date: formatStripeDate(session.created),
+    email: getCustomerEmail(session) || "No email",
+    status: existingId ? "Will update existing record" : "Ready to import",
+  };
+}
+
+async function syncSession(
+  session: Stripe.Checkout.Session,
+): Promise<SyncResult> {
   /*
-    IMPORTANT:
-    Test mode Stripe payments must not be pulled into the money tracker.
+    Test-mode Stripe payments must not be pulled into the money tracker.
     They are not real Burton Pride income and should not appear in accounts.
   */
   if (session.livemode !== true) {
-    return "test_skipped" as const;
+    return "test_skipped";
   }
 
   if (session.payment_status !== "paid") {
-    return "skipped" as const;
+    return "skipped";
   }
 
   const amountPence = toPence(session.amount_total);
 
   if (amountPence <= 0) {
-    return "skipped" as const;
+    return "skipped";
   }
 
   const source = getPaymentSource(session);
@@ -257,7 +374,7 @@ async function syncSession(session: Stripe.Checkout.Session) {
 
   if (existingError) {
     console.error("Website payment sync existing check error:", existingError);
-    return "skipped" as const;
+    return "skipped";
   }
 
   if (existing?.id) {
@@ -268,10 +385,10 @@ async function syncSession(session: Stripe.Checkout.Session) {
 
     if (updateError) {
       console.error("Website payment sync update error:", updateError);
-      return "skipped" as const;
+      return "skipped";
     }
 
-    return "updated" as const;
+    return "updated";
   }
 
   const { error: insertError } = await supabaseAdmin
@@ -280,18 +397,88 @@ async function syncSession(session: Stripe.Checkout.Session) {
 
   if (insertError) {
     console.error("Website payment sync insert error:", insertError);
-    return "skipped" as const;
+    return "skipped";
   }
 
-  return "created" as const;
+  return "created";
 }
 
+/**
+ * GET only previews data.
+ * It never inserts or updates any money tracker rows.
+ */
+export async function GET(req: NextRequest) {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Missing STRIPE_SECRET_KEY environment variable.",
+        },
+        { status: 500 },
+      );
+    }
+
+    const isTestConnection =
+      req.nextUrl.searchParams.get("test") === "true";
+
+    if (isTestConnection) {
+      await stripe.checkout.sessions.list({
+        limit: 1,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        connected: true,
+        message:
+          "API connection test passed. Stripe responded successfully. No payments were imported.",
+      });
+    }
+
+    const sessions = await listAllCheckoutSessions();
+
+    const importableSessions = sessions.filter(canImportSession);
+
+    const previewItems = await Promise.all(
+      importableSessions.map((session) => createPreviewItem(session)),
+    );
+
+    return NextResponse.json({
+      ok: true,
+      previewOnly: true,
+      count: previewItems.length,
+      previewItems,
+      message: `${previewItems.length} live paid website payment${
+        previewItems.length === 1 ? "" : "s"
+      } found. Nothing has been imported yet.`,
+    });
+  } catch (error: any) {
+    console.error("Website payment preview route error:", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error?.message ||
+          "Failed to preview website payments. Please check the server logs.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * POST imports the live paid Stripe payments after the user confirms.
+ */
 export async function POST() {
   try {
     if (!process.env.STRIPE_SECRET_KEY) {
       return NextResponse.json(
-        { error: "Missing STRIPE_SECRET_KEY environment variable." },
-        { status: 500 }
+        {
+          ok: false,
+          error: "Missing STRIPE_SECRET_KEY environment variable.",
+        },
+        { status: 500 },
       );
     }
 
@@ -299,28 +486,17 @@ export async function POST() {
     let updated = 0;
     let skipped = 0;
     let testSkipped = 0;
-    let startingAfter: string | undefined;
 
-    do {
-      const sessions = await stripe.checkout.sessions.list({
-        limit: 100,
-        starting_after: startingAfter,
-        expand: ["data.payment_intent", "data.subscription"],
-      });
+    const sessions = await listAllCheckoutSessions();
 
-      for (const session of sessions.data) {
-        const result = await syncSession(session);
+    for (const session of sessions) {
+      const result = await syncSession(session);
 
-        if (result === "created") created += 1;
-        if (result === "updated") updated += 1;
-        if (result === "skipped") skipped += 1;
-        if (result === "test_skipped") testSkipped += 1;
-      }
-
-      startingAfter = sessions.has_more
-        ? sessions.data[sessions.data.length - 1]?.id
-        : undefined;
-    } while (startingAfter);
+      if (result === "created") created += 1;
+      if (result === "updated") updated += 1;
+      if (result === "skipped") skipped += 1;
+      if (result === "test_skipped") testSkipped += 1;
+    }
 
     return NextResponse.json({
       ok: true,
@@ -328,18 +504,19 @@ export async function POST() {
       updated,
       skipped,
       testSkipped,
-      message: `Website payments synced successfully. Test payments skipped: ${testSkipped}.`,
+      message: `Website payments synced successfully. Added ${created}, updated ${updated}, skipped ${skipped}, test payments skipped ${testSkipped}.`,
     });
   } catch (error: any) {
     console.error("Website payment sync route error:", error);
 
     return NextResponse.json(
       {
+        ok: false,
         error:
           error?.message ||
           "Failed to sync website payments. Please check the server logs.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
