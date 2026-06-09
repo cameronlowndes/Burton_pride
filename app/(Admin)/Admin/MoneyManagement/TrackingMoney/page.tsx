@@ -8,7 +8,6 @@ import {
   Banknote,
   Bug,
   Coins,
-  RefreshCcw,
   RotateCcw,
   Settings2,
   Sparkles,
@@ -24,6 +23,7 @@ import MoneyMonthlyBreakdown from "../../components/money/MoneyMonthlyBreakdown"
 import MoneyYearLockPanel from "../../components/money/MoneyYearLockPanel";
 import MoneyCarryForwardNote from "../../components/money/MoneyCarryForwardNote";
 import MoneyPageModals from "../../components/money/MoneyPageModals";
+import WebsitePaymentsSyncCard from "../../components/money/WebsitePaymentsSyncCard";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
@@ -44,11 +44,6 @@ function safeString(value: unknown) {
 function getHelpfulErrorMessage(message: string) {
   const lower = message.toLowerCase();
 
-  /**
-   * Check password-specific messages before the generic 403 permission check.
-   * A wrong lock password may correctly return HTTP 403, but that does not
-   * mean the signed-in admin account is missing money tracker permissions.
-   */
   if (
     lower.includes("main admin password is wrong") ||
     lower.includes("password is wrong") ||
@@ -227,7 +222,7 @@ function DetailedErrorBox({
                   details: detailText || null,
                 },
                 null,
-                2
+                2,
               )}
             </pre>
           </details>
@@ -320,194 +315,153 @@ export default function MoneyTransactionsPage() {
 
         {!easyMode ? (
           <>
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-1">
-              <h2 className="text-base font-bold text-white">
-                Website payments sync
-              </h2>
+            <WebsitePaymentsSyncCard
+              syncing={money.stripeSyncing}
+              message={money.stripeSyncMessage}
+              error={money.stripeSyncError}
+              onSync={money.syncStripeDonations}
+              DetailedErrorBox={DetailedErrorBox}
+            />
 
-              <p className="max-w-3xl text-sm text-white/65">
-                Website payments are not synced automatically when this page
-                loads. Use this button when you want to pull Stripe website
-                payments into the money tracker, including donations, raffle,
-                Windows of Hope, vendor fees, sponsorship and future payment
-                types. Manual entries will stay separate.
-              </p>
-            </div>
+            <MoneyPageStatus
+              error={money.error}
+              errorDetails={money.errorDetails}
+              selectedYear={money.selectedYear}
+              selectedViewMonth={money.selectedViewMonth}
+              filteredTransactionsLength={money.filteredTransactions.length}
+              yearTransactionsLength={money.yearTransactions.length}
+            />
 
-            <button
-              type="button"
-              onClick={money.syncStripeDonations}
-              disabled={money.stripeSyncing}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 shadow-lg shadow-sky-950/20 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-            >
-              <RefreshCcw
-                className={`h-4 w-4 ${
-                  money.stripeSyncing ? "animate-spin" : ""
-                }`}
-              />
+            <MoneyDashboardAlerts
+              selectedYear={money.selectedYear}
+              transactions={money.yearTransactions}
+              yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+              failedCsvRows={(money as any).failedCsvRows || []}
+              receiptReminderDays={RECEIPT_REMINDER_DAYS}
+              onSetFilter={money.setFilter}
+              onSetSearchTerm={money.setSearchTerm}
+              onMarkTransactionChecked={money.markTransactionChecked}
+            />
 
-              {money.stripeSyncing
-                ? "Syncing website payments..."
-                : "Sync Website Payments"}
-            </button>
-          </div>
+            <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+              <div className="mb-5 flex flex-col gap-2">
+                <h2 className="text-2xl font-black text-white">
+                  Money tracker tools
+                </h2>
 
-          {money.stripeSyncMessage ? (
-            <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
-              {money.stripeSyncMessage}
-            </div>
-          ) : null}
-
-          {money.stripeSyncError ? (
-            <div className="mt-4">
-              <DetailedErrorBox
-                title="Website payments sync error"
-                error={money.stripeSyncError}
-              />
-            </div>
-          ) : null}
-        </section>
-
-        <MoneyPageStatus
-          error={money.error}
-          errorDetails={money.errorDetails}
-          selectedYear={money.selectedYear}
-          selectedViewMonth={money.selectedViewMonth}
-          filteredTransactionsLength={money.filteredTransactions.length}
-          yearTransactionsLength={money.yearTransactions.length}
-        />
-
-        <MoneyDashboardAlerts
-          selectedYear={money.selectedYear}
-          transactions={money.yearTransactions}
-          yearlySponsorBreakdown={money.yearlySponsorBreakdown}
-          failedCsvRows={(money as any).failedCsvRows || []}
-          receiptReminderDays={RECEIPT_REMINDER_DAYS}
-          onSetFilter={money.setFilter}
-          onSetSearchTerm={money.setSearchTerm}
-          onMarkTransactionChecked={money.markTransactionChecked}
-        />
-
-        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
-          <div className="mb-5 flex flex-col gap-2">
-            <h2 className="text-2xl font-black text-white">
-              Money tracker tools
-            </h2>
-
-            <p className="max-w-3xl text-sm leading-6 text-white/60">
-              Extra tools for tracking cash fundraising, refunds and Burton
-              Pride accounts clearly.
-            </p>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Link
-              href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
-              className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
-            >
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20">
-                <Coins className="h-6 w-6" />
+                <p className="max-w-3xl text-sm leading-6 text-white/60">
+                  Extra tools for tracking cash fundraising, refunds and Burton
+                  Pride accounts clearly.
+                </p>
               </div>
 
-              <h3 className="text-xl font-black text-white">
-                Cash Tin Tracker
-              </h3>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning"
+                  className="group rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-amber-500/20"
+                >
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20">
+                    <Coins className="h-6 w-6" />
+                  </div>
 
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Track cash fundraising days, starting cash, money received,
-                money banked, cash spent, who counted it and any difference.
-              </p>
+                  <h3 className="text-xl font-black text-white">
+                    Cash Tin Tracker
+                  </h3>
 
-              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-amber-100">
-                Open cash tracker
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  <p className="mt-2 text-sm leading-6 text-white/60">
+                    Track cash fundraising days, starting cash, money received,
+                    money banked, cash spent, who counted it and any difference.
+                  </p>
+
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-amber-100">
+                    Open cash tracker
+                    <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </div>
+                </Link>
+
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/Refunds"
+                  className="group rounded-3xl border border-violet-300/20 bg-violet-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-violet-500/20"
+                >
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/20 text-violet-100 ring-1 ring-violet-300/20">
+                    <RotateCcw className="h-6 w-6" />
+                  </div>
+
+                  <h3 className="text-xl font-black text-white">
+                    Refund Tracker
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-6 text-white/60">
+                    Track money returned to Burton Pride and money refunded back
+                    to other people separately from ordinary income and
+                    expenses.
+                  </p>
+
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-100">
+                    Open refund tracker
+                    <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </div>
+                </Link>
+
+                <Link
+                  href="/Admin/MoneyManagement/TrackingMoney/BankBalanceCheck"
+                  className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-sky-500/20"
+                >
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20">
+                    <Banknote className="h-6 w-6" />
+                  </div>
+
+                  <h3 className="text-xl font-black text-white">
+                    Manual Bank Balance Check
+                  </h3>
+
+                  <p className="mt-2 text-sm leading-6 text-white/60">
+                    Open the dedicated page to compare the real bank statement
+                    balance with Burton Pride Money In, including completed
+                    refunds received back.
+                  </p>
+
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-sky-100">
+                    Open bank balance check
+                    <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </div>
+                </Link>
               </div>
-            </Link>
+            </section>
 
-            <Link
-              href="/Admin/MoneyManagement/TrackingMoney/Refunds"
-              className="group rounded-3xl border border-violet-300/20 bg-violet-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-violet-500/20"
-            >
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/20 text-violet-100 ring-1 ring-violet-300/20">
-                <RotateCcw className="h-6 w-6" />
-              </div>
+            <MoneyYearLockPanel
+              selectedYear={money.selectedYear}
+              selectedYearLocked={money.selectedYearLocked}
+              yearLockPassword={money.yearLockPassword}
+              setYearLockPassword={money.setYearLockPassword}
+              lockingYear={money.lockingYear}
+              onLockYear={money.lockSelectedYear}
+              onUnlockYear={money.unlockSelectedYear}
+              printMonthOptions={money.printMonthOptions}
+              selectedLockMonth={money.selectedLockMonth}
+              setSelectedLockMonth={money.setSelectedLockMonth}
+              selectedMonthLocked={money.selectedMonthLocked}
+            />
 
-              <h3 className="text-xl font-black text-white">
-                Refund Tracker
-              </h3>
+            <MoneyStatsCards totals={money.totals} />
 
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Track money returned to Burton Pride and money refunded back to
-                other people separately from ordinary income and expenses.
-              </p>
+            <MoneyCarryForwardNote
+              selectedYear={money.selectedYear}
+              carryForwardNote={money.carryForwardNote}
+            />
 
-              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-violet-100">
-                Open refund tracker
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </div>
-            </Link>
+            <MoneySponsorSection
+              selectedYear={money.selectedYear}
+              yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+              openNewSponsorForm={money.openNewSponsorForm}
+              startEditSponsor={money.startEditSponsor}
+              setDeleteSponsorId={money.setDeleteSponsorId}
+            />
 
-            <Link
-              href="/Admin/MoneyManagement/TrackingMoney/BankBalanceCheck"
-              className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-sky-500/20"
-            >
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20">
-                <Banknote className="h-6 w-6" />
-              </div>
-
-              <h3 className="text-xl font-black text-white">
-                Manual Bank Balance Check
-              </h3>
-
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                Open the dedicated page to compare the real bank statement
-                balance with Burton Pride Money In, including completed refunds
-                received back.
-              </p>
-
-              <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-sky-100">
-                Open bank balance check
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </div>
-            </Link>
-          </div>
-        </section>
-
-        <MoneyYearLockPanel
-          selectedYear={money.selectedYear}
-          selectedYearLocked={money.selectedYearLocked}
-          yearLockPassword={money.yearLockPassword}
-          setYearLockPassword={money.setYearLockPassword}
-          lockingYear={money.lockingYear}
-          onLockYear={money.lockSelectedYear}
-          onUnlockYear={money.unlockSelectedYear}
-          printMonthOptions={money.printMonthOptions}
-          selectedLockMonth={money.selectedLockMonth}
-          setSelectedLockMonth={money.setSelectedLockMonth}
-          selectedMonthLocked={money.selectedMonthLocked}
-        />
-
-        <MoneyStatsCards totals={money.totals} />
-
-        <MoneyCarryForwardNote
-          selectedYear={money.selectedYear}
-          carryForwardNote={money.carryForwardNote}
-        />
-
-        <MoneySponsorSection
-          selectedYear={money.selectedYear}
-          yearlySponsorBreakdown={money.yearlySponsorBreakdown}
-          openNewSponsorForm={money.openNewSponsorForm}
-          startEditSponsor={money.startEditSponsor}
-          setDeleteSponsorId={money.setDeleteSponsorId}
-        />
-
-        <MoneyMonthlyBreakdown
-          selectedYear={money.selectedYear}
-          transactions={money.transactions}
-        />
+            <MoneyMonthlyBreakdown
+              selectedYear={money.selectedYear}
+              transactions={money.transactions}
+            />
           </>
         ) : (
           <MoneyStatsCards totals={money.totals} />

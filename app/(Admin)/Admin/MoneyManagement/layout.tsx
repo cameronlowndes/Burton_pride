@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import MoneyManagementSidebar from "../components/rooting/MoneyManagement";
+import Watermark from "../components/money/watermark/Watermark";
 
 export default function MoneySidebar({
   children,
@@ -20,6 +21,7 @@ export default function MoneySidebar({
           <div className="min-h-full w-full max-w-none">
             {children}
           </div>
+          <Watermark />
         </main>
       </MoneyManagementSidebar>
     </div>
