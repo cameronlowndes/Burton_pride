@@ -4,13 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Bug,
+  CheckSquare,
   FileText,
   RefreshCcw,
   RotateCcw,
   Search,
   Settings2,
   Sparkles,
+  Square,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -48,6 +51,8 @@ type Transaction = {
   deleted_at: string | null;
   deleted_by?: string | null;
 };
+
+type DeleteMode = "single" | "selected" | "all" | null;
 
 const EASY_MODE_STORAGE_KEY = "burton-pride-hidden-transactions-easy-mode";
 
@@ -137,6 +142,18 @@ function isSponsorshipTransaction(item: Transaction) {
   );
 }
 
+async function readJsonResponse(res: Response) {
+  const text = await res.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      rawResponse: text,
+    };
+  }
+}
+
 export default function HiddenTransactionsPage() {
   /**
    * Full Mode stays as the default.
@@ -149,11 +166,15 @@ export default function HiddenTransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
 
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
+  const [deleteMode, setDeleteMode] = useState<DeleteMode>(null);
+  const [singleDeleteId, setSingleDeleteId] = useState<string | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState<any>(null);
 
@@ -190,22 +211,16 @@ export default function HiddenTransactionsPage() {
       setLoading(true);
       setError("");
       setErrorDetails(null);
+      setSuccessMessage("");
 
       const res = await fetch(
         `/api/admin/money/transactions/hidden?t=${Date.now()}`,
         {
           cache: "no-store",
-        }
+        },
       );
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -215,7 +230,15 @@ export default function HiddenTransactionsPage() {
         };
       }
 
-      setTransactions(data.transactions || []);
+      const loadedTransactions = data.transactions || [];
+
+      setTransactions(loadedTransactions);
+
+      setSelectedIds((currentSelectedIds) =>
+        currentSelectedIds.filter((id) =>
+          loadedTransactions.some((item: Transaction) => item.id === id),
+        ),
+      );
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -269,24 +292,130 @@ export default function HiddenTransactionsPage() {
     };
   }, [filteredTransactions]);
 
+  const selectedTransactions = useMemo(() => {
+    return transactions.filter((item) => selectedIds.includes(item.id));
+  }, [transactions, selectedIds]);
+
+  const selectedTotal = useMemo(() => {
+    return selectedTransactions.reduce(
+      (sum, item) => sum + (item.amount_pence || 0),
+      0,
+    );
+  }, [selectedTransactions]);
+
+  const allVisibleSelected = useMemo(() => {
+    return (
+      filteredTransactions.length > 0 &&
+      filteredTransactions.every((item) => selectedIds.includes(item.id))
+    );
+  }, [filteredTransactions, selectedIds]);
+
+  const deleteIds = useMemo(() => {
+    if (deleteMode === "single") {
+      return singleDeleteId ? [singleDeleteId] : [];
+    }
+
+    if (deleteMode === "selected") {
+      return selectedIds;
+    }
+
+    if (deleteMode === "all") {
+      return transactions.map((item) => item.id);
+    }
+
+    return [];
+  }, [deleteMode, singleDeleteId, selectedIds, transactions]);
+
+  const requiredDeleteConfirmation =
+    deleteMode === "all" ? "DELETE ALL" : "DELETE";
+
+  function toggleSelected(id: string) {
+    setSelectedIds((currentSelectedIds) => {
+      if (currentSelectedIds.includes(id)) {
+        return currentSelectedIds.filter((selectedId) => selectedId !== id);
+      }
+
+      return [...currentSelectedIds, id];
+    });
+  }
+
+  function selectAllVisible() {
+    const visibleIds = filteredTransactions.map((item) => item.id);
+
+    setSelectedIds((currentSelectedIds) => {
+      const allAreAlreadySelected = visibleIds.every((id) =>
+        currentSelectedIds.includes(id),
+      );
+
+      if (allAreAlreadySelected) {
+        return currentSelectedIds.filter((id) => !visibleIds.includes(id));
+      }
+
+      return Array.from(new Set([...currentSelectedIds, ...visibleIds]));
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds([]);
+  }
+
+  function openSingleDelete(id: string) {
+    setDeleteMode("single");
+    setSingleDeleteId(id);
+    setDeleteConfirmText("");
+    setError("");
+    setErrorDetails(null);
+    setSuccessMessage("");
+  }
+
+  function openSelectedDelete() {
+    if (selectedIds.length === 0) {
+      setError("Please select at least one hidden payment first.");
+      return;
+    }
+
+    setDeleteMode("selected");
+    setSingleDeleteId(null);
+    setDeleteConfirmText("");
+    setError("");
+    setErrorDetails(null);
+    setSuccessMessage("");
+  }
+
+  function openDeleteAll() {
+    if (transactions.length === 0) {
+      setError("There are no hidden payments to delete.");
+      return;
+    }
+
+    setDeleteMode("all");
+    setSingleDeleteId(null);
+    setDeleteConfirmText("");
+    setError("");
+    setErrorDetails(null);
+    setSuccessMessage("");
+  }
+
+  function closeDeleteModal() {
+    if (deleting) return;
+
+    setDeleteMode(null);
+    setSingleDeleteId(null);
+    setDeleteConfirmText("");
+  }
+
   async function restoreTransaction(id: string) {
     try {
       setRestoringId(id);
       setError("");
       setErrorDetails(null);
+      setSuccessMessage("");
 
       const res = await fetch(`/api/admin/money/transactions/${id}/restore`, {
         method: "PATCH",
       });
 
-      const text = await res.text();
-
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw {
@@ -296,7 +425,15 @@ export default function HiddenTransactionsPage() {
         };
       }
 
-      setTransactions((prev) => prev.filter((item) => item.id !== id));
+      setTransactions((previous) =>
+        previous.filter((item) => item.id !== id),
+      );
+
+      setSelectedIds((previous) =>
+        previous.filter((selectedId) => selectedId !== id),
+      );
+
+      setSuccessMessage("Payment restored successfully.");
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
       setErrorDetails(err);
@@ -305,54 +442,100 @@ export default function HiddenTransactionsPage() {
     }
   }
 
-  async function permanentlyDeleteTransaction() {
-    if (!deleteId) return;
+  async function permanentlyDeleteTransactions() {
+    if (!deleteMode || deleteIds.length === 0) return;
 
     try {
       setDeleting(true);
       setError("");
       setErrorDetails(null);
+      setSuccessMessage("");
 
       const cleanConfirmText = deleteConfirmText.trim();
 
-      if (cleanConfirmText !== "DELETE") {
-        setError("Please type DELETE in capital letters to confirm.");
+      if (cleanConfirmText !== requiredDeleteConfirmation) {
+        setError(
+          `Please type ${requiredDeleteConfirmation} exactly to confirm.`,
+        );
         setDeleting(false);
         return;
       }
 
-      const res = await fetch(
-        `/api/admin/money/transactions/${deleteId}/permanent`,
-        {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
+      const successfullyDeletedIds: string[] = [];
+
+      for (const id of deleteIds) {
+        const res = await fetch(
+          `/api/admin/money/transactions/${id}/permanent`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+            },
+
+            /**
+             * Your existing permanent-delete API expects DELETE.
+             * For the all-items popup, the page requires DELETE ALL for safety,
+             * but each existing API call still receives DELETE.
+             */
+            body: JSON.stringify({
+              confirmText: "DELETE",
+            }),
           },
-          body: JSON.stringify({
-            confirmText: cleanConfirmText,
-          }),
+        );
+
+        const data = await readJsonResponse(res);
+
+        if (!res.ok || !data.ok) {
+          setTransactions((previous) =>
+            previous.filter(
+              (item) => !successfullyDeletedIds.includes(item.id),
+            ),
+          );
+
+          setSelectedIds((previous) =>
+            previous.filter(
+              (selectedId) =>
+                !successfullyDeletedIds.includes(selectedId),
+            ),
+          );
+
+          throw {
+            message:
+              data.error ||
+              `Failed while permanently deleting payment ${id}.`,
+            details: {
+              failedId: id,
+              successfullyDeletedIds,
+              apiResponse: data,
+            },
+            status: res.status,
+          };
         }
+
+        successfullyDeletedIds.push(id);
+      }
+
+      setTransactions((previous) =>
+        previous.filter(
+          (item) => !successfullyDeletedIds.includes(item.id),
+        ),
       );
 
-      const text = await res.text();
+      setSelectedIds((previous) =>
+        previous.filter(
+          (selectedId) =>
+            !successfullyDeletedIds.includes(selectedId),
+        ),
+      );
 
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { rawResponse: text };
-      }
+      setSuccessMessage(
+        `${successfullyDeletedIds.length} hidden payment${
+          successfullyDeletedIds.length === 1 ? "" : "s"
+        } permanently deleted.`,
+      );
 
-      if (!res.ok || !data.ok) {
-        throw {
-          message: data.error || "Failed to permanently delete transaction.",
-          details: data,
-          status: res.status,
-        };
-      }
-
-      setTransactions((prev) => prev.filter((item) => item.id !== deleteId));
-      setDeleteId(null);
+      setDeleteMode(null);
+      setSingleDeleteId(null);
       setDeleteConfirmText("");
     } catch (err: any) {
       setError(err?.message || "Something went wrong");
@@ -377,6 +560,7 @@ export default function HiddenTransactionsPage() {
               </Link>
 
               <h1 className="text-3xl font-bold">Hidden Transactions</h1>
+
               <p className="mt-1 text-sm text-white/60">
                 These are soft-deleted payments. They are hidden from the money
                 tracker, totals, Excel exports, and print reports.
@@ -386,9 +570,12 @@ export default function HiddenTransactionsPage() {
             <button
               type="button"
               onClick={loadHiddenTransactions}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20"
+              disabled={loading || deleting}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <RefreshCcw className="h-4 w-4" />
+              <RefreshCcw
+                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+              />
               Refresh
             </button>
           </div>
@@ -441,7 +628,13 @@ export default function HiddenTransactionsPage() {
           </div>
         </section>
 
-        {error && (
+        {successMessage ? (
+          <section className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 p-5 text-sm font-bold text-emerald-100">
+            {successMessage}
+          </section>
+        ) : null}
+
+        {error ? (
           <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5">
             <div className="flex items-center gap-2 font-bold text-red-100">
               <Bug className="h-5 w-5" />
@@ -450,13 +643,13 @@ export default function HiddenTransactionsPage() {
 
             <p className="mt-2 text-sm text-red-100">{error}</p>
 
-            {errorDetails && (
+            {errorDetails ? (
               <pre className="mt-4 max-h-80 overflow-auto rounded-2xl bg-black/40 p-4 text-xs text-red-100">
                 {JSON.stringify(errorDetails, null, 2)}
               </pre>
-            )}
+            ) : null}
           </section>
-        )}
+        ) : null}
 
         <section className="grid w-full max-w-none gap-4 md:grid-cols-3">
           <div className="rounded-3xl bg-purple-500/10 p-5">
@@ -476,24 +669,88 @@ export default function HiddenTransactionsPage() {
         </section>
 
         <section className="w-full max-w-none rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-          <div className="mb-4 flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="mb-4 flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold">Hidden Payments</h2>
+
               <p className="text-sm text-white/50">
-                {easyMode
-                  ? "Restore a payment to bring it back into the main tracker, or permanently delete it when it is no longer needed."
-                  : "Restore a payment to bring it back into the main tracker. The Hidden By column shows which admin hid it."}
+                Select one or more hidden payments to permanently delete them
+                together, or use Delete All Hidden Forever to permanently remove
+                every hidden payment.
               </p>
             </div>
 
-            <div className="relative w-full lg:w-[520px] lg:shrink-0">
+            <div className="relative w-full xl:w-[520px] xl:shrink-0">
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+
               <input
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search hidden transactions..."
                 className="w-full rounded-xl bg-black/30 py-3 pl-11 pr-4 text-sm text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40"
               />
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-sm font-black text-white">
+                {selectedIds.length} payment
+                {selectedIds.length === 1 ? "" : "s"} selected
+              </p>
+
+              <p className="mt-1 text-xs text-white/55">
+                Selected value: {money(selectedTotal)}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                disabled={filteredTransactions.length === 0 || deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {allVisibleSelected ? (
+                  <CheckSquare className="h-4 w-4" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+
+                {allVisibleSelected
+                  ? "Unselect Visible"
+                  : "Select All Visible"}
+              </button>
+
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={selectedIds.length === 0 || deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+                Clear Selection
+              </button>
+
+              <button
+                type="button"
+                onClick={openSelectedDelete}
+                disabled={selectedIds.length === 0 || deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/20 px-4 py-2.5 text-sm font-black text-red-100 ring-1 ring-red-300/20 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Selected Forever
+              </button>
+
+              <button
+                type="button"
+                onClick={openDeleteAll}
+                disabled={transactions.length === 0 || deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete All Hidden Forever
+              </button>
             </div>
           </div>
 
@@ -509,37 +766,68 @@ export default function HiddenTransactionsPage() {
             <div className="w-full max-w-none overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10">
               <table
                 className={`w-full text-sm ${
-                  easyMode ? "min-w-[900px]" : "min-w-[1650px]"
+                  easyMode ? "min-w-[980px]" : "min-w-[1730px]"
                 }`}
               >
                 <thead className="bg-white/10 text-white/60">
                   <tr>
+                    <th className="w-[56px] p-3 text-center">
+                      <button
+                        type="button"
+                        onClick={selectAllVisible}
+                        disabled={filteredTransactions.length === 0 || deleting}
+                        className="inline-flex rounded-lg p-1 text-white/75 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          allVisibleSelected
+                            ? "Unselect visible payments"
+                            : "Select all visible payments"
+                        }
+                      >
+                        {allVisibleSelected ? (
+                          <CheckSquare className="h-5 w-5" />
+                        ) : (
+                          <Square className="h-5 w-5" />
+                        )}
+                      </button>
+                    </th>
+
                     <th className="p-3 text-left">Date</th>
-                    {!easyMode && (
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Hidden On</th>
-                    )}
-                    {!easyMode && (
+                    ) : null}
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Hidden By</th>
-                    )}
+                    ) : null}
+
                     <th className="p-3 text-left">Title</th>
                     <th className="p-3 text-left">Type</th>
-                    {!easyMode && (
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Source</th>
-                    )}
-                    {!easyMode && (
+                    ) : null}
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Sponsor</th>
-                    )}
-                    {!easyMode && (
+                    ) : null}
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Supplier</th>
-                    )}
-                    {!easyMode && (
+                    ) : null}
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Personal</th>
-                    )}
+                    ) : null}
+
                     <th className="p-3 text-left">Payment</th>
-                    {!easyMode && (
+
+                    {!easyMode ? (
                       <th className="p-3 text-left">Invoice</th>
-                    )}
+                    ) : null}
+
                     <th className="p-3 text-right">Amount</th>
+
                     <th className="sticky right-0 bg-[#242435] p-3 text-right backdrop-blur">
                       Action
                     </th>
@@ -550,20 +838,46 @@ export default function HiddenTransactionsPage() {
                   {filteredTransactions.map((item) => {
                     const isPersonal = isPersonalFundsTransaction(item);
                     const hasSponsor = isSponsorshipTransaction(item);
+                    const isSelected = selectedIds.includes(item.id);
 
                     return (
-                      <tr key={item.id} className="border-t border-white/10">
+                      <tr
+                        key={item.id}
+                        className={`border-t border-white/10 transition ${
+                          isSelected ? "bg-sky-500/10" : ""
+                        }`}
+                      >
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => toggleSelected(item.id)}
+                            disabled={deleting}
+                            className="inline-flex rounded-lg p-1 text-white/75 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                            title={
+                              isSelected
+                                ? "Unselect payment"
+                                : "Select payment"
+                            }
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="h-5 w-5 text-sky-200" />
+                            ) : (
+                              <Square className="h-5 w-5" />
+                            )}
+                          </button>
+                        </td>
+
                         <td className="whitespace-nowrap p-3">
                           {formatDate(item.transaction_date || item.created_at)}
                         </td>
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="whitespace-nowrap p-3 text-red-200">
                             {formatDate(item.deleted_at)}
                           </td>
-                        )}
+                        ) : null}
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="max-w-[190px] p-3">
                             <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-300/20">
                               <p className="font-bold">Hidden by</p>
@@ -572,31 +886,31 @@ export default function HiddenTransactionsPage() {
                               </p>
                             </div>
                           </td>
-                        )}
+                        ) : null}
 
                         <td className="max-w-[240px] p-3">
                           <p className="break-words font-semibold">
                             {item.title}
                           </p>
 
-                          {item.description && (
+                          {item.description ? (
                             <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
                               {item.description}
                             </p>
-                          )}
+                          ) : null}
 
-                          {item.sponsorship_note && (
+                          {item.sponsorship_note ? (
                             <p className="mt-2 line-clamp-3 break-words rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                               {item.sponsorship_note}
                             </p>
-                          )}
+                          ) : null}
 
-                          {easyMode && (
+                          {easyMode ? (
                             <p className="mt-2 text-xs text-white/45">
                               Hidden {formatDate(item.deleted_at)} by{" "}
                               {displayAdminName(item.deleted_by)}
                             </p>
-                          )}
+                          ) : null}
                         </td>
 
                         <td className="whitespace-nowrap p-3">
@@ -611,13 +925,13 @@ export default function HiddenTransactionsPage() {
                           </span>
                         </td>
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="whitespace-nowrap p-3">
                             {sourceLabel(item.source)}
                           </td>
-                        )}
+                        ) : null}
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="max-w-[180px] p-3">
                             {hasSponsor ? (
                               <span className="inline-flex rounded-2xl bg-amber-500/20 px-3 py-1 text-xs font-bold text-amber-100 ring-1 ring-amber-300/20">
@@ -627,9 +941,9 @@ export default function HiddenTransactionsPage() {
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-                        )}
+                        ) : null}
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="max-w-[200px] p-3">
                             {item.supplier_name ? (
                               <div className="space-y-1">
@@ -637,19 +951,19 @@ export default function HiddenTransactionsPage() {
                                   {item.supplier_name}
                                 </span>
 
-                                {item.supplier_category && (
+                                {item.supplier_category ? (
                                   <p className="text-xs text-cyan-100/65">
                                     {item.supplier_category}
                                   </p>
-                                )}
+                                ) : null}
                               </div>
                             ) : (
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-                        )}
+                        ) : null}
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="p-3">
                             {isPersonal ? (
                               <div className="space-y-1">
@@ -657,23 +971,23 @@ export default function HiddenTransactionsPage() {
                                   Personal funds
                                 </span>
 
-                                {item.personal_funds_name && (
+                                {item.personal_funds_name ? (
                                   <p className="text-xs text-sky-100/70">
                                     {item.personal_funds_name}
                                   </p>
-                                )}
+                                ) : null}
                               </div>
                             ) : (
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-                        )}
+                        ) : null}
 
                         <td className="whitespace-nowrap p-3">
                           {item.payment_method || "—"}
                         </td>
 
-                        {!easyMode && (
+                        {!easyMode ? (
                           <td className="p-3">
                             {item.invoice_image_url ? (
                               <a
@@ -689,7 +1003,7 @@ export default function HiddenTransactionsPage() {
                               <span className="text-white/40">—</span>
                             )}
                           </td>
-                        )}
+                        ) : null}
 
                         <td className="whitespace-nowrap p-3 text-right font-bold">
                           {money(item.amount_pence)}
@@ -699,12 +1013,13 @@ export default function HiddenTransactionsPage() {
                           <div className="inline-flex items-center justify-end gap-2">
                             <button
                               type="button"
-                              disabled={restoringId === item.id}
+                              disabled={restoringId === item.id || deleting}
                               onClick={() => restoreTransaction(item.id)}
-                              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:opacity-50"
+                              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                               title="Restore transaction"
                             >
                               <RotateCcw className="h-4 w-4" />
+
                               {restoringId === item.id
                                 ? "Restoring..."
                                 : "Restore"}
@@ -713,11 +1028,8 @@ export default function HiddenTransactionsPage() {
                             <button
                               type="button"
                               disabled={deleting}
-                              onClick={() => {
-                                setDeleteId(item.id);
-                                setDeleteConfirmText("");
-                              }}
-                              className="inline-flex items-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:opacity-50"
+                              onClick={() => openSingleDelete(item.id)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-bold text-red-200 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                               title="Permanently delete transaction"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -735,29 +1047,45 @@ export default function HiddenTransactionsPage() {
         </section>
       </div>
 
-      {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-1 py-4 backdrop-blur-sm sm:px-2">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Permanently delete payment?</h2>
+      {deleteMode ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-2 py-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
+            <h2 className="text-xl font-bold">
+              {deleteMode === "all"
+                ? "Permanently delete all hidden payments?"
+                : deleteMode === "selected"
+                  ? "Permanently delete selected payments?"
+                  : "Permanently delete payment?"}
+            </h2>
 
-            <p className="mt-3 text-sm text-white/70">
-              This will permanently remove the hidden transaction from Supabase.
-              This cannot be undone.
+            <p className="mt-3 text-sm leading-6 text-white/70">
+              {deleteMode === "all"
+                ? `This will permanently remove all ${deleteIds.length} hidden payments from Supabase. This cannot be undone.`
+                : deleteMode === "selected"
+                  ? `This will permanently remove ${deleteIds.length} selected hidden payment${
+                      deleteIds.length === 1 ? "" : "s"
+                    } from Supabase. This cannot be undone.`
+                  : "This will permanently remove the hidden transaction from Supabase. This cannot be undone."}
             </p>
 
             <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              Only do this if you are sure you no longer need this record.
+              Only continue when you are completely sure. Permanently deleted
+              records cannot be restored.
             </div>
 
             <label className="mt-5 block text-sm font-bold text-white/80">
-              Type DELETE to confirm
+              Type{" "}
+              <span className="text-red-200">
+                {requiredDeleteConfirmation}
+              </span>{" "}
+              to confirm
             </label>
 
             <input
               type="text"
               value={deleteConfirmText}
-              onChange={(e) => setDeleteConfirmText(e.target.value)}
-              placeholder="Type DELETE"
+              onChange={(event) => setDeleteConfirmText(event.target.value)}
+              placeholder={`Type ${requiredDeleteConfirmation}`}
               autoComplete="off"
               name="money-hidden-delete-confirm"
               className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
@@ -765,34 +1093,47 @@ export default function HiddenTransactionsPage() {
 
             <p className="mt-2 text-xs text-white/45">
               This must be typed exactly as{" "}
-              <span className="font-bold text-red-200">DELETE</span>.
+              <span className="font-bold text-red-200">
+                {requiredDeleteConfirmation}
+              </span>
+              .
             </p>
 
-            <div className="mt-6 flex justify-end gap-3">
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => {
-                  setDeleteId(null);
-                  setDeleteConfirmText("");
-                }}
+                onClick={closeDeleteModal}
                 disabled={deleting}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
+                className="rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cancel
               </button>
 
               <button
                 type="button"
-                onClick={permanentlyDeleteTransaction}
-                disabled={deleting || deleteConfirmText.trim() !== "DELETE"}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={permanentlyDeleteTransactions}
+                disabled={
+                  deleting ||
+                  deleteConfirmText.trim() !== requiredDeleteConfirmation
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {deleting ? "Deleting..." : "Delete Forever"}
+                <Trash2 className="h-4 w-4" />
+
+                {deleting
+                  ? `Deleting ${deleteIds.length} payment${
+                      deleteIds.length === 1 ? "" : "s"
+                    }...`
+                  : deleteMode === "all"
+                    ? "Delete All Hidden Forever"
+                    : deleteMode === "selected"
+                      ? "Delete Selected Forever"
+                      : "Delete Forever"}
               </button>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </main>
   );
 }
