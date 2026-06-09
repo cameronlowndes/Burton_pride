@@ -17,15 +17,7 @@ type NavbarChild = {
   open_in_new_tab: boolean;
 };
 
-type NavbarItem = {
-  id: string;
-  label: string;
-  href: string | null;
-  item_type: "link" | "dropdown";
-  parent_id: string | null;
-  sort_order: number;
-  is_enabled: boolean;
-  open_in_new_tab: boolean;
+type NavbarItem = NavbarChild & {
   children?: NavbarChild[];
 };
 
@@ -93,6 +85,18 @@ export default function Navbar() {
     setOpenDropdownId(null);
   }, [pathname]);
 
+  useEffect(() => {
+    if (isMenuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMenuOpen]);
+
   const rainbowClass = "font-bold rainbow-underline";
 
   const isActive = (path: string) => {
@@ -116,38 +120,25 @@ export default function Navbar() {
   function renderNavLink(item: NavbarItem | NavbarChild, mobile = false) {
     if (!item.href) return null;
 
+    const isExternal =
+      item.href.startsWith("http://") || item.href.startsWith("https://");
+
     const commonClass = mobile
-      ? `block transform py-2 text-lg font-semibold transition hover:scale-105 ${
-          isActive(item.href) ? rainbowClass : ""
+      ? `block w-full rounded-2xl px-5 py-3 text-center text-lg font-bold text-white transition hover:bg-white/15 ${
+          isActive(item.href) ? "bg-white/20" : ""
         }`
       : isActive(item.href)
       ? rainbowClass
       : "hover:underline";
 
-    const isExternal =
-      item.href.startsWith("http://") || item.href.startsWith("https://");
-
-    if (isExternal || item.open_in_new_tab) {
-      return (
-        <Link
-          key={item.id}
-          href={item.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={commonClass}
-          onClick={() => {
-            if (mobile) setIsMenuOpen(false);
-          }}
-        >
-          {item.label}
-        </Link>
-      );
-    }
-
     return (
       <Link
         key={item.id}
         href={item.href}
+        target={isExternal || item.open_in_new_tab ? "_blank" : undefined}
+        rel={
+          isExternal || item.open_in_new_tab ? "noopener noreferrer" : undefined
+        }
         className={commonClass}
         onClick={() => {
           if (mobile) setIsMenuOpen(false);
@@ -159,98 +150,103 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="fixed left-0 right-0 top-0 z-50 flex w-full items-center justify-between bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-8 py-3 text-white shadow-md backdrop-blur-md">
-      <div className="flex flex-col leading-tight">
-        <Link href="/" className="text-xl font-bold text-white drop-shadow-md">
-          Burton Pride
-        </Link>
+    <nav className="fixed left-0 right-0 top-0 z-[9999] w-full bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-4 py-3 text-white shadow-md backdrop-blur-md sm:px-6 md:px-8">
+      <div className="flex w-full items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 leading-tight">
+          <Link
+            href="/"
+            className="block truncate text-xl font-bold text-white drop-shadow-md sm:text-2xl"
+          >
+            Burton Pride
+          </Link>
 
-        <Link
-          href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] font-semibold tracking-wide text-white transition hover:text-white md:text-xs"
-        >
-          Built & Powered by Cameron Digital Works
-        </Link>
-      </div>
+          <Link
+            href="https://www.camerondigitalworks.com/BurtonPrideSupportPage"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block truncate text-[10px] font-semibold tracking-wide text-white transition hover:text-white md:text-xs"
+          >
+            Built & Powered by Cameron Digital Works
+          </Link>
+        </div>
 
-      <div className="hidden gap-6 md:flex">
-        {!loading &&
-          topItems.map((item) => {
-            if (item.item_type === "dropdown") {
-              const active = isDropdownActive(item);
+        <div className="hidden items-center gap-6 md:flex">
+          {!loading &&
+            topItems.map((item) => {
+              if (item.item_type === "dropdown") {
+                const active = isDropdownActive(item);
 
-              return (
-                <div
-                  key={item.id}
-                  ref={(el) => {
-                    dropdownRefs.current[item.id] = el;
-                  }}
-                  className="relative"
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleDropdown(item.id)}
-                    className={`flex cursor-pointer items-center gap-1 ${
-                      active ? rainbowClass : "hover:underline"
-                    }`}
+                return (
+                  <div
+                    key={item.id}
+                    ref={(el) => {
+                      dropdownRefs.current[item.id] = el;
+                    }}
+                    className="relative"
                   >
-                    {item.label}
-                    <FaCaretDown className="text-sm" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleDropdown(item.id)}
+                      className={`flex cursor-pointer items-center gap-1 ${
+                        active ? rainbowClass : "hover:underline"
+                      }`}
+                    >
+                      {item.label}
+                      <FaCaretDown className="text-sm" />
+                    </button>
 
-                  <AnimatePresence>
-                    {openDropdownId === item.id && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="absolute left-0 z-20 mt-2 w-56 rounded-md border border-gray-200 bg-white text-black shadow-lg"
-                      >
-                        {(item.children || []).map((child) => {
-                          if (!child.href) return null;
+                    <AnimatePresence>
+                      {openDropdownId === item.id && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="absolute left-0 z-[9999] mt-2 w-56 rounded-md border border-gray-200 bg-white text-black shadow-lg"
+                        >
+                          {(item.children || []).map((child) => {
+                            if (!child.href) return null;
 
-                          const external =
-                            child.href.startsWith("http://") ||
-                            child.href.startsWith("https://");
+                            const external =
+                              child.href.startsWith("http://") ||
+                              child.href.startsWith("https://");
 
-                          return (
-                            <Link
-                              key={child.id}
-                              href={child.href}
-                              target={
-                                external || child.open_in_new_tab
-                                  ? "_blank"
-                                  : undefined
-                              }
-                              rel={
-                                external || child.open_in_new_tab
-                                  ? "noopener noreferrer"
-                                  : undefined
-                              }
-                              className="block px-4 py-2 hover:bg-gray-100"
-                            >
-                              {child.label}
-                            </Link>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            }
+                            return (
+                              <Link
+                                key={child.id}
+                                href={child.href}
+                                target={
+                                  external || child.open_in_new_tab
+                                    ? "_blank"
+                                    : undefined
+                                }
+                                rel={
+                                  external || child.open_in_new_tab
+                                    ? "noopener noreferrer"
+                                    : undefined
+                                }
+                                className="block px-4 py-2 hover:bg-gray-100"
+                              >
+                                {child.label}
+                              </Link>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              }
 
-            return renderNavLink(item, false);
-          })}
-      </div>
+              return renderNavLink(item, false);
+            })}
+        </div>
 
-      <div className="md:hidden">
         <button
+          type="button"
           onClick={() => setIsMenuOpen((prev) => !prev)}
-          className="relative z-50 text-2xl rainbow-text"
-          aria-label="Toggle menu"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-2xl text-purple-700 shadow-lg ring-2 ring-white/60 md:hidden"
+          aria-label={isMenuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={isMenuOpen}
         >
           {isMenuOpen ? <FaTimes /> : <FaBars />}
         </button>
@@ -259,74 +255,88 @@ export default function Navbar() {
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
+            initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-            className="absolute left-0 top-full z-40 flex w-full flex-col items-center gap-4 bg-gradient-to-b from-purple-600 via-pink-600 to-red-500 py-6 text-white shadow-xl backdrop-blur-lg"
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2 }}
+            className="fixed left-0 right-0 top-[68px] z-[9998] max-h-[calc(100vh-68px)] overflow-y-auto bg-gradient-to-b from-purple-700 via-pink-600 to-red-500 px-5 py-6 text-white shadow-2xl md:hidden"
           >
-            {!loading &&
-              topItems.map((item) => {
-                if (item.item_type === "dropdown") {
-                  const isOpen = openDropdownId === item.id;
+            <div className="mx-auto flex w-full max-w-md flex-col items-center gap-3">
+              {loading && (
+                <p className="text-sm font-semibold text-white/90">
+                  Loading menu...
+                </p>
+              )}
 
-                  return (
-                    <div
-                      key={item.id}
-                      className="flex w-full flex-col items-center gap-2"
-                    >
-                      <button
-                        onClick={() => toggleDropdown(item.id)}
-                        className="flex items-center gap-1 text-lg font-semibold transition hover:scale-105"
+              {!loading &&
+                topItems.map((item) => {
+                  if (item.item_type === "dropdown") {
+                    const isOpen = openDropdownId === item.id;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex w-full flex-col items-center gap-2"
                       >
-                        {item.label} <FaCaretDown />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleDropdown(item.id)}
+                          className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-lg font-bold text-white transition hover:bg-white/15"
+                        >
+                          {item.label}
+                          <FaCaretDown
+                            className={`transition ${
+                              isOpen ? "rotate-180" : ""
+                            }`}
+                          />
+                        </button>
 
-                      <AnimatePresence>
-                        {isOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            className="flex w-56 flex-col overflow-hidden rounded-md bg-white text-black shadow-lg"
-                          >
-                            {(item.children || []).map((child) => {
-                              if (!child.href) return null;
+                        <AnimatePresence>
+                          {isOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -8 }}
+                              className="flex w-full flex-col overflow-hidden rounded-2xl bg-white text-black shadow-lg"
+                            >
+                              {(item.children || []).map((child) => {
+                                if (!child.href) return null;
 
-                              const external =
-                                child.href.startsWith("http://") ||
-                                child.href.startsWith("https://");
+                                const external =
+                                  child.href.startsWith("http://") ||
+                                  child.href.startsWith("https://");
 
-                              return (
-                                <Link
-                                  key={child.id}
-                                  href={child.href}
-                                  target={
-                                    external || child.open_in_new_tab
-                                      ? "_blank"
-                                      : undefined
-                                  }
-                                  rel={
-                                    external || child.open_in_new_tab
-                                      ? "noopener noreferrer"
-                                      : undefined
-                                  }
-                                  className="px-4 py-2 hover:bg-gray-100"
-                                  onClick={() => setIsMenuOpen(false)}
-                                >
-                                  {child.label}
-                                </Link>
-                              );
-                            })}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                }
+                                return (
+                                  <Link
+                                    key={child.id}
+                                    href={child.href}
+                                    target={
+                                      external || child.open_in_new_tab
+                                        ? "_blank"
+                                        : undefined
+                                    }
+                                    rel={
+                                      external || child.open_in_new_tab
+                                        ? "noopener noreferrer"
+                                        : undefined
+                                    }
+                                    className="px-4 py-3 text-center font-semibold hover:bg-gray-100"
+                                    onClick={() => setIsMenuOpen(false)}
+                                  >
+                                    {child.label}
+                                  </Link>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  }
 
-                return renderNavLink(item, true);
-              })}
+                  return renderNavLink(item, true);
+                })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
