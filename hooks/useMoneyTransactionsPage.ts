@@ -124,6 +124,23 @@ type LoanActionFunding = SponsorBreakdown & {
   loan_paid_off_at?: string | null;
 };
 
+type StripePreviewItem = {
+  id: string;
+  title: string;
+  description?: string | null;
+  type: string;
+  category?: string | null;
+  amount?: string | number;
+  amount_pence?: number;
+  date?: string;
+  transaction_date?: string;
+  email?: string | null;
+  status?: string;
+  payment_method?: string | null;
+  source?: string | null;
+  stripe_payment_id?: string | null;
+};
+
 const initialForm = {
   title: "",
   description: "",
@@ -462,6 +479,10 @@ export function useMoneyTransactionsPage() {
     null
   );
   const [stripeSyncError, setStripeSyncError] = useState<string | null>(null);
+  const [stripePreviewing, setStripePreviewing] = useState(false);
+  const [stripePreviewItems, setStripePreviewItems] = useState<
+    StripePreviewItem[]
+  >([]);
 
   const displaySponsors = useMemo(() => {
     if (sponsors.length > 0) return sponsors;
@@ -719,7 +740,129 @@ export function useMoneyTransactionsPage() {
     }
   }
 
-  async function syncStripeDonations() {
+  async function previewStripeDonations() {
+    try {
+      setStripePreviewing(true);
+      setStripeSyncMessage(null);
+      setStripeSyncError(null);
+      setError("");
+      setErrorDetails(null);
+
+      const res = await fetch(
+        `/api/admin/money/sync-stripe?preview=true&t=${Date.now()}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            preview: true,
+          }),
+          cache: "no-store",
+        }
+      );
+
+      const data = await readJsonResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw {
+          message: data.error || "Failed to preview Stripe website payments",
+          details: data,
+          status: res.status,
+        };
+      }
+
+      const rawPreviewItems =
+        data.previewItems ||
+        data.items ||
+        data.payments ||
+        data.transactions ||
+        [];
+
+      const previewItems: StripePreviewItem[] = Array.isArray(rawPreviewItems)
+        ? rawPreviewItems.map((item: any, index: number) => ({
+            ...item,
+            id:
+              String(
+                item.id ||
+                  item.stripe_payment_id ||
+                  item.payment_intent_id ||
+                  item.checkout_session_id ||
+                  `stripe-preview-${index + 1}`
+              ),
+            title: String(
+              item.title ||
+                item.name ||
+                item.description ||
+                item.payment_type ||
+                "Website payment"
+            ),
+            description: item.description || "",
+            type: String(item.type || item.payment_type || "income"),
+            category: item.category || "Website payment",
+            amount:
+              item.amount ??
+              (Number.isFinite(Number(item.amount_pence))
+                ? (Number(item.amount_pence) / 100).toFixed(2)
+                : "0.00"),
+            amount_pence: Number(
+              item.amount_pence ??
+                Math.round(Number(item.amount || 0) * 100)
+            ),
+            date: String(
+              item.date ||
+                item.transaction_date ||
+                item.created_at ||
+                getTodayDate()
+            ),
+            transaction_date: String(
+              item.transaction_date ||
+                item.date ||
+                item.created_at ||
+                getTodayDate()
+            ),
+            email: item.email || item.customer_email || null,
+            status: String(item.status || "Ready to import"),
+            payment_method: item.payment_method || "Stripe",
+            source: item.source || "stripe",
+            stripe_payment_id:
+              item.stripe_payment_id ||
+              item.payment_intent_id ||
+              item.checkout_session_id ||
+              item.id ||
+              null,
+          }))
+        : [];
+
+      setStripePreviewItems(previewItems);
+
+      setStripeSyncMessage(
+        previewItems.length === 0
+          ? "No new website payments were found to import."
+          : `Preview ready. Check ${previewItems.length} website payment${
+              previewItems.length === 1 ? "" : "s"
+            } before confirming the import.`
+      );
+
+      return previewItems;
+    } catch (err: any) {
+      const message =
+        err?.message || "Something went wrong previewing website payments.";
+
+      setStripeSyncError(message);
+      setError(message);
+      setErrorDetails(err);
+      setStripePreviewItems([]);
+
+      return [];
+    } finally {
+      setStripePreviewing(false);
+    }
+  }
+
+  async function syncStripeDonations(
+    confirmedItems: StripePreviewItem[] = stripePreviewItems
+  ) {
     try {
       setStripeSyncing(true);
       setStripeSyncMessage(null);
@@ -727,8 +870,30 @@ export function useMoneyTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
+      const itemsToImport = Array.isArray(confirmedItems)
+        ? confirmedItems
+        : [];
+
+      if (itemsToImport.length === 0) {
+        throw {
+          message:
+            "There are no previewed website payments to import. Load the preview first, check the details, then confirm the import.",
+          details: {
+            confirmedItems: itemsToImport,
+          },
+        };
+      }
+
       const res = await fetch(`/api/admin/money/sync-stripe?t=${Date.now()}`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          preview: false,
+          confirmed: true,
+          items: itemsToImport,
+        }),
         cache: "no-store",
       });
 
@@ -749,6 +914,8 @@ export function useMoneyTransactionsPage() {
       setStripeSyncMessage(
         `Stripe sync complete. Added ${created}, updated ${updated}, skipped ${skipped}. Manual transactions were not changed.`
       );
+
+      setStripePreviewItems([]);
 
       await loadTransactions();
       await loadSponsors();
@@ -3339,6 +3506,8 @@ export function useMoneyTransactionsPage() {
     stripeSyncing,
     stripeSyncMessage,
     stripeSyncError,
+    stripePreviewing,
+    stripePreviewItems,
 
     budgetItems,
     savingBudget,
@@ -3380,6 +3549,7 @@ export function useMoneyTransactionsPage() {
 
     handleYearChange,
     refreshAll,
+    previewStripeDonations,
     syncStripeDonations,
 
     openNewSponsorForm,

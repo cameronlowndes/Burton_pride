@@ -153,8 +153,7 @@ function getHelpfulErrorMessage(message: string) {
 
   return {
     title: "Money tracker error",
-    summary:
-      "Something went wrong while loading or syncing the money tracker.",
+    summary: "Something went wrong while loading or syncing the money tracker.",
     checks: [
       "Refresh the page.",
       "Check the browser console.",
@@ -189,9 +188,7 @@ function DetailedErrorBox({
             {title}
           </p>
 
-          <h2 className="mt-2 text-xl font-black text-white">
-            {help.title}
-          </h2>
+          <h2 className="mt-2 text-xl font-black text-white">{help.title}</h2>
 
           <p className="mt-2 text-sm leading-6 text-red-100/80">
             {help.summary}
@@ -317,8 +314,16 @@ export default function MoneyTransactionsPage() {
           <>
             <WebsitePaymentsSyncCard
               syncing={money.stripeSyncing}
+              previewing={(money as any).stripePreviewing || false}
               message={money.stripeSyncMessage}
               error={money.stripeSyncError}
+              previewItems={(money as any).stripePreviewItems || []}
+              onPreview={
+                (money as any).previewStripeDonations ||
+                (() => {
+                  console.warn("previewStripeDonations is missing from hook.");
+                })
+              }
               onSync={money.syncStripeDonations}
               DetailedErrorBox={DetailedErrorBox}
             />
