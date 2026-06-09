@@ -324,7 +324,10 @@ export default function MoneyTransactionsPage() {
                   console.warn("previewStripeDonations is missing from hook.");
                 })
               }
-              onSync={money.syncStripeDonations}
+         
+              onSync={(confirmedSessionIds) =>
+                money.syncStripeDonations(confirmedSessionIds as any)
+              }
               DetailedErrorBox={DetailedErrorBox}
             />
 

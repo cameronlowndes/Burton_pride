@@ -1229,6 +1229,7 @@ export default function MoneyTransactionsTable({
   function enableEasyMode() {
     setEasyMode(true);
     setColumnsOpen(false);
+    setFiltersOpen(false);
     setSelectedSponsorId("all");
     setSelectedPaymentMethod("all");
     setQuickFilter("all");
@@ -2229,6 +2230,327 @@ export default function MoneyTransactionsTable({
     );
   }
 
+  function renderEasyModeCard(item: Transaction) {
+    const isPersonal = isPersonalFundsTransaction(item);
+    const hasFunding = isSponsorshipTransaction(item);
+    const missingReceipt = hasMissingReceiptWarning(item);
+    const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
+    const lockReason = getTransactionLockReason(item);
+    const locked = Boolean(lockReason);
+    const checkedByName = item.checked_at
+      ? getCheckedByDisplayName(item)
+      : "";
+    const checkedByEmail = item.checked_at ? getCheckedByEmail(item) : null;
+    const canUndoChecked = item.checked_at
+      ? canCurrentAdminUncheckTransaction({
+          item,
+          currentUserId,
+          currentUserEmail,
+          currentUserName,
+        })
+      : false;
+    const checkedByOtherAdmin = Boolean(item.checked_at && !canUndoChecked);
+
+    return (
+      <article
+        key={`easy-${item.id}`}
+        className={`rounded-3xl border bg-black/25 p-5 shadow-xl ${
+          locked
+            ? "border-red-300/30"
+            : receiptOverdue
+              ? "border-red-300/30"
+              : "border-white/10"
+        }`}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex rounded-full px-3 py-1 text-xs font-black ring-1 ${
+                  item.type === "income"
+                    ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20"
+                    : "bg-red-500/15 text-red-100 ring-red-300/20"
+                }`}
+              >
+                {item.type === "income" ? "MONEY IN" : "MONEY OUT"}
+              </span>
+
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/70 ring-1 ring-white/10">
+                {item.payment_method || "No payment method"}
+              </span>
+            </div>
+
+            <h3 className="mt-3 break-words text-xl font-black leading-tight text-white sm:text-2xl">
+              {item.title}
+            </h3>
+
+            <p className="mt-2 text-sm font-semibold text-white/55">
+              {item.transaction_reference || "Reference not added yet"}
+            </p>
+          </div>
+
+          <div
+            className={`shrink-0 rounded-2xl px-4 py-3 text-2xl font-black ring-1 ${
+              item.type === "income"
+                ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20"
+                : "bg-red-500/15 text-red-100 ring-red-300/20"
+            }`}
+          >
+            {money(item.amount_pence)}
+          </div>
+        </div>
+
+        <WarningBadges
+          item={item}
+          receiptReminderDays={activeReceiptReminderDays}
+        />
+
+        {locked ? (
+          <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold leading-6 text-red-100">
+            {lockReason}
+          </div>
+        ) : null}
+
+        {receiptOverdue ? (
+          <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold leading-6 text-red-100">
+            {receiptReminderLabel(item, activeReceiptReminderDays)}
+          </div>
+        ) : null}
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/10">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Date
+            </p>
+            <p className="mt-2 text-base font-black text-white">
+              {none(item.transaction_date)}
+            </p>
+          </div>
+
+          <div
+            className={`rounded-2xl p-4 ring-1 ${
+              checkedByOtherAdmin
+                ? "bg-orange-500/10 ring-orange-300/20"
+                : item.checked_at
+                  ? "bg-emerald-500/10 ring-emerald-300/20"
+                  : "bg-white/[0.06] ring-white/10"
+            }`}
+          >
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Checked status
+            </p>
+
+            <p
+              className={`mt-2 text-base font-black ${
+                checkedByOtherAdmin
+                  ? "text-orange-100"
+                  : item.checked_at
+                    ? "text-emerald-100"
+                    : "text-amber-100"
+              }`}
+            >
+              {checkedByOtherAdmin
+                ? "Locked by another admin"
+                : item.checked_at
+                  ? "Checked"
+                  : "Needs checking"}
+            </p>
+
+            {item.checked_at ? (
+              <div className="mt-2 space-y-1 text-xs font-semibold leading-5 text-white/65">
+                <p>
+                  Checked by{" "}
+                  <span className="font-black text-white">{checkedByName}</span>
+                </p>
+
+                {checkedByEmail ? (
+                  <p className="break-all text-white/50">{checkedByEmail}</p>
+                ) : null}
+
+                <p className="text-white/50">{formatDate(item.checked_at)}</p>
+              </div>
+            ) : null}
+          </div>
+
+          {hasFunding ? (
+            <div className="rounded-2xl bg-amber-500/10 p-4 ring-1 ring-amber-300/20 sm:col-span-2">
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-100/70">
+                Funding
+              </p>
+              <p className="mt-2 text-base font-black text-amber-100">
+                {item.sponsor_name || "Funding record linked"}
+              </p>
+            </div>
+          ) : null}
+
+          {isPersonal ? (
+            <div className="rounded-2xl bg-orange-500/10 p-4 ring-1 ring-orange-300/20 sm:col-span-2">
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-orange-100/70">
+                Personal funds
+              </p>
+              <p className="mt-2 text-base font-black text-orange-100">
+                {item.personal_funds_repaid ? "Paid back" : "Still needs paying back"}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        {checkedByOtherAdmin ? (
+          <div className="mt-4 rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4 text-sm font-bold leading-6 text-orange-100">
+            <p className="font-black text-white">
+              Checked status locked by {checkedByName}
+            </p>
+
+            <p className="mt-1 text-orange-100/80">
+              Only the admin who marked this payment as checked can undo it.
+            </p>
+
+            {checkedByEmail ? (
+              <p className="mt-1 break-all text-xs text-orange-100/65">
+                {checkedByEmail}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <label className="inline-flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10">
+            <input
+              type="checkbox"
+              checked={selectedIds.has(item.id)}
+              disabled={locked}
+              onChange={() => toggleSelect(item.id)}
+              className="h-5 w-5 rounded border-white/20 bg-black/30 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            Select payment
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setDetailsItem(item)}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20"
+          >
+            <Eye className="h-4 w-4" />
+            View details
+          </button>
+
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() =>
+              runTransactionAction(item, () => onEditTransaction(item))
+            }
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Pencil className="h-4 w-4" />
+            Edit payment
+          </button>
+
+          <button
+            type="button"
+            disabled={
+              locked ||
+              checkingId === item.id ||
+              checkedByOtherAdmin
+            }
+            onClick={() =>
+              runTransactionAction(item, () => onMarkTransactionChecked(item))
+            }
+            title={
+              checkedByOtherAdmin
+                ? `Only ${checkedByName} can undo the checked status.`
+                : item.checked_at
+                  ? "Undo the checked status"
+                  : "Mark this payment as checked"
+            }
+            className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              checkedByOtherAdmin
+                ? "bg-orange-500/10 text-orange-100 ring-orange-300/20"
+                : item.checked_at
+                  ? "bg-orange-500/15 text-orange-100 ring-orange-300/20 hover:bg-orange-500/25"
+                  : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
+            }`}
+          >
+            <CheckCircle2 className="h-4 w-4" />
+
+            {checkingId === item.id
+              ? "Saving..."
+              : checkedByOtherAdmin
+                ? `Locked by ${checkedByName}`
+                : item.checked_at
+                  ? "Undo checked"
+                  : "Mark checked"}
+          </button>
+        </div>
+      </article>
+    );
+  }
+
+  function renderEasyModeRefundCard(refund: TrackingRefund) {
+    return (
+      <article
+        key={`easy-refund-${refund.id}`}
+        className="rounded-3xl border border-cyan-300/20 bg-cyan-500/[0.06] p-5 shadow-xl"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className={refundTypeBadgeClass(refund)}>
+                {refundTypeLabel(refund)}
+              </Badge>
+
+              <Badge className={refundStatusBadgeClass(refund.status)}>
+                {refundStatusLabel(refund.status)}
+              </Badge>
+            </div>
+
+            <h3 className="mt-3 break-words text-xl font-black leading-tight text-white sm:text-2xl">
+              {refund.title}
+            </h3>
+
+            <p className="mt-2 text-sm font-semibold text-white/55">
+              {refundReference(refund)}
+            </p>
+          </div>
+
+          <div className="shrink-0 rounded-2xl bg-cyan-500/15 px-4 py-3 text-2xl font-black text-cyan-100 ring-1 ring-cyan-300/20">
+            {money(refund.amount_pence)}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/10">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Date
+            </p>
+            <p className="mt-2 text-base font-black text-white">
+              {none(refund.refund_date)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white/[0.06] p-4 ring-1 ring-white/10">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Status
+            </p>
+            <p className="mt-2 text-base font-black text-cyan-100">
+              {refundStatusLabel(refund.status)}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <Link
+            href="/admin/money/refunds"
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-500/15 px-4 py-3 text-sm font-black text-cyan-100 ring-1 ring-cyan-300/20 transition hover:bg-cyan-500/25"
+          >
+            <Eye className="h-4 w-4" />
+            Open refund tracker
+          </Link>
+        </div>
+      </article>
+    );
+  }
+
   function renderMobileRefundCard(refund: TrackingRefund) {
     return (
       <div
@@ -2482,7 +2804,67 @@ export default function MoneyTransactionsTable({
         </div>
       )}
 
-      <div className="mb-4 grid gap-3 xl:grid-cols-[1fr_auto]">
+      {easyMode ? (
+        <div className="mb-4 rounded-3xl border border-emerald-300/20 bg-emerald-500/[0.08] p-4 shadow-xl sm:p-5">
+          <div className="mb-4">
+            <h3 className="text-lg font-black text-white">
+              Find a payment
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-emerald-100/70">
+              Search by payment title or reference. Choose a month only when you
+              need to narrow the list down.
+            </p>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1fr_260px_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-white/40" />
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search payments..."
+                className="w-full rounded-2xl bg-black/30 py-4 pl-12 pr-4 text-base font-semibold text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-emerald-300/50"
+              />
+            </div>
+
+            <select
+              value={selectedViewMonth}
+              onChange={(event) => {
+                setSelectedViewMonth(event.target.value);
+                setSearchTerm("");
+              }}
+              className="rounded-2xl bg-black/30 p-4 text-base font-black text-white outline-none ring-1 ring-emerald-300/20"
+            >
+              {printMonthOptions.map((month) => (
+                <option
+                  key={month.key}
+                  value={month.key}
+                  className="bg-[#11111f] text-white"
+                >
+                  {month.label} ({month.count})
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm("");
+                setFilter("all");
+                setSelectedSponsorId("all");
+                setSelectedPaymentMethod("all");
+                setQuickFilter("all");
+                setSelectedViewMonth("all");
+              }}
+              className="rounded-2xl bg-white/10 px-5 py-4 text-base font-black text-white transition hover:bg-white/20"
+            >
+              Clear search
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className={`${easyMode ? "hidden" : "mb-4 grid gap-3 xl:grid-cols-[1fr_auto]"}`}>
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
           <button
             type="button"
@@ -2752,10 +3134,10 @@ export default function MoneyTransactionsTable({
         <div className="mb-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
           <p className="font-black">Easy Mode is on</p>
           <p className="mt-1 text-xs leading-5 text-emerald-100/75">
-            The table is showing the main details only: reference, date, title,
-            type, amount, payment, checked status and actions. Use Full Mode
-            when you need funding, supplier, repayment, bank, receipt or finance
-            columns.
+            Payments are shown as large, simple cards with the title, amount,
+            date, payment type and checked status. Use Full Mode when you need
+            the advanced table, funding details, receipts, bank matching or
+            finance notes.
           </p>
         </div>
       )}
@@ -2987,7 +3369,17 @@ export default function MoneyTransactionsTable({
         </div>
       ) : (
         <>
-          <div className="grid gap-3 xl:hidden">
+          {easyMode ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {visibleTrackingRows.map((row) =>
+                row.kind === "transaction"
+                  ? renderEasyModeCard(row.item)
+                  : renderEasyModeRefundCard(row.item),
+              )}
+            </div>
+          ) : null}
+
+          <div className={`${easyMode ? "hidden" : "grid"} gap-3 xl:hidden`}>
             {visibleTrackingRows.map((row) =>
               row.kind === "transaction"
                 ? renderMobileCard(row.item)
@@ -2995,7 +3387,7 @@ export default function MoneyTransactionsTable({
             )}
           </div>
 
-          <div className="hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full">
+          <div className={`${easyMode ? "hidden" : "hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full"}`}>
             <table
               className={`w-full text-sm ${easyMode ? "min-w-[1200px]" : "min-w-[2250px]"}`}
             >

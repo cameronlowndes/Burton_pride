@@ -1944,6 +1944,14 @@ export function useMoneyTransactionsPage() {
   }
 
   function startEditTransaction(item: Transaction) {
+    /**
+     * Keep the user's current position on the page when Edit is pressed.
+     * The transaction form can update without forcing the browser back to the
+     * top of the page.
+     */
+    const scrollTop =
+      typeof window !== "undefined" ? window.scrollY : 0;
+
     const lockMessage = getLockMessage(item.transaction_date || item.created_at);
 
     if (lockMessage) {
@@ -2046,10 +2054,20 @@ export function useMoneyTransactionsPage() {
     setError("");
     setErrorDetails(null);
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
+    /**
+     * React state updates can change the page height while the form switches
+     * into edit mode. Restore the previous viewport position after the render
+     * so pressing Edit never jumps to the top of the page.
+     */
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({
+          top: scrollTop,
+          left: 0,
+          behavior: "auto",
+        });
+      });
+    }
   }
 
   function cancelEditTransaction() {

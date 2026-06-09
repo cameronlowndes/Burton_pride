@@ -13,6 +13,7 @@ import {
   PiggyBank,
   Plus,
   Save,
+  Sparkles,
   Target,
   Trash2,
   X,
@@ -1244,6 +1245,7 @@ export default function MoneyBudgetPlanning({
   currentAdminEmail = null,
 }: Props) {
   const [isOpen, setIsOpen] = useState(false);
+  const [superEasyMode, setSuperEasyMode] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draftItems, setDraftItems] = useState<BudgetItem[]>(budgetItems);
   const [draftAmountInputs, setDraftAmountInputs] = useState<
@@ -1470,6 +1472,15 @@ export default function MoneyBudgetPlanning({
   const hasSavingTarget = savingTargetTotals.targetPence > 0;
 
   const hasOverBudgetRows = rows.some((item) => item.remainingPence < 0);
+
+  function startSuperEasyEditing() {
+    setDraftItems(budgetItems);
+    setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
+    setNewBudgetName("");
+    setNewBudgetError(null);
+    setAuditLogError(null);
+    setEditing(true);
+  }
 
   function startEditing() {
     setDraftItems(budgetItems);
@@ -1989,6 +2000,10 @@ export default function MoneyBudgetPlanning({
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
+
+    // Keep Super Easy Mode in edit mode so the new budget area appears
+    // immediately and can be given an amount before Save Budget is pressed.
+    setEditing(true);
   }
 
   function removeBudgetAreaFromDraft(categoryKey: string) {
@@ -2107,6 +2122,422 @@ export default function MoneyBudgetPlanning({
 
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+      {superEasyMode ? (
+        <div className="space-y-5">
+          <div className="rounded-3xl border border-emerald-300/25 bg-emerald-500/10 p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-emerald-100">
+                  <Sparkles className="h-4 w-4" />
+                  Super Easy Mode
+                </div>
+
+                <h2 className="mt-3 text-2xl font-black text-white">
+                  Simple budget planner
+                </h2>
+
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-100/75">
+                  This view only shows the main numbers. Use the large buttons
+                  below to change your budget or update your saving target.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSuperEasyMode(false)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-emerald-100"
+              >
+                Show Full Mode
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5">
+              <p className="text-sm font-black text-emerald-100">Budget planned</p>
+              <p className="mt-2 text-3xl font-black text-white">
+                {money(totals.planned)}
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-red-300/20 bg-red-500/10 p-5">
+              <p className="text-sm font-black text-red-100">Money spent</p>
+              <p className="mt-2 text-3xl font-black text-white">
+                {money(totals.actual)}
+              </p>
+            </div>
+
+            <div
+              className={`rounded-3xl border p-5 ${
+                totals.remaining >= 0
+                  ? "border-sky-300/20 bg-sky-500/10"
+                  : "border-red-300/20 bg-red-500/10"
+              }`}
+            >
+              <p className="text-sm font-black text-white/75">Money left</p>
+              <p
+                className={`mt-2 text-3xl font-black ${
+                  totals.remaining >= 0 ? "text-sky-100" : "text-red-100"
+                }`}
+              >
+                {money(totals.remaining)}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/20 p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-xl font-black text-white">
+                  Your budget areas
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-white/60">
+                  Set how much you plan to spend in each area.
+                </p>
+              </div>
+
+              {!editing ? (
+                <button
+                  type="button"
+                  onClick={startSuperEasyEditing}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white transition hover:bg-pink-400"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Change Budget Amounts
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={cancelEditing}
+                    disabled={savingBudget}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <X className="h-4 w-4" />
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={saveBudget}
+                    disabled={savingBudget}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Save className="h-4 w-4" />
+                    {savingBudget ? "Saving..." : "Save Budget"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {auditLogError ? (
+              <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <p className="whitespace-pre-wrap break-words leading-6">
+                    {auditLogError}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4 rounded-2xl border border-emerald-300/25 bg-emerald-500/10 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-300/20">
+                  <Plus className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-base font-black text-white">
+                    Add a new budget area
+                  </h4>
+
+                  <p className="mt-1 text-xs leading-5 text-emerald-100/70">
+                    Add another area such as First Aid, Toilets, Stage,
+                    Marketing, Gazebos, or Volunteer costs.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  value={newBudgetName}
+                  onChange={(event) => {
+                    setNewBudgetName(event.target.value);
+                    setNewBudgetError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addBudgetArea();
+                    }
+                  }}
+                  placeholder="Example: First Aid"
+                  className="min-w-0 flex-1 rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-emerald-300/20 placeholder:text-white/35 focus:ring-emerald-300/50"
+                />
+
+                <button
+                  type="button"
+                  onClick={addBudgetArea}
+                  disabled={savingBudget}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Budget Area
+                </button>
+              </div>
+
+              {newBudgetError ? (
+                <p className="mt-3 rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100">
+                  {newBudgetError}
+                </p>
+              ) : null}
+
+              {!editing ? (
+                <p className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-emerald-100/75">
+                  Adding a new area will open editing automatically. Enter its
+                  budget amount, then press Save Budget.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {rows.map((item) => {
+                const overBudget = item.remainingPence < 0;
+
+                return (
+                  <div
+                    key={item.category_key}
+                    className={`rounded-2xl border p-4 ${
+                      overBudget
+                        ? "border-red-300/30 bg-red-500/10"
+                        : "border-white/10 bg-white/[0.03]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Banknote className="h-4 w-4 text-white/45" />
+                      <p className="font-black text-white">
+                        {item.category_label}
+                      </p>
+                    </div>
+
+                    {editing ? (
+                      <label className="mt-3 block">
+                        <span className="mb-2 block text-xs font-black uppercase tracking-wide text-white/55">
+                          Planned amount
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-black text-white">£</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={draftAmountInputs[item.category_key] ?? ""}
+                            onChange={(event) =>
+                              updateDraftPlannedAmount(
+                                item.category_key,
+                                event.target.value,
+                              )
+                            }
+                            onBlur={() =>
+                              formatDraftPlannedAmount(item.category_key)
+                            }
+                            placeholder="0.00"
+                            className="w-full rounded-xl bg-black/30 p-3 text-lg font-black text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/50"
+                          />
+                        </div>
+                      </label>
+                    ) : (
+                      <p className="mt-3 text-2xl font-black text-white">
+                        {money(item.planned_amount_pence)}
+                      </p>
+                    )}
+
+                    <div className="mt-3 space-y-1 text-sm text-white/65">
+                      <p>
+                        Spent:{" "}
+                        <strong className="text-white">
+                          {money(item.actualPence)}
+                        </strong>
+                      </p>
+                      <p>
+                        Left:{" "}
+                        <strong
+                          className={
+                            overBudget ? "text-red-100" : "text-emerald-100"
+                          }
+                        >
+                          {money(item.remainingPence)}
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSuperEasyMode(false);
+                setIsOpen(true);
+              }}
+              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/20"
+            >
+              Open advanced budget settings
+            </button>
+          </div>
+
+          <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100">
+                  <Target className="h-4 w-4" />
+                  Simple saving target
+                </div>
+                <h3 className="mt-3 text-xl font-black text-white">
+                  Save money for something important
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-sky-100/70">
+                  Enter the amount you need and how many months you have.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={saveSelectedSavingTarget}
+                disabled={savingTargetSaving || savingTargetLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-5 py-3 text-sm font-black text-black transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                {savingTargetSaving ? "Saving..." : "Save Target"}
+              </button>
+            </div>
+
+            {savingTargetError ? (
+              <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+                {savingTargetError}
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <span className="mb-2 block text-sm font-black text-sky-100">
+                  What are you saving for?
+                </span>
+                <input
+                  type="text"
+                  value={selectedSavingTarget.name}
+                  onChange={(event) =>
+                    updateSavingTarget("name", event.target.value)
+                  }
+                  placeholder="Example: Insurance"
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+                />
+              </label>
+
+              <label className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <span className="mb-2 block text-sm font-black text-sky-100">
+                  How much do you need?
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-black text-white">£</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={selectedSavingTarget.targetAmount}
+                    onChange={(event) =>
+                      updateSavingTarget("targetAmount", event.target.value)
+                    }
+                    placeholder="1000"
+                    className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+                  />
+                </div>
+              </label>
+
+              <label className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <span className="mb-2 block text-sm font-black text-sky-100">
+                  How much have you saved?
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-black text-white">£</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={selectedSavingTarget.currentSaved}
+                    onChange={(event) =>
+                      updateSavingTarget("currentSaved", event.target.value)
+                    }
+                    placeholder="0"
+                    className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+                  />
+                </div>
+              </label>
+
+              <label className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <span className="mb-2 block text-sm font-black text-sky-100">
+                  How many months?
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={selectedSavingTarget.months}
+                  onChange={(event) =>
+                    updateSavingTarget("months", event.target.value)
+                  }
+                  placeholder="6"
+                  className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-sky-300/50"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-sm font-black text-sky-100">Still to save</p>
+                <p className="mt-2 text-2xl font-black text-white">
+                  {money(savingTargetTotals.remainingToSavePence)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4">
+                <p className="text-sm font-black text-purple-100">
+                  Save each month
+                </p>
+                <p className="mt-2 text-2xl font-black text-white">
+                  {savingTargetTotals.months > 0
+                    ? money(savingTargetTotals.monthlyRequiredPence)
+                    : "Add months"}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={addCurrentSavedFromMonthlyAmount}
+                disabled={
+                  savingTargetTotals.monthlyRequiredPence <= 0 ||
+                  savingTargetSaving ||
+                  savingTargetLoading
+                }
+                className="inline-flex min-h-[92px] items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-4 text-base font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Calculator className="h-5 w-5" />
+                Add One Month Saved
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSuperEasyMode(false)}
+              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/20"
+            >
+              Manage more saving targets in Full Mode
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100">
@@ -2139,6 +2570,15 @@ export default function MoneyBudgetPlanning({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSuperEasyMode(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400"
+          >
+            <Sparkles className="h-4 w-4" />
+            Use Super Easy Mode
+          </button>
+
           <button
             type="button"
             onClick={() => setIsOpen((prev) => !prev)}
@@ -2914,6 +3354,8 @@ export default function MoneyBudgetPlanning({
         </div>
       )}
 
+        </>
+      )}
 
       {deleteBudgetAreaPopup && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">

@@ -36,6 +36,11 @@ type ImportPreviewItem = {
   date: string;
   email: string;
   status: string;
+  source: WebsitePaymentSource;
+};
+
+type ImportRequestBody = {
+  confirmedSessionIds?: unknown;
 };
 
 const SOURCE_LABELS: Record<WebsitePaymentSource, string> = {
@@ -66,6 +71,7 @@ function formatMoney(amountPence: number) {
 
 function cleanText(value: unknown) {
   if (typeof value !== "string") return "";
+
   return value.trim();
 }
 
@@ -135,11 +141,17 @@ function normaliseSource(source: string): WebsitePaymentSource {
     cleanSource === "vendor_pitch" ||
     cleanSource === "sponsorship" ||
     cleanSource === "merchandise" ||
-    cleanSource === "ticket_sales"
+    cleanSource === "ticket_sales" ||
+    cleanSource === "website_payment"
   ) {
     return cleanSource;
   }
 
+  /**
+   * IMPORTANT:
+   * Unknown website payments must never automatically become donations.
+   * They stay as Website Payment until checked by an admin.
+   */
   return "website_payment";
 }
 
@@ -157,11 +169,19 @@ function getPaymentSource(
     return normaliseSource(metadataSource);
   }
 
+  /**
+   * Subscription checkout sessions can safely be treated as monthly
+   * donations only when your website uses subscriptions for donations.
+   */
   if (session.mode === "subscription") {
     return "website_monthly_donation";
   }
 
-  return "website_donation";
+  /**
+   * IMPORTANT:
+   * Do not guess that an ordinary payment is a donation.
+   */
+  return "website_payment";
 }
 
 function getCategory(
@@ -189,7 +209,7 @@ function getTitle(
     cleanText(metadata.money_tracker_title) ||
     cleanText(metadata.title) ||
     SOURCE_LABELS[source] ||
-    "Website payment";
+    "Website Payment";
 
   return `${baseTitle} - ${customerName}`;
 }
@@ -202,7 +222,7 @@ function getDescription(
   const customerEmail = getCustomerEmail(session);
 
   const parts = [
-    "Synced from Stripe checkout.",
+    "Imported from a confirmed Stripe checkout session.",
     `Source: ${SOURCE_LABELS[source] || source}.`,
     "Stripe mode: LIVE.",
   ];
@@ -233,6 +253,12 @@ function getDescription(
 
   if (cleanText(metadata.money_tracker_note)) {
     parts.push(`Note: ${metadata.money_tracker_note}.`);
+  }
+
+  if (source === "website_payment") {
+    parts.push(
+      "This payment did not include a recognised source. Check the category manually.",
+    );
   }
 
   return parts.join(" ");
@@ -289,6 +315,7 @@ async function getExistingTransactionId(stripeSessionId: string) {
 
   if (error) {
     console.error("Website payment existing check error:", error);
+
     return null;
   }
 
@@ -311,17 +338,14 @@ async function createPreviewItem(
     amount_pence: amountPence,
     date: formatStripeDate(session.created),
     email: getCustomerEmail(session) || "No email",
-    status: existingId ? "Will update existing record" : "Ready to import",
+    status: existingId ? "Already imported" : "Ready to import",
+    source,
   };
 }
 
 async function syncSession(
   session: Stripe.Checkout.Session,
 ): Promise<SyncResult> {
-  /*
-    Test-mode Stripe payments must not be pulled into the money tracker.
-    They are not real Burton Pride income and should not appear in accounts.
-  */
   if (session.livemode !== true) {
     return "test_skipped";
   }
@@ -374,21 +398,16 @@ async function syncSession(
 
   if (existingError) {
     console.error("Website payment sync existing check error:", existingError);
+
     return "skipped";
   }
 
+  /**
+   * Existing Stripe rows are not automatically overwritten.
+   * This avoids replacing manual corrections made by admins.
+   */
   if (existing?.id) {
-    const { error: updateError } = await supabaseAdmin
-      .from("money_transactions")
-      .update(payload)
-      .eq("id", existing.id);
-
-    if (updateError) {
-      console.error("Website payment sync update error:", updateError);
-      return "skipped";
-    }
-
-    return "updated";
+    return "skipped";
   }
 
   const { error: insertError } = await supabaseAdmin
@@ -397,6 +416,7 @@ async function syncSession(
 
   if (insertError) {
     console.error("Website payment sync insert error:", insertError);
+
     return "skipped";
   }
 
@@ -404,8 +424,8 @@ async function syncSession(
 }
 
 /**
- * GET only previews data.
- * It never inserts or updates any money tracker rows.
+ * GET only previews Stripe data.
+ * It never inserts or updates money tracker rows.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -415,7 +435,9 @@ export async function GET(req: NextRequest) {
           ok: false,
           error: "Missing STRIPE_SECRET_KEY environment variable.",
         },
-        { status: 500 },
+        {
+          status: 500,
+        },
       );
     }
 
@@ -462,15 +484,18 @@ export async function GET(req: NextRequest) {
           error?.message ||
           "Failed to preview website payments. Please check the server logs.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }
 
 /**
- * POST imports the live paid Stripe payments after the user confirms.
+ * POST imports only the Stripe checkout sessions explicitly confirmed by
+ * the admin. It never loops through all Stripe payments automatically.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
     if (!process.env.STRIPE_SECRET_KEY) {
       return NextResponse.json(
@@ -478,7 +503,47 @@ export async function POST() {
           ok: false,
           error: "Missing STRIPE_SECRET_KEY environment variable.",
         },
-        { status: 500 },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    const body = (await req.json().catch(() => ({}))) as ImportRequestBody;
+
+    const confirmedSessionIds = Array.isArray(body.confirmedSessionIds)
+      ? body.confirmedSessionIds
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [];
+
+    if (confirmedSessionIds.length === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "No Stripe payments were confirmed. Preview the payments and select the records you want to import first.",
+        },
+        {
+          status: 400,
+        },
+      );
+    }
+
+    /**
+     * Limit imports to a sensible batch size.
+     */
+    if (confirmedSessionIds.length > 250) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Too many Stripe payments were selected at once. Please import 250 or fewer payments at a time.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
@@ -487,9 +552,11 @@ export async function POST() {
     let skipped = 0;
     let testSkipped = 0;
 
-    const sessions = await listAllCheckoutSessions();
+    for (const sessionId of confirmedSessionIds) {
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ["payment_intent", "subscription"],
+      });
 
-    for (const session of sessions) {
       const result = await syncSession(session);
 
       if (result === "created") created += 1;
@@ -504,19 +571,21 @@ export async function POST() {
       updated,
       skipped,
       testSkipped,
-      message: `Website payments synced successfully. Added ${created}, updated ${updated}, skipped ${skipped}, test payments skipped ${testSkipped}.`,
+      message: `Confirmed website payment import complete. Added ${created}, skipped ${skipped}, test payments skipped ${testSkipped}.`,
     });
   } catch (error: any) {
-    console.error("Website payment sync route error:", error);
+    console.error("Website payment confirmed import route error:", error);
 
     return NextResponse.json(
       {
         ok: false,
         error:
           error?.message ||
-          "Failed to sync website payments. Please check the server logs.",
+          "Failed to import the confirmed website payments. Please check the server logs.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }

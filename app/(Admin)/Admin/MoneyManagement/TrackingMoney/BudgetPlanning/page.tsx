@@ -14,7 +14,7 @@ import {
 
 import MoneyHeader from "../../../components/money/MoneyHeader";
 import MoneyPageStatus from "../../../components/money/MoneyPageStatus";
-import MoneyBudgetPlanning from "../../../components/money/MoneyBudgetPlanning";
+import MoneyBudgetPlanning from "../../../components/money/Budget/MoneyBudgetPlanning";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 

@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ComponentType } from "react";
 import {
-  AlertTriangle,
   CheckCircle2,
+  CheckSquare,
   FlaskConical,
   Pencil,
   RefreshCcw,
   RotateCcw,
   Server,
+  Square,
   X,
 } from "lucide-react";
 
@@ -33,16 +35,16 @@ type WebsitePaymentsSyncCardProps = {
 
   /**
    * Kept optional so your current page does not break.
-   * This component loads the real preview directly from the API.
+   * The component loads the real preview directly from the API.
    */
   onPreview?: () => void;
 
   /**
-   * Runs your existing POST import function after a real preview is confirmed.
+   * Only the selected and confirmed Stripe session IDs are sent for import.
    */
-  onSync: () => void;
+  onSync: (confirmedSessionIds: string[]) => void;
 
-  DetailedErrorBox: React.ComponentType<{
+  DetailedErrorBox: ComponentType<{
     title: string;
     error: unknown;
   }>;
@@ -143,6 +145,16 @@ function formatMoney(item: ImportPreviewItem) {
   return "£0.00";
 }
 
+function isAlreadyImported(item: ImportPreviewItem) {
+  return String(item.status || "")
+    .toLowerCase()
+    .includes("already imported");
+}
+
+function isSelectableLivePayment(item: ImportPreviewItem) {
+  return Boolean(item.id) && !isAlreadyImported(item);
+}
+
 export default function WebsitePaymentsSyncCard({
   syncing,
   previewing = false,
@@ -156,6 +168,8 @@ export default function WebsitePaymentsSyncCard({
   const [localPreviewing, setLocalPreviewing] = useState(false);
   const [localPreviewItems, setLocalPreviewItems] =
     useState<ImportPreviewItem[]>(previewItems);
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const [testMode, setTestMode] = useState(false);
   const [testCompleteMessage, setTestCompleteMessage] = useState<string | null>(
@@ -171,6 +185,22 @@ export default function WebsitePaymentsSyncCard({
   const visiblePreviewItems = useMemo(() => {
     return localPreviewItems.length > 0 ? localPreviewItems : previewItems;
   }, [localPreviewItems, previewItems]);
+
+  const selectableLiveIds = useMemo(() => {
+    if (testMode) return [];
+
+    return visiblePreviewItems
+      .filter(isSelectableLivePayment)
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id));
+  }, [testMode, visiblePreviewItems]);
+
+  const allSelectableLivePaymentsSelected = useMemo(() => {
+    return (
+      selectableLiveIds.length > 0 &&
+      selectableLiveIds.every((id) => selectedIds.includes(id))
+    );
+  }, [selectableLiveIds, selectedIds]);
 
   function getPreviewItems(data: PreviewApiResponse) {
     const items =
@@ -204,7 +234,32 @@ export default function WebsitePaymentsSyncCard({
 
   function resetTestData() {
     setLocalPreviewItems(cloneTestItems());
+    setSelectedIds([]);
     setLocalError(null);
+  }
+
+  function toggleSelectedPayment(id: string) {
+    setSelectedIds((currentIds) => {
+      if (currentIds.includes(id)) {
+        return currentIds.filter((currentId) => currentId !== id);
+      }
+
+      return [...currentIds, id];
+    });
+  }
+
+  function toggleSelectAllLivePayments() {
+    setSelectedIds((currentIds) => {
+      const allSelected = selectableLiveIds.every((id) =>
+        currentIds.includes(id),
+      );
+
+      if (allSelected) {
+        return currentIds.filter((id) => !selectableLiveIds.includes(id));
+      }
+
+      return Array.from(new Set([...currentIds, ...selectableLiveIds]));
+    });
   }
 
   async function testApiConnection() {
@@ -250,6 +305,7 @@ export default function WebsitePaymentsSyncCard({
   function openEditableTestData() {
     setTestMode(true);
     setLocalPreviewItems(cloneTestItems());
+    setSelectedIds([]);
     setLocalError(null);
     setApiTestMessage(null);
     setTestCompleteMessage(null);
@@ -262,6 +318,7 @@ export default function WebsitePaymentsSyncCard({
       setShowPreviewWindow(true);
       setLocalPreviewing(true);
       setLocalPreviewItems([]);
+      setSelectedIds([]);
       setLocalError(null);
       setApiTestMessage(null);
       setTestCompleteMessage(null);
@@ -283,7 +340,20 @@ export default function WebsitePaymentsSyncCard({
         );
       }
 
-      setLocalPreviewItems(getPreviewItems(data));
+      const loadedItems = getPreviewItems(data);
+
+      setLocalPreviewItems(loadedItems);
+
+      /**
+       * Select new payments automatically.
+       * Existing imported payments stay unselected and disabled.
+       */
+      setSelectedIds(
+        loadedItems
+          .filter(isSelectableLivePayment)
+          .map((item) => item.id)
+          .filter((id): id is string => Boolean(id)),
+      );
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error
@@ -292,6 +362,7 @@ export default function WebsitePaymentsSyncCard({
 
       setLocalError(errorMessage);
       setLocalPreviewItems([]);
+      setSelectedIds([]);
     } finally {
       setLocalPreviewing(false);
     }
@@ -300,14 +371,14 @@ export default function WebsitePaymentsSyncCard({
   function closePreviewWindow() {
     setShowPreviewWindow(false);
     setTestMode(false);
+    setSelectedIds([]);
   }
 
   function confirmImport() {
-    if (visiblePreviewItems.length === 0) return;
-
     if (testMode) {
       setShowPreviewWindow(false);
       setTestMode(false);
+      setSelectedIds([]);
 
       setTestCompleteMessage(
         "Editable test completed successfully. No example payments were imported or saved.",
@@ -316,8 +387,14 @@ export default function WebsitePaymentsSyncCard({
       return;
     }
 
+    if (selectedIds.length === 0) {
+      setLocalError("Select at least one live website payment before importing.");
+      return;
+    }
+
     setShowPreviewWindow(false);
-    onSync();
+    onSync(selectedIds);
+    setSelectedIds([]);
   }
 
   return (
@@ -331,8 +408,8 @@ export default function WebsitePaymentsSyncCard({
 
             <p className="max-w-3xl text-sm text-white/65">
               Preview live website payments before importing them into the money
-              tracker. Use the editable test data first to check that the
-              preview window works correctly.
+              tracker. Nothing is imported automatically. Only selected
+              payments are sent after you confirm the list.
             </p>
           </div>
 
@@ -444,13 +521,13 @@ export default function WebsitePaymentsSyncCard({
                 <h2 className="text-2xl font-black text-white">
                   {testMode
                     ? "Test the editable payment preview"
-                    : "Confirm live website payments import"}
+                    : "Select live website payments to import"}
                 </h2>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
                   {testMode
                     ? "Change the example fields below to test the editor. These rows are fake and will never be imported into your money tracker."
-                    : "Check every live payment returned by Stripe. Only click confirm when the data looks correct."}
+                    : "Tick only the payments you want to import. Existing imported payments are disabled to prevent accidental duplicates."}
                 </p>
               </div>
 
@@ -472,8 +549,8 @@ export default function WebsitePaymentsSyncCard({
                   </p>
 
                   <p className="mt-1 text-sm text-violet-100/75">
-                    Edit anything below. No request will be sent to your import
-                    API when you complete the test.
+                    Edit anything below. Completing the safe test does not call
+                    your import API.
                   </p>
                 </div>
 
@@ -484,6 +561,38 @@ export default function WebsitePaymentsSyncCard({
                 >
                   <RotateCcw className="h-4 w-4" />
                   Reset Test Data
+                </button>
+              </div>
+            ) : null}
+
+            {!testMode && !isLoadingPreview && visiblePreviewItems.length > 0 ? (
+              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-black text-sky-100">
+                    {selectedIds.length} live payment
+                    {selectedIds.length === 1 ? "" : "s"} selected
+                  </p>
+
+                  <p className="mt-1 text-sm text-sky-100/75">
+                    Only the selected Stripe payments will be imported.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={toggleSelectAllLivePayments}
+                  disabled={selectableLiveIds.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/20 px-4 py-2.5 text-sm font-black text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {allSelectableLivePaymentsSelected ? (
+                    <CheckSquare className="h-4 w-4" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+
+                  {allSelectableLivePaymentsSelected
+                    ? "Unselect All New Payments"
+                    : "Select All New Payments"}
                 </button>
               </div>
             ) : null}
@@ -509,9 +618,13 @@ export default function WebsitePaymentsSyncCard({
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-white/10">
-                  <table className="w-full min-w-[1100px] text-left text-sm">
+                  <table className="w-full min-w-[1180px] text-left text-sm">
                     <thead className="bg-white/10 text-xs uppercase tracking-[0.14em] text-white/55">
                       <tr>
+                        {!testMode ? (
+                          <th className="px-3 py-3">Import</th>
+                        ) : null}
+
                         <th className="px-3 py-3">Title</th>
                         <th className="px-3 py-3">Type</th>
                         <th className="px-3 py-3">Amount</th>
@@ -522,128 +635,171 @@ export default function WebsitePaymentsSyncCard({
                     </thead>
 
                     <tbody className="divide-y divide-white/10">
-                      {visiblePreviewItems.map((item, index) => (
-                        <tr
-                          key={item.id || index}
-                          className="bg-white/[0.03]"
-                        >
-                          {testMode ? (
-                            <>
-                              <td className="min-w-[280px] px-3 py-3">
-                                <input
-                                  value={item.title || ""}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "title",
-                                      event.target.value,
-                                    )
+                      {visiblePreviewItems.map((item, index) => {
+                        const itemId = item.id || "";
+                        const alreadyImported = isAlreadyImported(item);
+                        const selectable = isSelectableLivePayment(item);
+                        const selected = selectedIds.includes(itemId);
+
+                        return (
+                          <tr
+                            key={item.id || index}
+                            className={`bg-white/[0.03] ${
+                              selected && !testMode ? "bg-sky-500/10" : ""
+                            }`}
+                          >
+                            {!testMode ? (
+                              <td className="px-3 py-3">
+                                <button
+                                  type="button"
+                                  disabled={!selectable}
+                                  onClick={() => {
+                                    if (!itemId) return;
+
+                                    toggleSelectedPayment(itemId);
+                                  }}
+                                  className="inline-flex rounded-lg p-1 text-white/75 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                                  title={
+                                    alreadyImported
+                                      ? "This payment is already imported"
+                                      : selected
+                                        ? "Unselect this payment"
+                                        : "Select this payment"
                                   }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                />
+                                >
+                                  {selected ? (
+                                    <CheckSquare className="h-5 w-5 text-sky-200" />
+                                  ) : (
+                                    <Square className="h-5 w-5" />
+                                  )}
+                                </button>
                               </td>
+                            ) : null}
 
-                              <td className="min-w-[180px] px-3 py-3">
-                                <input
-                                  value={item.type || ""}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "type",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                />
-                              </td>
+                            {testMode ? (
+                              <>
+                                <td className="min-w-[280px] px-3 py-3">
+                                  <input
+                                    value={item.title || ""}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "title",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
 
-                              <td className="min-w-[120px] px-3 py-3">
-                                <input
-                                  value={formatMoney(item)}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "amount",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-emerald-100 outline-none transition focus:border-violet-300/50"
-                                />
-                              </td>
+                                <td className="min-w-[180px] px-3 py-3">
+                                  <input
+                                    value={item.type || ""}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "type",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
 
-                              <td className="min-w-[150px] px-3 py-3">
-                                <input
-                                  type="date"
-                                  value={item.date || ""}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "date",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                />
-                              </td>
+                                <td className="min-w-[120px] px-3 py-3">
+                                  <input
+                                    value={formatMoney(item)}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "amount",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-emerald-100 outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
 
-                              <td className="min-w-[230px] px-3 py-3">
-                                <input
-                                  type="email"
-                                  value={item.email || ""}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "email",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                />
-                              </td>
+                                <td className="min-w-[150px] px-3 py-3">
+                                  <input
+                                    type="date"
+                                    value={item.date || ""}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "date",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
 
-                              <td className="min-w-[180px] px-3 py-3">
-                                <input
-                                  value={item.status || ""}
-                                  onChange={(event) =>
-                                    updateTestItem(
-                                      index,
-                                      "status",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                />
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td className="px-4 py-3 font-bold text-white">
-                                {item.title || item.name || "Untitled payment"}
-                              </td>
+                                <td className="min-w-[230px] px-3 py-3">
+                                  <input
+                                    type="email"
+                                    value={item.email || ""}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "email",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
 
-                              <td className="px-4 py-3 text-white/70">
-                                {item.type || "Website payment"}
-                              </td>
+                                <td className="min-w-[180px] px-3 py-3">
+                                  <input
+                                    value={item.status || ""}
+                                    onChange={(event) =>
+                                      updateTestItem(
+                                        index,
+                                        "status",
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
+                                  />
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="px-4 py-3 font-bold text-white">
+                                  {item.title || item.name || "Untitled payment"}
+                                </td>
 
-                              <td className="px-4 py-3 font-bold text-emerald-100">
-                                {formatMoney(item)}
-                              </td>
+                                <td className="px-4 py-3 text-white/70">
+                                  {item.type || "Website payment"}
+                                </td>
 
-                              <td className="px-4 py-3 text-white/70">
-                                {item.date || "No date"}
-                              </td>
+                                <td className="px-4 py-3 font-bold text-emerald-100">
+                                  {formatMoney(item)}
+                                </td>
 
-                              <td className="px-4 py-3 text-white/70">
-                                {item.email || "No email"}
-                              </td>
+                                <td className="px-4 py-3 text-white/70">
+                                  {item.date || "No date"}
+                                </td>
 
-                              <td className="px-4 py-3 text-white/70">
-                                {item.status || "Ready to import"}
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
+                                <td className="px-4 py-3 text-white/70">
+                                  {item.email || "No email"}
+                                </td>
+
+                                <td
+                                  className={`px-4 py-3 font-semibold ${
+                                    alreadyImported
+                                      ? "text-amber-200"
+                                      : "text-emerald-200"
+                                  }`}
+                                >
+                                  {item.status || "Ready to import"}
+                                </td>
+                              </>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -665,8 +821,8 @@ export default function WebsitePaymentsSyncCard({
                 disabled={
                   syncing ||
                   isLoadingPreview ||
-                  visiblePreviewItems.length === 0 ||
-                  Boolean(localError && !testMode)
+                  Boolean(localError && !testMode) ||
+                  (!testMode && selectedIds.length === 0)
                 }
                 className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black text-black transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   testMode
@@ -688,7 +844,9 @@ export default function WebsitePaymentsSyncCard({
                   ? "Complete Safe Test"
                   : syncing
                     ? "Importing..."
-                    : "Confirm & Import"}
+                    : `Confirm & Import ${selectedIds.length} Payment${
+                        selectedIds.length === 1 ? "" : "s"
+                      }`}
               </button>
             </div>
           </div>

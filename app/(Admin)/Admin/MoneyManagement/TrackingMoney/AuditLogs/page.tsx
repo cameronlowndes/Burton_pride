@@ -51,7 +51,7 @@ import {
   copyToClipboard,
   formatDateOnly,
   formatDateTime,
-  getActorDisplayName,
+  getActorDisplayName as getActorDisplayNameFromUtils,
   getActorEmailDisplay,
   getActorUniqueKey,
   getActorUserIdDisplay,
@@ -77,6 +77,77 @@ import {
 } from "@/lib/money/audit_logs/audit-log-utils";
 import { InfoCard, RawDataCard, StatCard } from "../../../components/money/AduitLogs/AuditLogCards";
 import AuditRiskRulesPanel from "../../../components/money/AduitLogs/AuditRiskRulesPanel";
+
+/**
+ * Some older audit rows saved "Unknown admin" as the actor name even though
+ * the correct admin email was recorded. Treat placeholder names as missing and
+ * fall back to a readable name generated from the email address.
+ *
+ * This fixes old permanent-delete logs immediately without changing the
+ * database rows, and it keeps new rows readable if a route only stores email.
+ */
+function isPlaceholderAdminName(value: unknown) {
+  const clean = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    !clean ||
+    clean === "unknown admin" ||
+    clean === "unknown user" ||
+    clean === "authenticated admin" ||
+    clean === "admin" ||
+    clean === "unknown"
+  );
+}
+
+function readableAdminNameFromEmail(value: unknown) {
+  const email = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  if (!email || !email.includes("@")) {
+    return "";
+  }
+
+  const knownAdminNames: Record<string, string> = {
+    "cameronlowndes@burtonpride.co.uk": "Cameron Lowndes",
+    "cameron.lowndes@burtonpride.co.uk": "Cameron Lowndes",
+    "cameron-lowndes@burtonpride.co.uk": "Cameron Lowndes",
+    "cameron_lowndes@burtonpride.co.uk": "Cameron Lowndes",
+    "simonwhale@burtonpride.co.uk": "Simon Whale",
+    "isaactimmins@burtonpride.co.uk": "Isaac Timmins",
+    "olga@burtonpride.co.uk": "Olga",
+  };
+
+  if (knownAdminNames[email]) {
+    return knownAdminNames[email];
+  }
+
+  return email
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+function getActorDisplayName(log: MoneyAuditLog) {
+  const savedName = getActorDisplayNameFromUtils(log);
+
+  if (!isPlaceholderAdminName(savedName)) {
+    return savedName;
+  }
+
+  const fallbackEmail =
+    getActorEmailDisplay(log) ||
+    String((log as any)?.actor_email || "").trim() ||
+    String((log as any)?.created_by_email || "").trim() ||
+    String((log as any)?.metadata?.actor_email || "").trim() ||
+    String((log as any)?.metadata?.created_by_email || "").trim() ||
+    String((log as any)?.metadata?.email || "").trim();
+
+  return readableAdminNameFromEmail(fallbackEmail) || "Unknown admin";
+}
 
 export default function MoneyAuditLogsPage() {
   const [logs, setLogs] = useState<MoneyAuditLog[]>([]);
