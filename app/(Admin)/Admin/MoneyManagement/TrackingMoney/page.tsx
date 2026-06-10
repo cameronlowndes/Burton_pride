@@ -28,9 +28,9 @@ import WebsitePaymentsSyncCard from "../../components/money/WebsitePaymentsSyncC
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 const RECEIPT_REMINDER_DAYS = 7;
-export const EASY_MODE_STORAGE_KEY =
+const EASY_MODE_STORAGE_KEY =
   "burton-pride-money-tracker-easy-mode";
-export const EASY_MODE_CHANGE_EVENT =
+const EASY_MODE_CHANGE_EVENT =
   "burton-pride-money-tracker-easy-mode-change";
 
 type MoneyTrackerDisplayMode = "full" | "easy" | "super-easy";
