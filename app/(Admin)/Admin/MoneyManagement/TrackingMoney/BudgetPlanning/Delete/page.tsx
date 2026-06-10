@@ -6,7 +6,7 @@ import {
   Trash2,
 } from "lucide-react";
 
-import DeletedMoneyItemsClient from "../../../../components/money/BudgetTrackerDelete";
+import DeletedMoneyItemsClient from "../../../../components/money/Budget/BudgetTrackerDelete";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

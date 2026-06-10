@@ -28,7 +28,12 @@ import WebsitePaymentsSyncCard from "../../components/money/WebsitePaymentsSyncC
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 
 const RECEIPT_REMINDER_DAYS = 7;
-const EASY_MODE_STORAGE_KEY = "burton-pride-money-tracker-easy-mode";
+export const EASY_MODE_STORAGE_KEY =
+  "burton-pride-money-tracker-easy-mode";
+export const EASY_MODE_CHANGE_EVENT =
+  "burton-pride-money-tracker-easy-mode-change";
+
+type MoneyTrackerDisplayMode = "full" | "easy" | "super-easy";
 
 function safeString(value: unknown) {
   if (typeof value === "string") return value;
@@ -231,28 +236,73 @@ function DetailedErrorBox({
 
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
-  const [easyMode, setEasyMode] = useState(false);
+  const [displayMode, setDisplayMode] =
+    useState<MoneyTrackerDisplayMode>("full");
+
+  const easyMode = displayMode === "easy" || displayMode === "super-easy";
+  const superEasyMode = displayMode === "super-easy";
 
   useEffect(() => {
     const savedMode = window.localStorage.getItem(EASY_MODE_STORAGE_KEY);
 
-    if (savedMode === "full") {
-      setEasyMode(false);
+    if (savedMode === "easy" || savedMode === "super-easy") {
+      setDisplayMode(savedMode);
+    } else {
+      setDisplayMode("full");
     }
+
+    function handleStorageChange(event: StorageEvent) {
+      if (event.key !== EASY_MODE_STORAGE_KEY) return;
+
+      if (event.newValue === "easy" || event.newValue === "super-easy") {
+        setDisplayMode(event.newValue);
+      } else {
+        setDisplayMode("full");
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
   }, []);
 
-  function changeEasyMode(nextEasyMode: boolean) {
-    setEasyMode(nextEasyMode);
-    window.localStorage.setItem(
-      EASY_MODE_STORAGE_KEY,
-      nextEasyMode ? "easy" : "full",
+  useEffect(() => {
+    window.localStorage.setItem(EASY_MODE_STORAGE_KEY, displayMode);
+    document.documentElement.dataset.moneyTrackerMode = displayMode;
+
+    window.dispatchEvent(
+      new CustomEvent(EASY_MODE_CHANGE_EVENT, {
+        detail: {
+          easyMode,
+          superEasyMode,
+          mode: displayMode,
+        },
+      }),
     );
+  }, [displayMode, easyMode, superEasyMode]);
+
+  function changeDisplayMode(nextMode: MoneyTrackerDisplayMode) {
+    setDisplayMode(nextMode);
   }
 
+  // This is spread into every imported money component.
+  // Components can use easyMode for both simplified modes, or superEasyMode
+  // when they need to show only the most basic add-payment controls.
+  // The `as any` keeps this page compatible while older components are updated.
+  const easyModeProps = { easyMode, superEasyMode, displayMode } as any;
+
   return (
-    <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
+    <main
+      data-easy-mode={easyMode ? "true" : "false"}
+      data-super-easy-mode={superEasyMode ? "true" : "false"}
+      data-money-tracker-mode={displayMode}
+      className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3"
+    >
       <div className="w-full max-w-none min-w-0 space-y-6">
         <MoneyHeader
+          {...easyModeProps}
           selectedYear={money.selectedYear}
           yearOptions={money.yearOptions}
           onYearChange={money.handleYearChange}
@@ -260,13 +310,13 @@ export default function MoneyTransactionsPage() {
         />
 
         <section className="rounded-3xl border border-pink-300/20 bg-pink-500/10 p-4 shadow-2xl shadow-black/20 sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4">
             <div className="flex items-start gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-pink-500/20 text-pink-100 ring-1 ring-pink-300/20">
-                {easyMode ? (
-                  <Sparkles className="h-5 w-5" />
-                ) : (
+                {displayMode === "full" ? (
                   <Settings2 className="h-5 w-5" />
+                ) : (
+                  <Sparkles className="h-5 w-5" />
                 )}
               </div>
 
@@ -276,29 +326,63 @@ export default function MoneyTransactionsPage() {
                 </p>
 
                 <h2 className="mt-1 text-xl font-black text-white">
-                  {easyMode ? "Easy Mode is on" : "Full Mode is on"}
+                  {displayMode === "super-easy"
+                    ? "Super Easy Mode is on"
+                    : displayMode === "easy"
+                      ? "Easy Mode is on"
+                      : "Full Mode is on"}
                 </h2>
 
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-white/65">
-                  {easyMode
-                    ? "The page is showing the main money tracker only. Advanced reports, syncing, account locks and management tools are hidden to keep the page simple."
-                    : "All money tracker tools are visible, including reports, website sync, alerts, account locks, funding details and monthly breakdowns."}
+                  {displayMode === "super-easy"
+                    ? "Only the basic money tracker is shown. This is the simplest view for adding and checking payments without extra information getting in the way."
+                    : displayMode === "easy"
+                      ? "The main money tracker and summary are shown. Advanced reports, syncing, account locks and management tools are hidden to keep the page simple."
+                      : "All money tracker tools are visible, including reports, website sync, alerts, account locks, funding details and monthly breakdowns."}
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => changeEasyMode(!easyMode)}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-pink-100 lg:w-auto"
-            >
-              {easyMode ? (
-                <Settings2 className="h-4 w-4" />
-              ) : (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => changeDisplayMode("super-easy")}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition ${
+                  displayMode === "super-easy"
+                    ? "bg-white text-black"
+                    : "border border-white/10 bg-white/[0.05] text-white hover:bg-white/[0.1]"
+                }`}
+              >
                 <Sparkles className="h-4 w-4" />
-              )}
-              {easyMode ? "Show Full Mode" : "Use Easy Mode"}
-            </button>
+                Super Easy Mode
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changeDisplayMode("easy")}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition ${
+                  displayMode === "easy"
+                    ? "bg-white text-black"
+                    : "border border-white/10 bg-white/[0.05] text-white hover:bg-white/[0.1]"
+                }`}
+              >
+                <Sparkles className="h-4 w-4" />
+                Easy Mode
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changeDisplayMode("full")}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition ${
+                  displayMode === "full"
+                    ? "bg-white text-black"
+                    : "border border-white/10 bg-white/[0.05] text-white hover:bg-white/[0.1]"
+                }`}
+              >
+                <Settings2 className="h-4 w-4" />
+                Full Mode
+              </button>
+            </div>
           </div>
         </section>
 
@@ -313,6 +397,7 @@ export default function MoneyTransactionsPage() {
         {!easyMode ? (
           <>
             <WebsitePaymentsSyncCard
+              {...easyModeProps}
               syncing={money.stripeSyncing}
               previewing={(money as any).stripePreviewing || false}
               message={money.stripeSyncMessage}
@@ -332,6 +417,7 @@ export default function MoneyTransactionsPage() {
             />
 
             <MoneyPageStatus
+              {...easyModeProps}
               error={money.error}
               errorDetails={money.errorDetails}
               selectedYear={money.selectedYear}
@@ -341,6 +427,7 @@ export default function MoneyTransactionsPage() {
             />
 
             <MoneyDashboardAlerts
+              {...easyModeProps}
               selectedYear={money.selectedYear}
               transactions={money.yearTransactions}
               yearlySponsorBreakdown={money.yearlySponsorBreakdown}
@@ -438,6 +525,7 @@ export default function MoneyTransactionsPage() {
             </section>
 
             <MoneyYearLockPanel
+              {...easyModeProps}
               selectedYear={money.selectedYear}
               selectedYearLocked={money.selectedYearLocked}
               yearLockPassword={money.yearLockPassword}
@@ -451,14 +539,16 @@ export default function MoneyTransactionsPage() {
               selectedMonthLocked={money.selectedMonthLocked}
             />
 
-            <MoneyStatsCards totals={money.totals} />
+            <MoneyStatsCards {...easyModeProps} totals={money.totals} />
 
             <MoneyCarryForwardNote
+              {...easyModeProps}
               selectedYear={money.selectedYear}
               carryForwardNote={money.carryForwardNote}
             />
 
             <MoneySponsorSection
+              {...easyModeProps}
               selectedYear={money.selectedYear}
               yearlySponsorBreakdown={money.yearlySponsorBreakdown}
               openNewSponsorForm={money.openNewSponsorForm}
@@ -467,16 +557,18 @@ export default function MoneyTransactionsPage() {
             />
 
             <MoneyMonthlyBreakdown
+              {...easyModeProps}
               selectedYear={money.selectedYear}
               transactions={money.transactions}
             />
           </>
-        ) : (
-          <MoneyStatsCards totals={money.totals} />
+        ) : superEasyMode ? null : (
+          <MoneyStatsCards {...easyModeProps} totals={money.totals} />
         )}
 
         <div id="money-transactions-table" data-money-transactions-table>
           <MoneyMainGrid
+            {...easyModeProps}
             form={money.form}
             setForm={money.setForm}
             invoiceFiles={money.invoiceFiles}
@@ -541,6 +633,7 @@ export default function MoneyTransactionsPage() {
       </div>
 
       <MoneyPageModals
+        {...easyModeProps}
         sponsorFormOpen={money.sponsorFormOpen}
         editingSponsor={money.editingSponsor}
         sponsorForm={money.sponsorForm}
