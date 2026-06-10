@@ -576,7 +576,6 @@ function transactionMonthKey(item: Transaction) {
   return rawDate.slice(0, 7);
 }
 
-
 function normaliseLockedMonthKeys(value: unknown) {
   if (!Array.isArray(value)) return [];
 
@@ -1230,10 +1229,32 @@ export default function MoneyTransactionsTable({
     setEasyMode(true);
     setColumnsOpen(false);
     setFiltersOpen(false);
+    setSelectedIds(new Set());
+    setSearchTerm("");
+    setFilter("all");
     setSelectedSponsorId("all");
     setSelectedPaymentMethod("all");
     setQuickFilter("all");
     setLocalReceiptReminderDays(receiptReminderDaysSafe);
+  }
+
+  function resetEasyModeFilters() {
+    setSearchTerm("");
+    setFilter("all");
+    setSelectedSponsorId("all");
+    setSelectedPaymentMethod("all");
+    setQuickFilter("all");
+    setSelectedViewMonth("all");
+  }
+
+  function showEasyModePayments(
+    nextFilter: "all" | "income" | "expense" | "sponsorship" | "personal",
+    nextQuickFilter: QuickFilter = "all",
+  ) {
+    setFilter(nextFilter);
+    setQuickFilter(nextQuickFilter);
+    setSelectedSponsorId("all");
+    setSelectedPaymentMethod("all");
   }
 
   const topActionButtonBase =
@@ -1245,20 +1266,13 @@ export default function MoneyTransactionsTable({
   );
 
   const lockedYearSet = useMemo(
-    () =>
-      new Set([
-        ...normaliseLockedYearKeys(lockedYears),
-        ...apiLockedYears,
-      ]),
+    () => new Set([...normaliseLockedYearKeys(lockedYears), ...apiLockedYears]),
     [lockedYears, apiLockedYears],
   );
 
   const lockedMonthSet = useMemo(
     () =>
-      new Set([
-        ...normaliseLockedMonthKeys(lockedMonths),
-        ...apiLockedMonths,
-      ]),
+      new Set([...normaliseLockedMonthKeys(lockedMonths), ...apiLockedMonths]),
     [lockedMonths, apiLockedMonths],
   );
 
@@ -1489,7 +1503,12 @@ export default function MoneyTransactionsTable({
       for (const id of previous) {
         const item = transactions.find((transaction) => transaction.id === id);
 
-        if (item && !isTransactionLocked(item) && !selectedViewIsLocked) {
+        if (
+          item &&
+          !item.checked_at &&
+          !isTransactionLocked(item) &&
+          !selectedViewIsLocked
+        ) {
           next.add(id);
         } else {
           changed = true;
@@ -1796,7 +1815,12 @@ export default function MoneyTransactionsTable({
   const visibleIds = useMemo(
     () =>
       visibleTransactions
-        .filter((item) => !isTransactionLocked(item) && !selectedViewIsLocked)
+        .filter(
+          (item) =>
+            !item.checked_at &&
+            !isTransactionLocked(item) &&
+            !selectedViewIsLocked,
+        )
         .map((item) => item.id)
         .filter(Boolean),
     [visibleTransactions, lockedYears, lockedMonths],
@@ -1806,7 +1830,10 @@ export default function MoneyTransactionsTable({
     [visibleTransactions, selectedIds],
   );
   const selectedEditableTransactions = useMemo(
-    () => selectedTransactions.filter((item) => !isTransactionLocked(item)),
+    () =>
+      selectedTransactions.filter(
+        (item) => !item.checked_at && !isTransactionLocked(item),
+      ),
     [selectedTransactions, lockedYears, lockedMonths],
   );
   const allVisibleSelected =
@@ -1911,7 +1938,7 @@ export default function MoneyTransactionsTable({
   function toggleSelect(id: string) {
     const item = transactions.find((transaction) => transaction.id === id);
 
-    if (item && isTransactionLocked(item)) return;
+    if (item && (item.checked_at || isTransactionLocked(item))) return;
 
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -1935,7 +1962,7 @@ export default function MoneyTransactionsTable({
     action: (item: Transaction) => Promise<void> | void,
   ) {
     const editableTransactions = selectedTransactions.filter(
-      (item) => !isTransactionLocked(item),
+      (item) => !item.checked_at && !isTransactionLocked(item),
     );
 
     if (editableTransactions.length === 0) {
@@ -2084,6 +2111,23 @@ export default function MoneyTransactionsTable({
     const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
     const lockReason = getTransactionLockReason(item);
     const locked = Boolean(lockReason);
+    const paymentChecked = Boolean(item.checked_at);
+    const checkedByName = paymentChecked ? getCheckedByDisplayName(item) : "";
+    const canUndoChecked = paymentChecked
+      ? canCurrentAdminUncheckTransaction({
+          item,
+          currentUserId,
+          currentUserEmail,
+          currentUserName,
+        })
+      : false;
+    const checkedByOtherAdmin = Boolean(paymentChecked && !canUndoChecked);
+    const paymentActionsLocked = locked || paymentChecked;
+    const paymentActionLockReason = locked
+      ? lockReason
+      : paymentChecked
+        ? `This payment was checked by ${checkedByName}. Undo the checked status before making changes.`
+        : "";
 
     return (
       <div
@@ -2095,7 +2139,7 @@ export default function MoneyTransactionsTable({
             <input
               type="checkbox"
               checked={selectedIds.has(item.id)}
-              disabled={locked}
+              disabled={paymentActionsLocked}
               onChange={() => toggleSelect(item.id)}
               className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
             />
@@ -2199,17 +2243,20 @@ export default function MoneyTransactionsTable({
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
+            disabled={paymentActionsLocked}
             onClick={() => setDetailsItem(item)}
-            className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
+            title={paymentActionLockReason || "View details"}
+            className="rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Eye className="mr-1 inline h-3 w-3" /> Details
           </button>
           <button
             type="button"
-            disabled={locked}
+            disabled={paymentActionsLocked}
             onClick={() =>
               runTransactionAction(item, () => onEditTransaction(item))
             }
+            title={paymentActionLockReason || "Edit payment"}
             className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
           >
             <Pencil className="mr-1 inline h-3 w-3" /> Edit
@@ -2219,7 +2266,14 @@ export default function MoneyTransactionsTable({
             onClick={() =>
               runTransactionAction(item, () => onMarkTransactionChecked(item))
             }
-            disabled={locked || checkingId === item.id}
+            disabled={locked || checkingId === item.id || checkedByOtherAdmin}
+            title={
+              checkedByOtherAdmin
+                ? `Only ${checkedByName} can undo the checked status.`
+                : item.checked_at
+                  ? "Undo the checked status"
+                  : "Mark this payment as checked"
+            }
             className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
           >
             <CheckCircle2 className="mr-1 inline h-3 w-3" />{" "}
@@ -2237,9 +2291,7 @@ export default function MoneyTransactionsTable({
     const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
     const lockReason = getTransactionLockReason(item);
     const locked = Boolean(lockReason);
-    const checkedByName = item.checked_at
-      ? getCheckedByDisplayName(item)
-      : "";
+    const checkedByName = item.checked_at ? getCheckedByDisplayName(item) : "";
     const checkedByEmail = item.checked_at ? getCheckedByEmail(item) : null;
     const canUndoChecked = item.checked_at
       ? canCurrentAdminUncheckTransaction({
@@ -2250,6 +2302,13 @@ export default function MoneyTransactionsTable({
         })
       : false;
     const checkedByOtherAdmin = Boolean(item.checked_at && !canUndoChecked);
+    const paymentChecked = Boolean(item.checked_at);
+    const paymentActionsLocked = locked || paymentChecked;
+    const paymentActionLockReason = locked
+      ? lockReason
+      : paymentChecked
+        ? `This payment was checked by ${checkedByName}. Undo the checked status before making changes.`
+        : "";
 
     return (
       <article
@@ -2389,7 +2448,9 @@ export default function MoneyTransactionsTable({
                 Personal funds
               </p>
               <p className="mt-2 text-base font-black text-orange-100">
-                {item.personal_funds_repaid ? "Paid back" : "Still needs paying back"}
+                {item.personal_funds_repaid
+                  ? "Paid back"
+                  : "Still needs paying back"}
               </p>
             </div>
           ) : null}
@@ -2413,46 +2474,22 @@ export default function MoneyTransactionsTable({
           </div>
         ) : null}
 
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-          <label className="inline-flex items-center gap-3 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10">
-            <input
-              type="checkbox"
-              checked={selectedIds.has(item.id)}
-              disabled={locked}
-              onChange={() => toggleSelect(item.id)}
-              className="h-5 w-5 rounded border-white/20 bg-black/30 disabled:cursor-not-allowed disabled:opacity-50"
-            />
-            Select payment
-          </label>
+        {paymentChecked && !checkedByOtherAdmin ? (
+          <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm font-bold leading-6 text-emerald-100">
+            <p className="font-black text-white">
+              Payment is locked after checking
+            </p>
+            <p className="mt-1 text-emerald-100/80">
+              Press Undo checked before editing, deleting, selecting, or
+              changing this payment.
+            </p>
+          </div>
+        ) : null}
 
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <button
             type="button"
-            onClick={() => setDetailsItem(item)}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20"
-          >
-            <Eye className="h-4 w-4" />
-            View details
-          </button>
-
-          <button
-            type="button"
-            disabled={locked}
-            onClick={() =>
-              runTransactionAction(item, () => onEditTransaction(item))
-            }
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Pencil className="h-4 w-4" />
-            Edit payment
-          </button>
-
-          <button
-            type="button"
-            disabled={
-              locked ||
-              checkingId === item.id ||
-              checkedByOtherAdmin
-            }
+            disabled={locked || checkingId === item.id || checkedByOtherAdmin}
             onClick={() =>
               runTransactionAction(item, () => onMarkTransactionChecked(item))
             }
@@ -2463,7 +2500,7 @@ export default function MoneyTransactionsTable({
                   ? "Undo the checked status"
                   : "Mark this payment as checked"
             }
-            className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl px-4 py-4 text-base font-black ring-1 transition disabled:cursor-not-allowed disabled:opacity-60 ${
               checkedByOtherAdmin
                 ? "bg-orange-500/10 text-orange-100 ring-orange-300/20"
                 : item.checked_at
@@ -2471,7 +2508,7 @@ export default function MoneyTransactionsTable({
                   : "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/25"
             }`}
           >
-            <CheckCircle2 className="h-4 w-4" />
+            <CheckCircle2 className="h-5 w-5" />
 
             {checkingId === item.id
               ? "Saving..."
@@ -2480,6 +2517,43 @@ export default function MoneyTransactionsTable({
                 : item.checked_at
                   ? "Undo checked"
                   : "Mark checked"}
+          </button>
+
+          <button
+            type="button"
+            disabled={paymentActionsLocked}
+            onClick={() =>
+              runTransactionAction(item, () => onEditTransaction(item))
+            }
+            title={paymentActionLockReason || "Edit payment"}
+            className="inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-sky-500/15 px-4 py-4 text-base font-black text-sky-100 ring-1 ring-sky-300/20 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Pencil className="h-5 w-5" />
+            Edit payment
+          </button>
+
+          <button
+            type="button"
+            disabled={paymentActionsLocked || deleting}
+            onClick={() =>
+              runTransactionAction(item, () => onHideTransaction(item.id))
+            }
+            title={paymentActionLockReason || "Delete payment"}
+            className="inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-red-500/15 px-4 py-4 text-base font-black text-red-100 ring-1 ring-red-300/20 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-5 w-5" />
+            {deleting ? "Deleting..." : "Delete payment"}
+          </button>
+
+          <button
+            type="button"
+            disabled={paymentActionsLocked}
+            onClick={() => setDetailsItem(item)}
+            title={paymentActionLockReason || "View details"}
+            className="inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-4 text-base font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Eye className="h-5 w-5" />
+            View details
           </button>
         </div>
       </article>
@@ -2681,7 +2755,9 @@ export default function MoneyTransactionsTable({
           </p>
         </div>
 
-        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-3 2xl:flex 2xl:flex-wrap 2xl:justify-end">
+        <div
+          className={`${easyMode ? "hidden" : "grid"} w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto lg:grid-cols-3 2xl:flex 2xl:flex-wrap 2xl:justify-end`}
+        >
           <select
             value={selectedPrintMonth}
             onChange={(event) => setSelectedPrintMonth(event.target.value)}
@@ -2807,12 +2883,9 @@ export default function MoneyTransactionsTable({
       {easyMode ? (
         <div className="mb-4 rounded-3xl border border-emerald-300/20 bg-emerald-500/[0.08] p-4 shadow-xl sm:p-5">
           <div className="mb-4">
-            <h3 className="text-lg font-black text-white">
-              Find a payment
-            </h3>
-            <p className="mt-1 text-sm leading-6 text-emerald-100/70">
-              Search by payment title or reference. Choose a month only when you
-              need to narrow the list down.
+            <h3 className="text-xl font-black text-white">Find a payment</h3>
+            <p className="mt-1 text-sm leading-6 text-emerald-100/75">
+              Search for a payment or tap one of the large buttons below.
             </p>
           </div>
 
@@ -2822,7 +2895,7 @@ export default function MoneyTransactionsTable({
               <input
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search payments..."
+                placeholder="Search payment name or reference..."
                 className="w-full rounded-2xl bg-black/30 py-4 pl-12 pr-4 text-base font-semibold text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-emerald-300/50"
               />
             </div>
@@ -2848,23 +2921,103 @@ export default function MoneyTransactionsTable({
 
             <button
               type="button"
-              onClick={() => {
-                setSearchTerm("");
-                setFilter("all");
-                setSelectedSponsorId("all");
-                setSelectedPaymentMethod("all");
-                setQuickFilter("all");
-                setSelectedViewMonth("all");
-              }}
+              onClick={resetEasyModeFilters}
               className="rounded-2xl bg-white/10 px-5 py-4 text-base font-black text-white transition hover:bg-white/20"
             >
-              Clear search
+              Show all payments
             </button>
+          </div>
+
+          <div className="mt-5">
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-emerald-100/65">
+              Show me
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("all", "all")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  filter === "all" && quickFilter === "all"
+                    ? "bg-white text-black ring-white"
+                    : "bg-white/10 text-white ring-white/10 hover:bg-white/20"
+                }`}
+              >
+                All payments
+              </button>
+
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("all", "unchecked")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  quickFilter === "unchecked"
+                    ? "bg-amber-100 text-black ring-amber-100"
+                    : "bg-amber-500/10 text-amber-100 ring-amber-300/20 hover:bg-amber-500/20"
+                }`}
+              >
+                Needs checking
+              </button>
+
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("income", "all")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  filter === "income" && quickFilter === "all"
+                    ? "bg-emerald-100 text-black ring-emerald-100"
+                    : "bg-emerald-500/10 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/20"
+                }`}
+              >
+                Money in
+              </button>
+
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("expense", "all")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  filter === "expense" && quickFilter === "all"
+                    ? "bg-red-100 text-black ring-red-100"
+                    : "bg-red-500/10 text-red-100 ring-red-300/20 hover:bg-red-500/20"
+                }`}
+              >
+                Money out
+              </button>
+
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("all", "missing_receipts")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  quickFilter === "missing_receipts"
+                    ? "bg-orange-100 text-black ring-orange-100"
+                    : "bg-orange-500/10 text-orange-100 ring-orange-300/20 hover:bg-orange-500/20"
+                }`}
+              >
+                Missing receipts
+              </button>
+
+              <button
+                type="button"
+                onClick={() => showEasyModePayments("all", "refunds")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  quickFilter === "refunds"
+                    ? "bg-cyan-100 text-black ring-cyan-100"
+                    : "bg-cyan-500/10 text-cyan-100 ring-cyan-300/20 hover:bg-cyan-500/20"
+                }`}
+              >
+                Refunds
+              </button>
+            </div>
+
+            <p className="mt-4 text-sm font-bold text-white/70">
+              Showing {visibleTrackingRows.length} entr
+              {visibleTrackingRows.length === 1 ? "y" : "ies"}.
+            </p>
           </div>
         </div>
       ) : null}
 
-      <div className={`${easyMode ? "hidden" : "mb-4 grid gap-3 xl:grid-cols-[1fr_auto]"}`}>
+      <div
+        className={`${easyMode ? "hidden" : "mb-4 grid gap-3 xl:grid-cols-[1fr_auto]"}`}
+      >
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
           <button
             type="button"
@@ -3134,132 +3287,129 @@ export default function MoneyTransactionsTable({
         <div className="mb-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
           <p className="font-black">Easy Mode is on</p>
           <p className="mt-1 text-xs leading-5 text-emerald-100/75">
-            Payments are shown as large, simple cards with the title, amount,
-            date, payment type and checked status. Use Full Mode when you need
-            the advanced table, funding details, receipts, bank matching or
-            finance notes.
+            Tap a payment to check, edit or delete it. Checked payments stay
+            locked until the same admin presses Undo checked.
           </p>
         </div>
       )}
 
-      <div
-        className={`mb-4 grid gap-3 md:grid-cols-2 ${easyMode ? "xl:grid-cols-3" : "xl:grid-cols-8"}`}
-      >
-        <div className="rounded-2xl bg-emerald-500/10 p-3 ring-1 ring-emerald-300/20">
-          <p className="text-xs font-black text-emerald-100/70">Money In</p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {money(moneyInIncludingCompletedRefunds)}
+      <section className="mb-4 space-y-3">
+        <div className="rounded-3xl border border-sky-300/30 bg-sky-500/15 p-5 shadow-lg shadow-black/10">
+          <p className="text-sm font-black uppercase tracking-wide text-sky-100">
+            Money Available Now
           </p>
 
-          {refundTotals.receivedBack > 0 ? (
-            <p className="mt-1 text-[11px] font-bold text-emerald-100/55">
-              Includes {money(refundTotals.receivedBack)} completed refund
-              {refundTotals.receivedBack === 1 ? "" : "s"} received back
-            </p>
-          ) : null}
-        </div>
-
-        <div className="rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20">
-          <p className="text-xs font-black text-red-100/70">Money Out</p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {money(moneyOutIncludingCompletedRefunds)}
-          </p>
-
-          <p className="mt-1 text-[11px] font-bold text-red-100/55">
-            Excludes personal funds until paid back
-          </p>
-        </div>
-
-        <div className="rounded-2xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20">
-          <p className="text-xs font-black text-sky-100/70">
-            Available balance in view
-          </p>
-
-          <p className="mt-1 text-lg font-black text-white">
+          <p className="mt-2 break-words text-4xl font-black text-white sm:text-5xl">
             {money(availableBalanceInView)}
           </p>
 
-          <p className="mt-1 text-[11px] font-bold text-sky-100/55">
-            Matches tracker rules and includes completed refunds
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-sky-100/75">
+            This is the money currently available in the selected view. It
+            updates when money comes in, payments go out or completed refunds
+            are added.
           </p>
         </div>
 
         <div
-          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-cyan-500/10 p-3 ring-1 ring-cyan-300/20`}
+          className={`grid gap-3 sm:grid-cols-2 ${easyMode ? "xl:grid-cols-2" : "xl:grid-cols-4 2xl:grid-cols-7"}`}
         >
-          <p className="text-xs font-black text-cyan-100/70">
-            Refunds received back
-          </p>
+          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
+            <p className="text-sm font-black text-emerald-100">Total Money In</p>
 
-          <p className="mt-1 text-lg font-black text-white">
-            {money(refundTotals.receivedBack)}
-          </p>
+            <p className="mt-2 break-words text-2xl font-black text-white">
+              {money(moneyInIncludingCompletedRefunds)}
+            </p>
 
-          <p className="mt-1 text-[11px] font-bold text-cyan-100/55">
-            Added into Money In when completed
-          </p>
+            <p className="mt-2 text-xs leading-5 text-emerald-100/65">
+              General money received, including completed refunds received back.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
+            <p className="text-sm font-black text-red-100">Total Money Out</p>
+
+            <p className="mt-2 break-words text-2xl font-black text-white">
+              {money(moneyOutIncludingCompletedRefunds)}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-red-100/65">
+              Payments made by Burton Pride. Personal funds only count after repayment.
+            </p>
+          </div>
+
+          <div
+            className={`${easyMode ? "hidden" : ""} rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4`}
+          >
+            <p className="text-sm font-black text-cyan-100">Refunds Received</p>
+
+            <p className="mt-2 break-words text-2xl font-black text-white">
+              {money(refundTotals.receivedBack)}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-cyan-100/65">
+              Money returned to Burton Pride.
+            </p>
+          </div>
+
+          <div
+            className={`${easyMode ? "hidden" : ""} rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4`}
+          >
+            <p className="text-sm font-black text-purple-100">Refunds Sent Back</p>
+
+            <p className="mt-2 break-words text-2xl font-black text-white">
+              {money(refundTotals.sentBack)}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-purple-100/65">
+              Money refunded back to other people.
+            </p>
+          </div>
+
+          <div
+            className={`${easyMode ? "hidden" : ""} rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4`}
+          >
+            <p className="text-sm font-black text-amber-100">Payments To Check</p>
+
+            <p className="mt-2 text-2xl font-black text-white">
+              {totals.unchecked}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-amber-100/65">
+              Payments that have not been checked yet.
+            </p>
+          </div>
+
+          <div
+            className={`${easyMode ? "hidden" : ""} rounded-2xl border border-red-300/20 bg-red-500/10 p-4`}
+          >
+            <p className="text-sm font-black text-red-100">Receipts Overdue</p>
+
+            <p className="mt-2 text-2xl font-black text-white">
+              {totals.overdueReceipts}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-red-100/65">
+              Missing for more than {activeReceiptReminderDays} days.
+            </p>
+          </div>
+
+          <div
+            className={`${easyMode ? "hidden" : ""} rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4`}
+          >
+            <p className="text-sm font-black text-orange-100">Still Owed Back</p>
+
+            <p className="mt-2 break-words text-2xl font-black text-white">
+              {money(totals.unpaidPersonal)}
+            </p>
+
+            <p className="mt-2 text-xs leading-5 text-orange-100/65">
+              Personal payments that still need repaying.
+            </p>
+          </div>
         </div>
+      </section>
 
-        <div
-          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-purple-500/10 p-3 ring-1 ring-purple-300/20`}
-        >
-          <p className="text-xs font-black text-purple-100/70">
-            Refunds sent back
-          </p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {money(refundTotals.sentBack)}
-          </p>
-
-          <p className="mt-1 text-[11px] font-bold text-purple-100/55">
-            Added into Money Out when completed
-          </p>
-        </div>
-
-        <div
-          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-amber-500/10 p-3 ring-1 ring-amber-300/20`}
-        >
-          <p className="text-xs font-black text-amber-100/70">Unchecked</p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {totals.unchecked}
-          </p>
-        </div>
-
-        <div
-          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-red-500/10 p-3 ring-1 ring-red-300/20`}
-        >
-          <p className="text-xs font-black text-red-100/70">Receipt overdue</p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {totals.overdueReceipts}
-          </p>
-
-          <p className="mt-1 text-[11px] font-bold text-red-100/55">
-            after {activeReceiptReminderDays} days
-          </p>
-        </div>
-
-        <div
-          className={`${easyMode ? "hidden" : ""} rounded-2xl bg-orange-500/10 p-3 ring-1 ring-orange-300/20`}
-        >
-          <p className="text-xs font-black text-orange-100/70">
-            Unpaid personal
-          </p>
-
-          <p className="mt-1 text-lg font-black text-white">
-            {money(totals.unpaidPersonal)}
-          </p>
-
-          <p className="mt-1 text-[11px] font-bold text-orange-100/55">
-            Not removed from available balance yet
-          </p>
-        </div>
-      </div>
-
-      {selectedTransactions.length > 0 && (
+      {!easyMode && selectedTransactions.length > 0 && (
         <div className="sticky top-2 z-20 mb-4 rounded-2xl border border-pink-300/20 bg-[#1b1020]/95 p-3 shadow-2xl shadow-black backdrop-blur">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="text-sm font-bold text-white">
@@ -3370,7 +3520,7 @@ export default function MoneyTransactionsTable({
       ) : (
         <>
           {easyMode ? (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-4">
               {visibleTrackingRows.map((row) =>
                 row.kind === "transaction"
                   ? renderEasyModeCard(row.item)
@@ -3387,7 +3537,9 @@ export default function MoneyTransactionsTable({
             )}
           </div>
 
-          <div className={`${easyMode ? "hidden" : "hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full"}`}>
+          <div
+            className={`${easyMode ? "hidden" : "hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full"}`}
+          >
             <table
               className={`w-full text-sm ${easyMode ? "min-w-[1200px]" : "min-w-[2250px]"}`}
             >
@@ -3714,6 +3866,16 @@ export default function MoneyTransactionsTable({
                     financeDraft.note !== (item.finance_note || "");
                   const lockReason = getTransactionLockReason(item);
                   const locked = Boolean(lockReason);
+                  const paymentChecked = Boolean(item.checked_at);
+                  const checkedByName = paymentChecked
+                    ? getCheckedByDisplayName(item)
+                    : "";
+                  const paymentActionsLocked = locked || paymentChecked;
+                  const paymentActionLockReason = locked
+                    ? lockReason
+                    : paymentChecked
+                      ? `This payment was checked by ${checkedByName}. Undo the checked status before making changes.`
+                      : "";
 
                   return (
                     <tr
@@ -3724,9 +3886,11 @@ export default function MoneyTransactionsTable({
                         <input
                           type="checkbox"
                           checked={selectedIds.has(item.id)}
-                          disabled={locked}
+                          disabled={paymentActionsLocked}
                           onChange={() => toggleSelect(item.id)}
-                          title={locked ? lockReason : "Select transaction"}
+                          title={
+                            paymentActionLockReason || "Select transaction"
+                          }
                         />
                       </ColumnCell>
 
@@ -3756,8 +3920,10 @@ export default function MoneyTransactionsTable({
                       >
                         <button
                           type="button"
+                          disabled={paymentActionsLocked}
                           onClick={() => setDetailsItem(item)}
-                          className="break-words text-left font-semibold text-white hover:text-sky-200"
+                          title={paymentActionLockReason || "View details"}
+                          className="break-words text-left font-semibold text-white hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {item.title}
                         </button>
@@ -3915,7 +4081,7 @@ export default function MoneyTransactionsTable({
                                 </label>
                                 <input
                                   type="file"
-                                  disabled={locked}
+                                  disabled={paymentActionsLocked}
                                   multiple
                                   accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
                                   onChange={(event) => {
@@ -3941,7 +4107,9 @@ export default function MoneyTransactionsTable({
 
                             <button
                               type="button"
-                              disabled={locked || repayingId === item.id}
+                              disabled={
+                                paymentActionsLocked || repayingId === item.id
+                              }
                               onClick={() =>
                                 runTransactionAction(item, async () => {
                                   await onTogglePersonalFundsRepaid(
@@ -4005,7 +4173,10 @@ export default function MoneyTransactionsTable({
                           <div className="grid grid-cols-2 gap-1">
                             <button
                               type="button"
-                              disabled={locked || bankReconcilingId === item.id}
+                              disabled={
+                                paymentActionsLocked ||
+                                bankReconcilingId === item.id
+                              }
                               onClick={() =>
                                 runTransactionAction(item, () =>
                                   onUpdateBankReconciliationStatus(
@@ -4025,7 +4196,10 @@ export default function MoneyTransactionsTable({
                             </button>
                             <button
                               type="button"
-                              disabled={locked || bankReconcilingId === item.id}
+                              disabled={
+                                paymentActionsLocked ||
+                                bankReconcilingId === item.id
+                              }
                               onClick={() =>
                                 runTransactionAction(item, () =>
                                   onUpdateBankReconciliationStatus(
@@ -4040,7 +4214,10 @@ export default function MoneyTransactionsTable({
                             </button>
                             <button
                               type="button"
-                              disabled={locked || bankReconcilingId === item.id}
+                              disabled={
+                                paymentActionsLocked ||
+                                bankReconcilingId === item.id
+                              }
                               onClick={() =>
                                 runTransactionAction(item, () =>
                                   onUpdateBankReconciliationStatus(
@@ -4055,7 +4232,10 @@ export default function MoneyTransactionsTable({
                             </button>
                             <button
                               type="button"
-                              disabled={locked || bankReconcilingId === item.id}
+                              disabled={
+                                paymentActionsLocked ||
+                                bankReconcilingId === item.id
+                              }
                               onClick={() =>
                                 runTransactionAction(item, () =>
                                   onUpdateBankReconciliationStatus(
@@ -4177,7 +4357,7 @@ export default function MoneyTransactionsTable({
                             </label>
                             <select
                               value={financeDraft.status}
-                              disabled={locked}
+                              disabled={paymentActionsLocked}
                               onChange={(event) =>
                                 setFinanceDraftStatus(
                                   item,
@@ -4198,7 +4378,7 @@ export default function MoneyTransactionsTable({
                             </select>
                             <textarea
                               value={financeDraft.note}
-                              disabled={locked}
+                              disabled={paymentActionsLocked}
                               onChange={(event) =>
                                 setFinanceDraftNote(item, event.target.value)
                               }
@@ -4208,7 +4388,7 @@ export default function MoneyTransactionsTable({
                             <button
                               type="button"
                               disabled={
-                                locked ||
+                                paymentActionsLocked ||
                                 financeNoteUpdatingId === item.id ||
                                 !financeNoteChanged
                               }
@@ -4242,35 +4422,40 @@ export default function MoneyTransactionsTable({
                         <div className="inline-flex items-center justify-end gap-2">
                           <button
                             type="button"
+                            disabled={paymentActionsLocked}
                             onClick={() => setDetailsItem(item)}
-                            className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20"
-                            title="View details"
+                            className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={paymentActionLockReason || "View details"}
                           >
                             <Eye className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
-                            disabled={locked}
+                            disabled={paymentActionsLocked}
                             onClick={() =>
                               runTransactionAction(item, () =>
                                 onEditTransaction(item),
                               )
                             }
                             className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            title={locked ? lockReason : "Edit transaction"}
+                            title={
+                              paymentActionLockReason || "Edit transaction"
+                            }
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
-                            disabled={locked || deleting}
+                            disabled={paymentActionsLocked || deleting}
                             onClick={() =>
                               runTransactionAction(item, () =>
                                 onHideTransaction(item.id),
                               )
                             }
                             className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            title={locked ? lockReason : "Hide transaction"}
+                            title={
+                              paymentActionLockReason || "Hide transaction"
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>

@@ -669,13 +669,10 @@ export default function MoneyMonthlyBreakdown({
               </h2>
 
               <p className="mt-2 max-w-4xl break-words text-sm leading-6 text-white/60">
-                Jan to Dec view for {selectedYear}. Restricted sponsor,
-                grant, loan or funding money is kept separate from the
-                general Burton Pride balance. Completed refunds are also
-                displayed separately, but money received back increases
-                the available general balance and money sent back reduces
-                it. Unpaid personal funds only reduce the balance after
-                they are marked as paid back.
+                See how much general money came in and went out each month in
+                {selectedYear}. Restricted funding stays separate. Completed
+                refunds update the money available now. Personal payments only
+                reduce the balance after they are marked as paid back.
               </p>
 
               <button
@@ -696,57 +693,57 @@ export default function MoneyMonthlyBreakdown({
 
           <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:w-[930px] xl:grid-cols-3 2xl:grid-cols-6">
             <MetricCard
-              title="General Money In"
+              title="Money Available Now"
+              value={formatMoney(totals.generalBalance)}
+              note="General money currently available to use"
+              tone="sky"
+              icon={<Wallet className="h-4 w-4" />}
+            />
+
+            <MetricCard
+              title="Money In"
               value={formatMoney(totals.generalIncome)}
-              note="Ordinary unrestricted income only"
+              note="General money received"
               tone="emerald"
               icon={<TrendingUp className="h-4 w-4" />}
             />
 
             <MetricCard
-              title="General Money Out"
+              title="Money Out"
               value={formatMoney(totals.generalOut)}
               note={
                 totals.unpaidPersonalFunds > 0
                   ? `${formatMoney(
                       totals.unpaidPersonalFunds
-                    )} personal funds not counted yet`
-                  : "Ordinary Burton Pride spending only"
+                    )} still needs paying back`
+                  : "General payments made"
               }
               tone="red"
               icon={<TrendingDown className="h-4 w-4" />}
             />
 
             <MetricCard
-              title="Refunds Received Back"
+              title="Refunds Received"
               value={formatMoney(totals.refundsReceivedBack)}
-              note="Added back into the available balance"
+              note="Money returned to Burton Pride"
               tone="violet"
               icon={<RefreshCcw className="h-4 w-4" />}
             />
 
             <MetricCard
-              title="Refunds Sent Back"
+              title="Refunds Sent"
               value={formatMoney(totals.refundsSentBack)}
-              note="Removed from the available balance"
+              note="Money refunded to someone else"
               tone="rose"
               icon={<RotateCcw className="h-4 w-4" />}
             />
 
             <MetricCard
-              title="Restricted Funding Left"
+              title="Restricted Money Left"
               value={formatMoney(totals.restrictedLeft)}
-              note="Kept separate from general money"
+              note="Funding kept separate from general money"
               tone="amber"
               icon={<LockKeyhole className="h-4 w-4" />}
-            />
-
-            <MetricCard
-              title="Available General Balance"
-              value={formatMoney(totals.generalBalance)}
-              note="General money in − general money out + refunds received − refunds sent"
-              tone="sky"
-              icon={<Wallet className="h-4 w-4" />}
             />
           </div>
         </div>
@@ -829,35 +826,35 @@ export default function MoneyMonthlyBreakdown({
 
                   <div className="space-y-3">
                     <MonthProgress
-                      label="General money in"
+                      label="Money in"
                       value={row.generalIncome}
                       max={maxMonthValue}
                       tone="emerald"
                     />
 
                     <MonthProgress
-                      label="General money out"
+                      label="Money out"
                       value={row.generalOut}
                       max={maxMonthValue}
                       tone="red"
                     />
 
                     <MonthProgress
-                      label="Refunds received back"
+                      label="Refunds received"
                       value={row.refundsReceivedBack}
                       max={maxMonthValue}
                       tone="violet"
                     />
 
                     <MonthProgress
-                      label="Refunds sent back"
+                      label="Refunds sent"
                       value={row.refundsSentBack}
                       max={maxMonthValue}
                       tone="rose"
                     />
 
                     <MonthProgress
-                      label="Restricted funding left"
+                      label="Restricted money left"
                       value={row.restrictedLeft}
                       max={maxMonthValue}
                       tone="amber"
@@ -899,11 +896,11 @@ export default function MoneyMonthlyBreakdown({
 
               <div>
                 <p className="font-black text-sky-100">
-                  How the available general balance is calculated
+                  How money available now is calculated
                 </p>
 
                 <p className="mt-1">
-                  General money in minus general money out, plus completed
+                  Money in minus general money out, plus completed
                   refunds received back, minus completed refunds sent back.
                   Refunds remain visible separately so they are not
                   confused with new income or ordinary spending.
