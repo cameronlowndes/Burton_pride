@@ -443,7 +443,7 @@ export default function AdminUsersClient() {
         return;
       }
 
-      const res = await fetch("/api/admin/users", {
+      const res = await fetch("/api/admin/settings/users", {
         method: "POST",
         credentials: "include",
         headers: {
@@ -507,7 +507,7 @@ export default function AdminUsersClient() {
             draftPermissions[admin.id] ||
             normalisePermissions(admin.permissions);
 
-      const res = await fetch("/api/admin/users", {
+      const res = await fetch("/api/admin/settings/users", {
         method: "PATCH",
         credentials: "include",
         headers: {
