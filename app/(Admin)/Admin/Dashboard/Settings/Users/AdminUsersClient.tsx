@@ -334,7 +334,7 @@ export default function AdminUsersClient() {
       setError("");
       setMessage("");
 
-      const res = await fetch(`/api/admin/users?t=${Date.now()}`, {
+      const res = await fetch(`/api/admin/settings/users?t=${Date.now()}`, {
         cache: "no-store",
         credentials: "include",
       });
