@@ -16,13 +16,23 @@ import {
 
 type ImportPreviewItem = {
   id?: string;
+  stripe_session_id?: string | null;
+  checkout_session_id?: string | null;
+  stripe_payment_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  stripe_customer_id?: string | null;
   title?: string;
   name?: string;
   type?: string;
+  category?: string | null;
+  description?: string | null;
   amount?: number | string;
   amount_pence?: number;
   date?: string;
-  email?: string;
+  transaction_date?: string;
+  email?: string | null;
+  payment_method?: string | null;
+  source?: string | null;
   status?: string;
 };
 
@@ -40,9 +50,11 @@ type WebsitePaymentsSyncCardProps = {
   onPreview?: () => void;
 
   /**
-   * Only the selected and confirmed Stripe session IDs are sent for import.
+   * Selected edited payments are sent for import.
+   * Each row still includes the Stripe Checkout Session ID so the backend can
+   * safely import only the chosen Stripe payment.
    */
-  onSync: (confirmedSessionIds: string[]) => void;
+  onSync: (confirmedPayments: ImportPreviewItem[]) => void;
 
   DetailedErrorBox: ComponentType<{
     title: string;
@@ -64,46 +76,74 @@ type PreviewApiResponse = {
 const TEST_PREVIEW_ITEMS: ImportPreviewItem[] = [
   {
     id: "test-donation-001",
+    stripe_session_id: "test-donation-001",
+    checkout_session_id: "test-donation-001",
     title: "Website Donation - Example Supporter",
     name: "Example Supporter",
     type: "Website Donation",
+    category: "Website Donation",
+    description: "Safe test donation row.",
     amount: "£10.00",
     amount_pence: 1000,
     date: "2026-06-09",
+    transaction_date: "2026-06-09",
     email: "supporter@example.com",
+    payment_method: "Stripe",
+    source: "website_donation",
     status: "Ready to import",
   },
   {
     id: "test-raffle-002",
+    stripe_session_id: "test-raffle-002",
+    checkout_session_id: "test-raffle-002",
     title: "Raffle Tickets - Example Customer",
     name: "Example Customer",
     type: "Raffle Tickets",
+    category: "Raffle Tickets",
+    description: "Safe test raffle row.",
     amount: "£5.00",
     amount_pence: 500,
     date: "2026-06-09",
+    transaction_date: "2026-06-09",
     email: "raffle@example.com",
+    payment_method: "Stripe",
+    source: "raffle",
     status: "Ready to import",
   },
   {
     id: "test-vendor-003",
+    stripe_session_id: "test-vendor-003",
+    checkout_session_id: "test-vendor-003",
     title: "Vendor Pitch Fee - Example Food Vendor",
     name: "Example Food Vendor",
     type: "Vendor Pitch Fee",
+    category: "Vendor Pitch Fee",
+    description: "Safe test vendor row.",
     amount: "£47.50",
     amount_pence: 4750,
     date: "2026-06-09",
+    transaction_date: "2026-06-09",
     email: "vendor@example.com",
+    payment_method: "Stripe",
+    source: "vendor_pitch",
     status: "Ready to import",
   },
   {
     id: "test-sponsor-004",
+    stripe_session_id: "test-sponsor-004",
+    checkout_session_id: "test-sponsor-004",
     title: "Sponsorship - Example Sponsor",
     name: "Example Sponsor",
     type: "Sponsorship",
+    category: "Sponsorship",
+    description: "Safe test sponsorship row.",
     amount: "£100.00",
     amount_pence: 10000,
     date: "2026-06-09",
+    transaction_date: "2026-06-09",
     email: "sponsor@example.com",
+    payment_method: "Stripe",
+    source: "sponsorship",
     status: "Ready to import",
   },
 ];
@@ -121,8 +161,39 @@ async function readJsonResponse(res: Response): Promise<PreviewApiResponse> {
   }
 }
 
+function cloneItems(items: ImportPreviewItem[]): ImportPreviewItem[] {
+  return items.map((item) => ({ ...item }));
+}
+
 function cloneTestItems(): ImportPreviewItem[] {
-  return TEST_PREVIEW_ITEMS.map((item) => ({ ...item }));
+  return cloneItems(TEST_PREVIEW_ITEMS);
+}
+
+function cleanText(value: unknown) {
+  if (typeof value !== "string") return "";
+
+  return value.trim();
+}
+
+function getSessionId(item: ImportPreviewItem) {
+  return cleanText(item.id) || cleanText(item.stripe_session_id) || cleanText(item.checkout_session_id);
+}
+
+function penceFromAmount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value * 100);
+  }
+
+  const cleaned = String(value || "")
+    .replace(/£/g, "")
+    .replace(/,/g, "")
+    .trim();
+
+  const amount = Number(cleaned);
+
+  if (!Number.isFinite(amount)) return 0;
+
+  return Math.round(amount * 100);
 }
 
 function formatMoney(item: ImportPreviewItem) {
@@ -131,7 +202,17 @@ function formatMoney(item: ImportPreviewItem) {
       return `£${item.amount.toFixed(2)}`;
     }
 
-    return String(item.amount);
+    const amountString = String(item.amount).trim();
+
+    if (amountString.startsWith("£")) return amountString;
+
+    const amountNumber = Number(amountString.replace(/,/g, ""));
+
+    if (Number.isFinite(amountNumber)) {
+      return `£${amountNumber.toFixed(2)}`;
+    }
+
+    return amountString;
   }
 
   if (
@@ -145,6 +226,34 @@ function formatMoney(item: ImportPreviewItem) {
   return "£0.00";
 }
 
+function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
+  const sessionId = getSessionId(item);
+  const date = cleanText(item.date) || cleanText(item.transaction_date);
+  const amountPence = Number.isFinite(Number(item.amount_pence))
+    ? Number(item.amount_pence)
+    : penceFromAmount(item.amount);
+
+  return {
+    ...item,
+    id: sessionId || item.id,
+    stripe_session_id: sessionId || item.stripe_session_id || null,
+    checkout_session_id: sessionId || item.checkout_session_id || null,
+    title: cleanText(item.title) || cleanText(item.name) || "Website payment",
+    name: cleanText(item.name) || "Website customer",
+    type: cleanText(item.type) || "Website Payment",
+    category: cleanText(item.category) || cleanText(item.type) || "Website Payment",
+    description: cleanText(item.description) || null,
+    amount: formatMoney({ amount: item.amount, amount_pence: amountPence }),
+    amount_pence: amountPence,
+    date: date || new Date().toISOString().slice(0, 10),
+    transaction_date: date || new Date().toISOString().slice(0, 10),
+    email: cleanText(item.email) || null,
+    payment_method: cleanText(item.payment_method) || "Stripe",
+    source: cleanText(item.source) || "website_payment",
+    status: cleanText(item.status) || "Ready to import",
+  };
+}
+
 function isAlreadyImported(item: ImportPreviewItem) {
   return String(item.status || "")
     .toLowerCase()
@@ -152,7 +261,33 @@ function isAlreadyImported(item: ImportPreviewItem) {
 }
 
 function isSelectableLivePayment(item: ImportPreviewItem) {
-  return Boolean(item.id) && !isAlreadyImported(item);
+  return Boolean(getSessionId(item)) && !isAlreadyImported(item);
+}
+
+function buildEditedPaymentForImport(item: ImportPreviewItem): ImportPreviewItem {
+  const sessionId = getSessionId(item);
+  const amountPence = penceFromAmount(item.amount);
+  const date = cleanText(item.date) || cleanText(item.transaction_date) || new Date().toISOString().slice(0, 10);
+
+  return {
+    ...item,
+    id: sessionId,
+    stripe_session_id: sessionId,
+    checkout_session_id: sessionId,
+    title: cleanText(item.title) || "Website payment",
+    name: cleanText(item.name) || "Website customer",
+    type: cleanText(item.type) || "Website Payment",
+    category: cleanText(item.category) || cleanText(item.type) || "Website Payment",
+    description: cleanText(item.description) || null,
+    amount: formatMoney({ amount_pence: amountPence }),
+    amount_pence: amountPence,
+    date,
+    transaction_date: date,
+    email: cleanText(item.email) || null,
+    payment_method: cleanText(item.payment_method) || "Stripe",
+    source: cleanText(item.source) || "website_payment",
+    status: cleanText(item.status) || "Ready to import",
+  };
 }
 
 export default function WebsitePaymentsSyncCard({
@@ -166,8 +301,12 @@ export default function WebsitePaymentsSyncCard({
 }: WebsitePaymentsSyncCardProps) {
   const [showPreviewWindow, setShowPreviewWindow] = useState(false);
   const [localPreviewing, setLocalPreviewing] = useState(false);
-  const [localPreviewItems, setLocalPreviewItems] =
-    useState<ImportPreviewItem[]>(previewItems);
+  const [originalPreviewItems, setOriginalPreviewItems] = useState<ImportPreviewItem[]>(
+    cloneItems(previewItems).map(normalisePreviewItem),
+  );
+  const [localPreviewItems, setLocalPreviewItems] = useState<ImportPreviewItem[]>(
+    cloneItems(previewItems).map(normalisePreviewItem),
+  );
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -183,7 +322,9 @@ export default function WebsitePaymentsSyncCard({
   const isLoadingPreview = previewing || localPreviewing;
 
   const visiblePreviewItems = useMemo(() => {
-    return localPreviewItems.length > 0 ? localPreviewItems : previewItems;
+    return localPreviewItems.length > 0
+      ? localPreviewItems
+      : cloneItems(previewItems).map(normalisePreviewItem);
   }, [localPreviewItems, previewItems]);
 
   const selectableLiveIds = useMemo(() => {
@@ -191,8 +332,8 @@ export default function WebsitePaymentsSyncCard({
 
     return visiblePreviewItems
       .filter(isSelectableLivePayment)
-      .map((item) => item.id)
-      .filter((id): id is string => Boolean(id));
+      .map((item) => getSessionId(item))
+      .filter(Boolean);
   }, [testMode, visiblePreviewItems]);
 
   const allSelectableLivePaymentsSelected = useMemo(() => {
@@ -210,31 +351,51 @@ export default function WebsitePaymentsSyncCard({
       data.transactions ||
       [];
 
-    return Array.isArray(items) ? items : [];
+    return Array.isArray(items) ? items.map(normalisePreviewItem) : [];
   }
 
-  function updateTestItem(
+  function updatePreviewItem(
     index: number,
     field: keyof ImportPreviewItem,
     value: string,
   ) {
-    if (!testMode) return;
-
     setLocalPreviewItems((currentItems) =>
       currentItems.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
 
-        return {
+        const updatedItem: ImportPreviewItem = {
           ...item,
           [field]: value,
         };
+
+        if (field === "amount") {
+          updatedItem.amount_pence = penceFromAmount(value);
+        }
+
+        if (field === "date") {
+          updatedItem.transaction_date = value;
+        }
+
+        if (field === "type" && !cleanText(item.category)) {
+          updatedItem.category = value;
+        }
+
+        return updatedItem;
       }),
     );
   }
 
   function resetTestData() {
-    setLocalPreviewItems(cloneTestItems());
+    const items = cloneTestItems().map(normalisePreviewItem);
+
+    setOriginalPreviewItems(items);
+    setLocalPreviewItems(items);
     setSelectedIds([]);
+    setLocalError(null);
+  }
+
+  function resetLiveEdits() {
+    setLocalPreviewItems(cloneItems(originalPreviewItems));
     setLocalError(null);
   }
 
@@ -303,8 +464,11 @@ export default function WebsitePaymentsSyncCard({
   }
 
   function openEditableTestData() {
+    const items = cloneTestItems().map(normalisePreviewItem);
+
     setTestMode(true);
-    setLocalPreviewItems(cloneTestItems());
+    setOriginalPreviewItems(items);
+    setLocalPreviewItems(items);
     setSelectedIds([]);
     setLocalError(null);
     setApiTestMessage(null);
@@ -317,6 +481,7 @@ export default function WebsitePaymentsSyncCard({
       setTestMode(false);
       setShowPreviewWindow(true);
       setLocalPreviewing(true);
+      setOriginalPreviewItems([]);
       setLocalPreviewItems([]);
       setSelectedIds([]);
       setLocalError(null);
@@ -342,7 +507,8 @@ export default function WebsitePaymentsSyncCard({
 
       const loadedItems = getPreviewItems(data);
 
-      setLocalPreviewItems(loadedItems);
+      setOriginalPreviewItems(cloneItems(loadedItems));
+      setLocalPreviewItems(cloneItems(loadedItems));
 
       /**
        * Select new payments automatically.
@@ -351,8 +517,8 @@ export default function WebsitePaymentsSyncCard({
       setSelectedIds(
         loadedItems
           .filter(isSelectableLivePayment)
-          .map((item) => item.id)
-          .filter((id): id is string => Boolean(id)),
+          .map((item) => getSessionId(item))
+          .filter(Boolean),
       );
     } catch (err: unknown) {
       const errorMessage =
@@ -361,6 +527,7 @@ export default function WebsitePaymentsSyncCard({
           : "Something went wrong while previewing website payments.";
 
       setLocalError(errorMessage);
+      setOriginalPreviewItems([]);
       setLocalPreviewItems([]);
       setSelectedIds([]);
     } finally {
@@ -387,13 +554,37 @@ export default function WebsitePaymentsSyncCard({
       return;
     }
 
-    if (selectedIds.length === 0) {
+    const selectedPayments = visiblePreviewItems
+      .filter((item) => selectedIds.includes(getSessionId(item)))
+      .filter(isSelectableLivePayment)
+      .map(buildEditedPaymentForImport);
+
+    if (selectedPayments.length === 0) {
       setLocalError("Select at least one live website payment before importing.");
       return;
     }
 
+    const invalidPayments = selectedPayments.filter((item) => {
+      return (
+        !getSessionId(item) ||
+        !cleanText(item.title) ||
+        !cleanText(item.type) ||
+        !cleanText(item.category) ||
+        !cleanText(item.date) ||
+        !Number.isFinite(Number(item.amount_pence)) ||
+        Number(item.amount_pence) <= 0
+      );
+    });
+
+    if (invalidPayments.length > 0) {
+      setLocalError(
+        "One or more selected payments has missing information. Please check title, type, category, amount and date before importing.",
+      );
+      return;
+    }
+
     setShowPreviewWindow(false);
-    onSync(selectedIds);
+    onSync(selectedPayments);
     setSelectedIds([]);
   }
 
@@ -408,8 +599,8 @@ export default function WebsitePaymentsSyncCard({
 
             <p className="max-w-3xl text-sm text-white/65">
               Preview live website payments before importing them into the money
-              tracker. Nothing is imported automatically. Only selected
-              payments are sent after you confirm the list.
+              tracker. Nothing is imported automatically. Selected payments can
+              be edited before the final import.
             </p>
           </div>
 
@@ -499,7 +690,7 @@ export default function WebsitePaymentsSyncCard({
 
       {showPreviewWindow ? (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl">
+          <div className="max-h-[92vh] w-full max-w-[96rem] overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <div
@@ -521,13 +712,13 @@ export default function WebsitePaymentsSyncCard({
                 <h2 className="text-2xl font-black text-white">
                   {testMode
                     ? "Test the editable payment preview"
-                    : "Select live website payments to import"}
+                    : "Select and edit live website payments to import"}
                 </h2>
 
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
                   {testMode
                     ? "Change the example fields below to test the editor. These rows are fake and will never be imported into your money tracker."
-                    : "Tick only the payments you want to import. Existing imported payments are disabled to prevent accidental duplicates."}
+                    : "Tick only the payments you want to import. You can change the title, name, type, category, amount, date, email, payment method, source and description before import. Existing imported payments stay disabled."}
                 </p>
               </div>
 
@@ -566,7 +757,7 @@ export default function WebsitePaymentsSyncCard({
             ) : null}
 
             {!testMode && !isLoadingPreview && visiblePreviewItems.length > 0 ? (
-              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="font-black text-sky-100">
                     {selectedIds.length} live payment
@@ -574,26 +765,39 @@ export default function WebsitePaymentsSyncCard({
                   </p>
 
                   <p className="mt-1 text-sm text-sky-100/75">
-                    Only the selected Stripe payments will be imported.
+                    Only the selected Stripe payments will be imported. Edited
+                    fields are sent with the selected payments.
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={toggleSelectAllLivePayments}
-                  disabled={selectableLiveIds.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/20 px-4 py-2.5 text-sm font-black text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {allSelectableLivePaymentsSelected ? (
-                    <CheckSquare className="h-4 w-4" />
-                  ) : (
-                    <Square className="h-4 w-4" />
-                  )}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={resetLiveEdits}
+                    disabled={originalPreviewItems.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset Edits
+                  </button>
 
-                  {allSelectableLivePaymentsSelected
-                    ? "Unselect All New Payments"
-                    : "Select All New Payments"}
-                </button>
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllLivePayments}
+                    disabled={selectableLiveIds.length === 0}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/20 px-4 py-2.5 text-sm font-black text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {allSelectableLivePaymentsSelected ? (
+                      <CheckSquare className="h-4 w-4" />
+                    ) : (
+                      <Square className="h-4 w-4" />
+                    )}
+
+                    {allSelectableLivePaymentsSelected
+                      ? "Unselect All New Payments"
+                      : "Select All New Payments"}
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -618,7 +822,7 @@ export default function WebsitePaymentsSyncCard({
                 </div>
 
                 <div className="overflow-x-auto rounded-2xl border border-white/10">
-                  <table className="w-full min-w-[1180px] text-left text-sm">
+                  <table className="w-full min-w-[1800px] text-left text-sm">
                     <thead className="bg-white/10 text-xs uppercase tracking-[0.14em] text-white/55">
                       <tr>
                         {!testMode ? (
@@ -626,30 +830,36 @@ export default function WebsitePaymentsSyncCard({
                         ) : null}
 
                         <th className="px-3 py-3">Title</th>
+                        <th className="px-3 py-3">Name</th>
                         <th className="px-3 py-3">Type</th>
+                        <th className="px-3 py-3">Category</th>
                         <th className="px-3 py-3">Amount</th>
                         <th className="px-3 py-3">Date</th>
                         <th className="px-3 py-3">Email</th>
+                        <th className="px-3 py-3">Payment Method</th>
+                        <th className="px-3 py-3">Source</th>
+                        <th className="px-3 py-3">Description</th>
                         <th className="px-3 py-3">Status</th>
                       </tr>
                     </thead>
 
                     <tbody className="divide-y divide-white/10">
                       {visiblePreviewItems.map((item, index) => {
-                        const itemId = item.id || "";
+                        const itemId = getSessionId(item);
                         const alreadyImported = isAlreadyImported(item);
                         const selectable = isSelectableLivePayment(item);
                         const selected = selectedIds.includes(itemId);
+                        const editable = testMode || selectable;
 
                         return (
                           <tr
-                            key={item.id || index}
+                            key={itemId || index}
                             className={`bg-white/[0.03] ${
                               selected && !testMode ? "bg-sky-500/10" : ""
-                            }`}
+                            } ${alreadyImported ? "opacity-70" : ""}`}
                           >
                             {!testMode ? (
-                              <td className="px-3 py-3">
+                              <td className="px-3 py-3 align-top">
                                 <button
                                   type="button"
                                   disabled={!selectable}
@@ -676,127 +886,173 @@ export default function WebsitePaymentsSyncCard({
                               </td>
                             ) : null}
 
-                            {testMode ? (
-                              <>
-                                <td className="min-w-[280px] px-3 py-3">
-                                  <input
-                                    value={item.title || ""}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "title",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
+                            <td className="min-w-[300px] px-3 py-3 align-top">
+                              <input
+                                value={item.title || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "title",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="min-w-[180px] px-3 py-3">
-                                  <input
-                                    value={item.type || ""}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "type",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
+                            <td className="min-w-[220px] px-3 py-3 align-top">
+                              <input
+                                value={item.name || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "name",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="min-w-[120px] px-3 py-3">
-                                  <input
-                                    value={formatMoney(item)}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "amount",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-emerald-100 outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
+                            <td className="min-w-[190px] px-3 py-3 align-top">
+                              <input
+                                value={item.type || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "type",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="min-w-[150px] px-3 py-3">
-                                  <input
-                                    type="date"
-                                    value={item.date || ""}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "date",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
+                            <td className="min-w-[190px] px-3 py-3 align-top">
+                              <input
+                                value={item.category || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "category",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="min-w-[230px] px-3 py-3">
-                                  <input
-                                    type="email"
-                                    value={item.email || ""}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "email",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
+                            <td className="min-w-[140px] px-3 py-3 align-top">
+                              <input
+                                value={formatMoney(item)}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "amount",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-emerald-100 outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="min-w-[180px] px-3 py-3">
-                                  <input
-                                    value={item.status || ""}
-                                    onChange={(event) =>
-                                      updateTestItem(
-                                        index,
-                                        "status",
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-violet-300/50"
-                                  />
-                                </td>
-                              </>
-                            ) : (
-                              <>
-                                <td className="px-4 py-3 font-bold text-white">
-                                  {item.title || item.name || "Untitled payment"}
-                                </td>
+                            <td className="min-w-[160px] px-3 py-3 align-top">
+                              <input
+                                type="date"
+                                value={item.date || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "date",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="px-4 py-3 text-white/70">
-                                  {item.type || "Website payment"}
-                                </td>
+                            <td className="min-w-[260px] px-3 py-3 align-top">
+                              <input
+                                type="email"
+                                value={item.email || ""}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "email",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="px-4 py-3 font-bold text-emerald-100">
-                                  {formatMoney(item)}
-                                </td>
+                            <td className="min-w-[190px] px-3 py-3 align-top">
+                              <input
+                                value={item.payment_method || "Stripe"}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "payment_method",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="px-4 py-3 text-white/70">
-                                  {item.date || "No date"}
-                                </td>
+                            <td className="min-w-[200px] px-3 py-3 align-top">
+                              <input
+                                value={item.source || "website_payment"}
+                                disabled={!editable}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "source",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td className="px-4 py-3 text-white/70">
-                                  {item.email || "No email"}
-                                </td>
+                            <td className="min-w-[360px] px-3 py-3 align-top">
+                              <textarea
+                                value={item.description || ""}
+                                disabled={!editable}
+                                rows={2}
+                                onChange={(event) =>
+                                  updatePreviewItem(
+                                    index,
+                                    "description",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                            </td>
 
-                                <td
-                                  className={`px-4 py-3 font-semibold ${
-                                    alreadyImported
-                                      ? "text-amber-200"
-                                      : "text-emerald-200"
-                                  }`}
-                                >
-                                  {item.status || "Ready to import"}
-                                </td>
-                              </>
-                            )}
+                            <td
+                              className={`min-w-[170px] px-4 py-3 align-top font-semibold ${
+                                alreadyImported
+                                  ? "text-amber-200"
+                                  : "text-emerald-200"
+                              }`}
+                            >
+                              {item.status || "Ready to import"}
+                              {itemId ? (
+                                <div className="mt-1 text-[10px] font-medium text-white/35">
+                                  {itemId}
+                                </div>
+                              ) : null}
+                            </td>
                           </tr>
                         );
                       })}

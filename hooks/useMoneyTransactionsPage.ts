@@ -125,6 +125,10 @@ type LoanActionFunding = SponsorBreakdown & {
 };
 
 type StripePreviewItem = {
+  /**
+   * This must be the Stripe Checkout Session ID, for example cs_live_...
+   * The import API will reject anything else so payment intents are not used here.
+   */
   id: string;
   title: string;
   description?: string | null;
@@ -139,6 +143,9 @@ type StripePreviewItem = {
   payment_method?: string | null;
   source?: string | null;
   stripe_payment_id?: string | null;
+  stripe_session_id?: string | null;
+  checkout_session_id?: string | null;
+  stripe_checkout_session_id?: string | null;
 };
 
 const initialForm = {
@@ -210,6 +217,33 @@ async function readJsonResponse(res: Response) {
   } catch {
     return { rawResponse: text };
   }
+}
+
+function normaliseStripeCheckoutSessionId(value: unknown) {
+  const id = String(value || "").trim();
+
+  return id.startsWith("cs_") ? id : "";
+}
+
+function getConfirmedStripeSessionIds(value: unknown) {
+  const rawItems = Array.isArray(value) ? value : [];
+
+  const ids = rawItems
+    .map((item: any) => {
+      if (typeof item === "string") return item;
+
+      return (
+        item?.id ||
+        item?.stripe_session_id ||
+        item?.checkout_session_id ||
+        item?.stripe_checkout_session_id ||
+        ""
+      );
+    })
+    .map(normaliseStripeCheckoutSessionId)
+    .filter(Boolean);
+
+  return Array.from(new Set(ids));
 }
 
 function makeAmountSearchValues(amountPence: number | null | undefined) {
@@ -751,13 +785,7 @@ export function useMoneyTransactionsPage() {
       const res = await fetch(
         `/api/admin/money/sync-stripe?preview=true&t=${Date.now()}`,
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            preview: true,
-          }),
+          method: "GET",
           cache: "no-store",
         }
       );
@@ -780,65 +808,77 @@ export function useMoneyTransactionsPage() {
         [];
 
       const previewItems: StripePreviewItem[] = Array.isArray(rawPreviewItems)
-        ? rawPreviewItems.map((item: any, index: number) => ({
-            ...item,
-            id:
-              String(
-                item.id ||
-                  item.stripe_payment_id ||
-                  item.payment_intent_id ||
-                  item.checkout_session_id ||
-                  `stripe-preview-${index + 1}`
-              ),
-            title: String(
-              item.title ||
-                item.name ||
-                item.description ||
-                item.payment_type ||
-                "Website payment"
-            ),
-            description: item.description || "",
-            type: String(item.type || item.payment_type || "income"),
-            category: item.category || "Website payment",
-            amount:
-              item.amount ??
-              (Number.isFinite(Number(item.amount_pence))
-                ? (Number(item.amount_pence) / 100).toFixed(2)
-                : "0.00"),
-            amount_pence: Number(
-              item.amount_pence ??
-                Math.round(Number(item.amount || 0) * 100)
-            ),
-            date: String(
-              item.date ||
-                item.transaction_date ||
-                item.created_at ||
-                getTodayDate()
-            ),
-            transaction_date: String(
-              item.transaction_date ||
-                item.date ||
-                item.created_at ||
-                getTodayDate()
-            ),
-            email: item.email || item.customer_email || null,
-            status: String(item.status || "Ready to import"),
-            payment_method: item.payment_method || "Stripe",
-            source: item.source || "stripe",
-            stripe_payment_id:
-              item.stripe_payment_id ||
-              item.payment_intent_id ||
-              item.checkout_session_id ||
+        ? rawPreviewItems.map((item: any) => {
+            const stripeSessionId = normaliseStripeCheckoutSessionId(
               item.id ||
-              null,
-          }))
+                item.stripe_session_id ||
+                item.checkout_session_id ||
+                item.stripe_checkout_session_id
+            );
+
+            const paymentIntentId = String(
+              item.stripe_payment_id ||
+                item.stripe_payment_intent_id ||
+                item.payment_intent_id ||
+                item.payment_intent ||
+                ""
+            ).trim();
+
+            const itemStatus = stripeSessionId
+              ? String(item.status || "Ready to import")
+              : "Cannot import - missing Stripe checkout session ID";
+
+            return {
+              ...item,
+              id: stripeSessionId,
+              title: String(
+                item.title ||
+                  item.name ||
+                  item.description ||
+                  item.payment_type ||
+                  "Website payment"
+              ),
+              description: item.description || "",
+              type: String(item.type || item.payment_type || "income"),
+              category: item.category || "Website payment",
+              amount:
+                item.amount ??
+                (Number.isFinite(Number(item.amount_pence))
+                  ? (Number(item.amount_pence) / 100).toFixed(2)
+                  : "0.00"),
+              amount_pence: Number(
+                item.amount_pence ??
+                  Math.round(Number(item.amount || 0) * 100)
+              ),
+              date: String(
+                item.date ||
+                  item.transaction_date ||
+                  item.created_at ||
+                  getTodayDate()
+              ),
+              transaction_date: String(
+                item.transaction_date ||
+                  item.date ||
+                  item.created_at ||
+                  getTodayDate()
+              ),
+              email: item.email || item.customer_email || null,
+              status: itemStatus,
+              payment_method: item.payment_method || "Stripe",
+              source: item.source || "stripe",
+              stripe_payment_id: paymentIntentId || null,
+              stripe_session_id: stripeSessionId || null,
+              checkout_session_id: stripeSessionId || null,
+              stripe_checkout_session_id: stripeSessionId || null,
+            };
+          })
         : [];
 
       setStripePreviewItems(previewItems);
 
       setStripeSyncMessage(
         previewItems.length === 0
-          ? "No new website payments were found to import."
+          ? "No website payments were found to import."
           : `Preview ready. Check ${previewItems.length} website payment${
               previewItems.length === 1 ? "" : "s"
             } before confirming the import.`
@@ -861,7 +901,7 @@ export function useMoneyTransactionsPage() {
   }
 
   async function syncStripeDonations(
-    confirmedItems: StripePreviewItem[] = stripePreviewItems
+    confirmedSessionIdsOrItems: unknown = stripePreviewItems
   ) {
     try {
       setStripeSyncing(true);
@@ -870,16 +910,19 @@ export function useMoneyTransactionsPage() {
       setError("");
       setErrorDetails(null);
 
-      const itemsToImport = Array.isArray(confirmedItems)
-        ? confirmedItems
-        : [];
+      const confirmedSessionIds = getConfirmedStripeSessionIds(
+        confirmedSessionIdsOrItems
+      );
 
-      if (itemsToImport.length === 0) {
+      if (confirmedSessionIds.length === 0) {
         throw {
           message:
-            "There are no previewed website payments to import. Load the preview first, check the details, then confirm the import.",
+            "No valid Stripe payments were selected. Please preview the payments, tick the ones you want, then click import.",
           details: {
-            confirmedItems: itemsToImport,
+            received: confirmedSessionIdsOrItems,
+            confirmedSessionIds,
+            expected:
+              "Stripe Checkout Session IDs must start with cs_, for example cs_live_...",
           },
         };
       }
@@ -890,9 +933,7 @@ export function useMoneyTransactionsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          preview: false,
-          confirmed: true,
-          items: itemsToImport,
+          confirmedSessionIds,
         }),
         cache: "no-store",
       });
@@ -901,7 +942,7 @@ export function useMoneyTransactionsPage() {
 
       if (!res.ok || !data.ok) {
         throw {
-          message: data.error || "Failed to sync Stripe donations",
+          message: data.error || "Failed to import selected Stripe payments",
           details: data,
           status: res.status,
         };
@@ -910,9 +951,11 @@ export function useMoneyTransactionsPage() {
       const created = Number(data.created || 0);
       const updated = Number(data.updated || 0);
       const skipped = Number(data.skipped || 0);
+      const testSkipped = Number(data.testSkipped || 0);
 
       setStripeSyncMessage(
-        `Stripe sync complete. Added ${created}, updated ${updated}, skipped ${skipped}. Manual transactions were not changed.`
+        data.message ||
+          `Stripe import complete. Added ${created}, updated ${updated}, skipped ${skipped}, test payments skipped ${testSkipped}.`
       );
 
       setStripePreviewItems([]);
@@ -925,7 +968,7 @@ export function useMoneyTransactionsPage() {
       await loadBudgetItems();
     } catch (err: any) {
       const message =
-        err?.message || "Something went wrong syncing Stripe donations.";
+        err?.message || "Something went wrong importing Stripe payments.";
 
       setStripeSyncError(message);
       setError(message);

@@ -20,27 +20,86 @@ type WebsitePaymentSource =
   | "ticket_sales"
   | "website_payment";
 
-type SyncResult =
-  | "created"
-  | "updated"
-  | "skipped"
-  | "test_skipped";
+type MoneyTransactionType = "income" | "expense";
+
+type SyncResult = "created" | "updated" | "skipped" | "test_skipped";
 
 type ImportPreviewItem = {
   id: string;
+  stripe_session_id: string;
   title: string;
   name: string;
   type: string;
+  transaction_type: MoneyTransactionType;
+  category: string;
   amount: string;
   amount_pence: number;
   date: string;
+  transaction_date: string;
   email: string;
   status: string;
+  payment_method: string;
   source: WebsitePaymentSource;
+  description: string;
+  stripe_payment_intent_id: string | null;
+  stripe_customer_id: string | null;
+  already_imported: boolean;
+};
+
+type EditableImportItem = {
+  id?: unknown;
+  stripe_session_id?: unknown;
+  checkout_session_id?: unknown;
+  stripe_checkout_session_id?: unknown;
+
+  title?: unknown;
+  name?: unknown;
+  customer_name?: unknown;
+  customerName?: unknown;
+
+  type?: unknown;
+  transaction_type?: unknown;
+  transactionType?: unknown;
+  category?: unknown;
+
+  amount?: unknown;
+  amount_pence?: unknown;
+  amountPence?: unknown;
+
+  date?: unknown;
+  transaction_date?: unknown;
+  transactionDate?: unknown;
+
+  email?: unknown;
+  customer_email?: unknown;
+  customerEmail?: unknown;
+
+  payment_method?: unknown;
+  paymentMethod?: unknown;
+
+  source?: unknown;
+  description?: unknown;
+  note?: unknown;
+  status?: unknown;
 };
 
 type ImportRequestBody = {
   confirmedSessionIds?: unknown;
+  selectedSessionIds?: unknown;
+  selectedPaymentIds?: unknown;
+  sessionIds?: unknown;
+  ids?: unknown;
+  items?: unknown;
+  confirmedItems?: unknown;
+  editedItems?: unknown;
+  payments?: unknown;
+  transactions?: unknown;
+};
+
+type SyncSessionResponse = {
+  result: SyncResult;
+  stripeSessionId: string;
+  reason?: string;
 };
 
 const SOURCE_LABELS: Record<WebsitePaymentSource, string> = {
@@ -54,6 +113,16 @@ const SOURCE_LABELS: Record<WebsitePaymentSource, string> = {
   ticket_sales: "Ticket Sales",
   website_payment: "Website Payment",
 };
+
+const SOURCE_BY_LABEL: Record<string, WebsitePaymentSource> = Object.entries(
+  SOURCE_LABELS,
+).reduce(
+  (acc, [source, label]) => {
+    acc[label.toLowerCase()] = source as WebsitePaymentSource;
+    return acc;
+  },
+  {} as Record<string, WebsitePaymentSource>,
+);
 
 function toPence(amount: number | null | undefined) {
   return typeof amount === "number" ? amount : 0;
@@ -73,6 +142,12 @@ function cleanText(value: unknown) {
   if (typeof value !== "string") return "";
 
   return value.trim();
+}
+
+function cleanOptionalText(value: unknown) {
+  const text = cleanText(value);
+
+  return text || null;
 }
 
 function getMetadata(session: Stripe.Checkout.Session) {
@@ -109,7 +184,17 @@ function getCustomerEmail(session: Stripe.Checkout.Session) {
 function normaliseSource(source: string): WebsitePaymentSource {
   const cleanSource = source.toLowerCase().trim();
 
+  if (!cleanSource) return "website_payment";
+
+  if (SOURCE_BY_LABEL[cleanSource]) {
+    return SOURCE_BY_LABEL[cleanSource];
+  }
+
   if (cleanSource === "monthly_donation") {
+    return "website_monthly_donation";
+  }
+
+  if (cleanSource === "monthly donation") {
     return "website_monthly_donation";
   }
 
@@ -117,19 +202,19 @@ function normaliseSource(source: string): WebsitePaymentSource {
     return "website_donation";
   }
 
-  if (cleanSource === "raffle_ticket") {
+  if (cleanSource === "raffle_ticket" || cleanSource === "raffle ticket") {
     return "raffle";
   }
 
-  if (cleanSource === "window_of_hope") {
+  if (cleanSource === "window_of_hope" || cleanSource === "window of hope") {
     return "windows_of_hope";
   }
 
-  if (cleanSource === "vendor") {
+  if (cleanSource === "vendor" || cleanSource === "vendor pitch") {
     return "vendor_pitch";
   }
 
-  if (cleanSource === "ticket") {
+  if (cleanSource === "ticket" || cleanSource === "ticket sales") {
     return "ticket_sales";
   }
 
@@ -285,6 +370,161 @@ function canImportSession(session: Stripe.Checkout.Session) {
   return amountPence > 0;
 }
 
+function parseMoneyPence(value: unknown, fallbackPence: number) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value * 100);
+  }
+
+  if (typeof value !== "string") return fallbackPence;
+
+  const cleanValue = value
+    .trim()
+    .replace(/£/g, "")
+    .replace(/,/g, "")
+    .replace(/\s/g, "");
+
+  if (!cleanValue) return fallbackPence;
+
+  const amount = Number(cleanValue);
+
+  if (!Number.isFinite(amount)) return fallbackPence;
+
+  return Math.round(amount * 100);
+}
+
+function parseAmountPenceFromEditableItem(
+  item: EditableImportItem | null,
+  fallbackPence: number,
+) {
+  if (!item) return fallbackPence;
+
+  const rawPence = item.amount_pence ?? item.amountPence;
+
+  if (typeof rawPence === "number" && Number.isFinite(rawPence)) {
+    return Math.round(rawPence);
+  }
+
+  if (typeof rawPence === "string" && rawPence.trim()) {
+    const parsedPence = Number(rawPence.trim().replace(/,/g, ""));
+
+    if (Number.isFinite(parsedPence)) {
+      return Math.round(parsedPence);
+    }
+  }
+
+  return parseMoneyPence(item.amount, fallbackPence);
+}
+
+function normaliseTransactionType(value: unknown): MoneyTransactionType {
+  const cleanValue = cleanText(value).toLowerCase();
+
+  if (cleanValue === "expense" || cleanValue === "money out") {
+    return "expense";
+  }
+
+  return "income";
+}
+
+function normaliseDate(value: unknown, fallbackDate: string) {
+  const text = cleanText(value);
+
+  if (!text) return fallbackDate;
+
+  /**
+   * Keep only yyyy-mm-dd. This is the format used by the money tracker.
+   */
+  const dateOnly = text.slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    return dateOnly;
+  }
+
+  return fallbackDate;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getSessionIdFromEditableItem(item: unknown) {
+  if (typeof item === "string") return item.trim();
+
+  if (!item || typeof item !== "object") return "";
+
+  const row = item as EditableImportItem;
+
+  return cleanText(
+    row.id ||
+      row.stripe_session_id ||
+      row.checkout_session_id ||
+      row.stripe_checkout_session_id,
+  );
+}
+
+function readEditableItems(value: unknown): EditableImportItem[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter(
+    (item): item is EditableImportItem =>
+      Boolean(item) && typeof item === "object",
+  );
+}
+
+function getEditableItemsFromBody(body: ImportRequestBody) {
+  return [
+    ...readEditableItems(body.items),
+    ...readEditableItems(body.confirmedItems),
+    ...readEditableItems(body.editedItems),
+    ...readEditableItems(body.payments),
+    ...readEditableItems(body.transactions),
+  ];
+}
+
+function getConfirmedSessionIdsFromBody(body: ImportRequestBody) {
+  const editableItems = getEditableItemsFromBody(body);
+
+  const ids = [
+    ...readStringArray(body.confirmedSessionIds),
+    ...readStringArray(body.selectedSessionIds),
+    ...readStringArray(body.selectedPaymentIds),
+    ...readStringArray(body.sessionIds),
+    ...readStringArray(body.ids),
+    ...editableItems.map(getSessionIdFromEditableItem),
+  ];
+
+  return Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean))).filter(
+    (id) => id.startsWith("cs_"),
+  );
+}
+
+function getEditableItemMap(body: ImportRequestBody) {
+  const map = new Map<string, EditableImportItem>();
+
+  for (const item of getEditableItemsFromBody(body)) {
+    const sessionId = getSessionIdFromEditableItem(item);
+
+    if (!sessionId || !sessionId.startsWith("cs_")) continue;
+
+    map.set(sessionId, item);
+  }
+
+  return map;
+}
+
 async function listAllCheckoutSessions() {
   const sessions: Stripe.Checkout.Session[] = [];
   let startingAfter: string | undefined;
@@ -328,49 +568,195 @@ async function createPreviewItem(
   const source = getPaymentSource(session);
   const amountPence = toPence(session.amount_total);
   const existingId = await getExistingTransactionId(session.id);
+  const description = getDescription(session, source);
+  const title = getTitle(session, source);
+  const category = getCategory(session, source);
+  const date = formatStripeDate(session.created);
 
   return {
     id: session.id,
-    title: getTitle(session, source),
+    stripe_session_id: session.id,
+    title,
     name: getCustomerName(session),
     type: SOURCE_LABELS[source] || "Website Payment",
+    transaction_type: "income",
+    category,
     amount: formatMoney(amountPence),
     amount_pence: amountPence,
-    date: formatStripeDate(session.created),
+    date,
+    transaction_date: date,
     email: getCustomerEmail(session) || "No email",
     status: existingId ? "Already imported" : "Ready to import",
+    payment_method: "Stripe",
     source,
+    description,
+    stripe_payment_intent_id: getPaymentIntentId(session),
+    stripe_customer_id: getCustomerId(session),
+    already_imported: Boolean(existingId),
   };
+}
+
+function getEditedText(
+  item: EditableImportItem | null,
+  keys: Array<keyof EditableImportItem>,
+  fallback: string,
+) {
+  if (!item) return fallback;
+
+  for (const key of keys) {
+    const value = cleanText(item[key]);
+
+    if (value) return value;
+  }
+
+  return fallback;
+}
+
+function getEditedSource(
+  item: EditableImportItem | null,
+  fallbackSource: WebsitePaymentSource,
+) {
+  if (!item) return fallbackSource;
+
+  const rawSource = getEditedText(item, ["source", "type"], fallbackSource);
+
+  return normaliseSource(rawSource || fallbackSource);
+}
+
+function getEditedDescription({
+  item,
+  session,
+  source,
+  fallbackDescription,
+}: {
+  item: EditableImportItem | null;
+  session: Stripe.Checkout.Session;
+  source: WebsitePaymentSource;
+  fallbackDescription: string;
+}) {
+  const customDescription = getEditedText(
+    item,
+    ["description", "note"],
+    "",
+  );
+
+  const name = getEditedText(
+    item,
+    ["name", "customer_name", "customerName"],
+    getCustomerName(session),
+  );
+
+  const email = getEditedText(
+    item,
+    ["email", "customer_email", "customerEmail"],
+    getCustomerEmail(session),
+  );
+
+  const parts = [
+    customDescription || fallbackDescription,
+    "Admin checked this Stripe payment before import.",
+    `Stripe checkout session ID: ${session.id}.`,
+  ];
+
+  if (name) {
+    parts.push(`Customer name: ${name}.`);
+  }
+
+  if (email) {
+    parts.push(`Customer email: ${email}.`);
+  }
+
+  parts.push(`Money tracker source: ${SOURCE_LABELS[source] || source}.`);
+
+  return parts.filter(Boolean).join(" ");
 }
 
 async function syncSession(
   session: Stripe.Checkout.Session,
-): Promise<SyncResult> {
+  editableItem: EditableImportItem | null,
+): Promise<SyncSessionResponse> {
+  const stripeSessionId = session.id;
+
   if (session.livemode !== true) {
-    return "test_skipped";
+    return {
+      result: "test_skipped",
+      stripeSessionId,
+      reason: "Stripe checkout session is not live mode.",
+    };
   }
 
   if (session.payment_status !== "paid") {
-    return "skipped";
+    return {
+      result: "skipped",
+      stripeSessionId,
+      reason: "Stripe checkout session is not paid.",
+    };
   }
 
-  const amountPence = toPence(session.amount_total);
+  const originalAmountPence = toPence(session.amount_total);
+  const editedAmountPence = parseAmountPenceFromEditableItem(
+    editableItem,
+    originalAmountPence,
+  );
 
-  if (amountPence <= 0) {
-    return "skipped";
+  if (editedAmountPence <= 0) {
+    return {
+      result: "skipped",
+      stripeSessionId,
+      reason: "Payment amount must be above £0.",
+    };
   }
 
-  const source = getPaymentSource(session);
-  const stripeSessionId = session.id;
+  const fallbackSource = getPaymentSource(session);
+  const source = getEditedSource(editableItem, fallbackSource);
+
+  const fallbackTitle = getTitle(session, source);
+  const fallbackCategory = getCategory(session, source);
+  const fallbackDescription = getDescription(session, source);
+  const fallbackDate = formatStripeDate(session.created);
+
+  const editedType = normaliseTransactionType(
+    editableItem?.transaction_type || editableItem?.transactionType,
+  );
+
+  const editedTitle = getEditedText(
+    editableItem,
+    ["title"],
+    fallbackTitle,
+  );
+
+  const editedCategory = getEditedText(
+    editableItem,
+    ["category", "type"],
+    fallbackCategory,
+  );
+
+  const editedPaymentMethod = getEditedText(
+    editableItem,
+    ["payment_method", "paymentMethod"],
+    "Stripe",
+  );
+
+  const editedDate = normaliseDate(
+    editableItem?.transaction_date || editableItem?.transactionDate || editableItem?.date,
+    fallbackDate,
+  );
+
+  const editedDescription = getEditedDescription({
+    item: editableItem,
+    session,
+    source,
+    fallbackDescription,
+  });
 
   const payload = {
-    title: getTitle(session, source),
-    description: getDescription(session, source),
-    type: "income",
-    category: getCategory(session, source),
-    amount_pence: amountPence,
-    payment_method: "Stripe",
-    transaction_date: formatStripeDate(session.created),
+    title: editedTitle,
+    description: editedDescription,
+    type: editedType,
+    category: editedCategory,
+    amount_pence: editedAmountPence,
+    payment_method: editedPaymentMethod,
+    transaction_date: editedDate,
     invoice_image_url: null,
 
     is_personal_funds: false,
@@ -399,7 +785,11 @@ async function syncSession(
   if (existingError) {
     console.error("Website payment sync existing check error:", existingError);
 
-    return "skipped";
+    return {
+      result: "skipped",
+      stripeSessionId,
+      reason: existingError.message,
+    };
   }
 
   /**
@@ -407,7 +797,11 @@ async function syncSession(
    * This avoids replacing manual corrections made by admins.
    */
   if (existing?.id) {
-    return "skipped";
+    return {
+      result: "skipped",
+      stripeSessionId,
+      reason: "Payment was already imported.",
+    };
   }
 
   const { error: insertError } = await supabaseAdmin
@@ -417,10 +811,17 @@ async function syncSession(
   if (insertError) {
     console.error("Website payment sync insert error:", insertError);
 
-    return "skipped";
+    return {
+      result: "skipped",
+      stripeSessionId,
+      reason: insertError.message,
+    };
   }
 
-  return "created";
+  return {
+    result: "created",
+    stripeSessionId,
+  };
 }
 
 /**
@@ -441,8 +842,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const isTestConnection =
-      req.nextUrl.searchParams.get("test") === "true";
+    const isTestConnection = req.nextUrl.searchParams.get("test") === "true";
 
     if (isTestConnection) {
       await stripe.checkout.sessions.list({
@@ -494,6 +894,10 @@ export async function GET(req: NextRequest) {
 /**
  * POST imports only the Stripe checkout sessions explicitly confirmed by
  * the admin. It never loops through all Stripe payments automatically.
+ *
+ * It also accepts edited preview rows. The Stripe session is still checked
+ * against Stripe before insert, but the money tracker fields can be changed
+ * by an admin before import.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -511,19 +915,17 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as ImportRequestBody;
 
-    const confirmedSessionIds = Array.isArray(body.confirmedSessionIds)
-      ? body.confirmedSessionIds
-          .filter((value): value is string => typeof value === "string")
-          .map((value) => value.trim())
-          .filter(Boolean)
-      : [];
+    const confirmedSessionIds = getConfirmedSessionIdsFromBody(body);
+    const editableItemMap = getEditableItemMap(body);
 
     if (confirmedSessionIds.length === 0) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "No Stripe payments were confirmed. Preview the payments and select the records you want to import first.",
+            "No Stripe payments were confirmed. Preview the payments, tick the records you want, then import them.",
+          details:
+            "The request must send Stripe checkout session IDs in confirmedSessionIds or editable rows in items. Stripe checkout session IDs start with cs_.",
         },
         {
           status: 400,
@@ -552,17 +954,32 @@ export async function POST(req: NextRequest) {
     let skipped = 0;
     let testSkipped = 0;
 
+    const skippedRows: Array<{
+      stripeSessionId: string;
+      reason: string;
+    }> = [];
+
     for (const sessionId of confirmedSessionIds) {
       const session = await stripe.checkout.sessions.retrieve(sessionId, {
         expand: ["payment_intent", "subscription"],
       });
 
-      const result = await syncSession(session);
+      const result = await syncSession(
+        session,
+        editableItemMap.get(sessionId) || null,
+      );
 
-      if (result === "created") created += 1;
-      if (result === "updated") updated += 1;
-      if (result === "skipped") skipped += 1;
-      if (result === "test_skipped") testSkipped += 1;
+      if (result.result === "created") created += 1;
+      if (result.result === "updated") updated += 1;
+      if (result.result === "skipped") skipped += 1;
+      if (result.result === "test_skipped") testSkipped += 1;
+
+      if (result.reason) {
+        skippedRows.push({
+          stripeSessionId: result.stripeSessionId,
+          reason: result.reason,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -571,6 +988,7 @@ export async function POST(req: NextRequest) {
       updated,
       skipped,
       testSkipped,
+      skippedRows,
       message: `Confirmed website payment import complete. Added ${created}, skipped ${skipped}, test payments skipped ${testSkipped}.`,
     });
   } catch (error: any) {
