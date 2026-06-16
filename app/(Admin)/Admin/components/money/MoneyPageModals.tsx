@@ -1,11 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
-import {
-  RotateCcw,
-  Trash2,
-  X,
-} from "lucide-react";
+import { RotateCcw, Trash2, X } from "lucide-react";
 
 import type {
   LoanInterestFormState,
@@ -93,15 +89,6 @@ type MoneyPageModalsProps = {
   setDeleteId: Dispatch<SetStateAction<string | null>>;
   onHidePayment: () => Promise<void>;
 
-  /**
-   * Optional refund soft-delete popup.
-   *
-   * These props allow the main Tracking Money table to open a matching
-   * custom popup when a refund row is moved to Deleted Refunds.
-   *
-   * They are optional so the page will continue compiling before the
-   * refund wiring is added to useMoneyTransactionsPage.ts.
-   */
   deleteRefundId?: string | null;
   deleteRefundTitle?: string | null;
   deletingRefund?: boolean;
@@ -131,26 +118,26 @@ type MoneyPageModalsProps = {
   onSaveLoanInterest: () => Promise<void>;
 };
 
+type RefundSoftDeleteModalProps = {
+  refundId?: string | null;
+  refundTitle?: string | null;
+  deleting?: boolean;
+  onClose: () => void;
+  onConfirm?: () => Promise<void>;
+};
+
 function RefundSoftDeleteModal({
   refundId,
   refundTitle,
-  deleting,
+  deleting = false,
   onClose,
   onConfirm,
-}: {
-  refundId: string | null;
-  refundTitle: string | null;
-  deleting: boolean;
-  onClose: () => void;
-  onConfirm?: () => Promise<void>;
-}) {
-  if (!refundId) {
-    return null;
-  }
+}: RefundSoftDeleteModalProps) {
+  if (!refundId) return null;
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
-      <section className="w-full max-w-lg overflow-hidden rounded-[22px] border border-white/10 bg-[#10101f] shadow-2xl shadow-black/50">
+      <section className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#10101f] shadow-2xl shadow-black/50">
         <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 text-rose-200">
@@ -158,11 +145,11 @@ function RefundSoftDeleteModal({
             </div>
 
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
+              <p className="text-xs font-black uppercase tracking-wide text-rose-300">
                 Refund Tracker
               </p>
 
-              <h2 className="mt-1 text-lg font-bold text-white">
+              <h2 className="mt-1 text-lg font-black text-white">
                 Move refund to Deleted Refunds?
               </h2>
             </div>
@@ -172,7 +159,7 @@ function RefundSoftDeleteModal({
             type="button"
             onClick={onClose}
             disabled={deleting}
-            className="rounded-lg border border-white/10 bg-white/5 p-2 text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Close refund deletion popup"
           >
             <X className="h-4 w-4" />
@@ -180,18 +167,18 @@ function RefundSoftDeleteModal({
         </header>
 
         <div className="px-5 py-5">
-          <p className="text-sm leading-6 text-slate-300">
+          <p className="text-sm leading-6 text-white/70">
             Move{" "}
-            <span className="font-bold text-white">
+            <strong className="text-white">
               {refundTitle || "this refund"}
-            </span>{" "}
+            </strong>{" "}
             to Deleted Refunds?
           </p>
 
           <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm leading-6 text-amber-100">
-            This is a soft delete. The refund will stop affecting the
-            available Burton Pride balance, but it can be restored later
-            from the Deleted Refunds page.
+            This is a soft delete. The refund will stop affecting the available
+            Burton Pride balance, but it can be restored later from the Deleted
+            Refunds page.
           </div>
 
           <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -199,26 +186,19 @@ function RefundSoftDeleteModal({
               type="button"
               onClick={onClose}
               disabled={deleting}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Keep Refund
+              Keep refund
             </button>
 
             <button
               type="button"
               onClick={() => void onConfirm?.()}
               disabled={deleting || !onConfirm}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2 text-xs font-black text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <RotateCcw
-                className={`h-4 w-4 ${
-                  deleting ? "animate-spin" : ""
-                }`}
-              />
-
-              {deleting
-                ? "Moving Refund..."
-                : "Move to Deleted Refunds"}
+              <RotateCcw className={`h-4 w-4 ${deleting ? "animate-spin" : ""}`} />
+              {deleting ? "Moving refund..." : "Move to Deleted Refunds"}
             </button>
           </div>
         </div>

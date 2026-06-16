@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   CircleAlert,
   FileText,
@@ -8,7 +9,6 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useState } from "react";
 
 import { monthNameFromKey } from "@/lib/money/utils";
 
@@ -22,10 +22,6 @@ type MoneyPageStatusProps = {
   filteredTransactionsLength: number;
   yearTransactionsLength: number;
 
-  /**
-   * Refund values are optional so this component continues working while
-   * the refund integration is being added to the main money hook.
-   */
   filteredRefundsLength?: number;
   yearRefundsLength?: number;
   completedRefundsLength?: number;
@@ -35,14 +31,24 @@ type MoneyPageStatusProps = {
   refundsErrorDetails?: unknown;
 };
 
-function stringifyDetails(details: unknown) {
-  if (details === undefined || details === null) {
-    return "";
-  }
+type ErrorPanelProps = {
+  title: string;
+  message: string;
+  details?: unknown;
+  onDismiss: () => void;
+};
 
-  if (typeof details === "string") {
-    return details;
-  }
+type StatusCardProps = {
+  title: string;
+  value: number;
+  description: string;
+  tone: "default" | "refund" | "success" | "total";
+  icon: "transactions" | "refunds" | "completed" | "total";
+};
+
+function stringifyDetails(details: unknown) {
+  if (details === undefined || details === null) return "";
+  if (typeof details === "string") return details;
 
   try {
     return JSON.stringify(details, null, 2);
@@ -51,13 +57,7 @@ function stringifyDetails(details: unknown) {
   }
 }
 
-function getSelectedPeriodLabel({
-  selectedYear,
-  selectedViewMonth,
-}: {
-  selectedYear: string;
-  selectedViewMonth: string;
-}) {
+function getPeriodLabel(selectedYear: string, selectedViewMonth: string) {
   if (selectedViewMonth === "all") {
     return `Jan to Dec ${selectedYear}`;
   }
@@ -65,18 +65,38 @@ function getSelectedPeriodLabel({
   return `${monthNameFromKey(selectedViewMonth)} ${selectedYear}`;
 }
 
-function ErrorPanel({
-  title,
-  message,
-  details,
-  onDismiss,
-}: {
-  title: string;
-  message: string;
-  details?: unknown;
-  onDismiss: () => void;
-}) {
-  const serverDetails = stringifyDetails(details);
+function plural(value: number, word: string) {
+  return `${value} ${word}${value === 1 ? "" : "s"}`;
+}
+
+const cardToneClasses = {
+  default: {
+    card: "border-white/10 bg-black/20",
+    text: "text-white/50",
+  },
+  refund: {
+    card: "border-violet-300/20 bg-violet-500/10",
+    text: "text-violet-100/80",
+  },
+  success: {
+    card: "border-emerald-300/20 bg-emerald-500/10",
+    text: "text-emerald-100/80",
+  },
+  total: {
+    card: "border-sky-300/20 bg-sky-500/10",
+    text: "text-sky-100/80",
+  },
+};
+
+function StatusIcon({ icon }: { icon: StatusCardProps["icon"] }) {
+  if (icon === "refunds") return <RefreshCcw className="h-4 w-4" />;
+  if (icon === "transactions") return <WalletCards className="h-4 w-4" />;
+
+  return <FileText className="h-4 w-4" />;
+}
+
+function ErrorPanel({ title, message, details, onDismiss }: ErrorPanelProps) {
+  const technicalDetails = stringifyDetails(details);
 
   return (
     <section className="rounded-3xl border border-red-400/30 bg-red-500/10 p-5 shadow-2xl shadow-black/20">
@@ -87,10 +107,8 @@ function ErrorPanel({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-black text-red-100">
-                {title}
-              </h2>
+            <div className="min-w-0">
+              <h2 className="text-base font-black text-red-100">{title}</h2>
 
               <p className="mt-2 break-words text-sm leading-6 text-red-100/90">
                 {message}
@@ -107,20 +125,47 @@ function ErrorPanel({
             </button>
           </div>
 
-          {serverDetails ? (
+          {technicalDetails ? (
             <details className="mt-4 overflow-hidden rounded-2xl border border-red-300/20 bg-black/20">
               <summary className="cursor-pointer px-4 py-3 text-xs font-black uppercase tracking-wide text-red-100">
                 Show technical details
               </summary>
 
               <pre className="max-h-80 overflow-auto border-t border-red-300/10 bg-black/30 p-4 text-xs leading-5 text-red-100">
-                {serverDetails}
+                {technicalDetails}
               </pre>
             </details>
           ) : null}
         </div>
       </div>
     </section>
+  );
+}
+
+function StatusCard({
+  title,
+  value,
+  description,
+  tone,
+  icon,
+}: StatusCardProps) {
+  const classes = cardToneClasses[tone];
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${classes.card}`}>
+      <div
+        className={`flex items-center gap-2 text-xs font-black uppercase tracking-wide ${classes.text}`}
+      >
+        <StatusIcon icon={icon} />
+        {title}
+      </div>
+
+      <p className="mt-2 text-xl font-black text-white">{value}</p>
+
+      <p className={`mt-1 text-xs leading-5 ${classes.text}`}>
+        {description}
+      </p>
+    </div>
   );
 }
 
@@ -142,21 +187,13 @@ export default function MoneyPageStatus({
   refundsError = "",
   refundsErrorDetails,
 }: MoneyPageStatusProps) {
-  const [hideTransactionError, setHideTransactionError] =
-    useState(false);
-
+  const [hideTransactionError, setHideTransactionError] = useState(false);
   const [hideRefundError, setHideRefundError] = useState(false);
 
-  const periodLabel = getSelectedPeriodLabel({
-    selectedYear,
-    selectedViewMonth,
-  });
-
+  const periodLabel = getPeriodLabel(selectedYear, selectedViewMonth);
   const visibleActivityCount =
     filteredTransactionsLength + filteredRefundsLength;
-
-  const yearActivityCount =
-    yearTransactionsLength + yearRefundsLength;
+  const yearActivityCount = yearTransactionsLength + yearRefundsLength;
 
   return (
     <div className="space-y-4">
@@ -180,15 +217,15 @@ export default function MoneyPageStatus({
 
       <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-black text-white">
               Showing money tracker for {periodLabel}
             </p>
 
             <p className="mt-1 max-w-3xl text-xs leading-5 text-white/50">
-              Normal transactions and refunds are displayed together for
-              visibility. Refunds remain recorded separately so they do not
-              look like ordinary income or expenses.
+              Transactions and refunds are shown together for visibility.
+              Refunds are still recorded separately so they do not look like
+              ordinary income or spending.
             </p>
           </div>
 
@@ -201,70 +238,46 @@ export default function MoneyPageStatus({
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/50">
-              <WalletCards className="h-4 w-4" />
-              Visible transactions
-            </div>
+          <StatusCard
+            title="Visible transactions"
+            value={filteredTransactionsLength}
+            description={`${plural(
+              yearTransactionsLength,
+              "normal transaction",
+            )} saved for the full year.`}
+            tone="default"
+            icon="transactions"
+          />
 
-            <p className="mt-2 text-xl font-black text-white">
-              {filteredTransactionsLength}
-            </p>
+          <StatusCard
+            title="Visible refunds"
+            value={filteredRefundsLength}
+            description={`${plural(
+              yearRefundsLength,
+              "refund",
+            )} saved for the full year.`}
+            tone="refund"
+            icon="refunds"
+          />
 
-            <p className="mt-1 text-xs leading-5 text-white/45">
-              {yearTransactionsLength} normal transaction
-              {yearTransactionsLength === 1 ? "" : "s"} saved for the full
-              year.
-            </p>
-          </div>
+          <StatusCard
+            title="Completed refunds"
+            value={completedRefundsLength}
+            description="Only completed refunds adjust the available Burton Pride balance."
+            tone="success"
+            icon="completed"
+          />
 
-          <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-violet-100/80">
-              <RefreshCcw className="h-4 w-4" />
-              Visible refunds
-            </div>
-
-            <p className="mt-2 text-xl font-black text-white">
-              {filteredRefundsLength}
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-violet-100/70">
-              {yearRefundsLength} refund
-              {yearRefundsLength === 1 ? "" : "s"} saved for the full year.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-emerald-100/80">
-              <FileText className="h-4 w-4" />
-              Completed refunds
-            </div>
-
-            <p className="mt-2 text-xl font-black text-white">
-              {completedRefundsLength}
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-emerald-100/70">
-              Only completed refunds adjust the available Burton Pride
-              balance.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-sky-100/80">
-              <FileText className="h-4 w-4" />
-              Total visible activity
-            </div>
-
-            <p className="mt-2 text-xl font-black text-white">
-              {visibleActivityCount}
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-sky-100/70">
-              {yearActivityCount} combined record
-              {yearActivityCount === 1 ? "" : "s"} saved for the full year.
-            </p>
-          </div>
+          <StatusCard
+            title="Total visible activity"
+            value={visibleActivityCount}
+            description={`${plural(
+              yearActivityCount,
+              "combined record",
+            )} saved for the full year.`}
+            tone="total"
+            icon="total"
+          />
         </div>
       </section>
     </div>

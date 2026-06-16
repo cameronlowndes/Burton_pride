@@ -153,6 +153,14 @@ const initialForm = {
   description: "",
   type: "income",
   category: "",
+  budgetCategory: "",
+  budgetCategoryKey: "",
+  budget_category: "",
+  budget_category_key: "",
+  budgetCategoryLabel: "",
+  budget_category_label: "",
+  costArea: "",
+  cost_area: "",
   amount: "",
   paymentMethod: "",
   transactionDate: new Date().toISOString().slice(0, 10),
@@ -386,6 +394,59 @@ function getTransactionSupplierName(item: Transaction) {
 
 function getTransactionSupplierCategory(item: Transaction) {
   return String((item as any).supplier_category || (item as any).supplierCategory || "").trim();
+}
+
+function getFormBudgetKey(form: FormState) {
+  const row = form as any;
+
+  return String(
+    row.budgetCategoryKey ||
+      row.budget_category_key ||
+      row.budgetCategory ||
+      row.budget_category ||
+      row.costArea ||
+      row.cost_area ||
+      "",
+  ).trim();
+}
+
+function getFormBudgetLabel(form: FormState) {
+  const row = form as any;
+
+  return String(
+    row.budgetCategoryLabel || row.budget_category_label || "",
+  ).trim();
+}
+
+function getTransactionBudgetKey(item: Transaction) {
+  const row = item as any;
+
+  return String(
+    row.budget_category_key ||
+      row.budgetCategoryKey ||
+      row.budget_category ||
+      row.budgetCategory ||
+      row.cost_area ||
+      row.costArea ||
+      "",
+  ).trim();
+}
+
+function getTransactionBudgetLabel(item: Transaction) {
+  const row = item as any;
+
+  return String(
+    row.budget_category_label || row.budgetCategoryLabel || "",
+  ).trim();
+}
+
+function makeBudgetKeyFromLabel(label: string) {
+  return String(label || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "other";
 }
 
 function normaliseSupplierCategory(value?: string | null) {
@@ -1956,6 +2017,14 @@ export function useMoneyTransactionsPage() {
       description: "This is a test transaction",
       type: "income",
       category: "",
+      budgetCategory: "",
+      budgetCategoryKey: "",
+      budget_category: "",
+      budget_category_key: "",
+      budgetCategoryLabel: "",
+      budget_category_label: "",
+      costArea: "",
+      cost_area: "",
       amount: "25.00",
       paymentMethod: "Stripe",
       transactionDate: getTodayDate(),
@@ -2061,6 +2130,14 @@ export function useMoneyTransactionsPage() {
       description: item.description || "",
       type: hasSponsorLinked ? "expense" : item.type,
       category: editCategory,
+      budgetCategory: getTransactionBudgetKey(item),
+      budgetCategoryKey: getTransactionBudgetKey(item),
+      budget_category: getTransactionBudgetKey(item),
+      budget_category_key: getTransactionBudgetKey(item),
+      budgetCategoryLabel: getTransactionBudgetLabel(item),
+      budget_category_label: getTransactionBudgetLabel(item),
+      costArea: getTransactionBudgetKey(item),
+      cost_area: getTransactionBudgetKey(item),
       amount: ((item.amount_pence || 0) / 100).toFixed(2),
       paymentMethod: editPaymentMethod,
       transactionDate: item.transaction_date || getTodayDate(),
@@ -2211,6 +2288,16 @@ export function useMoneyTransactionsPage() {
       const finalSponsorId = selectedSponsorForSave?.id || "";
       const finalSponsorName = selectedSponsorForSave?.sponsor_name || "";
       const isSponsorLinked = Boolean(finalSponsorId || finalSponsorName);
+      const rawBudgetKey = getFormBudgetKey(form);
+      const rawBudgetLabel =
+        getFormBudgetLabel(form) ||
+        budgetItems.find((item) => item.category_key === rawBudgetKey)
+          ?.category_label ||
+        (rawBudgetKey ? rawBudgetKey.replace(/_/g, " ") : "");
+      const shouldClearBudgetForMoneyIn =
+        !isSponsorLinked && form.type === "income";
+      const finalBudgetKey = shouldClearBudgetForMoneyIn ? "" : rawBudgetKey;
+      const finalBudgetLabel = shouldClearBudgetForMoneyIn ? "" : rawBudgetLabel;
 
       const isLoanLinked = selectedSponsorForSave?.funding_type === "loan";
       const loanMode = getLoanMode(form.category);
@@ -2338,6 +2425,15 @@ export function useMoneyTransactionsPage() {
         uploadData.append("supplier_name", finalSupplierName);
         uploadData.append("supplierCategory", finalSupplierCategory);
         uploadData.append("supplier_category", finalSupplierCategory);
+
+        uploadData.append("budgetCategory", finalBudgetKey);
+        uploadData.append("budgetCategoryKey", finalBudgetKey);
+        uploadData.append("budget_category", finalBudgetKey);
+        uploadData.append("budget_category_key", finalBudgetKey);
+        uploadData.append("budgetCategoryLabel", finalBudgetLabel);
+        uploadData.append("budget_category_label", finalBudgetLabel);
+        uploadData.append("costArea", finalBudgetKey);
+        uploadData.append("cost_area", finalBudgetKey);
 
         uploadData.append(
           "bankReconciliationStatus",

@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { ComponentType } from "react";
+import { useMemo, useState, type ComponentType } from "react";
 import {
   CheckCircle2,
   CheckSquare,
@@ -42,24 +41,9 @@ type WebsitePaymentsSyncCardProps = {
   message?: string | null;
   error?: unknown;
   previewItems?: ImportPreviewItem[];
-
-  /**
-   * Kept optional so your current page does not break.
-   * The component loads the real preview directly from the API.
-   */
   onPreview?: () => void;
-
-  /**
-   * Selected edited payments are sent for import.
-   * Each row still includes the Stripe Checkout Session ID so the backend can
-   * safely import only the chosen Stripe payment.
-   */
   onSync: (confirmedPayments: ImportPreviewItem[]) => void;
-
-  DetailedErrorBox: ComponentType<{
-    title: string;
-    error: unknown;
-  }>;
+  DetailedErrorBox: ComponentType<{ title: string; error: unknown }>;
 };
 
 type PreviewApiResponse = {
@@ -70,7 +54,13 @@ type PreviewApiResponse = {
   items?: ImportPreviewItem[];
   payments?: ImportPreviewItem[];
   transactions?: ImportPreviewItem[];
-  connected?: boolean;
+};
+
+type EditableField = {
+  key: keyof ImportPreviewItem;
+  label: string;
+  type?: "text" | "email" | "date" | "textarea";
+  className?: string;
 };
 
 const TEST_PREVIEW_ITEMS: ImportPreviewItem[] = [
@@ -148,35 +138,44 @@ const TEST_PREVIEW_ITEMS: ImportPreviewItem[] = [
   },
 ];
 
-async function readJsonResponse(res: Response): Promise<PreviewApiResponse> {
-  const text = await res.text();
+const EDITABLE_FIELDS: EditableField[] = [
+  { key: "title", label: "Title", className: "md:col-span-2" },
+  { key: "name", label: "Name" },
+  { key: "type", label: "Type" },
+  { key: "category", label: "Category" },
+  { key: "amount", label: "Amount" },
+  { key: "date", label: "Date", type: "date" },
+  { key: "email", label: "Email", type: "email" },
+  { key: "payment_method", label: "Payment method" },
+  { key: "source", label: "Source" },
+  {
+    key: "description",
+    label: "Description",
+    type: "textarea",
+    className: "md:col-span-2 xl:col-span-3",
+  },
+];
 
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return {
-      ok: false,
-      error: text || "The API returned an invalid response.",
-    };
-  }
+const inputClass =
+  "w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60";
+
+const actionButtonClass =
+  "inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto";
+
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function cloneItems(items: ImportPreviewItem[]): ImportPreviewItem[] {
+function cloneItems(items: ImportPreviewItem[]) {
   return items.map((item) => ({ ...item }));
 }
 
-function cloneTestItems(): ImportPreviewItem[] {
-  return cloneItems(TEST_PREVIEW_ITEMS);
-}
-
-function cleanText(value: unknown) {
-  if (typeof value !== "string") return "";
-
-  return value.trim();
-}
-
 function getSessionId(item: ImportPreviewItem) {
-  return cleanText(item.id) || cleanText(item.stripe_session_id) || cleanText(item.checkout_session_id);
+  return (
+    cleanText(item.id) ||
+    cleanText(item.stripe_session_id) ||
+    cleanText(item.checkout_session_id)
+  );
 }
 
 function penceFromAmount(value: unknown) {
@@ -184,46 +183,29 @@ function penceFromAmount(value: unknown) {
     return Math.round(value * 100);
   }
 
-  const cleaned = String(value || "")
-    .replace(/£/g, "")
-    .replace(/,/g, "")
-    .trim();
+  const amount = Number(
+    String(value || "")
+      .replace(/£/g, "")
+      .replace(/,/g, "")
+      .trim(),
+  );
 
-  const amount = Number(cleaned);
-
-  if (!Number.isFinite(amount)) return 0;
-
-  return Math.round(amount * 100);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
 }
 
-function formatMoney(item: ImportPreviewItem) {
+function formatMoney(item: Pick<ImportPreviewItem, "amount" | "amount_pence">) {
   if (item.amount !== undefined && item.amount !== null && item.amount !== "") {
-    if (typeof item.amount === "number") {
-      return `£${item.amount.toFixed(2)}`;
-    }
+    if (typeof item.amount === "number") return `£${item.amount.toFixed(2)}`;
 
-    const amountString = String(item.amount).trim();
+    const text = String(item.amount).trim();
+    if (text.startsWith("£")) return text;
 
-    if (amountString.startsWith("£")) return amountString;
-
-    const amountNumber = Number(amountString.replace(/,/g, ""));
-
-    if (Number.isFinite(amountNumber)) {
-      return `£${amountNumber.toFixed(2)}`;
-    }
-
-    return amountString;
+    const amount = Number(text.replace(/,/g, ""));
+    return Number.isFinite(amount) ? `£${amount.toFixed(2)}` : text;
   }
 
-  if (
-    item.amount_pence !== undefined &&
-    item.amount_pence !== null &&
-    Number.isFinite(Number(item.amount_pence))
-  ) {
-    return `£${(Number(item.amount_pence) / 100).toFixed(2)}`;
-  }
-
-  return "£0.00";
+  const pence = Number(item.amount_pence || 0);
+  return `£${(pence / 100).toFixed(2)}`;
 }
 
 function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
@@ -241,7 +223,8 @@ function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
     title: cleanText(item.title) || cleanText(item.name) || "Website payment",
     name: cleanText(item.name) || "Website customer",
     type: cleanText(item.type) || "Website Payment",
-    category: cleanText(item.category) || cleanText(item.type) || "Website Payment",
+    category:
+      cleanText(item.category) || cleanText(item.type) || "Website Payment",
     description: cleanText(item.description) || null,
     amount: formatMoney({ amount: item.amount, amount_pence: amountPence }),
     amount_pence: amountPence,
@@ -255,19 +238,43 @@ function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
 }
 
 function isAlreadyImported(item: ImportPreviewItem) {
-  return String(item.status || "")
-    .toLowerCase()
-    .includes("already imported");
+  return cleanText(item.status).toLowerCase().includes("already imported");
 }
 
 function isSelectableLivePayment(item: ImportPreviewItem) {
   return Boolean(getSessionId(item)) && !isAlreadyImported(item);
 }
 
-function buildEditedPaymentForImport(item: ImportPreviewItem): ImportPreviewItem {
+async function readJsonResponse(
+  response: Response,
+): Promise<PreviewApiResponse> {
+  const text = await response.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      ok: false,
+      error: text || "The API returned an invalid response.",
+    };
+  }
+}
+
+function getPreviewItems(data: PreviewApiResponse) {
+  const items =
+    data.previewItems || data.items || data.payments || data.transactions || [];
+  return Array.isArray(items) ? items.map(normalisePreviewItem) : [];
+}
+
+function buildEditedPaymentForImport(
+  item: ImportPreviewItem,
+): ImportPreviewItem {
   const sessionId = getSessionId(item);
   const amountPence = penceFromAmount(item.amount);
-  const date = cleanText(item.date) || cleanText(item.transaction_date) || new Date().toISOString().slice(0, 10);
+  const date =
+    cleanText(item.date) ||
+    cleanText(item.transaction_date) ||
+    new Date().toISOString().slice(0, 10);
 
   return {
     ...item,
@@ -277,7 +284,8 @@ function buildEditedPaymentForImport(item: ImportPreviewItem): ImportPreviewItem
     title: cleanText(item.title) || "Website payment",
     name: cleanText(item.name) || "Website customer",
     type: cleanText(item.type) || "Website Payment",
-    category: cleanText(item.category) || cleanText(item.type) || "Website Payment",
+    category:
+      cleanText(item.category) || cleanText(item.type) || "Website Payment",
     description: cleanText(item.description) || null,
     amount: formatMoney({ amount_pence: amountPence }),
     amount_pence: amountPence,
@@ -288,6 +296,65 @@ function buildEditedPaymentForImport(item: ImportPreviewItem): ImportPreviewItem
     source: cleanText(item.source) || "website_payment",
     status: cleanText(item.status) || "Ready to import",
   };
+}
+
+function StatusMessage({
+  message,
+  type = "success",
+}: {
+  message: string;
+  type?: "success" | "warning";
+}) {
+  const styles =
+    type === "success"
+      ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+      : "border-amber-400/30 bg-amber-500/10 text-amber-100";
+
+  return (
+    <div
+      className={`mt-4 flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm font-medium ${styles}`}
+    >
+      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function EditableInput({
+  item,
+  field,
+  disabled,
+  onChange,
+}: {
+  item: ImportPreviewItem;
+  field: EditableField;
+  disabled: boolean;
+  onChange: (field: keyof ImportPreviewItem, value: string) => void;
+}) {
+  const value =
+    field.key === "amount" ? formatMoney(item) : String(item[field.key] || "");
+
+  if (field.type === "textarea") {
+    return (
+      <textarea
+        rows={2}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(field.key, event.target.value)}
+        className={`${inputClass} resize-y`}
+      />
+    );
+  }
+
+  return (
+    <input
+      type={field.type || "text"}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(field.key, event.target.value)}
+      className={`${inputClass} ${field.key === "amount" ? "font-bold text-emerald-100" : ""}`}
+    />
+  );
 }
 
 export default function WebsitePaymentsSyncCard({
@@ -301,20 +368,17 @@ export default function WebsitePaymentsSyncCard({
 }: WebsitePaymentsSyncCardProps) {
   const [showPreviewWindow, setShowPreviewWindow] = useState(false);
   const [localPreviewing, setLocalPreviewing] = useState(false);
-  const [originalPreviewItems, setOriginalPreviewItems] = useState<ImportPreviewItem[]>(
-    cloneItems(previewItems).map(normalisePreviewItem),
-  );
-  const [localPreviewItems, setLocalPreviewItems] = useState<ImportPreviewItem[]>(
-    cloneItems(previewItems).map(normalisePreviewItem),
-  );
-
+  const [originalPreviewItems, setOriginalPreviewItems] = useState<
+    ImportPreviewItem[]
+  >(cloneItems(previewItems).map(normalisePreviewItem));
+  const [localPreviewItems, setLocalPreviewItems] = useState<
+    ImportPreviewItem[]
+  >(cloneItems(previewItems).map(normalisePreviewItem));
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
   const [testMode, setTestMode] = useState(false);
   const [testCompleteMessage, setTestCompleteMessage] = useState<string | null>(
     null,
   );
-
   const [apiTestRunning, setApiTestRunning] = useState(false);
   const [apiTestMessage, setApiTestMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -332,201 +396,132 @@ export default function WebsitePaymentsSyncCard({
 
     return visiblePreviewItems
       .filter(isSelectableLivePayment)
-      .map((item) => getSessionId(item))
+      .map(getSessionId)
       .filter(Boolean);
   }, [testMode, visiblePreviewItems]);
 
-  const allSelectableLivePaymentsSelected = useMemo(() => {
-    return (
-      selectableLiveIds.length > 0 &&
-      selectableLiveIds.every((id) => selectedIds.includes(id))
-    );
-  }, [selectableLiveIds, selectedIds]);
-
-  function getPreviewItems(data: PreviewApiResponse) {
-    const items =
-      data.previewItems ||
-      data.items ||
-      data.payments ||
-      data.transactions ||
-      [];
-
-    return Array.isArray(items) ? items.map(normalisePreviewItem) : [];
-  }
+  const allSelectableLivePaymentsSelected =
+    selectableLiveIds.length > 0 &&
+    selectableLiveIds.every((id) => selectedIds.includes(id));
 
   function updatePreviewItem(
     index: number,
     field: keyof ImportPreviewItem,
     value: string,
   ) {
-    setLocalPreviewItems((currentItems) =>
-      currentItems.map((item, itemIndex) => {
+    setLocalPreviewItems((items) =>
+      items.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
 
-        const updatedItem: ImportPreviewItem = {
-          ...item,
-          [field]: value,
-        };
+        const updated: ImportPreviewItem = { ...item, [field]: value };
 
-        if (field === "amount") {
-          updatedItem.amount_pence = penceFromAmount(value);
-        }
+        if (field === "amount") updated.amount_pence = penceFromAmount(value);
+        if (field === "date") updated.transaction_date = value;
+        if (field === "type" && !cleanText(item.category))
+          updated.category = value;
 
-        if (field === "date") {
-          updatedItem.transaction_date = value;
-        }
-
-        if (field === "type" && !cleanText(item.category)) {
-          updatedItem.category = value;
-        }
-
-        return updatedItem;
+        return updated;
       }),
     );
   }
 
-  function resetTestData() {
-    const items = cloneTestItems().map(normalisePreviewItem);
-
-    setOriginalPreviewItems(items);
-    setLocalPreviewItems(items);
-    setSelectedIds([]);
+  function resetMessages() {
     setLocalError(null);
+    setApiTestMessage(null);
+    setTestCompleteMessage(null);
   }
 
-  function resetLiveEdits() {
-    setLocalPreviewItems(cloneItems(originalPreviewItems));
-    setLocalError(null);
-  }
+  function loadItemsIntoEditor(items: ImportPreviewItem[], testing: boolean) {
+    const normalised = cloneItems(items).map(normalisePreviewItem);
 
-  function toggleSelectedPayment(id: string) {
-    setSelectedIds((currentIds) => {
-      if (currentIds.includes(id)) {
-        return currentIds.filter((currentId) => currentId !== id);
-      }
-
-      return [...currentIds, id];
-    });
-  }
-
-  function toggleSelectAllLivePayments() {
-    setSelectedIds((currentIds) => {
-      const allSelected = selectableLiveIds.every((id) =>
-        currentIds.includes(id),
-      );
-
-      if (allSelected) {
-        return currentIds.filter((id) => !selectableLiveIds.includes(id));
-      }
-
-      return Array.from(new Set([...currentIds, ...selectableLiveIds]));
-    });
+    setTestMode(testing);
+    setOriginalPreviewItems(cloneItems(normalised));
+    setLocalPreviewItems(cloneItems(normalised));
+    setSelectedIds(
+      testing
+        ? []
+        : normalised
+            .filter(isSelectableLivePayment)
+            .map(getSessionId)
+            .filter(Boolean),
+    );
+    setShowPreviewWindow(true);
   }
 
   async function testApiConnection() {
     try {
       setApiTestRunning(true);
-      setApiTestMessage(null);
-      setTestCompleteMessage(null);
-      setLocalError(null);
+      resetMessages();
 
-      const res = await fetch(
+      const response = await fetch(
         `/api/admin/money/sync-stripe?preview=true&test=true&t=${Date.now()}`,
         {
           method: "GET",
           cache: "no-store",
         },
       );
+      const data = await readJsonResponse(response);
 
-      const data = await readJsonResponse(res);
-
-      if (!res.ok || data.ok === false) {
+      if (!response.ok || data.ok === false) {
         throw new Error(
           data.error ||
-            `API connection test failed with status ${res.status}.`,
+            `API connection test failed with status ${response.status}.`,
         );
       }
 
       setApiTestMessage(
         data.message ||
-          "API connection test passed. Stripe responded successfully. No payments were imported.",
+          "API connection test passed. No payments were imported.",
       );
-    } catch (err: unknown) {
-      const errorMessage =
+    } catch (err) {
+      setLocalError(
         err instanceof Error
           ? err.message
-          : "Something went wrong while testing the API connection.";
-
-      setLocalError(errorMessage);
+          : "Something went wrong while testing the API connection.",
+      );
     } finally {
       setApiTestRunning(false);
     }
   }
 
   function openEditableTestData() {
-    const items = cloneTestItems().map(normalisePreviewItem);
-
-    setTestMode(true);
-    setOriginalPreviewItems(items);
-    setLocalPreviewItems(items);
-    setSelectedIds([]);
-    setLocalError(null);
-    setApiTestMessage(null);
-    setTestCompleteMessage(null);
-    setShowPreviewWindow(true);
+    resetMessages();
+    loadItemsIntoEditor(TEST_PREVIEW_ITEMS, true);
   }
 
   async function openRealPreviewWindow() {
     try {
-      setTestMode(false);
-      setShowPreviewWindow(true);
       setLocalPreviewing(true);
+      resetMessages();
+      setShowPreviewWindow(true);
+      setTestMode(false);
       setOriginalPreviewItems([]);
       setLocalPreviewItems([]);
       setSelectedIds([]);
-      setLocalError(null);
-      setApiTestMessage(null);
-      setTestCompleteMessage(null);
 
-      const res = await fetch(
+      const response = await fetch(
         `/api/admin/money/sync-stripe?preview=true&t=${Date.now()}`,
         {
           method: "GET",
           cache: "no-store",
         },
       );
+      const data = await readJsonResponse(response);
 
-      const data = await readJsonResponse(res);
-
-      if (!res.ok || data.ok === false) {
+      if (!response.ok || data.ok === false) {
         throw new Error(
           data.error ||
-            `Failed to preview website payments. API status: ${res.status}.`,
+            `Failed to preview website payments. API status: ${response.status}.`,
         );
       }
 
-      const loadedItems = getPreviewItems(data);
-
-      setOriginalPreviewItems(cloneItems(loadedItems));
-      setLocalPreviewItems(cloneItems(loadedItems));
-
-      /**
-       * Select new payments automatically.
-       * Existing imported payments stay unselected and disabled.
-       */
-      setSelectedIds(
-        loadedItems
-          .filter(isSelectableLivePayment)
-          .map((item) => getSessionId(item))
-          .filter(Boolean),
-      );
-    } catch (err: unknown) {
-      const errorMessage =
+      loadItemsIntoEditor(getPreviewItems(data), false);
+    } catch (err) {
+      setLocalError(
         err instanceof Error
           ? err.message
-          : "Something went wrong while previewing website payments.";
-
-      setLocalError(errorMessage);
+          : "Something went wrong while previewing website payments.",
+      );
       setOriginalPreviewItems([]);
       setLocalPreviewItems([]);
       setSelectedIds([]);
@@ -541,16 +536,38 @@ export default function WebsitePaymentsSyncCard({
     setSelectedIds([]);
   }
 
+  function resetTestData() {
+    loadItemsIntoEditor(TEST_PREVIEW_ITEMS, true);
+    setLocalError(null);
+  }
+
+  function resetLiveEdits() {
+    setLocalPreviewItems(cloneItems(originalPreviewItems));
+    setLocalError(null);
+  }
+
+  function toggleSelectedPayment(id: string) {
+    setSelectedIds((ids) =>
+      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
+    );
+  }
+
+  function toggleSelectAllLivePayments() {
+    setSelectedIds((ids) => {
+      if (selectableLiveIds.every((id) => ids.includes(id))) {
+        return ids.filter((id) => !selectableLiveIds.includes(id));
+      }
+
+      return Array.from(new Set([...ids, ...selectableLiveIds]));
+    });
+  }
+
   function confirmImport() {
     if (testMode) {
-      setShowPreviewWindow(false);
-      setTestMode(false);
-      setSelectedIds([]);
-
+      closePreviewWindow();
       setTestCompleteMessage(
         "Editable test completed successfully. No example payments were imported or saved.",
       );
-
       return;
     }
 
@@ -560,11 +577,13 @@ export default function WebsitePaymentsSyncCard({
       .map(buildEditedPaymentForImport);
 
     if (selectedPayments.length === 0) {
-      setLocalError("Select at least one live website payment before importing.");
+      setLocalError(
+        "Select at least one live website payment before importing.",
+      );
       return;
     }
 
-    const invalidPayments = selectedPayments.filter((item) => {
+    const invalidPayment = selectedPayments.find((item) => {
       return (
         !getSessionId(item) ||
         !cleanText(item.title) ||
@@ -576,9 +595,9 @@ export default function WebsitePaymentsSyncCard({
       );
     });
 
-    if (invalidPayments.length > 0) {
+    if (invalidPayment) {
       setLocalError(
-        "One or more selected payments has missing information. Please check title, type, category, amount and date before importing.",
+        "A selected payment has missing information. Check title, type, category, amount and date before importing.",
       );
       return;
     }
@@ -593,14 +612,10 @@ export default function WebsitePaymentsSyncCard({
       <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
-            <h2 className="text-base font-bold text-white">
-              Website payments sync
-            </h2>
-
-            <p className="max-w-3xl text-sm text-white/65">
-              Preview live website payments before importing them into the money
-              tracker. Nothing is imported automatically. Selected payments can
-              be edited before the final import.
+            <h2 className="text-lg font-black text-white">Website payments</h2>
+            <p className="max-w-3xl text-sm leading-6 text-white/65">
+              Preview Stripe payments first. Nothing is imported until you
+              select payments and confirm.
             </p>
           </div>
 
@@ -609,65 +624,45 @@ export default function WebsitePaymentsSyncCard({
               type="button"
               onClick={openEditableTestData}
               disabled={syncing || isLoadingPreview || apiTestRunning}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-2.5 text-sm font-semibold text-violet-100 shadow-lg shadow-violet-950/20 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              className={`${actionButtonClass} border-violet-400/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20`}
             >
               <Pencil className="h-4 w-4" />
-              Editable Test Data
+              Test editor
             </button>
 
             <button
               type="button"
               onClick={testApiConnection}
               disabled={syncing || isLoadingPreview || apiTestRunning}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-lg shadow-amber-950/20 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              className={`${actionButtonClass} border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20`}
             >
               {apiTestRunning ? (
                 <RefreshCcw className="h-4 w-4 animate-spin" />
               ) : (
                 <FlaskConical className="h-4 w-4" />
               )}
-
-              {apiTestRunning ? "Testing API..." : "Test API Connection"}
+              {apiTestRunning ? "Testing..." : "Test API"}
             </button>
 
             <button
               type="button"
               onClick={openRealPreviewWindow}
               disabled={syncing || isLoadingPreview || apiTestRunning}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 shadow-lg shadow-sky-950/20 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              className={`${actionButtonClass} border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20`}
             >
               <RefreshCcw
-                className={`h-4 w-4 ${
-                  isLoadingPreview ? "animate-spin" : ""
-                }`}
+                className={`h-4 w-4 ${isLoadingPreview ? "animate-spin" : ""}`}
               />
-
-              {isLoadingPreview
-                ? "Loading preview..."
-                : "Preview Live Website Payments"}
+              {isLoadingPreview ? "Loading..." : "Preview live payments"}
             </button>
           </div>
         </div>
 
         {testCompleteMessage ? (
-          <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-            {testCompleteMessage}
-          </div>
+          <StatusMessage message={testCompleteMessage} />
         ) : null}
-
-        {apiTestMessage ? (
-          <div className="mt-4 flex items-start gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-            {apiTestMessage}
-          </div>
-        ) : null}
-
-        {message ? (
-          <div className="mt-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-100">
-            {message}
-          </div>
-        ) : null}
+        {apiTestMessage ? <StatusMessage message={apiTestMessage} /> : null}
+        {message ? <StatusMessage message={message} /> : null}
 
         {localError ? (
           <div className="mt-4">
@@ -690,7 +685,7 @@ export default function WebsitePaymentsSyncCard({
 
       {showPreviewWindow ? (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-[96rem] overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl">
+          <div className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <div
@@ -705,20 +700,18 @@ export default function WebsitePaymentsSyncCard({
                   ) : (
                     <Server className="h-4 w-4" />
                   )}
-
-                  {testMode ? "Editable test data" : "Loaded from Stripe API"}
+                  {testMode ? "Test mode" : "Stripe preview"}
                 </div>
 
                 <h2 className="text-2xl font-black text-white">
                   {testMode
-                    ? "Test the editable payment preview"
-                    : "Select and edit live website payments to import"}
+                    ? "Test the payment editor"
+                    : "Check payments before import"}
                 </h2>
-
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
                   {testMode
-                    ? "Change the example fields below to test the editor. These rows are fake and will never be imported into your money tracker."
-                    : "Tick only the payments you want to import. You can change the title, name, type, category, amount, date, email, payment method, source and description before import. Existing imported payments stay disabled."}
+                    ? "Edit these example rows safely. They will not be imported."
+                    : "Select the live Stripe payments you want to import. You can edit the details first."}
                 </p>
               </div>
 
@@ -733,333 +726,132 @@ export default function WebsitePaymentsSyncCard({
             </div>
 
             {testMode ? (
-              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-black text-violet-100">
-                    Safe testing mode is active
-                  </p>
-
-                  <p className="mt-1 text-sm text-violet-100/75">
-                    Edit anything below. Completing the safe test does not call
-                    your import API.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={resetTestData}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-300/20 bg-violet-500/20 px-4 py-2.5 text-sm font-black text-violet-100 transition hover:bg-violet-500/30"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Reset Test Data
-                </button>
-              </div>
+              <PreviewToolbar
+                title="Safe test mode"
+                text="Change anything below. No data will be saved."
+                buttonLabel="Reset test data"
+                onButtonClick={resetTestData}
+                colour="violet"
+              />
             ) : null}
 
-            {!testMode && !isLoadingPreview && visiblePreviewItems.length > 0 ? (
-              <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="font-black text-sky-100">
-                    {selectedIds.length} live payment
-                    {selectedIds.length === 1 ? "" : "s"} selected
-                  </p>
-
-                  <p className="mt-1 text-sm text-sky-100/75">
-                    Only the selected Stripe payments will be imported. Edited
-                    fields are sent with the selected payments.
-                  </p>
-                </div>
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={resetLiveEdits}
-                    disabled={originalPreviewItems.length === 0}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Reset Edits
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllLivePayments}
-                    disabled={selectableLiveIds.length === 0}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-300/20 bg-sky-500/20 px-4 py-2.5 text-sm font-black text-sky-100 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {allSelectableLivePaymentsSelected ? (
-                      <CheckSquare className="h-4 w-4" />
-                    ) : (
-                      <Square className="h-4 w-4" />
-                    )}
-
-                    {allSelectableLivePaymentsSelected
-                      ? "Unselect All New Payments"
-                      : "Select All New Payments"}
-                  </button>
-                </div>
-              </div>
+            {!testMode &&
+            !isLoadingPreview &&
+            visiblePreviewItems.length > 0 ? (
+              <PreviewToolbar
+                title={`${selectedIds.length} live payment${selectedIds.length === 1 ? "" : "s"} selected`}
+                text="Only selected payments will be imported. Already imported payments are disabled."
+                buttonLabel="Reset edits"
+                onButtonClick={resetLiveEdits}
+                secondButtonLabel={
+                  allSelectableLivePaymentsSelected
+                    ? "Unselect all"
+                    : "Select all new"
+                }
+                onSecondButtonClick={toggleSelectAllLivePayments}
+                secondButtonDisabled={selectableLiveIds.length === 0}
+                colour="sky"
+              />
             ) : null}
 
             {isLoadingPreview && !testMode ? (
-              <div className="flex items-center gap-3 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-4 text-sm font-bold text-sky-100">
-                <RefreshCcw className="h-4 w-4 animate-spin" />
-                Loading live website payments preview from the Stripe API...
-              </div>
+              <StatusBox text="Loading live website payments from Stripe..." />
             ) : localError && !testMode ? (
-              <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">
-                {localError}
-              </div>
+              <StatusBox text={localError} tone="error" />
             ) : visiblePreviewItems.length === 0 ? (
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm font-bold text-amber-100">
-                No website payments were returned.
-              </div>
+              <StatusBox
+                text="No website payments were returned."
+                tone="warning"
+              />
             ) : (
-              <>
-                <div className="mb-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/75">
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/75">
                   {visiblePreviewItems.length} payment
-                  {visiblePreviewItems.length === 1 ? "" : "s"} shown below.
+                  {visiblePreviewItems.length === 1 ? "" : "s"} shown.
                 </div>
 
-                <div className="overflow-x-auto rounded-2xl border border-white/10">
-                  <table className="w-full min-w-[1800px] text-left text-sm">
-                    <thead className="bg-white/10 text-xs uppercase tracking-[0.14em] text-white/55">
-                      <tr>
-                        {!testMode ? (
-                          <th className="px-3 py-3">Import</th>
-                        ) : null}
+                <div className="grid gap-3">
+                  {visiblePreviewItems.map((item, index) => {
+                    const itemId = getSessionId(item);
+                    const alreadyImported = isAlreadyImported(item);
+                    const selectable = isSelectableLivePayment(item);
+                    const selected = selectedIds.includes(itemId);
+                    const editable = testMode || selectable;
 
-                        <th className="px-3 py-3">Title</th>
-                        <th className="px-3 py-3">Name</th>
-                        <th className="px-3 py-3">Type</th>
-                        <th className="px-3 py-3">Category</th>
-                        <th className="px-3 py-3">Amount</th>
-                        <th className="px-3 py-3">Date</th>
-                        <th className="px-3 py-3">Email</th>
-                        <th className="px-3 py-3">Payment Method</th>
-                        <th className="px-3 py-3">Source</th>
-                        <th className="px-3 py-3">Description</th>
-                        <th className="px-3 py-3">Status</th>
-                      </tr>
-                    </thead>
-
-                    <tbody className="divide-y divide-white/10">
-                      {visiblePreviewItems.map((item, index) => {
-                        const itemId = getSessionId(item);
-                        const alreadyImported = isAlreadyImported(item);
-                        const selectable = isSelectableLivePayment(item);
-                        const selected = selectedIds.includes(itemId);
-                        const editable = testMode || selectable;
-
-                        return (
-                          <tr
-                            key={itemId || index}
-                            className={`bg-white/[0.03] ${
-                              selected && !testMode ? "bg-sky-500/10" : ""
-                            } ${alreadyImported ? "opacity-70" : ""}`}
-                          >
-                            {!testMode ? (
-                              <td className="px-3 py-3 align-top">
-                                <button
-                                  type="button"
-                                  disabled={!selectable}
-                                  onClick={() => {
-                                    if (!itemId) return;
-
-                                    toggleSelectedPayment(itemId);
-                                  }}
-                                  className="inline-flex rounded-lg p-1 text-white/75 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                                  title={
-                                    alreadyImported
-                                      ? "This payment is already imported"
-                                      : selected
-                                        ? "Unselect this payment"
-                                        : "Select this payment"
-                                  }
-                                >
-                                  {selected ? (
-                                    <CheckSquare className="h-5 w-5 text-sky-200" />
-                                  ) : (
-                                    <Square className="h-5 w-5" />
-                                  )}
-                                </button>
-                              </td>
-                            ) : null}
-
-                            <td className="min-w-[300px] px-3 py-3 align-top">
-                              <input
-                                value={item.title || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "title",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[220px] px-3 py-3 align-top">
-                              <input
-                                value={item.name || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "name",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[190px] px-3 py-3 align-top">
-                              <input
-                                value={item.type || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "type",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[190px] px-3 py-3 align-top">
-                              <input
-                                value={item.category || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "category",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[140px] px-3 py-3 align-top">
-                              <input
-                                value={formatMoney(item)}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "amount",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm font-bold text-emerald-100 outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[160px] px-3 py-3 align-top">
-                              <input
-                                type="date"
-                                value={item.date || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "date",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[260px] px-3 py-3 align-top">
-                              <input
-                                type="email"
-                                value={item.email || ""}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "email",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[190px] px-3 py-3 align-top">
-                              <input
-                                value={item.payment_method || "Stripe"}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "payment_method",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[200px] px-3 py-3 align-top">
-                              <input
-                                value={item.source || "website_payment"}
-                                disabled={!editable}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "source",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td className="min-w-[360px] px-3 py-3 align-top">
-                              <textarea
-                                value={item.description || ""}
-                                disabled={!editable}
-                                rows={2}
-                                onChange={(event) =>
-                                  updatePreviewItem(
-                                    index,
-                                    "description",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-                              />
-                            </td>
-
-                            <td
-                              className={`min-w-[170px] px-4 py-3 align-top font-semibold ${
-                                alreadyImported
-                                  ? "text-amber-200"
-                                  : "text-emerald-200"
-                              }`}
+                    return (
+                      <div
+                        key={itemId || index}
+                        className={`rounded-2xl border p-4 ${
+                          selected && !testMode
+                            ? "border-sky-300/30 bg-sky-500/10"
+                            : "border-white/10 bg-white/[0.03]"
+                        } ${alreadyImported ? "opacity-70" : ""}`}
+                      >
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-black text-white">
+                              {item.title || "Website payment"}
+                            </p>
+                            <p
+                              className={`mt-1 text-xs font-semibold ${alreadyImported ? "text-amber-200" : "text-emerald-200"}`}
                             >
                               {item.status || "Ready to import"}
-                              {itemId ? (
-                                <div className="mt-1 text-[10px] font-medium text-white/35">
-                                  {itemId}
-                                </div>
-                              ) : null}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            </p>
+                            {itemId ? (
+                              <p className="mt-1 text-[11px] text-white/35">
+                                {itemId}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          {!testMode ? (
+                            <button
+                              type="button"
+                              disabled={!selectable}
+                              onClick={() =>
+                                itemId && toggleSelectedPayment(itemId)
+                              }
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {selected ? (
+                                <CheckSquare className="h-4 w-4 text-sky-200" />
+                              ) : (
+                                <Square className="h-4 w-4" />
+                              )}
+                              {alreadyImported
+                                ? "Already imported"
+                                : selected
+                                  ? "Selected"
+                                  : "Select"}
+                            </button>
+                          ) : null}
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                          {EDITABLE_FIELDS.map((field) => (
+                            <label
+                              key={field.key}
+                              className={field.className || ""}
+                            >
+                              <span className="mb-1 block text-xs font-black uppercase tracking-wide text-white/45">
+                                {field.label}
+                              </span>
+                              <EditableInput
+                                item={item}
+                                field={field}
+                                disabled={!editable}
+                                onChange={(key, value) =>
+                                  updatePreviewItem(index, key, value)
+                                }
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </>
+              </div>
             )}
 
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -1090,24 +882,98 @@ export default function WebsitePaymentsSyncCard({
                   <CheckCircle2 className="h-4 w-4" />
                 ) : (
                   <RefreshCcw
-                    className={`h-4 w-4 ${
-                      syncing ? "animate-spin" : ""
-                    }`}
+                    className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
                   />
                 )}
-
                 {testMode
-                  ? "Complete Safe Test"
+                  ? "Complete safe test"
                   : syncing
                     ? "Importing..."
-                    : `Confirm & Import ${selectedIds.length} Payment${
-                        selectedIds.length === 1 ? "" : "s"
-                      }`}
+                    : `Confirm & import ${selectedIds.length} payment${selectedIds.length === 1 ? "" : "s"}`}
               </button>
             </div>
           </div>
         </div>
       ) : null}
     </>
+  );
+}
+
+function PreviewToolbar({
+  title,
+  text,
+  buttonLabel,
+  onButtonClick,
+  secondButtonLabel,
+  onSecondButtonClick,
+  secondButtonDisabled = false,
+  colour,
+}: {
+  title: string;
+  text: string;
+  buttonLabel: string;
+  onButtonClick: () => void;
+  secondButtonLabel?: string;
+  onSecondButtonClick?: () => void;
+  secondButtonDisabled?: boolean;
+  colour: "sky" | "violet";
+}) {
+  const styles =
+    colour === "sky"
+      ? "border-sky-300/20 bg-sky-500/10 text-sky-100"
+      : "border-violet-300/20 bg-violet-500/10 text-violet-100";
+
+  return (
+    <div
+      className={`mb-4 flex flex-col gap-3 rounded-2xl border p-4 lg:flex-row lg:items-center lg:justify-between ${styles}`}
+    >
+      <div>
+        <p className="font-black">{title}</p>
+        <p className="mt-1 text-sm opacity-75">{text}</p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={onButtonClick}
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15"
+        >
+          <RotateCcw className="h-4 w-4" />
+          {buttonLabel}
+        </button>
+
+        {secondButtonLabel && onSecondButtonClick ? (
+          <button
+            type="button"
+            onClick={onSecondButtonClick}
+            disabled={secondButtonDisabled}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckSquare className="h-4 w-4" />
+            {secondButtonLabel}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StatusBox({
+  text,
+  tone = "info",
+}: {
+  text: string;
+  tone?: "info" | "warning" | "error";
+}) {
+  const styles = {
+    info: "border-sky-300/20 bg-sky-500/10 text-sky-100",
+    warning: "border-amber-300/20 bg-amber-500/10 text-amber-100",
+    error: "border-red-300/20 bg-red-500/10 text-red-100",
+  }[tone];
+
+  return (
+    <div className={`rounded-2xl border p-4 text-sm font-bold ${styles}`}>
+      {text}
+    </div>
   );
 }

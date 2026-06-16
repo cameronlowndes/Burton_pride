@@ -27,6 +27,15 @@ type BudgetItem = {
   category_key: string;
   category_label: string;
   planned_amount_pence: number;
+  /**
+   * Manual actual spending overrides are saved inside the notes column as
+   * hidden metadata, so this works even if your Supabase budget table has no
+   * extra manual-actual columns yet.
+   */
+  manual_actual_enabled?: boolean | null;
+  manual_actual_pence?: number | null;
+  actual_amount_pence?: number | null;
+  actual_override_pence?: number | null;
   notes?: string | null;
   updated_by?: string | null;
   updated_by_email?: string | null;
@@ -34,7 +43,10 @@ type BudgetItem = {
 };
 
 type BudgetRow = BudgetItem & {
+  autoActualPence: number;
   actualPence: number;
+  manualActualEnabled: boolean;
+  manualActualPence: number | null;
   remainingPence: number;
   percentUsed: number;
 };
@@ -134,6 +146,141 @@ function cleanMoneyInput(value: string) {
   return value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
 }
 
+const BUDGET_META_START = "<!--BURTON_BUDGET_META:";
+const BUDGET_META_END = "-->";
+
+type BudgetHiddenMeta = {
+  manualActualEnabled?: boolean;
+  manualActualPence?: number | null;
+};
+
+function parseBudgetHiddenMeta(notes?: string | null): BudgetHiddenMeta {
+  const raw = String(notes || "");
+  const startIndex = raw.indexOf(BUDGET_META_START);
+
+  if (startIndex === -1) return {};
+
+  const payloadStart = startIndex + BUDGET_META_START.length;
+  const endIndex = raw.indexOf(BUDGET_META_END, payloadStart);
+
+  if (endIndex === -1) return {};
+
+  try {
+    const parsed = JSON.parse(raw.slice(payloadStart, endIndex));
+    const manualActualPence = Number(parsed.manualActualPence ?? 0);
+
+    return {
+      manualActualEnabled: Boolean(parsed.manualActualEnabled),
+      manualActualPence: Number.isFinite(manualActualPence)
+        ? manualActualPence
+        : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function stripBudgetHiddenMeta(notes?: string | null) {
+  const raw = String(notes || "");
+  const startIndex = raw.indexOf(BUDGET_META_START);
+
+  if (startIndex === -1) return raw.trim();
+
+  const endIndex = raw.indexOf(BUDGET_META_END, startIndex);
+
+  if (endIndex === -1) return raw.slice(0, startIndex).trim();
+
+  return `${raw.slice(0, startIndex)}${raw.slice(endIndex + BUDGET_META_END.length)}`.trim();
+}
+
+function getBudgetPublicNotes(item: BudgetItem) {
+  return stripBudgetHiddenMeta(item.notes);
+}
+
+function getBudgetManualActualEnabled(item: BudgetItem) {
+  const meta = parseBudgetHiddenMeta(item.notes);
+
+  return Boolean(
+    item.manual_actual_enabled ||
+      meta.manualActualEnabled ||
+      item.manual_actual_pence !== undefined ||
+      item.actual_amount_pence !== undefined ||
+      item.actual_override_pence !== undefined,
+  );
+}
+
+function getBudgetManualActualPence(item: BudgetItem) {
+  const meta = parseBudgetHiddenMeta(item.notes);
+
+  const rawValue =
+    item.manual_actual_pence ??
+    item.actual_override_pence ??
+    item.actual_amount_pence ??
+    meta.manualActualPence ??
+    null;
+
+  if (rawValue === null || rawValue === undefined) return null;
+
+  const next = Number(rawValue || 0);
+
+  return Number.isFinite(next) ? next : null;
+}
+
+function buildBudgetNotesWithMeta(
+  publicNotes: string | null | undefined,
+  meta: BudgetHiddenMeta,
+) {
+  const cleanNotes = String(publicNotes || "").trim();
+
+  if (!meta.manualActualEnabled) {
+    return cleanNotes;
+  }
+
+  const cleanMeta = JSON.stringify({
+    manualActualEnabled: true,
+    manualActualPence: Math.max(0, Number(meta.manualActualPence || 0)),
+  });
+
+  return `${cleanNotes}${cleanNotes ? "\n\n" : ""}${BUDGET_META_START}${cleanMeta}${BUDGET_META_END}`;
+}
+
+function setBudgetPublicNotesOnItem(item: BudgetItem, publicNotes: string) {
+  const manualActualEnabled = getBudgetManualActualEnabled(item);
+  const manualActualPence = getBudgetManualActualPence(item);
+
+  return {
+    ...item,
+    notes: buildBudgetNotesWithMeta(publicNotes, {
+      manualActualEnabled,
+      manualActualPence,
+    }),
+  };
+}
+
+function setBudgetManualActualOnItem(
+  item: BudgetItem,
+  manualActualEnabled: boolean,
+  manualActualPence: number | null,
+) {
+  const publicNotes = getBudgetPublicNotes(item);
+  const cleanManualActualPence = manualActualEnabled
+    ? Math.max(0, Number(manualActualPence || 0))
+    : null;
+
+  return {
+    ...item,
+    manual_actual_enabled: manualActualEnabled,
+    manual_actual_pence: cleanManualActualPence,
+    actual_amount_pence: cleanManualActualPence,
+    actual_override_pence: cleanManualActualPence,
+    notes: buildBudgetNotesWithMeta(publicNotes, {
+      manualActualEnabled,
+      manualActualPence: cleanManualActualPence,
+    }),
+  };
+}
+
+
 function cleanWholeNumberInput(value: string) {
   return value.replace(/[^0-9]/g, "");
 }
@@ -187,6 +334,19 @@ function buildBudgetAmountInputs(items: BudgetItem[]) {
     acc[item.category_key] =
       Number(item.planned_amount_pence || 0) > 0
         ? penceToInput(item.planned_amount_pence)
+        : "";
+
+    return acc;
+  }, {});
+}
+
+function buildBudgetActualInputs(items: BudgetItem[]) {
+  return items.reduce<Record<string, string>>((acc, item) => {
+    const manualActualPence = getBudgetManualActualPence(item);
+
+    acc[item.category_key] =
+      manualActualPence !== null && Number(manualActualPence || 0) > 0
+        ? penceToInput(manualActualPence)
         : "";
 
     return acc;
@@ -372,7 +532,13 @@ type BudgetAuditPayload = {
 };
 
 function normaliseBudgetNote(value: string | null | undefined) {
-  return String(value || "").trim();
+  return getBudgetPublicNotes({
+    year: "",
+    category_key: "",
+    category_label: "",
+    planned_amount_pence: 0,
+    notes: value || "",
+  });
 }
 
 function buildBudgetAuditPayload(
@@ -418,6 +584,16 @@ function buildBudgetAuditPayload(
         changedFields.push("notes");
       }
 
+
+      if (
+        getBudgetManualActualEnabled(beforeItem) !==
+          getBudgetManualActualEnabled(afterItem) ||
+        Number(getBudgetManualActualPence(beforeItem) || 0) !==
+          Number(getBudgetManualActualPence(afterItem) || 0)
+      ) {
+        changedFields.push("manual_actual_spending");
+      }
+
       if (changedFields.length === 0) return null;
 
       return {
@@ -453,7 +629,10 @@ function cleanBudgetItemsForSave(items: BudgetItem[]) {
       category_key: item.category_key,
       category_label: item.category_label,
       planned_amount_pence: Number(item.planned_amount_pence || 0),
-      notes: item.notes || "",
+      notes: buildBudgetNotesWithMeta(getBudgetPublicNotes(item), {
+        manualActualEnabled: getBudgetManualActualEnabled(item),
+        manualActualPence: getBudgetManualActualPence(item),
+      }),
     };
 
     if (item.id) {
@@ -1251,6 +1430,9 @@ export default function MoneyBudgetPlanning({
   const [draftAmountInputs, setDraftAmountInputs] = useState<
     Record<string, string>
   >(() => buildBudgetAmountInputs(budgetItems));
+  const [draftActualInputs, setDraftActualInputs] = useState<
+    Record<string, string>
+  >(() => buildBudgetActualInputs(budgetItems));
   const [newBudgetName, setNewBudgetName] = useState("");
   const [newBudgetError, setNewBudgetError] = useState<string | null>(null);
   const [auditLogError, setAuditLogError] = useState<string | null>(null);
@@ -1287,6 +1469,7 @@ export default function MoneyBudgetPlanning({
   useEffect(() => {
     setDraftItems(budgetItems);
     setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
+    setDraftActualInputs(buildBudgetActualInputs(budgetItems));
   }, [budgetItems]);
 
   useEffect(() => {
@@ -1380,7 +1563,13 @@ export default function MoneyBudgetPlanning({
     const actuals = buildActualSpendByCategory(activeItems, transactions);
 
     return activeItems.map((item) => {
-      const actualPence = actuals[item.category_key] || 0;
+      const autoActualPence = actuals[item.category_key] || 0;
+      const manualActualEnabled = getBudgetManualActualEnabled(item);
+      const manualActualPence = getBudgetManualActualPence(item);
+      const actualPence =
+        manualActualEnabled && manualActualPence !== null
+          ? manualActualPence
+          : autoActualPence;
       const plannedPence = Number(item.planned_amount_pence || 0);
       const remainingPence = plannedPence - actualPence;
       const percentUsed =
@@ -1388,7 +1577,10 @@ export default function MoneyBudgetPlanning({
 
       return {
         ...item,
+        autoActualPence,
         actualPence,
+        manualActualEnabled,
+        manualActualPence,
         remainingPence,
         percentUsed,
       };
@@ -1476,6 +1668,7 @@ export default function MoneyBudgetPlanning({
   function startSuperEasyEditing() {
     setDraftItems(budgetItems);
     setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
+    setDraftActualInputs(buildBudgetActualInputs(budgetItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -1485,6 +1678,7 @@ export default function MoneyBudgetPlanning({
   function startEditing() {
     setDraftItems(budgetItems);
     setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
+    setDraftActualInputs(buildBudgetActualInputs(budgetItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -1495,6 +1689,7 @@ export default function MoneyBudgetPlanning({
   function cancelEditing() {
     setDraftItems(budgetItems);
     setDraftAmountInputs(buildBudgetAmountInputs(budgetItems));
+    setDraftActualInputs(buildBudgetActualInputs(budgetItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -1509,6 +1704,10 @@ export default function MoneyBudgetPlanning({
     setDraftItems((prev) =>
       prev.map((item) => {
         if (item.category_key !== categoryKey) return item;
+
+        if (field === "notes") {
+          return setBudgetPublicNotesOnItem(item, value);
+        }
 
         return {
           ...item,
@@ -1549,6 +1748,60 @@ export default function MoneyBudgetPlanning({
         [categoryKey]: penceToInput(inputToPence(rawValue)),
       };
     });
+  }
+
+
+  function updateDraftActualAmount(categoryKey: string, value: string) {
+    setDraftActualInputs((prev) => ({
+      ...prev,
+      [categoryKey]: value,
+    }));
+
+    setDraftItems((prev) =>
+      prev.map((item) => {
+        if (item.category_key !== categoryKey) return item;
+
+        return setBudgetManualActualOnItem(item, true, inputToPence(value));
+      }),
+    );
+  }
+
+  function formatDraftActualAmount(categoryKey: string) {
+    setDraftActualInputs((prev) => {
+      const rawValue = prev[categoryKey];
+
+      if (rawValue === undefined || rawValue === "") {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [categoryKey]: penceToInput(inputToPence(rawValue)),
+      };
+    });
+  }
+
+  function toggleManualActualAmount(categoryKey: string, enabled: boolean) {
+    setDraftItems((prev) =>
+      prev.map((item) => {
+        if (item.category_key !== categoryKey) return item;
+
+        const currentManual = getBudgetManualActualPence(item);
+
+        return setBudgetManualActualOnItem(
+          item,
+          enabled,
+          enabled ? currentManual ?? 0 : null,
+        );
+      }),
+    );
+
+    if (!enabled) {
+      setDraftActualInputs((prev) => ({
+        ...prev,
+        [categoryKey]: "",
+      }));
+    }
   }
 
   function updateSavingTarget(field: keyof SavingTargetState, value: string) {
@@ -1997,6 +2250,11 @@ export default function MoneyBudgetPlanning({
       [categoryKey]: "",
     }));
 
+    setDraftActualInputs((prev) => ({
+      ...prev,
+      [categoryKey]: "",
+    }));
+
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -2012,6 +2270,12 @@ export default function MoneyBudgetPlanning({
     );
 
     setDraftAmountInputs((prev) => {
+      const next = { ...prev };
+      delete next[categoryKey];
+      return next;
+    });
+
+    setDraftActualInputs((prev) => {
       const next = { ...prev };
       delete next[categoryKey];
       return next;
@@ -2114,6 +2378,7 @@ export default function MoneyBudgetPlanning({
 
     setDraftItems(afterItems);
     setDraftAmountInputs(buildBudgetAmountInputs(afterItems));
+    setDraftActualInputs(buildBudgetActualInputs(afterItems));
     setNewBudgetName("");
     setNewBudgetError(null);
     setAuditLogError(null);
@@ -2355,12 +2620,67 @@ export default function MoneyBudgetPlanning({
                       </p>
                     )}
 
+                    {editing ? (
+                      <div className="mt-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
+                        <label className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={item.manualActualEnabled}
+                            onChange={(event) =>
+                              toggleManualActualAmount(
+                                item.category_key,
+                                event.target.checked,
+                              )
+                            }
+                            className="mt-1 h-4 w-4 rounded border-white/20"
+                          />
+
+                          <span>
+                            <span className="block text-xs font-black uppercase tracking-wide text-sky-100">
+                              Manually set spent amount
+                            </span>
+                            <span className="mt-1 block text-xs text-sky-100/70">
+                              Auto from transactions: {money(item.autoActualPence)}
+                            </span>
+                          </span>
+                        </label>
+
+                        {item.manualActualEnabled ? (
+                          <div className="mt-3 flex items-center gap-2">
+                            <span className="text-lg font-black text-white">£</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              inputMode="decimal"
+                              value={draftActualInputs[item.category_key] ?? ""}
+                              onChange={(event) =>
+                                updateDraftActualAmount(
+                                  item.category_key,
+                                  event.target.value,
+                                )
+                              }
+                              onBlur={() =>
+                                formatDraftActualAmount(item.category_key)
+                              }
+                              placeholder="0.00"
+                              className="w-full rounded-xl bg-black/30 p-3 text-lg font-black text-white outline-none ring-1 ring-white/10 focus:ring-sky-300/50"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     <div className="mt-3 space-y-1 text-sm text-white/65">
                       <p>
-                        Spent:{" "}
-                        <strong className="text-white">
-                          {money(item.actualPence)}
-                        </strong>
+                        Spent: <strong className="text-white">{money(item.actualPence)}</strong>
+                        {item.manualActualEnabled ? (
+                          <span className="ml-2 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-sky-100 ring-1 ring-sky-300/20">
+                            Manual
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-xs text-white/40">Auto</span>
+                        )}
                       </p>
                       <p>
                         Left:{" "}
@@ -3225,8 +3545,64 @@ export default function MoneyBudgetPlanning({
                           )}
                         </td>
 
-                        <td className="px-4 py-4 font-bold text-white">
-                          {money(item.actualPence)}
+                        <td className="px-4 py-4">
+                          {editing ? (
+                            <div className="min-w-[190px] space-y-2">
+                              <label className="flex items-start gap-2 text-xs font-bold text-white/70">
+                                <input
+                                  type="checkbox"
+                                  checked={item.manualActualEnabled}
+                                  onChange={(event) =>
+                                    toggleManualActualAmount(
+                                      item.category_key,
+                                      event.target.checked,
+                                    )
+                                  }
+                                  className="mt-0.5 h-4 w-4 rounded border-white/20"
+                                />
+                                <span>
+                                  Manual actual
+                                  <span className="block font-normal text-white/40">
+                                    Auto: {money(item.autoActualPence)}
+                                  </span>
+                                </span>
+                              </label>
+
+                              {item.manualActualEnabled ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  inputMode="decimal"
+                                  value={draftActualInputs[item.category_key] ?? ""}
+                                  onChange={(event) =>
+                                    updateDraftActualAmount(
+                                      item.category_key,
+                                      event.target.value,
+                                    )
+                                  }
+                                  onBlur={() =>
+                                    formatDraftActualAmount(item.category_key)
+                                  }
+                                  placeholder="0.00"
+                                  className="w-36 rounded-xl bg-black/30 p-2 text-white outline-none ring-1 ring-white/10 focus:ring-sky-300/40"
+                                />
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="font-bold text-white">
+                              {money(item.actualPence)}
+                              {item.manualActualEnabled ? (
+                                <span className="ml-2 rounded-full bg-sky-500/15 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-sky-100 ring-1 ring-sky-300/20">
+                                  Manual
+                                </span>
+                              ) : (
+                                <span className="ml-2 text-xs font-semibold text-white/35">
+                                  Auto
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
 
                         <td
@@ -3260,7 +3636,7 @@ export default function MoneyBudgetPlanning({
                           {editing ? (
                             <input
                               type="text"
-                              value={item.notes || ""}
+                              value={getBudgetPublicNotes(item)}
                               onChange={(event) =>
                                 updateDraft(
                                   item.category_key,
@@ -3271,8 +3647,8 @@ export default function MoneyBudgetPlanning({
                               placeholder="Add note"
                               className="w-full rounded-xl bg-black/30 p-2 text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-pink-300/40"
                             />
-                          ) : item.notes ? (
-                            <span className="text-white/70">{item.notes}</span>
+                          ) : getBudgetPublicNotes(item) ? (
+                            <span className="text-white/70">{getBudgetPublicNotes(item)}</span>
                           ) : (
                             <span className="text-white/30">No notes</span>
                           )}

@@ -3,8 +3,10 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -163,6 +165,7 @@ type SortKey =
   | "title"
   | "type"
   | "amount"
+  | "budget"
   | "funding"
   | "payment"
   | "checked"
@@ -191,6 +194,7 @@ type ColumnKey =
   | "title"
   | "type"
   | "amount"
+  | "budget"
   | "funding"
   | "fundingNote"
   | "supplier"
@@ -291,6 +295,7 @@ const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "title", label: "Title", locked: true },
   { key: "type", label: "Type" },
   { key: "amount", label: "Amount", locked: true },
+  { key: "budget", label: "Budget" },
   { key: "funding", label: "Funding" },
   { key: "fundingNote", label: "Funding Note" },
   { key: "supplier", label: "Supplier" },
@@ -312,16 +317,21 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   title: true,
   type: true,
   amount: true,
-  funding: true,
+  budget: true,
+
+  // Keep normal mode clean by default. These advanced columns can still be
+  // switched back on from the Columns menu.
+  funding: false,
   fundingNote: false,
-  supplier: true,
-  personal: true,
+  supplier: false,
+  personal: false,
   paidBy: false,
-  repayment: true,
+  repayment: false,
+
   payment: true,
   bank: true,
-  receipt: true,
-  finance: true,
+  receipt: false,
+  finance: false,
   checked: true,
   actions: true,
 };
@@ -333,6 +343,7 @@ const easyModeVisibleColumns: Record<ColumnKey, boolean> = {
   title: true,
   type: true,
   amount: true,
+  budget: true,
   funding: false,
   fundingNote: false,
   supplier: false,
@@ -358,6 +369,374 @@ function lower(value?: unknown) {
 function numberValue(value?: unknown) {
   const next = Number(value || 0);
   return Number.isFinite(next) ? next : 0;
+}
+
+const budgetFallbackLabels: Record<string, string> = {
+  venue: "Venue",
+  insurance: "Insurance",
+  printing: "Printing",
+  security: "Security",
+  performers: "Performers",
+  equipment: "Equipment",
+  accessibility: "Accessibility",
+  other: "Other costs",
+  other_costs: "Other costs",
+};
+
+const autoBudgetRules: {
+  key: string;
+  label: string;
+  words: string[];
+}[] = [
+  {
+    key: "venue",
+    label: "Venue",
+    words: [
+      "venue",
+      "hall",
+      "room hire",
+      "hire room",
+      "building hire",
+      "park hire",
+      "site hire",
+      "shobnall",
+      "bridge inn",
+      "burton town hall",
+      "town hall",
+    ],
+  },
+  {
+    key: "insurance",
+    label: "Insurance",
+    words: [
+      "insurance",
+      "public liability",
+      "liability",
+      "cover",
+      "policy",
+      "premium",
+      "insurer",
+    ],
+  },
+  {
+    key: "printing",
+    label: "Printing",
+    words: [
+      "print",
+      "printing",
+      "poster",
+      "posters",
+      "banner",
+      "banners",
+      "leaflet",
+      "leaflets",
+      "flyer",
+      "flyers",
+      "programme",
+      "signage",
+      "signs",
+      "wristband",
+      "wristbands",
+    ],
+  },
+  {
+    key: "security",
+    label: "Security",
+    words: [
+      "security",
+      "sIA",
+      "steward",
+      "stewards",
+      "marshal",
+      "marshals",
+      "barrier",
+      "barriers",
+      "crowd",
+      "first response security",
+    ],
+  },
+  {
+    key: "performers",
+    label: "Performers",
+    words: [
+      "performer",
+      "performers",
+      "artist",
+      "artists",
+      "drag",
+      "singer",
+      "dj",
+      "host",
+      "entertainment",
+      "act",
+      "acts",
+      "stage act",
+      "citrine",
+      "iris prism",
+      "miss stella",
+    ],
+  },
+  {
+    key: "equipment",
+    label: "Equipment",
+    words: [
+      "equipment",
+      "gazebo",
+      "gazebos",
+      "table",
+      "tables",
+      "chair",
+      "chairs",
+      "stage",
+      "pa system",
+      "speaker",
+      "speakers",
+      "microphone",
+      "mic",
+      "generator",
+      "cable",
+      "cables",
+      "storage",
+      "storage box",
+      "lock",
+      "lock for storage",
+      "box",
+      "padlock",
+      "tent",
+      "marquee",
+      "toilet",
+      "toilets",
+      "bin",
+      "bins",
+      "radio",
+      "radios",
+      "hi vis",
+      "lanyard",
+      "lanyards",
+      "extension lead",
+    ],
+  },
+  {
+    key: "accessibility",
+    label: "Accessibility",
+    words: [
+      "accessibility",
+      "accessible",
+      "disabled",
+      "mobility",
+      "wheelchair",
+      "quiet space",
+      "sensory",
+      "sign language",
+      "bsl",
+      "ramp",
+      "ramps",
+    ],
+  },
+];
+
+type TransactionBudgetFields = Transaction & {
+  budgetCategory?: string | null;
+  budgetCategoryKey?: string | null;
+  budgetCategoryLabel?: string | null;
+  budget_category?: string | null;
+  budget_category_key?: string | null;
+  budget_category_label?: string | null;
+  costArea?: string | null;
+  cost_area?: string | null;
+};
+
+function humaniseBudgetValue(value?: string | null) {
+  const clean = cleanText(value);
+
+  if (!clean) return "";
+
+  return (
+    budgetFallbackLabels[clean.toLowerCase()] ||
+    clean
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+      .trim()
+  );
+}
+
+function getTransactionBudgetKey(item: Transaction) {
+  const row = item as TransactionBudgetFields;
+
+  return cleanText(
+    row.budgetCategoryKey ||
+      row.budget_category_key ||
+      row.budgetCategory ||
+      row.budget_category ||
+      row.costArea ||
+      row.cost_area,
+  );
+}
+
+function getTransactionBudgetLabel(item: Transaction) {
+  const row = item as TransactionBudgetFields;
+  const savedLabel = cleanText(row.budgetCategoryLabel || row.budget_category_label);
+
+  if (savedLabel) return savedLabel;
+
+  return humaniseBudgetValue(getTransactionBudgetKey(item));
+}
+
+function getAutoBudgetMatch(item: Transaction) {
+  const searchText = [
+    item.title,
+    item.description,
+    item.category,
+    item.payment_method,
+    item.sponsorship_note,
+    getSupplierName(item),
+    getSupplierCategory(item),
+    item.personal_funds_name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!searchText.trim()) {
+    return {
+      key: "other",
+      label: "Other costs",
+      matchedBy: "no clear title, note, category, supplier or payment wording was found",
+    };
+  }
+
+  for (const rule of autoBudgetRules) {
+    const matchedWord = rule.words.find((word) =>
+      searchText.includes(word.toLowerCase()),
+    );
+
+    if (matchedWord) {
+      return {
+        key: rule.key,
+        label: rule.label,
+        matchedBy: matchedWord,
+      };
+    }
+  }
+
+  return {
+    key: "other",
+    label: "Other costs",
+    matchedBy: "no specific budget keyword matched",
+  };
+}
+
+function getTransactionBudgetInfo(item: Transaction) {
+  const budgetKey = getTransactionBudgetKey(item);
+  const budgetLabel = getTransactionBudgetLabel(item);
+  const isManualBudget = Boolean(budgetKey || budgetLabel);
+  const isPersonal = isPersonalFundsTransaction(item);
+  const isMoneyIn = item.type === "income";
+  const isItemDonation =
+    item.payment_method === "Item Donation" ||
+    cleanText(item.category).toLowerCase() === "item donation";
+
+  if (isMoneyIn) {
+    return {
+      label: "None",
+      detail:
+        "Money In is not sent to Budget Planning. Budget Planning is for Money Out spending only.",
+      isManualBudget: false,
+      isAutoMatched: false,
+      isExcluded: true,
+      matchLabel: "None",
+      matchKey: "",
+    };
+  }
+
+  if (isItemDonation) {
+    return {
+      label: "Not in budget",
+      detail:
+        "Item donations are recorded for value only and are not saved to Budget Planning spend.",
+      isManualBudget: false,
+      isAutoMatched: false,
+      isExcluded: true,
+      matchLabel: "Not in budget",
+      matchKey: "",
+    };
+  }
+
+  if (isPersonal && !item.personal_funds_repaid) {
+    return {
+      label: "Not in budget yet",
+      detail:
+        "Personal funds only count once they are marked as paid back.",
+      isManualBudget: false,
+      isAutoMatched: false,
+      isExcluded: true,
+      matchLabel: "Not in budget yet",
+      matchKey: "",
+    };
+  }
+
+  if (isManualBudget) {
+    const manualLabel = budgetLabel || budgetKey;
+
+    return {
+      label: manualLabel,
+      detail: "Manually saved to this Budget Planning row.",
+      isManualBudget: true,
+      isAutoMatched: false,
+      isExcluded: false,
+      matchLabel: manualLabel,
+      matchKey: budgetKey,
+    };
+  }
+
+  const autoMatch = getAutoBudgetMatch(item);
+
+  return {
+    label: `Auto match → ${autoMatch.label}`,
+    detail: `No manual budget row saved. Budget Planning should auto match this to ${autoMatch.label} because it matched: ${autoMatch.matchedBy}.`,
+    isManualBudget: false,
+    isAutoMatched: true,
+    isExcluded: false,
+    matchLabel: autoMatch.label,
+    matchKey: autoMatch.key,
+  };
+}
+
+function budgetBadgeClass(item: Transaction) {
+  const budgetInfo = getTransactionBudgetInfo(item);
+
+  if (budgetInfo.isExcluded) {
+    return "bg-white/10 text-white/55 ring-white/10";
+  }
+
+  if (budgetInfo.isManualBudget) {
+    return "bg-pink-500/20 text-pink-100 ring-pink-300/20";
+  }
+
+  return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
+}
+
+function BudgetBadge({
+  item,
+  showReason = true,
+}: {
+  item: Transaction;
+  showReason?: boolean;
+}) {
+  const budgetInfo = getTransactionBudgetInfo(item);
+
+  return (
+    <div className="space-y-1">
+      <Badge className={budgetBadgeClass(item)}>{budgetInfo.label}</Badge>
+
+      {showReason ? (
+        <p className="max-w-[220px] text-[11px] font-medium leading-5 text-white/45">
+          {budgetInfo.detail}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function fundingTypeLabel(type?: FundingType | string | null) {
@@ -881,6 +1260,10 @@ function getRowSearchText(item: Transaction) {
     item.sponsorship_note,
     getSupplierName(item),
     getSupplierCategory(item),
+    getTransactionBudgetKey(item),
+    getTransactionBudgetLabel(item),
+    getTransactionBudgetInfo(item).label,
+    getTransactionBudgetInfo(item).detail,
     hasSupplierLinked(item)
       ? "supplier contact linked supplier contact"
       : "no supplier no contact",
@@ -942,6 +1325,8 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     "Title",
     "Type",
     "Amount",
+    "Budget",
+    "Budget Reason",
     "Payment Method",
     "Funding",
     "Supplier",
@@ -959,6 +1344,8 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     item.title || "",
     item.type || "",
     money(item.amount_pence),
+    getTransactionBudgetInfo(item).label,
+    getTransactionBudgetInfo(item).detail,
     item.payment_method || "",
     item.sponsor_name || "",
     getSupplierName(item),
@@ -1220,6 +1607,99 @@ export default function MoneyTransactionsTable({
   const [apiLockedYears, setApiLockedYears] = useState<string[]>([]);
   const [apiLockedMonths, setApiLockedMonths] = useState<string[]>([]);
 
+  /**
+   * Desktop table drag-to-scroll.
+   *
+   * The full money table is wider than the screen on normal/full mode. This
+   * lets admins hold the mouse down on empty/table space and drag left or
+   * right, instead of needing to go down to the bottom browser scrollbar.
+   */
+  const desktopTableScrollRef = useRef<HTMLDivElement | null>(null);
+  const desktopTableDragRef = useRef({
+    active: false,
+    pointerId: null as number | null,
+    startX: 0,
+    scrollLeft: 0,
+    moved: false,
+  });
+  const [desktopTableDragging, setDesktopTableDragging] = useState(false);
+
+  function isTableDragBlockedTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+
+    return Boolean(
+      target.closest(
+        "button, a, input, select, textarea, label, summary, details, [role='button'], [data-no-drag-scroll='true']",
+      ),
+    );
+  }
+
+  function startDesktopTableDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (isTableDragBlockedTarget(event.target)) return;
+
+    const element = desktopTableScrollRef.current;
+    if (!element) return;
+
+    desktopTableDragRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: element.scrollLeft,
+      moved: false,
+    };
+
+    element.setPointerCapture?.(event.pointerId);
+    setDesktopTableDragging(true);
+  }
+
+  function moveDesktopTableDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = desktopTableDragRef.current;
+    if (!drag.active) return;
+
+    const element = desktopTableScrollRef.current;
+    if (!element) return;
+
+    const distanceMoved = event.clientX - drag.startX;
+
+    if (Math.abs(distanceMoved) > 3) {
+      drag.moved = true;
+    }
+
+    if (drag.moved) {
+      event.preventDefault();
+    }
+
+    element.scrollLeft = drag.scrollLeft - distanceMoved;
+  }
+
+  function stopDesktopTableDrag(event?: ReactPointerEvent<HTMLDivElement>) {
+    const element = desktopTableScrollRef.current;
+    const pointerId = desktopTableDragRef.current.pointerId;
+
+    if (element && pointerId !== null) {
+      try {
+        element.releasePointerCapture?.(pointerId);
+      } catch {
+        // Pointer capture can already be released by the browser.
+      }
+    }
+
+    desktopTableDragRef.current.active = false;
+    desktopTableDragRef.current.pointerId = null;
+    setDesktopTableDragging(false);
+  }
+
+  function scrollDesktopTableBy(amount: number) {
+    const element = desktopTableScrollRef.current;
+    if (!element) return;
+
+    element.scrollBy({
+      left: amount,
+      behavior: "smooth",
+    });
+  }
+
   const effectiveVisibleColumns = useMemo(
     () => (easyMode ? easyModeVisibleColumns : visibleColumns),
     [easyMode, visibleColumns],
@@ -1258,7 +1738,7 @@ export default function MoneyTransactionsTable({
   }
 
   const topActionButtonBase =
-    "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5 sm:flex-none";
+    "inline-flex min-w-[135px] flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ring-1 transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 sm:flex-none";
 
   const activeReceiptReminderDays = Math.max(
     1,
@@ -2069,7 +2549,7 @@ export default function MoneyTransactionsTable({
               onClick={() =>
                 runTransactionAction(item, () => onMarkTransactionChecked(item))
               }
-              className="w-full rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+              className="w-full rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
             >
               {checkingId === item.id ? "Undoing..." : "Undo checked"}
             </button>
@@ -2096,7 +2576,7 @@ export default function MoneyTransactionsTable({
           onClick={() =>
             runTransactionAction(item, () => onMarkTransactionChecked(item))
           }
-          className="w-full rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+          className="w-full rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
         >
           {checkingId === item.id ? "Checking..." : "Mark checked"}
         </button>
@@ -2141,7 +2621,7 @@ export default function MoneyTransactionsTable({
               checked={selectedIds.has(item.id)}
               disabled={paymentActionsLocked}
               onChange={() => toggleSelect(item.id)}
-              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
             />
             <div>
               <p className="break-words font-black text-white">{item.title}</p>
@@ -2194,6 +2674,15 @@ export default function MoneyTransactionsTable({
               {hasFunding ? "Funding Money" : item.payment_method || "None"}
             </strong>
           </div>
+          <div className="sm:col-span-2">
+            Budget:{" "}
+            <strong className="text-white">
+              {getTransactionBudgetInfo(item).label}
+            </strong>
+            <p className="mt-1 text-xs leading-5 text-white/45">
+              {getTransactionBudgetInfo(item).detail}
+            </p>
+          </div>
           {hasSupplierLinked(item) && (
             <div>
               Supplier:{" "}
@@ -2227,17 +2716,6 @@ export default function MoneyTransactionsTable({
               </strong>
             </div>
           )}
-          {hasSupplierLinked(item) && (
-            <div>
-              Supplier:{" "}
-              <strong className="text-white">
-                {getSupplierName(item) || "Supplier/contact"}
-              </strong>
-              {getSupplierCategory(item)
-                ? ` · ${getSupplierCategory(item)}`
-                : ""}
-            </div>
-          )}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -2257,7 +2735,7 @@ export default function MoneyTransactionsTable({
               runTransactionAction(item, () => onEditTransaction(item))
             }
             title={paymentActionLockReason || "Edit payment"}
-            className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+            className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
           >
             <Pencil className="mr-1 inline h-3 w-3" /> Edit
           </button>
@@ -2274,7 +2752,7 @@ export default function MoneyTransactionsTable({
                   ? "Undo the checked status"
                   : "Mark this payment as checked"
             }
-            className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+            className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
           >
             <CheckCircle2 className="mr-1 inline h-3 w-3" />{" "}
             {item.checked_at ? "Undo" : "Check"}
@@ -2384,6 +2862,15 @@ export default function MoneyTransactionsTable({
             <p className="mt-2 text-base font-black text-white">
               {none(item.transaction_date)}
             </p>
+          </div>
+
+          <div className="rounded-2xl bg-pink-500/10 p-4 ring-1 ring-pink-300/20">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-pink-100/70">
+              Budget tracker
+            </p>
+            <div className="mt-2">
+              <BudgetBadge item={item} />
+            </div>
           </div>
 
           <div
@@ -2738,7 +3225,7 @@ export default function MoneyTransactionsTable({
           </div>
           <p className="mt-1 text-xs font-bold text-white/45">
             {easyMode
-              ? "Easy Mode shows the main payment details only. Switch it off to see advanced columns and tools."
+              ? "Easy Mode shows large simple cards. Normal mode now starts clean; use Columns to show advanced details."
               : "Full Mode is on. Advanced columns, filters and tools are visible."}
           </p>
           <p className="text-sm text-white/50">
@@ -3314,7 +3801,9 @@ export default function MoneyTransactionsTable({
           className={`grid gap-3 sm:grid-cols-2 ${easyMode ? "xl:grid-cols-2" : "xl:grid-cols-4 2xl:grid-cols-7"}`}
         >
           <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
-            <p className="text-sm font-black text-emerald-100">Total Money In</p>
+            <p className="text-sm font-black text-emerald-100">
+              Total Money In
+            </p>
 
             <p className="mt-2 break-words text-2xl font-black text-white">
               {money(moneyInIncludingCompletedRefunds)}
@@ -3333,7 +3822,8 @@ export default function MoneyTransactionsTable({
             </p>
 
             <p className="mt-2 text-xs leading-5 text-red-100/65">
-              Payments made by Burton Pride. Personal funds only count after repayment.
+              Payments made by Burton Pride. Personal funds only count after
+              repayment.
             </p>
           </div>
 
@@ -3354,7 +3844,9 @@ export default function MoneyTransactionsTable({
           <div
             className={`${easyMode ? "hidden" : ""} rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4`}
           >
-            <p className="text-sm font-black text-purple-100">Refunds Sent Back</p>
+            <p className="text-sm font-black text-purple-100">
+              Refunds Sent Back
+            </p>
 
             <p className="mt-2 break-words text-2xl font-black text-white">
               {money(refundTotals.sentBack)}
@@ -3368,7 +3860,9 @@ export default function MoneyTransactionsTable({
           <div
             className={`${easyMode ? "hidden" : ""} rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4`}
           >
-            <p className="text-sm font-black text-amber-100">Payments To Check</p>
+            <p className="text-sm font-black text-amber-100">
+              Payments To Check
+            </p>
 
             <p className="mt-2 text-2xl font-black text-white">
               {totals.unchecked}
@@ -3396,7 +3890,9 @@ export default function MoneyTransactionsTable({
           <div
             className={`${easyMode ? "hidden" : ""} rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4`}
           >
-            <p className="text-sm font-black text-orange-100">Still Owed Back</p>
+            <p className="text-sm font-black text-orange-100">
+              Still Owed Back
+            </p>
 
             <p className="mt-2 break-words text-2xl font-black text-white">
               {money(totals.unpaidPersonal)}
@@ -3432,7 +3928,7 @@ export default function MoneyTransactionsTable({
                     ),
                   )
                 }
-                className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
               >
                 Bulk mark checked
               </button>
@@ -3450,7 +3946,7 @@ export default function MoneyTransactionsTable({
                     ),
                   )
                 }
-                className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
               >
                 Bulk bank matched
               </button>
@@ -3460,7 +3956,7 @@ export default function MoneyTransactionsTable({
                 onClick={() =>
                   exportSelectedTransactionsCsv(selectedTransactions)
                 }
-                className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
               >
                 Export selected CSV
               </button>
@@ -3483,7 +3979,7 @@ export default function MoneyTransactionsTable({
                   getSelectedViewLockReason() ||
                   "Locked transactions cannot be hidden."
                 }
-                className="rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
               >
                 Hide selected
               </button>
@@ -3538,934 +4034,1027 @@ export default function MoneyTransactionsTable({
           </div>
 
           <div
-            className={`${easyMode ? "hidden" : "hidden w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:block xl:max-w-full"}`}
+            className={`${easyMode ? "hidden" : "hidden xl:block"} space-y-2`}
           >
-            <table
-              className={`w-full text-sm ${easyMode ? "min-w-[1200px]" : "min-w-[2250px]"}`}
+            <div
+              className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-white/65"
+              data-no-drag-scroll="true"
             >
-              <thead className="bg-white/10 text-white/60">
-                <tr>
-                  <ColumnHeader column="select" className="p-3 text-left">
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      disabled={visibleIds.length === 0}
-                      onChange={toggleSelectAllVisible}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="reference" className="p-3 text-left">
-                    Reference
-                  </ColumnHeader>
-                  <ColumnHeader column="date" className="p-3 text-left">
-                    <SortButton
-                      label="Date"
-                      sortKey="date"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="title" className="p-3 text-left">
-                    <SortButton
-                      label="Title"
-                      sortKey="title"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="type" className="p-3 text-left">
-                    <SortButton
-                      label="Type"
-                      sortKey="type"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="amount" className="p-3 text-right">
-                    <SortButton
-                      label="Amount"
-                      sortKey="amount"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="funding" className="p-3 text-left">
-                    <SortButton
-                      label="Funding"
-                      sortKey="funding"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="fundingNote" className="p-3 text-left">
-                    Funding Note
-                  </ColumnHeader>
-                  <ColumnHeader column="supplier" className="p-3 text-left">
-                    Supplier
-                  </ColumnHeader>
-                  <ColumnHeader column="personal" className="p-3 text-left">
-                    Personal
-                  </ColumnHeader>
-                  <ColumnHeader column="paidBy" className="p-3 text-left">
-                    Paid By
-                  </ColumnHeader>
-                  <ColumnHeader column="repayment" className="p-3 text-left">
-                    Repayment
-                  </ColumnHeader>
-                  <ColumnHeader column="payment" className="p-3 text-left">
-                    <SortButton
-                      label="Payment"
-                      sortKey="payment"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="bank" className="p-3 text-left">
-                    <SortButton
-                      label="Bank"
-                      sortKey="bank"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="receipt" className="p-3 text-left">
-                    <SortButton
-                      label="Receipt"
-                      sortKey="receipt"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="finance" className="p-3 text-left">
-                    <SortButton
-                      label="Finance"
-                      sortKey="finance"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader column="checked" className="p-3 text-left">
-                    <SortButton
-                      label="Checked"
-                      sortKey="checked"
-                      activeSortKey={sortKey}
-                      sortDirection={sortDirection}
-                      onSort={handleSort}
-                    />
-                  </ColumnHeader>
-                  <ColumnHeader
-                    column="actions"
-                    className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
-                  >
-                    Action
-                  </ColumnHeader>
-                </tr>
-              </thead>
+              <span>
+                Drag the table left or right, or use the buttons.
+              </span>
 
-              <tbody>
-                {visibleTrackingRows.map((row) => {
-                  if (row.kind === "refund") {
-                    const refund = row.item;
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => scrollDesktopTableBy(-450)}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-white hover:bg-white/20"
+                >
+                  ← Left
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollDesktopTableBy(450)}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-white hover:bg-white/20"
+                >
+                  Right →
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={desktopTableScrollRef}
+              onPointerDown={startDesktopTableDrag}
+              onPointerMove={moveDesktopTableDrag}
+              onPointerUp={stopDesktopTableDrag}
+              onPointerCancel={stopDesktopTableDrag}
+              onPointerLeave={stopDesktopTableDrag}
+              className={`w-full max-w-[calc(100vw-2rem)] overflow-x-auto rounded-2xl border border-white/10 xl:max-w-full ${
+                desktopTableDragging
+                  ? "cursor-grabbing select-none"
+                  : "cursor-grab"
+              }`}
+              title="Hold and drag left or right to move across the table"
+            >
+              <table
+                className="w-full min-w-[1550px] text-sm"
+              >
+                <thead className="bg-white/10 text-white/60">
+                  <tr>
+                    <ColumnHeader column="select" className="p-3 text-left">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        disabled={visibleIds.length === 0}
+                        onChange={toggleSelectAllVisible}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="reference" className="p-3 text-left">
+                      Reference
+                    </ColumnHeader>
+                    <ColumnHeader column="date" className="p-3 text-left">
+                      <SortButton
+                        label="Date"
+                        sortKey="date"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="title" className="p-3 text-left">
+                      <SortButton
+                        label="Title"
+                        sortKey="title"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="type" className="p-3 text-left">
+                      <SortButton
+                        label="Type"
+                        sortKey="type"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="amount" className="p-3 text-right">
+                      <SortButton
+                        label="Amount"
+                        sortKey="amount"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="budget" className="p-3 text-left">
+                      Budget
+                    </ColumnHeader>
+                    <ColumnHeader column="funding" className="p-3 text-left">
+                      <SortButton
+                        label="Funding"
+                        sortKey="funding"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader
+                      column="fundingNote"
+                      className="p-3 text-left"
+                    >
+                      Funding Note
+                    </ColumnHeader>
+                    <ColumnHeader column="supplier" className="p-3 text-left">
+                      Supplier
+                    </ColumnHeader>
+                    <ColumnHeader column="personal" className="p-3 text-left">
+                      Personal
+                    </ColumnHeader>
+                    <ColumnHeader column="paidBy" className="p-3 text-left">
+                      Paid By
+                    </ColumnHeader>
+                    <ColumnHeader column="repayment" className="p-3 text-left">
+                      Repayment
+                    </ColumnHeader>
+                    <ColumnHeader column="payment" className="p-3 text-left">
+                      <SortButton
+                        label="Payment"
+                        sortKey="payment"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="bank" className="p-3 text-left">
+                      <SortButton
+                        label="Bank"
+                        sortKey="bank"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="receipt" className="p-3 text-left">
+                      <SortButton
+                        label="Receipt"
+                        sortKey="receipt"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="finance" className="p-3 text-left">
+                      <SortButton
+                        label="Finance"
+                        sortKey="finance"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader column="checked" className="p-3 text-left">
+                      <SortButton
+                        label="Checked"
+                        sortKey="checked"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
+                    <ColumnHeader
+                      column="actions"
+                      className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                    >
+                      Action
+                    </ColumnHeader>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visibleTrackingRows.map((row) => {
+                    if (row.kind === "refund") {
+                      const refund = row.item;
+
+                      return (
+                        <tr
+                          key={`refund-${refund.id}`}
+                          className="border-t border-cyan-300/20 bg-cyan-500/[0.06]"
+                        >
+                          <ColumnCell column="select" className="p-3 align-top">
+                            <span className="text-white/25">—</span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="reference"
+                            className="whitespace-nowrap p-3 align-top"
+                          >
+                            <span className="inline-flex rounded-xl bg-cyan-500/15 px-3 py-1 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20">
+                              {refundReference(refund)}
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="date"
+                            className="whitespace-nowrap p-3 align-top"
+                          >
+                            {none(refund.refund_date)}
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="title"
+                            className="max-w-[240px] p-3 align-top"
+                          >
+                            <p className="break-words font-semibold text-white">
+                              {refund.title}
+                            </p>
+
+                            {refund.notes ? (
+                              <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
+                                {refund.notes}
+                              </p>
+                            ) : null}
+
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              <Badge className={refundTypeBadgeClass(refund)}>
+                                {refundTypeLabel(refund)}
+                              </Badge>
+
+                              <Badge
+                                className={refundStatusBadgeClass(
+                                  refund.status,
+                                )}
+                              >
+                                {refundStatusLabel(refund.status)}
+                              </Badge>
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="type"
+                            className="whitespace-nowrap p-3 align-top"
+                          >
+                            <span className="font-bold text-cyan-100">
+                              {refundTypeLabel(refund)}
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="amount"
+                            className="whitespace-nowrap p-3 text-right align-top font-bold text-cyan-100"
+                          >
+                            <div>{money(refund.amount_pence)}</div>
+                            <div className="mt-1 text-xs font-semibold text-cyan-200/70">
+                              Separate refund total
+                            </div>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="budget"
+                            className="max-w-[220px] p-3 align-top"
+                          >
+                            <span className="text-white/40">
+                              Managed in Refund Tracker
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="funding"
+                            className="p-3 align-top"
+                          >
+                            <span className="text-white/40">None</span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="fundingNote"
+                            className="p-3 align-top"
+                          >
+                            <span className="text-white/40">None</span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="supplier"
+                            className="max-w-[220px] p-3 align-top"
+                          >
+                            {refund.supplier?.supplier_name ? (
+                              <p className="break-words text-xs font-semibold text-white/85">
+                                {refund.supplier.supplier_name}
+                              </p>
+                            ) : (
+                              <span className="text-white/40">None</span>
+                            )}
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="personal"
+                            className="p-3 align-top"
+                          >
+                            <span className="text-white/40">None</span>
+                          </ColumnCell>
+
+                          <ColumnCell column="paidBy" className="p-3 align-top">
+                            <span className="text-white/40">None</span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="repayment"
+                            className="p-3 align-top"
+                          >
+                            <span className="text-white/40">
+                              Not applicable
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="payment"
+                            className="whitespace-nowrap p-3 align-top"
+                          >
+                            Refund
+                          </ColumnCell>
+
+                          <ColumnCell column="bank" className="p-3 align-top">
+                            <span className="text-white/40">
+                              Managed in Refund Tracker
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="receipt"
+                            className="p-3 align-top"
+                          >
+                            <span className="text-white/40">
+                              Not applicable
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="finance"
+                            className="p-3 align-top"
+                          >
+                            {refund.original_transaction?.title ? (
+                              <div>
+                                <p className="text-xs font-bold text-cyan-100">
+                                  Linked transaction
+                                </p>
+                                <p className="mt-1 max-w-[220px] break-words text-xs text-white/55">
+                                  {refund.original_transaction.title}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-white/40">
+                                No linked transaction
+                              </span>
+                            )}
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="checked"
+                            className="p-3 align-top"
+                          >
+                            <Badge
+                              className={refundStatusBadgeClass(refund.status)}
+                            >
+                              {refundStatusLabel(refund.status)}
+                            </Badge>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="actions"
+                            className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                          >
+                            <Link
+                              href="/admin/money/refunds"
+                              className="inline-flex items-center justify-center rounded-xl bg-cyan-500/15 p-2 text-cyan-100 transition hover:bg-cyan-500/25"
+                              title="Open Refund Tracker"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </ColumnCell>
+                        </tr>
+                      );
+                    }
+
+                    const item = row.item;
+                    const isPersonal = isPersonalFundsTransaction(item);
+                    const hasFunding = isSponsorshipTransaction(item);
+                    const fundingRecord = getFundingForTransaction(item);
+                    const fundingType =
+                      fundingRecord?.funding_type || "sponsor";
+                    const fundingLabel = fundingTypeLabel(fundingType);
+                    const shortLabel = fundingShortLabel(fundingType);
+                    const files = getTransactionFiles(item);
+                    const missingReceipt = hasMissingReceiptWarning(item);
+                    const receiptOverdue = isReceiptOverdue(
+                      item,
+                      activeReceiptReminderDays,
+                    );
+                    const proofFiles = repaymentProofFiles[item.id] || [];
+                    const bankStatus =
+                      item.bank_reconciliation_status || "unmatched";
+                    const financeDraft = getFinanceDraft(item);
+                    const financeStatus = item.finance_note_status || "none";
+                    const financeNoteChanged =
+                      financeDraft.status !== financeStatus ||
+                      financeDraft.note !== (item.finance_note || "");
+                    const lockReason = getTransactionLockReason(item);
+                    const locked = Boolean(lockReason);
+                    const paymentChecked = Boolean(item.checked_at);
+                    const checkedByName = paymentChecked
+                      ? getCheckedByDisplayName(item)
+                      : "";
+                    const paymentActionsLocked = locked || paymentChecked;
+                    const paymentActionLockReason = locked
+                      ? lockReason
+                      : paymentChecked
+                        ? `This payment was checked by ${checkedByName}. Undo the checked status before making changes.`
+                        : "";
 
                     return (
                       <tr
-                        key={`refund-${refund.id}`}
-                        className="border-t border-cyan-300/20 bg-cyan-500/[0.06]"
+                        key={item.id}
+                        className={`border-t border-white/10 ${locked ? "bg-red-500/[0.05]" : receiptOverdue ? "bg-red-500/[0.07]" : missingReceipt ? "bg-red-500/[0.03]" : ""}`}
                       >
                         <ColumnCell column="select" className="p-3 align-top">
-                          <span className="text-white/25">—</span>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(item.id)}
+                            disabled={paymentActionsLocked}
+                            onChange={() => toggleSelect(item.id)}
+                            title={
+                              paymentActionLockReason || "Select transaction"
+                            }
+                          />
                         </ColumnCell>
 
                         <ColumnCell
                           column="reference"
                           className="whitespace-nowrap p-3 align-top"
                         >
-                          <span className="inline-flex rounded-xl bg-cyan-500/15 px-3 py-1 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20">
-                            {refundReference(refund)}
-                          </span>
+                          {item.transaction_reference ? (
+                            <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">
+                              {item.transaction_reference}
+                            </span>
+                          ) : (
+                            <span className="text-white/40">Pending</span>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="date"
                           className="whitespace-nowrap p-3 align-top"
                         >
-                          {none(refund.refund_date)}
+                          {none(item.transaction_date)}
                         </ColumnCell>
 
                         <ColumnCell
                           column="title"
                           className="max-w-[240px] p-3 align-top"
                         >
-                          <p className="break-words font-semibold text-white">
-                            {refund.title}
-                          </p>
-
-                          {refund.notes ? (
+                          <button
+                            type="button"
+                            disabled={paymentActionsLocked}
+                            onClick={() => setDetailsItem(item)}
+                            title={paymentActionLockReason || "View details"}
+                            className="break-words text-left font-semibold text-white hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {item.title}
+                          </button>
+                          {item.description && (
                             <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
-                              {refund.notes}
+                              {item.description}
                             </p>
-                          ) : null}
-
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            <Badge className={refundTypeBadgeClass(refund)}>
-                              {refundTypeLabel(refund)}
-                            </Badge>
-
-                            <Badge
-                              className={refundStatusBadgeClass(refund.status)}
-                            >
-                              {refundStatusLabel(refund.status)}
-                            </Badge>
-                          </div>
+                          )}
+                          <WarningBadges
+                            item={item}
+                            receiptReminderDays={activeReceiptReminderDays}
+                          />
+                          {locked && (
+                            <p className="mt-2 rounded-xl bg-red-500/10 px-2 py-1 text-[11px] font-bold text-red-100 ring-1 ring-red-300/20">
+                              {lockReason}
+                            </p>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="type"
                           className="whitespace-nowrap p-3 align-top"
                         >
-                          <span className="font-bold text-cyan-100">
-                            {refundTypeLabel(refund)}
-                          </span>
+                          {item.type === "income" ? "Money In" : "Money Out"}
                         </ColumnCell>
 
                         <ColumnCell
                           column="amount"
-                          className="whitespace-nowrap p-3 text-right align-top font-bold text-cyan-100"
+                          className="whitespace-nowrap p-3 text-right align-top font-bold"
                         >
-                          <div>{money(refund.amount_pence)}</div>
-                          <div className="mt-1 text-xs font-semibold text-cyan-200/70">
-                            Separate refund total
-                          </div>
+                          <div>{money(item.amount_pence)}</div>
+                          {hasFunding && (
+                            <div className="mt-1 text-xs font-semibold text-amber-300">
+                              {item.type === "income"
+                                ? `${fundingLabel} in`
+                                : `${shortLabel}-funded spend`}
+                            </div>
+                          )}
+                          {isPersonal && item.personal_funds_repaid && (
+                            <div className="mt-1 text-xs font-semibold text-emerald-300">
+                              Taken from balance
+                            </div>
+                          )}
+                          {isPersonal && !item.personal_funds_repaid && (
+                            <div className="mt-1 text-xs font-semibold text-orange-300">
+                              Not taken yet
+                            </div>
+                          )}
                         </ColumnCell>
 
-                        <ColumnCell column="funding" className="p-3 align-top">
-                          <span className="text-white/40">None</span>
+                        <ColumnCell
+                          column="budget"
+                          className="max-w-[230px] p-3 align-top"
+                        >
+                          <BudgetBadge item={item} showReason={false} />
+                        </ColumnCell>
+
+                        <ColumnCell
+                          column="funding"
+                          className="max-w-[180px] p-3 align-top"
+                        >
+                          {hasFunding ? (
+                            <div className="space-y-2">
+                              <Badge className={fundingBadgeClass(fundingType)}>
+                                {fundingLabel}
+                              </Badge>
+                              <p className="break-words text-xs font-semibold text-white/80">
+                                {item.sponsor_name ||
+                                  fundingRecord?.sponsor_name ||
+                                  "Funding record"}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="fundingNote"
-                          className="p-3 align-top"
+                          className="max-w-[220px] p-3 align-top"
                         >
-                          <span className="text-white/40">None</span>
+                          {item.sponsorship_note ? (
+                            <span className="line-clamp-3 break-words text-sm text-amber-100">
+                              {item.sponsorship_note}
+                            </span>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="supplier"
                           className="max-w-[220px] p-3 align-top"
                         >
-                          {refund.supplier?.supplier_name ? (
-                            <p className="break-words text-xs font-semibold text-white/85">
-                              {refund.supplier.supplier_name}
-                            </p>
+                          {hasSupplierLinked(item) ? (
+                            <div className="space-y-2">
+                              <Badge
+                                className={supplierBadgeClass(
+                                  getSupplierCategory(item),
+                                )}
+                              >
+                                {getSupplierCategory(item) || "Supplier"}
+                              </Badge>
+
+                              <p className="break-words text-xs font-semibold text-white/85">
+                                {getSupplierName(item) || "Supplier/contact"}
+                              </p>
+                            </div>
                           ) : (
                             <span className="text-white/40">None</span>
                           )}
                         </ColumnCell>
 
                         <ColumnCell column="personal" className="p-3 align-top">
-                          <span className="text-white/40">None</span>
+                          {isPersonal ? (
+                            <Badge className="bg-sky-500/20 text-sky-100 ring-sky-300/20">
+                              Personal funds
+                            </Badge>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
                         </ColumnCell>
 
-                        <ColumnCell column="paidBy" className="p-3 align-top">
-                          <span className="text-white/40">None</span>
+                        <ColumnCell
+                          column="paidBy"
+                          className="max-w-[160px] p-3 align-top"
+                        >
+                          {item.personal_funds_name ? (
+                            <span className="break-words font-semibold text-sky-200">
+                              {item.personal_funds_name}
+                            </span>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="repayment"
-                          className="p-3 align-top"
+                          className="min-w-[190px] p-3 align-top"
                         >
-                          <span className="text-white/40">Not applicable</span>
+                          {isPersonal ? (
+                            <div className="space-y-2">
+                              {item.personal_funds_repaid ? (
+                                <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
+                                  Paid back
+                                  {item.personal_funds_repaid_at && (
+                                    <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
+                                      {formatDate(
+                                        item.personal_funds_repaid_at,
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="rounded-2xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20">
+                                  Not paid back
+                                </div>
+                              )}
+
+                              {!item.personal_funds_repaid && (
+                                <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                                  <label className="mb-1 block text-[11px] font-bold text-white/60">
+                                    Upload proof before payback
+                                  </label>
+                                  <input
+                                    type="file"
+                                    disabled={paymentActionsLocked}
+                                    multiple
+                                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
+                                    onChange={(event) => {
+                                      const selectedFiles = Array.from(
+                                        event.target.files || [],
+                                      );
+                                      setRepaymentProofFiles((prev) => ({
+                                        ...prev,
+                                        [item.id]: selectedFiles,
+                                      }));
+                                    }}
+                                    className="w-full text-[11px] text-white/60 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-2 file:py-1 file:text-[11px] file:font-bold file:text-white hover:file:bg-emerald-400"
+                                  />
+                                  {proofFiles.length > 0 && (
+                                    <p className="mt-2 text-[11px] font-semibold text-emerald-200">
+                                      {proofFiles.length} proof file
+                                      {proofFiles.length === 1 ? "" : "s"}{" "}
+                                      selected
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked || repayingId === item.id
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, async () => {
+                                    await onTogglePersonalFundsRepaid(
+                                      item,
+                                      proofFiles,
+                                    );
+                                    setRepaymentProofFiles((prev) => ({
+                                      ...prev,
+                                      [item.id]: [],
+                                    }));
+                                  })
+                                }
+                                className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 ${item.personal_funds_repaid ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25" : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"}`}
+                              >
+                                {repayingId === item.id
+                                  ? "Updating..."
+                                  : item.personal_funds_repaid
+                                    ? "Mark not paid back"
+                                    : "Mark paid back"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-white/40">None</span>
+                          )}
                         </ColumnCell>
 
                         <ColumnCell
                           column="payment"
                           className="whitespace-nowrap p-3 align-top"
                         >
-                          Refund
+                          {hasFunding
+                            ? "Funding Money"
+                            : item.payment_method || "None"}
                         </ColumnCell>
 
-                        <ColumnCell column="bank" className="p-3 align-top">
-                          <span className="text-white/40">
-                            Managed in Refund Tracker
-                          </span>
-                        </ColumnCell>
-
-                        <ColumnCell column="receipt" className="p-3 align-top">
-                          <span className="text-white/40">Not applicable</span>
-                        </ColumnCell>
-
-                        <ColumnCell column="finance" className="p-3 align-top">
-                          {refund.original_transaction?.title ? (
-                            <div>
-                              <p className="text-xs font-bold text-cyan-100">
-                                Linked transaction
+                        <ColumnCell
+                          column="bank"
+                          className="min-w-[230px] p-3 align-top"
+                        >
+                          <div className="space-y-2">
+                            <Badge
+                              className={bankReconciliationBadgeClass(
+                                bankStatus,
+                              )}
+                            >
+                              {bankReconciliationLabel(bankStatus)}
+                            </Badge>
+                            {item.bank_reconciled_by && (
+                              <p className="text-[11px] font-semibold text-white/50">
+                                By {item.bank_reconciled_by}
                               </p>
-                              <p className="mt-1 max-w-[220px] break-words text-xs text-white/55">
-                                {refund.original_transaction.title}
+                            )}
+                            {item.bank_reconciled_at && (
+                              <p className="text-[11px] font-semibold text-white/50">
+                                {formatDate(item.bank_reconciled_at)}
                               </p>
+                            )}
+                            {item.bank_reconciliation_note && (
+                              <p className="line-clamp-2 text-[11px] text-white/45">
+                                {item.bank_reconciliation_note}
+                              </p>
+                            )}
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked ||
+                                  bankReconcilingId === item.id
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, () =>
+                                    onUpdateBankReconciliationStatus(
+                                      item,
+                                      "matched",
+                                    ),
+                                  )
+                                }
+                                className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              >
+                                {bankReconcilingId === item.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3 w-3" />
+                                )}{" "}
+                                Matched
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked ||
+                                  bankReconcilingId === item.id
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, () =>
+                                    onUpdateBankReconciliationStatus(
+                                      item,
+                                      "needs_review",
+                                    ),
+                                  )
+                                }
+                                className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              >
+                                <ShieldAlert className="h-3 w-3" /> Review
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked ||
+                                  bankReconcilingId === item.id
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, () =>
+                                    onUpdateBankReconciliationStatus(
+                                      item,
+                                      "ignored",
+                                    ),
+                                  )
+                                }
+                                className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1.5 text-[11px] font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              >
+                                Ignore
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked ||
+                                  bankReconcilingId === item.id
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, () =>
+                                    onUpdateBankReconciliationStatus(
+                                      item,
+                                      "unmatched",
+                                    ),
+                                  )
+                                }
+                                className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1.5 text-[11px] font-black text-white/70 ring-1 ring-white/10 hover:bg-white/15 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              >
+                                <RefreshCcw className="h-3 w-3" /> Unmatched
+                              </button>
+                            </div>
+                          </div>
+                        </ColumnCell>
+
+                        <ColumnCell
+                          column="receipt"
+                          className="min-w-[230px] p-3 align-top"
+                        >
+                          {missingReceipt ? (
+                            <div
+                              className={`rounded-2xl border px-3 py-2 text-xs text-red-100 ${receiptOverdue ? "border-red-300/30 bg-red-500/15" : "border-red-300/20 bg-red-500/10"}`}
+                            >
+                              <div className="flex items-center gap-2 font-black">
+                                {receiptOverdue ? (
+                                  <CalendarClock className="h-4 w-4" />
+                                ) : (
+                                  <AlertTriangle className="h-4 w-4" />
+                                )}
+                                {receiptOverdue
+                                  ? "Receipt overdue"
+                                  : "Missing receipt"}
+                              </div>
+                              <div className="mt-1 text-red-100/70">
+                                {receiptReminderLabel(
+                                  item,
+                                  activeReceiptReminderDays,
+                                )}
+                              </div>
+                              <div className="mt-2 rounded-xl bg-black/20 px-2 py-1 text-[11px] font-bold text-red-100/75">
+                                Rule: upload receipt within{" "}
+                                {activeReceiptReminderDays} day
+                                {activeReceiptReminderDays === 1 ? "" : "s"} of
+                                the expense.
+                              </div>
+                            </div>
+                          ) : files.length > 0 ? (
+                            <div className="space-y-2">
+                              <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                                <div className="font-black">
+                                  Receipt / proof attached
+                                </div>
+                                <div className="mt-1 text-emerald-100/70">
+                                  {files.length} file
+                                  {files.length === 1 ? "" : "s"} attached.
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                {files.slice(0, 3).map((file, index) => (
+                                  <a
+                                    key={file.id || `${file.file_url}-${index}`}
+                                    href={file.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block max-w-[220px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
+                                    title={
+                                      file.file_name ||
+                                      `Attachment ${index + 1}`
+                                    }
+                                  >
+                                    <FileText className="mr-1 inline h-3 w-3" />
+                                    {file.file_name ||
+                                      `Attachment ${index + 1}`}
+                                    {file.file_size
+                                      ? ` (${formatFileSize(file.file_size)})`
+                                      : ""}
+                                  </a>
+                                ))}
+                                {files.length > 3 && (
+                                  <p className="text-xs text-white/40">
+                                    +{files.length - 3} more file
+                                    {files.length - 3 === 1 ? "" : "s"}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ) : (
-                            <span className="text-white/40">
-                              No linked transaction
+                            <span className="text-white/30">
+                              NOT UPLOAD YET
                             </span>
                           )}
                         </ColumnCell>
 
-                        <ColumnCell column="checked" className="p-3 align-top">
-                          <Badge
-                            className={refundStatusBadgeClass(refund.status)}
-                          >
-                            {refundStatusLabel(refund.status)}
-                          </Badge>
+                        <ColumnCell
+                          column="finance"
+                          className="min-w-[260px] p-3 align-top"
+                        >
+                          <div className="space-y-2">
+                            <Badge
+                              className={financeNoteBadgeClass(financeStatus)}
+                            >
+                              {financeNoteStatusLabel(financeStatus)}
+                            </Badge>
+                            {item.finance_note && (
+                              <p className="line-clamp-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-white/65 ring-1 ring-white/10">
+                                {item.finance_note}
+                              </p>
+                            )}
+                            {item.finance_note_updated_by && (
+                              <p className="text-[11px] font-semibold text-white/45">
+                                By {item.finance_note_updated_by}
+                              </p>
+                            )}
+                            {item.finance_note_updated_at && (
+                              <p className="text-[11px] font-semibold text-white/45">
+                                {formatDate(item.finance_note_updated_at)}
+                              </p>
+                            )}
+                            <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
+                              <label className="mb-1 block text-[11px] font-bold text-white/50">
+                                Update finance query
+                              </label>
+                              <select
+                                value={financeDraft.status}
+                                disabled={paymentActionsLocked}
+                                onChange={(event) =>
+                                  setFinanceDraftStatus(
+                                    item,
+                                    event.target.value as FinanceNoteStatus,
+                                  )
+                                }
+                                className="w-full rounded-lg bg-black/30 px-2 py-2 text-xs font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
+                              >
+                                {financeNoteOptions.map((option) => (
+                                  <option
+                                    key={option.value}
+                                    value={option.value}
+                                    className="bg-[#11111f] text-white"
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <textarea
+                                value={financeDraft.note}
+                                disabled={paymentActionsLocked}
+                                onChange={(event) =>
+                                  setFinanceDraftNote(item, event.target.value)
+                                }
+                                placeholder="Add finance note..."
+                                className="mt-2 min-h-16 w-full rounded-lg bg-black/30 px-2 py-2 text-xs text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
+                              />
+                              <button
+                                type="button"
+                                disabled={
+                                  paymentActionsLocked ||
+                                  financeNoteUpdatingId === item.id ||
+                                  !financeNoteChanged
+                                }
+                                onClick={() =>
+                                  runTransactionAction(item, () =>
+                                    saveFinanceDraft(item),
+                                  )
+                                }
+                                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              >
+                                {financeNoteUpdatingId === item.id && (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                )}{" "}
+                                Save finance note
+                              </button>
+                            </div>
+                          </div>
+                        </ColumnCell>
+
+                        <ColumnCell
+                          column="checked"
+                          className="min-w-[210px] p-3 align-top"
+                        >
+                          {renderCheckedCell(item)}
                         </ColumnCell>
 
                         <ColumnCell
                           column="actions"
-                          className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                          className="sticky right-0 z-10 bg-[#11111f] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
                         >
-                          <Link
-                            href="/admin/money/refunds"
-                            className="inline-flex items-center justify-center rounded-xl bg-cyan-500/15 p-2 text-cyan-100 transition hover:bg-cyan-500/25"
-                            title="Open Refund Tracker"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Link>
+                          <div className="inline-flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={paymentActionsLocked}
+                              onClick={() => setDetailsItem(item)}
+                              className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              title={paymentActionLockReason || "View details"}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={paymentActionsLocked}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onEditTransaction(item),
+                                )
+                              }
+                              className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              title={
+                                paymentActionLockReason || "Edit transaction"
+                              }
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={paymentActionsLocked || deleting}
+                              onClick={() =>
+                                runTransactionAction(item, () =>
+                                  onHideTransaction(item.id),
+                                )
+                              }
+                              className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              title={
+                                paymentActionLockReason || "Hide transaction"
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </ColumnCell>
                       </tr>
                     );
-                  }
-
-                  const item = row.item;
-                  const isPersonal = isPersonalFundsTransaction(item);
-                  const hasFunding = isSponsorshipTransaction(item);
-                  const fundingRecord = getFundingForTransaction(item);
-                  const fundingType = fundingRecord?.funding_type || "sponsor";
-                  const fundingLabel = fundingTypeLabel(fundingType);
-                  const shortLabel = fundingShortLabel(fundingType);
-                  const files = getTransactionFiles(item);
-                  const missingReceipt = hasMissingReceiptWarning(item);
-                  const receiptOverdue = isReceiptOverdue(
-                    item,
-                    activeReceiptReminderDays,
-                  );
-                  const proofFiles = repaymentProofFiles[item.id] || [];
-                  const bankStatus =
-                    item.bank_reconciliation_status || "unmatched";
-                  const financeDraft = getFinanceDraft(item);
-                  const financeStatus = item.finance_note_status || "none";
-                  const financeNoteChanged =
-                    financeDraft.status !== financeStatus ||
-                    financeDraft.note !== (item.finance_note || "");
-                  const lockReason = getTransactionLockReason(item);
-                  const locked = Boolean(lockReason);
-                  const paymentChecked = Boolean(item.checked_at);
-                  const checkedByName = paymentChecked
-                    ? getCheckedByDisplayName(item)
-                    : "";
-                  const paymentActionsLocked = locked || paymentChecked;
-                  const paymentActionLockReason = locked
-                    ? lockReason
-                    : paymentChecked
-                      ? `This payment was checked by ${checkedByName}. Undo the checked status before making changes.`
-                      : "";
-
-                  return (
-                    <tr
-                      key={item.id}
-                      className={`border-t border-white/10 ${locked ? "bg-red-500/[0.05]" : receiptOverdue ? "bg-red-500/[0.07]" : missingReceipt ? "bg-red-500/[0.03]" : ""}`}
-                    >
-                      <ColumnCell column="select" className="p-3 align-top">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(item.id)}
-                          disabled={paymentActionsLocked}
-                          onChange={() => toggleSelect(item.id)}
-                          title={
-                            paymentActionLockReason || "Select transaction"
-                          }
-                        />
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="reference"
-                        className="whitespace-nowrap p-3 align-top"
-                      >
-                        {item.transaction_reference ? (
-                          <span className="inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white ring-1 ring-white/10">
-                            {item.transaction_reference}
-                          </span>
-                        ) : (
-                          <span className="text-white/40">Pending</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="date"
-                        className="whitespace-nowrap p-3 align-top"
-                      >
-                        {none(item.transaction_date)}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="title"
-                        className="max-w-[240px] p-3 align-top"
-                      >
-                        <button
-                          type="button"
-                          disabled={paymentActionsLocked}
-                          onClick={() => setDetailsItem(item)}
-                          title={paymentActionLockReason || "View details"}
-                          className="break-words text-left font-semibold text-white hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {item.title}
-                        </button>
-                        {item.description && (
-                          <p className="mt-1 line-clamp-3 break-words text-xs text-white/50">
-                            {item.description}
-                          </p>
-                        )}
-                        <WarningBadges
-                          item={item}
-                          receiptReminderDays={activeReceiptReminderDays}
-                        />
-                        {locked && (
-                          <p className="mt-2 rounded-xl bg-red-500/10 px-2 py-1 text-[11px] font-bold text-red-100 ring-1 ring-red-300/20">
-                            {lockReason}
-                          </p>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="type"
-                        className="whitespace-nowrap p-3 align-top"
-                      >
-                        {item.type === "income" ? "Money In" : "Money Out"}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="amount"
-                        className="whitespace-nowrap p-3 text-right align-top font-bold"
-                      >
-                        <div>{money(item.amount_pence)}</div>
-                        {hasFunding && (
-                          <div className="mt-1 text-xs font-semibold text-amber-300">
-                            {item.type === "income"
-                              ? `${fundingLabel} in`
-                              : `${shortLabel}-funded spend`}
-                          </div>
-                        )}
-                        {isPersonal && item.personal_funds_repaid && (
-                          <div className="mt-1 text-xs font-semibold text-emerald-300">
-                            Taken from balance
-                          </div>
-                        )}
-                        {isPersonal && !item.personal_funds_repaid && (
-                          <div className="mt-1 text-xs font-semibold text-orange-300">
-                            Not taken yet
-                          </div>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="funding"
-                        className="max-w-[180px] p-3 align-top"
-                      >
-                        {hasFunding ? (
-                          <div className="space-y-2">
-                            <Badge className={fundingBadgeClass(fundingType)}>
-                              {fundingLabel}
-                            </Badge>
-                            <p className="break-words text-xs font-semibold text-white/80">
-                              {item.sponsor_name ||
-                                fundingRecord?.sponsor_name ||
-                                "Funding record"}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="fundingNote"
-                        className="max-w-[220px] p-3 align-top"
-                      >
-                        {item.sponsorship_note ? (
-                          <span className="line-clamp-3 break-words text-sm text-amber-100">
-                            {item.sponsorship_note}
-                          </span>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="supplier"
-                        className="max-w-[220px] p-3 align-top"
-                      >
-                        {hasSupplierLinked(item) ? (
-                          <div className="space-y-2">
-                            <Badge
-                              className={supplierBadgeClass(
-                                getSupplierCategory(item),
-                              )}
-                            >
-                              {getSupplierCategory(item) || "Supplier"}
-                            </Badge>
-
-                            <p className="break-words text-xs font-semibold text-white/85">
-                              {getSupplierName(item) || "Supplier/contact"}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell column="personal" className="p-3 align-top">
-                        {isPersonal ? (
-                          <Badge className="bg-sky-500/20 text-sky-100 ring-sky-300/20">
-                            Personal funds
-                          </Badge>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="paidBy"
-                        className="max-w-[160px] p-3 align-top"
-                      >
-                        {item.personal_funds_name ? (
-                          <span className="break-words font-semibold text-sky-200">
-                            {item.personal_funds_name}
-                          </span>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="repayment"
-                        className="min-w-[190px] p-3 align-top"
-                      >
-                        {isPersonal ? (
-                          <div className="space-y-2">
-                            {item.personal_funds_repaid ? (
-                              <div className="rounded-2xl bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-200 ring-1 ring-emerald-300/20">
-                                Paid back
-                                {item.personal_funds_repaid_at && (
-                                  <div className="mt-1 text-[11px] font-semibold text-emerald-100/70">
-                                    {formatDate(item.personal_funds_repaid_at)}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="rounded-2xl bg-orange-500/15 px-3 py-2 text-xs font-bold text-orange-200 ring-1 ring-orange-300/20">
-                                Not paid back
-                              </div>
-                            )}
-
-                            {!item.personal_funds_repaid && (
-                              <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
-                                <label className="mb-1 block text-[11px] font-bold text-white/60">
-                                  Upload proof before payback
-                                </label>
-                                <input
-                                  type="file"
-                                  disabled={paymentActionsLocked}
-                                  multiple
-                                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
-                                  onChange={(event) => {
-                                    const selectedFiles = Array.from(
-                                      event.target.files || [],
-                                    );
-                                    setRepaymentProofFiles((prev) => ({
-                                      ...prev,
-                                      [item.id]: selectedFiles,
-                                    }));
-                                  }}
-                                  className="w-full text-[11px] text-white/60 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5 file:mr-2 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-2 file:py-1 file:text-[11px] file:font-bold file:text-white hover:file:bg-emerald-400"
-                                />
-                                {proofFiles.length > 0 && (
-                                  <p className="mt-2 text-[11px] font-semibold text-emerald-200">
-                                    {proofFiles.length} proof file
-                                    {proofFiles.length === 1 ? "" : "s"}{" "}
-                                    selected
-                                  </p>
-                                )}
-                              </div>
-                            )}
-
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked || repayingId === item.id
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, async () => {
-                                  await onTogglePersonalFundsRepaid(
-                                    item,
-                                    proofFiles,
-                                  );
-                                  setRepaymentProofFiles((prev) => ({
-                                    ...prev,
-                                    [item.id]: [],
-                                  }));
-                                })
-                              }
-                              className={`w-full rounded-xl px-3 py-2 text-xs font-bold transition disabled:pointer-events-none disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 ${item.personal_funds_repaid ? "bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20 hover:bg-orange-500/25" : "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"}`}
-                            >
-                              {repayingId === item.id
-                                ? "Updating..."
-                                : item.personal_funds_repaid
-                                  ? "Mark not paid back"
-                                  : "Mark paid back"}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-white/40">None</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="payment"
-                        className="whitespace-nowrap p-3 align-top"
-                      >
-                        {hasFunding
-                          ? "Funding Money"
-                          : item.payment_method || "None"}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="bank"
-                        className="min-w-[230px] p-3 align-top"
-                      >
-                        <div className="space-y-2">
-                          <Badge
-                            className={bankReconciliationBadgeClass(bankStatus)}
-                          >
-                            {bankReconciliationLabel(bankStatus)}
-                          </Badge>
-                          {item.bank_reconciled_by && (
-                            <p className="text-[11px] font-semibold text-white/50">
-                              By {item.bank_reconciled_by}
-                            </p>
-                          )}
-                          {item.bank_reconciled_at && (
-                            <p className="text-[11px] font-semibold text-white/50">
-                              {formatDate(item.bank_reconciled_at)}
-                            </p>
-                          )}
-                          {item.bank_reconciliation_note && (
-                            <p className="line-clamp-2 text-[11px] text-white/45">
-                              {item.bank_reconciliation_note}
-                            </p>
-                          )}
-                          <div className="grid grid-cols-2 gap-1">
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked ||
-                                bankReconcilingId === item.id
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, () =>
-                                  onUpdateBankReconciliationStatus(
-                                    item,
-                                    "matched",
-                                  ),
-                                )
-                              }
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            >
-                              {bankReconcilingId === item.id ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="h-3 w-3" />
-                              )}{" "}
-                              Matched
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked ||
-                                bankReconcilingId === item.id
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, () =>
-                                  onUpdateBankReconciliationStatus(
-                                    item,
-                                    "needs_review",
-                                  ),
-                                )
-                              }
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-amber-500/15 px-2 py-1.5 text-[11px] font-black text-amber-100 ring-1 ring-amber-300/20 hover:bg-amber-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            >
-                              <ShieldAlert className="h-3 w-3" /> Review
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked ||
-                                bankReconcilingId === item.id
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, () =>
-                                  onUpdateBankReconciliationStatus(
-                                    item,
-                                    "ignored",
-                                  ),
-                                )
-                              }
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-sky-500/15 px-2 py-1.5 text-[11px] font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            >
-                              Ignore
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked ||
-                                bankReconcilingId === item.id
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, () =>
-                                  onUpdateBankReconciliationStatus(
-                                    item,
-                                    "unmatched",
-                                  ),
-                                )
-                              }
-                              className="inline-flex items-center justify-center gap-1 rounded-lg bg-white/10 px-2 py-1.5 text-[11px] font-black text-white/70 ring-1 ring-white/10 hover:bg-white/15 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            >
-                              <RefreshCcw className="h-3 w-3" /> Unmatched
-                            </button>
-                          </div>
-                        </div>
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="receipt"
-                        className="min-w-[230px] p-3 align-top"
-                      >
-                        {missingReceipt ? (
-                          <div
-                            className={`rounded-2xl border px-3 py-2 text-xs text-red-100 ${receiptOverdue ? "border-red-300/30 bg-red-500/15" : "border-red-300/20 bg-red-500/10"}`}
-                          >
-                            <div className="flex items-center gap-2 font-black">
-                              {receiptOverdue ? (
-                                <CalendarClock className="h-4 w-4" />
-                              ) : (
-                                <AlertTriangle className="h-4 w-4" />
-                              )}
-                              {receiptOverdue
-                                ? "Receipt overdue"
-                                : "Missing receipt"}
-                            </div>
-                            <div className="mt-1 text-red-100/70">
-                              {receiptReminderLabel(
-                                item,
-                                activeReceiptReminderDays,
-                              )}
-                            </div>
-                            <div className="mt-2 rounded-xl bg-black/20 px-2 py-1 text-[11px] font-bold text-red-100/75">
-                              Rule: upload receipt within{" "}
-                              {activeReceiptReminderDays} day
-                              {activeReceiptReminderDays === 1 ? "" : "s"} of
-                              the expense.
-                            </div>
-                          </div>
-                        ) : files.length > 0 ? (
-                          <div className="space-y-2">
-                            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                              <div className="font-black">
-                                Receipt / proof attached
-                              </div>
-                              <div className="mt-1 text-emerald-100/70">
-                                {files.length} file
-                                {files.length === 1 ? "" : "s"} attached.
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              {files.slice(0, 3).map((file, index) => (
-                                <a
-                                  key={file.id || `${file.file_url}-${index}`}
-                                  href={file.file_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block max-w-[220px] truncate rounded-lg bg-white/10 px-2 py-1 text-xs font-bold text-white hover:bg-white/20"
-                                  title={
-                                    file.file_name || `Attachment ${index + 1}`
-                                  }
-                                >
-                                  <FileText className="mr-1 inline h-3 w-3" />
-                                  {file.file_name || `Attachment ${index + 1}`}
-                                  {file.file_size
-                                    ? ` (${formatFileSize(file.file_size)})`
-                                    : ""}
-                                </a>
-                              ))}
-                              {files.length > 3 && (
-                                <p className="text-xs text-white/40">
-                                  +{files.length - 3} more file
-                                  {files.length - 3 === 1 ? "" : "s"}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-white/30">NOT UPLOAD YET</span>
-                        )}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="finance"
-                        className="min-w-[260px] p-3 align-top"
-                      >
-                        <div className="space-y-2">
-                          <Badge
-                            className={financeNoteBadgeClass(financeStatus)}
-                          >
-                            {financeNoteStatusLabel(financeStatus)}
-                          </Badge>
-                          {item.finance_note && (
-                            <p className="line-clamp-3 rounded-xl bg-black/20 px-3 py-2 text-xs text-white/65 ring-1 ring-white/10">
-                              {item.finance_note}
-                            </p>
-                          )}
-                          {item.finance_note_updated_by && (
-                            <p className="text-[11px] font-semibold text-white/45">
-                              By {item.finance_note_updated_by}
-                            </p>
-                          )}
-                          {item.finance_note_updated_at && (
-                            <p className="text-[11px] font-semibold text-white/45">
-                              {formatDate(item.finance_note_updated_at)}
-                            </p>
-                          )}
-                          <div className="rounded-xl bg-black/20 p-2 ring-1 ring-white/10">
-                            <label className="mb-1 block text-[11px] font-bold text-white/50">
-                              Update finance query
-                            </label>
-                            <select
-                              value={financeDraft.status}
-                              disabled={paymentActionsLocked}
-                              onChange={(event) =>
-                                setFinanceDraftStatus(
-                                  item,
-                                  event.target.value as FinanceNoteStatus,
-                                )
-                              }
-                              className="w-full rounded-lg bg-black/30 px-2 py-2 text-xs font-bold text-white outline-none ring-1 ring-white/10 focus:ring-cyan-300/40"
-                            >
-                              {financeNoteOptions.map((option) => (
-                                <option
-                                  key={option.value}
-                                  value={option.value}
-                                  className="bg-[#11111f] text-white"
-                                >
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            <textarea
-                              value={financeDraft.note}
-                              disabled={paymentActionsLocked}
-                              onChange={(event) =>
-                                setFinanceDraftNote(item, event.target.value)
-                              }
-                              placeholder="Add finance note..."
-                              className="mt-2 min-h-16 w-full rounded-lg bg-black/30 px-2 py-2 text-xs text-white outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-                            />
-                            <button
-                              type="button"
-                              disabled={
-                                paymentActionsLocked ||
-                                financeNoteUpdatingId === item.id ||
-                                !financeNoteChanged
-                              }
-                              onClick={() =>
-                                runTransactionAction(item, () =>
-                                  saveFinanceDraft(item),
-                                )
-                              }
-                              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20 hover:bg-cyan-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            >
-                              {financeNoteUpdatingId === item.id && (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              )}{" "}
-                              Save finance note
-                            </button>
-                          </div>
-                        </div>
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="checked"
-                        className="min-w-[210px] p-3 align-top"
-                      >
-                        {renderCheckedCell(item)}
-                      </ColumnCell>
-
-                      <ColumnCell
-                        column="actions"
-                        className="sticky right-0 z-10 bg-[#11111f] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
-                      >
-                        <div className="inline-flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            disabled={paymentActionsLocked}
-                            onClick={() => setDetailsItem(item)}
-                            className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                            title={paymentActionLockReason || "View details"}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={paymentActionsLocked}
-                            onClick={() =>
-                              runTransactionAction(item, () =>
-                                onEditTransaction(item),
-                              )
-                            }
-                            className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            title={
-                              paymentActionLockReason || "Edit transaction"
-                            }
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={paymentActionsLocked || deleting}
-                            onClick={() =>
-                              runTransactionAction(item, () =>
-                                onHideTransaction(item.id),
-                              )
-                            }
-                            className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
-                            title={
-                              paymentActionLockReason || "Hide transaction"
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </ColumnCell>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
@@ -4518,6 +5107,14 @@ export default function MoneyTransactionsTable({
                 <p className="mt-1 font-bold text-white">
                   {detailsItem.payment_method || "None"}
                 </p>
+              </div>
+              <div className="rounded-2xl bg-pink-500/10 p-4 ring-1 ring-pink-300/20">
+                <p className="text-xs font-black text-pink-100/70">
+                  Budget tracker
+                </p>
+                <div className="mt-2">
+                  <BudgetBadge item={detailsItem} />
+                </div>
               </div>
               <div className="rounded-2xl bg-white/5 p-4">
                 <p className="text-xs font-black text-white/40">Bank</p>
@@ -4581,7 +5178,7 @@ export default function MoneyTransactionsTable({
                     onEditTransaction(detailsItem),
                   )
                 }
-                className="rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-sky-500/15 px-4 py-3 text-sm font-black text-sky-100 ring-1 ring-sky-300/20 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
                 title={
                   getTransactionLockReason(detailsItem) || "Edit transaction"
                 }
@@ -4596,7 +5193,7 @@ export default function MoneyTransactionsTable({
                     onMarkTransactionChecked(detailsItem),
                   )
                 }
-                className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5 disabled:grayscale disabled:hover:bg-white/5"
+                className="rounded-xl bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
                 title={
                   getTransactionLockReason(detailsItem) ||
                   (detailsItem.checked_at ? "Undo checked" : "Mark checked")

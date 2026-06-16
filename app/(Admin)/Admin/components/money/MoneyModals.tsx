@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { X } from "lucide-react";
 
 import type {
@@ -56,11 +56,6 @@ type MoneyModalsProps = {
   onCloseSponsorForm: () => void;
   onSaveSponsor: () => void | Promise<void>;
 
-  /**
-   * Supplier / contact tracker.
-   * Used for regular suppliers such as printers, venues, insurance,
-   * entertainers, food vendors, security, equipment hire, and custom contacts.
-   */
   supplierFormOpen?: boolean;
   editingSupplier?: SupplierContact | null;
   supplierForm?: SupplierFormState;
@@ -117,6 +112,8 @@ type MoneyModalsProps = {
   onSaveLoanInterest: () => void | Promise<void>;
 };
 
+type ModalTone = "default" | "amber" | "cyan" | "orange" | "blue" | "red";
+
 const supplierCategoryOptions = [
   "Printer",
   "Venue",
@@ -131,9 +128,53 @@ const supplierCategoryOptions = [
   "Other",
 ];
 
+const loanRepaymentPaymentMethods = [
+  "Bank Transfer",
+  "Cash",
+  "Card Machine",
+  "PayPal",
+  "Online Payment",
+  "Other Types",
+];
+
+const toneClasses: Record<
+  ModalTone,
+  { ring: string; panel: string; button: string }
+> = {
+  default: {
+    ring: "ring-white/10 focus:ring-white/30",
+    panel: "border-white/10 bg-white/[0.04] text-white/70",
+    button: "bg-white/10 text-white hover:bg-white/20",
+  },
+  amber: {
+    ring: "ring-amber-300/20 focus:ring-amber-300/40",
+    panel: "border-amber-300/20 bg-amber-500/10 text-amber-100",
+    button: "bg-amber-500 text-black hover:bg-amber-400",
+  },
+  cyan: {
+    ring: "ring-cyan-300/20 focus:ring-cyan-300/40",
+    panel: "border-cyan-300/20 bg-cyan-500/10 text-cyan-100",
+    button: "bg-cyan-500 text-black hover:bg-cyan-400",
+  },
+  orange: {
+    ring: "ring-orange-300/20 focus:ring-orange-300/40",
+    panel: "border-orange-300/20 bg-orange-500/10 text-orange-100",
+    button: "bg-orange-500 text-black hover:bg-orange-400",
+  },
+  blue: {
+    ring: "ring-blue-300/20 focus:ring-blue-300/40",
+    panel: "border-blue-300/20 bg-blue-500/10 text-blue-100",
+    button: "bg-blue-500 text-white hover:bg-blue-400",
+  },
+  red: {
+    ring: "ring-red-300/20 focus:ring-red-300/40",
+    panel: "border-red-300/20 bg-red-500/10 text-red-100",
+    button: "bg-red-500 text-white hover:bg-red-400",
+  },
+};
+
 function isCustomSupplierCategory(category?: string | null) {
   const cleanCategory = String(category || "").trim();
-
   if (!cleanCategory) return false;
 
   return !supplierCategoryOptions.some(
@@ -174,6 +215,949 @@ function notesPlaceholder(type: FundingType) {
   if (type === "loan") return "Loan notes / extra notes / restrictions";
   if (type === "other") return "Funding notes / agreed use / restrictions";
   return "Notes / agreed use / restrictions";
+}
+
+function ModalShell({
+  open,
+  title,
+  description,
+  tone = "default",
+  maxWidth = "max-w-lg",
+  saving = false,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  description?: ReactNode;
+  tone?: ModalTone;
+  maxWidth?: string;
+  saving?: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+      <section
+        className={`max-h-[92vh] w-full ${maxWidth} overflow-y-auto rounded-3xl border border-white/10 bg-[#070716] p-4 text-white shadow-2xl sm:p-5`}
+      >
+        <header className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="break-words text-xl font-black text-white">
+              {title}
+            </h2>
+            {description ? (
+              <p className="mt-1 text-sm leading-6 text-white/60">
+                {description}
+              </p>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="shrink-0 rounded-xl bg-white/10 p-2 text-white/80 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={`Close ${title}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function InfoBox({
+  tone = "default",
+  children,
+}: {
+  tone?: ModalTone;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border p-4 text-sm leading-6 ${toneClasses[tone].panel}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TextInput({
+  value,
+  onChange,
+  placeholder,
+  tone = "default",
+  type = "text",
+  step,
+  name,
+  autoComplete,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  tone?: ModalTone;
+  type?: string;
+  step?: string;
+  name?: string;
+  autoComplete?: string;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      type={type}
+      step={step}
+      name={name}
+      autoComplete={autoComplete}
+      className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 ${toneClasses[tone].ring}`}
+    />
+  );
+}
+
+function TextArea({
+  value,
+  onChange,
+  placeholder,
+  tone = "default",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  tone?: ModalTone;
+}) {
+  return (
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className={`min-h-24 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 ${toneClasses[tone].ring}`}
+    />
+  );
+}
+
+function SelectInput({
+  value,
+  onChange,
+  options,
+  tone = "default",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  tone?: ModalTone;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={`w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ${toneClasses[tone].ring}`}
+    >
+      {options.map((option) => (
+        <option
+          key={option.value}
+          className="bg-[#070716] text-white"
+          value={option.value}
+        >
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ModalActions({
+  cancelLabel = "Cancel",
+  confirmLabel,
+  savingLabel = "Saving...",
+  saving = false,
+  disabled = false,
+  tone = "default",
+  onCancel,
+  onConfirm,
+}: {
+  cancelLabel?: string;
+  confirmLabel: string;
+  savingLabel?: string;
+  saving?: boolean;
+  disabled?: boolean;
+  tone?: ModalTone;
+  onCancel: () => void;
+  onConfirm?: () => void | Promise<void>;
+}) {
+  return (
+    <div className="flex flex-col justify-end gap-3 sm:flex-row">
+      <button
+        type="button"
+        onClick={onCancel}
+        disabled={saving}
+        className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {cancelLabel}
+      </button>
+
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={saving || disabled || !onConfirm}
+        className={`rounded-xl px-4 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${toneClasses[tone].button}`}
+      >
+        {saving ? savingLabel : confirmLabel}
+      </button>
+    </div>
+  );
+}
+
+function FundingModal({
+  open,
+  editingSponsor,
+  sponsorForm,
+  setSponsorForm,
+  savingSponsor,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  editingSponsor: Sponsor | null;
+  sponsorForm: SponsorFormState;
+  setSponsorForm: Dispatch<SetStateAction<SponsorFormState>>;
+  savingSponsor: boolean;
+  onClose: () => void;
+  onSave: () => void | Promise<void>;
+}) {
+  const activeFundingType = sponsorForm.fundingType || "sponsor";
+  const activeFundingLabel = fundingTypeLabel(activeFundingType);
+  const isLoan = activeFundingType === "loan";
+
+  return (
+    <ModalShell
+      open={open}
+      title={editingSponsor ? "Edit Funding" : "Add Funding"}
+      description={
+        editingSponsor
+          ? "Update this funding record, agreed amount and received money."
+          : "Add a sponsor, grant, loan or other restricted funding record."
+      }
+      saving={savingSponsor}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="mb-2 block text-sm font-bold text-white/80">
+            Funding type
+          </label>
+          <SelectInput
+            value={activeFundingType}
+            tone="amber"
+            onChange={(value) =>
+              setSponsorForm((prev) => ({
+                ...prev,
+                fundingType: value as FundingType,
+                loanMonthlyPayment:
+                  value === "loan" ? prev.loanMonthlyPayment : "",
+                loanInterestType:
+                  value === "loan" ? prev.loanInterestType || "none" : "none",
+                loanInterestAmount:
+                  value === "loan" ? prev.loanInterestAmount : "",
+                loanDueDate: value === "loan" ? prev.loanDueDate : "",
+                loanRepaymentTerms:
+                  value === "loan" ? prev.loanRepaymentTerms : "",
+              }))
+            }
+            options={[
+              { value: "sponsor", label: "Sponsor" },
+              { value: "grant", label: "Grant Money" },
+              { value: "loan", label: "Loan" },
+              { value: "other", label: "Other" },
+            ]}
+          />
+        </div>
+
+        <TextInput
+          value={sponsorForm.sponsorName}
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, sponsorName: value }))
+          }
+          placeholder={fundingNamePlaceholder(activeFundingType)}
+        />
+
+        <TextInput
+          value={sponsorForm.contactName}
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, contactName: value }))
+          }
+          placeholder="Contact name"
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput
+            value={sponsorForm.email}
+            onChange={(value) =>
+              setSponsorForm((prev) => ({ ...prev, email: value }))
+            }
+            placeholder="Email"
+            type="email"
+          />
+
+          <TextInput
+            value={sponsorForm.phone}
+            onChange={(value) =>
+              setSponsorForm((prev) => ({ ...prev, phone: value }))
+            }
+            placeholder="Phone"
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput
+            value={sponsorForm.agreedAmount}
+            onChange={(value) =>
+              setSponsorForm((prev) => ({ ...prev, agreedAmount: value }))
+            }
+            placeholder={agreedAmountPlaceholder(activeFundingType)}
+            type="number"
+            step="0.01"
+          />
+
+          <TextInput
+            value={sponsorForm.receivedAmount}
+            onChange={(value) =>
+              setSponsorForm((prev) => ({ ...prev, receivedAmount: value }))
+            }
+            placeholder={receivedAmountPlaceholder(activeFundingType)}
+            tone="amber"
+            type="number"
+            step="0.01"
+          />
+        </div>
+
+        {isLoan ? (
+          <LoanSetupFields
+            sponsorForm={sponsorForm}
+            setSponsorForm={setSponsorForm}
+          />
+        ) : null}
+
+        <TextArea
+          value={sponsorForm.notes}
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, notes: value }))
+          }
+          placeholder={notesPlaceholder(activeFundingType)}
+        />
+
+        <InfoBox tone="amber">
+          {isLoan ? (
+            <>
+              This will be saved as <strong>Loan</strong>. Loan amount and
+              interest show what is owed. Money paid back should be recorded
+              later using <strong>Record loan repayment</strong>.
+            </>
+          ) : (
+            <>
+              This will be saved as <strong>{activeFundingLabel}</strong>. You
+              can track money received, money spent and remaining balance in the
+              funding breakdown.
+            </>
+          )}
+        </InfoBox>
+
+        <button
+          type="button"
+          disabled={savingSponsor}
+          onClick={onSave}
+          className="w-full rounded-xl bg-amber-500 px-4 py-3 font-bold text-black hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {savingSponsor
+            ? editingSponsor
+              ? "Updating..."
+              : "Saving..."
+            : editingSponsor
+              ? "Update Funding"
+              : "Save Funding"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function LoanSetupFields({
+  sponsorForm,
+  setSponsorForm,
+}: {
+  sponsorForm: SponsorFormState;
+  setSponsorForm: Dispatch<SetStateAction<SponsorFormState>>;
+}) {
+  return (
+    <div className="space-y-4 rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4">
+      <InfoBox tone="blue">
+        <strong>Loan setup:</strong> add the loan amount, planned monthly
+        payment, any lender interest and the due date. Money paid back must be
+        added later using
+        <strong> Record loan repayment</strong>.
+      </InfoBox>
+
+      <div>
+        <label className="mb-2 block text-sm font-bold text-blue-100">
+          Planned monthly repayment amount
+        </label>
+        <TextInput
+          value={sponsorForm.loanMonthlyPayment}
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, loanMonthlyPayment: value }))
+          }
+          placeholder="Example: 120.01"
+          tone="blue"
+          type="number"
+          step="0.01"
+        />
+        <p className="mt-2 text-xs leading-5 text-blue-100/70">
+          This is the payment plan only. It does not count as paid back until
+          you use Record loan repayment.
+        </p>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-bold text-blue-100">
+          Is the lender adding interest?
+        </label>
+        <SelectInput
+          value={sponsorForm.loanInterestType}
+          tone="blue"
+          onChange={(value) =>
+            setSponsorForm((prev) => ({
+              ...prev,
+              loanInterestType: value as "none" | "fixed" | "percentage",
+              loanInterestAmount:
+                value === "none" ? "" : prev.loanInterestAmount,
+            }))
+          }
+          options={[
+            { value: "none", label: "No interest added" },
+            { value: "fixed", label: "Yes - fixed interest added on top" },
+            {
+              value: "percentage",
+              label: "Yes - percentage interest added on top",
+            },
+          ]}
+        />
+      </div>
+
+      {sponsorForm.loanInterestType !== "none" ? (
+        <div>
+          <label className="mb-2 block text-sm font-bold text-blue-100">
+            {sponsorForm.loanInterestType === "percentage"
+              ? "Interest percentage added by lender"
+              : "Interest charge added by lender"}
+          </label>
+          <TextInput
+            value={sponsorForm.loanInterestAmount}
+            onChange={(value) =>
+              setSponsorForm((prev) => ({ ...prev, loanInterestAmount: value }))
+            }
+            placeholder={
+              sponsorForm.loanInterestType === "percentage"
+                ? "Example: 10 means 10% extra owed"
+                : "Example: 200 means £200 extra interest added"
+            }
+            tone="blue"
+            type="number"
+            step="0.01"
+          />
+          <div className="mt-3 space-y-3">
+            <InfoBox tone="orange">
+              Only use this if the lender is charging extra interest on top of
+              the loan. Do not use this box for repayments.
+            </InfoBox>
+            <InfoBox tone="amber">
+              This interest will be added to the total loan owed. For example, a
+              £1,300 loan with £200 interest will show as £1,500 owed.
+            </InfoBox>
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <label className="mb-2 block text-sm font-bold text-blue-100">
+          Loan due date
+        </label>
+        <TextInput
+          type="date"
+          value={sponsorForm.loanDueDate}
+          tone="blue"
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, loanDueDate: value }))
+          }
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-bold text-blue-100">
+          Repayment terms
+        </label>
+        <TextArea
+          value={sponsorForm.loanRepaymentTerms}
+          tone="blue"
+          onChange={(value) =>
+            setSponsorForm((prev) => ({ ...prev, loanRepaymentTerms: value }))
+          }
+          placeholder="Example: Planned repayment is £120.01 per month. Full loan must be paid by the due date."
+        />
+      </div>
+    </div>
+  );
+}
+
+function SupplierModal({
+  open,
+  editingSupplier,
+  supplierForm,
+  setSupplierForm,
+  savingSupplier,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  editingSupplier: SupplierContact | null;
+  supplierForm?: SupplierFormState;
+  setSupplierForm?: Dispatch<SetStateAction<SupplierFormState>>;
+  savingSupplier: boolean;
+  onClose?: () => void;
+  onSave?: () => void | Promise<void>;
+}) {
+  if (!supplierForm) return null;
+
+  return (
+    <ModalShell
+      open={open}
+      title={
+        editingSupplier ? "Edit Supplier / Contact" : "Add Supplier / Contact"
+      }
+      description="Store regular suppliers, venues, insurance providers, entertainers, food vendors and other contacts."
+      tone="cyan"
+      saving={savingSupplier}
+      onClose={() => onClose?.()}
+    >
+      <div className="space-y-4">
+        <TextInput
+          value={supplierForm.supplierName}
+          onChange={(value) =>
+            setSupplierForm?.((prev) => ({ ...prev, supplierName: value }))
+          }
+          placeholder="Supplier / business name, e.g. Local Printer"
+          tone="cyan"
+        />
+
+        <TextInput
+          value={supplierForm.contactName}
+          onChange={(value) =>
+            setSupplierForm?.((prev) => ({ ...prev, contactName: value }))
+          }
+          placeholder="Contact name"
+        />
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <TextInput
+            value={supplierForm.email}
+            onChange={(value) =>
+              setSupplierForm?.((prev) => ({ ...prev, email: value }))
+            }
+            placeholder="Email"
+            type="email"
+          />
+          <TextInput
+            value={supplierForm.phone}
+            onChange={(value) =>
+              setSupplierForm?.((prev) => ({ ...prev, phone: value }))
+            }
+            placeholder="Phone"
+          />
+        </div>
+
+        <TextInput
+          value={supplierForm.website}
+          onChange={(value) =>
+            setSupplierForm?.((prev) => ({ ...prev, website: value }))
+          }
+          placeholder="Website"
+        />
+
+        <SupplierCategoryField
+          supplierForm={supplierForm}
+          setSupplierForm={setSupplierForm}
+        />
+
+        <TextArea
+          value={supplierForm.notes}
+          onChange={(value) =>
+            setSupplierForm?.((prev) => ({ ...prev, notes: value }))
+          }
+          placeholder="Notes, e.g. quote details, usual service, payment terms, or contact history"
+        />
+
+        <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <input
+            type="checkbox"
+            checked={supplierForm.isActive}
+            onChange={(event) =>
+              setSupplierForm?.((prev) => ({
+                ...prev,
+                isActive: event.target.checked,
+              }))
+            }
+            className="mt-1 h-4 w-4 rounded border-white/20"
+          />
+          <span>
+            <span className="block text-sm font-bold text-white">
+              Active supplier
+            </span>
+            <span className="block text-xs leading-5 text-white/50">
+              Turn this off to archive the supplier while keeping old linked
+              transactions safe.
+            </span>
+          </span>
+        </label>
+
+        <InfoBox tone="cyan">
+          This supplier can be linked to transactions so you can search, filter
+          and report payments by regular contacts.
+        </InfoBox>
+
+        <ModalActions
+          tone="cyan"
+          saving={savingSupplier}
+          confirmLabel={editingSupplier ? "Update Supplier" : "Save Supplier"}
+          savingLabel={editingSupplier ? "Updating..." : "Saving..."}
+          disabled={!supplierForm.supplierName.trim()}
+          onCancel={() => onClose?.()}
+          onConfirm={onSave}
+        />
+      </div>
+    </ModalShell>
+  );
+}
+
+function SupplierCategoryField({
+  supplierForm,
+  setSupplierForm,
+}: {
+  supplierForm: SupplierFormState;
+  setSupplierForm?: Dispatch<SetStateAction<SupplierFormState>>;
+}) {
+  const showCustomCategory =
+    isCustomSupplierCategory(supplierForm.category) ||
+    supplierForm.category === "";
+
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-bold text-white/80">
+        Supplier category
+      </label>
+      <SelectInput
+        value={
+          isCustomSupplierCategory(supplierForm.category)
+            ? "__custom__"
+            : supplierForm.category
+        }
+        tone="cyan"
+        onChange={(value) =>
+          setSupplierForm?.((prev) => ({
+            ...prev,
+            category: value === "__custom__" ? "" : value,
+          }))
+        }
+        options={[
+          { value: "", label: "Choose category..." },
+          ...supplierCategoryOptions.map((category) => ({
+            value: category,
+            label: category,
+          })),
+          { value: "__custom__", label: "Custom category..." },
+        ]}
+      />
+
+      {showCustomCategory ? (
+        <div className="mt-3">
+          <label className="mb-2 block text-xs font-bold text-cyan-100/80">
+            Custom category
+          </label>
+          <TextInput
+            value={
+              isCustomSupplierCategory(supplierForm.category)
+                ? supplierForm.category
+                : ""
+            }
+            onChange={(value) =>
+              setSupplierForm?.((prev) => ({ ...prev, category: value }))
+            }
+            placeholder="Type your own category, e.g. Signage, First Aid, Toilets"
+            tone="cyan"
+          />
+          <p className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-cyan-100/70">
+            Type a new category here if it is not listed above. It will be saved
+            against this supplier.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LoanRepaymentModal({
+  sponsor,
+  form,
+  setForm,
+  saving,
+  onClose,
+  onSave,
+}: {
+  sponsor: LoanActionFunding | null;
+  form: LoanRepaymentFormState;
+  setForm: Dispatch<SetStateAction<LoanRepaymentFormState>>;
+  saving: boolean;
+  onClose: () => void;
+  onSave: () => void | Promise<void>;
+}) {
+  return (
+    <ModalShell
+      open={Boolean(sponsor)}
+      title="Record loan repayment"
+      description={
+        <>
+          Record money paid back to <strong>{sponsor?.sponsor_name}</strong>.
+        </>
+      }
+      tone="orange"
+      saving={saving}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <InfoBox tone="orange">
+          Use this form only when Burton Pride has actually paid money back to
+          the lender. This reduces the amount still to repay.
+        </InfoBox>
+
+        <TextInput
+          value={form.amount}
+          onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))}
+          placeholder="Amount paid back, e.g. 200"
+          type="number"
+          step="0.01"
+          tone="orange"
+        />
+
+        <SelectInput
+          value={form.paymentMethod}
+          tone="orange"
+          onChange={(value) =>
+            setForm((prev) => ({ ...prev, paymentMethod: value }))
+          }
+          options={loanRepaymentPaymentMethods.map((method) => ({
+            value: method,
+            label: method,
+          }))}
+        />
+
+        <TextInput
+          type="date"
+          value={form.transactionDate}
+          onChange={(value) =>
+            setForm((prev) => ({ ...prev, transactionDate: value }))
+          }
+          tone="orange"
+        />
+
+        <TextArea
+          value={form.note}
+          onChange={(value) => setForm((prev) => ({ ...prev, note: value }))}
+          placeholder="Note, e.g. first repayment / monthly loan repayment"
+          tone="orange"
+        />
+
+        <InfoBox tone="orange">
+          This will be saved as an expense and linked to the loan.
+        </InfoBox>
+
+        <ModalActions
+          tone="orange"
+          saving={saving}
+          confirmLabel="Save Repayment"
+          savingLabel="Saving..."
+          onCancel={onClose}
+          onConfirm={onSave}
+        />
+      </div>
+    </ModalShell>
+  );
+}
+
+function LoanInterestModal({
+  sponsor,
+  form,
+  setForm,
+  saving,
+  onClose,
+  onSave,
+}: {
+  sponsor: LoanActionFunding | null;
+  form: LoanInterestFormState;
+  setForm: Dispatch<SetStateAction<LoanInterestFormState>>;
+  saving: boolean;
+  onClose: () => void;
+  onSave: () => void | Promise<void>;
+}) {
+  return (
+    <ModalShell
+      open={Boolean(sponsor)}
+      title="Add lender interest"
+      description={
+        <>
+          Add extra interest charged by <strong>{sponsor?.sponsor_name}</strong>
+          .
+        </>
+      }
+      tone="blue"
+      saving={saving}
+      onClose={onClose}
+    >
+      <div className="space-y-4">
+        <InfoBox tone="blue">
+          Use this only for extra interest or charges added by the lender. Do
+          not use this for money Burton Pride has paid back.
+        </InfoBox>
+
+        <TextInput
+          value={form.amount}
+          onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))}
+          placeholder="Interest charged by lender, e.g. 25"
+          type="number"
+          step="0.01"
+          tone="blue"
+        />
+
+        <TextInput
+          type="date"
+          value={form.transactionDate}
+          onChange={(value) =>
+            setForm((prev) => ({ ...prev, transactionDate: value }))
+          }
+          tone="blue"
+        />
+
+        <TextArea
+          value={form.note}
+          onChange={(value) => setForm((prev) => ({ ...prev, note: value }))}
+          placeholder="Note, e.g. lender added interest charge"
+          tone="blue"
+        />
+
+        <InfoBox tone="blue">
+          This will increase the total amount owed on the loan.
+        </InfoBox>
+
+        <ModalActions
+          tone="blue"
+          saving={saving}
+          confirmLabel="Save Lender Interest"
+          savingLabel="Saving..."
+          onCancel={onClose}
+          onConfirm={onSave}
+        />
+      </div>
+    </ModalShell>
+  );
+}
+
+function ConfirmModal({
+  open,
+  title,
+  message,
+  warning,
+  confirmLabel,
+  savingLabel = "Working...",
+  password,
+  passwordLabel,
+  passwordName,
+  setPassword,
+  count,
+  saving = false,
+  tone = "red",
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  message: ReactNode;
+  warning?: ReactNode;
+  confirmLabel: string;
+  savingLabel?: string;
+  password?: string;
+  passwordLabel?: string;
+  passwordName?: string;
+  setPassword?: Dispatch<SetStateAction<string>>;
+  count?: number;
+  saving?: boolean;
+  tone?: ModalTone;
+  onClose: () => void;
+  onConfirm?: () => void | Promise<void>;
+}) {
+  const needsPassword = Boolean(setPassword);
+  const disabled = needsPassword ? !String(password || "").trim() : false;
+
+  return (
+    <ModalShell
+      open={open}
+      title={title}
+      saving={saving}
+      onClose={onClose}
+      maxWidth="max-w-md"
+    >
+      <div className="space-y-5">
+        <p className="text-sm leading-6 text-white/70">{message}</p>
+
+        {warning ? <InfoBox tone={tone}>{warning}</InfoBox> : null}
+
+        {count !== undefined ? (
+          <p className="rounded-xl bg-black/20 px-3 py-2 text-xs font-bold text-white/55">
+            Records affected: <span className="text-white">{count}</span>
+          </p>
+        ) : null}
+
+        {needsPassword ? (
+          <div>
+            <label className="block text-sm font-bold text-white/80">
+              {passwordLabel}
+            </label>
+            <TextInput
+              type="password"
+              value={password || ""}
+              onChange={(value) => setPassword?.(value)}
+              placeholder="Enter main admin delete password"
+              name={passwordName}
+              autoComplete="new-password"
+              tone={tone}
+            />
+          </div>
+        ) : null}
+
+        <ModalActions
+          tone={tone}
+          saving={saving}
+          disabled={disabled}
+          confirmLabel={confirmLabel}
+          savingLabel={savingLabel}
+          onCancel={onClose}
+          onConfirm={onConfirm}
+        />
+      </div>
+    </ModalShell>
+  );
 }
 
 export default function MoneyModals({
@@ -240,1062 +1224,131 @@ export default function MoneyModals({
   onCloseLoanInterest,
   onSaveLoanInterest,
 }: MoneyModalsProps) {
-  const activeFundingType = sponsorForm.fundingType || "sponsor";
-  const activeFundingLabel = fundingTypeLabel(activeFundingType);
-
   return (
     <>
-      {sponsorFormOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-         <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#070716] p-4 text-white shadow-2xl sm:p-5">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="break-words text-xl font-bold">
-                  {editingSponsor ? "Edit Funding" : "Add Funding"}
-                </h2>
-
-                <p className="text-sm text-white/60">
-                  {editingSponsor
-                    ? "Update this funding record, agreed amount, and received money."
-                    : "Add sponsor, grant money, loan, or other funding so income and spending can be tracked clearly."}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={onCloseSponsorForm}
-                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20"
-                aria-label="Close funding form"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-bold text-white/80">
-                  Funding type
-                </label>
-
-                <select
-                  value={activeFundingType}
-                  onChange={(event) =>
-                    setSponsorForm((prev) => ({
-                      ...prev,
-                      fundingType: event.target.value as FundingType,
-                      loanMonthlyPayment:
-                        event.target.value === "loan"
-                          ? prev.loanMonthlyPayment
-                          : "",
-                      loanInterestType:
-                        event.target.value === "loan"
-                          ? prev.loanInterestType || "none"
-                          : "none",
-                      loanInterestAmount:
-                        event.target.value === "loan"
-                          ? prev.loanInterestAmount
-                          : "",
-                      loanDueDate:
-                        event.target.value === "loan" ? prev.loanDueDate : "",
-                      loanRepaymentTerms:
-                        event.target.value === "loan"
-                          ? prev.loanRepaymentTerms
-                          : "",
-                    }))
-                  }
-                  className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-amber-300/20 focus:ring-amber-300/40"
-                >
-                  <option className="bg-[#070716] text-white" value="sponsor">
-                    Sponsor
-                  </option>
-                  <option className="bg-[#070716] text-white" value="grant">
-                    Grant Money
-                  </option>
-                  <option className="bg-[#070716] text-white" value="loan">
-                    Loan
-                  </option>
-                  <option className="bg-[#070716] text-white" value="other">
-                    Other
-                  </option>
-                </select>
-              </div>
-
-              <input
-                value={sponsorForm.sponsorName}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    sponsorName: event.target.value,
-                  }))
-                }
-                placeholder={fundingNamePlaceholder(activeFundingType)}
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.contactName}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    contactName: event.target.value,
-                  }))
-                }
-                placeholder="Contact name"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.email}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    email: event.target.value,
-                  }))
-                }
-                placeholder="Email"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.phone}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    phone: event.target.value,
-                  }))
-                }
-                placeholder="Phone"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.agreedAmount}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    agreedAmount: event.target.value,
-                  }))
-                }
-                placeholder={agreedAmountPlaceholder(activeFundingType)}
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <input
-                value={sponsorForm.receivedAmount}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    receivedAmount: event.target.value,
-                  }))
-                }
-                placeholder={receivedAmountPlaceholder(activeFundingType)}
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-emerald-500/10 p-3 outline-none ring-1 ring-emerald-300/20 focus:ring-emerald-300/40"
-              />
-
-              {activeFundingType === "loan" && (
-                <div className="space-y-4 rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4">
-                  <div className="rounded-2xl border border-blue-300/20 bg-black/20 p-4 text-sm leading-6 text-blue-100">
-                    <strong>Loan setup:</strong> add the loan amount, planned
-                    monthly payment, any lender interest, and the due date. Money
-                    you have actually paid back must be added later using{" "}
-                    <strong>Record loan repayment</strong>.
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-bold text-blue-100">
-                      Planned monthly repayment amount
-                    </label>
-
-                    <input
-                      value={sponsorForm.loanMonthlyPayment}
-                      onChange={(event) =>
-                        setSponsorForm((prev) => ({
-                          ...prev,
-                          loanMonthlyPayment: event.target.value,
-                        }))
-                      }
-                      placeholder="Example: 120.01"
-                      type="number"
-                      step="0.01"
-                      className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-                    />
-
-                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
-                      This is the payment plan only. It does not count as paid
-                      back until you use “Record loan repayment”.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-bold text-blue-100">
-                      Is the lender adding interest?
-                    </label>
-
-                    <select
-                      value={sponsorForm.loanInterestType}
-                      onChange={(event) =>
-                        setSponsorForm((prev) => ({
-                          ...prev,
-                          loanInterestType: event.target.value as
-                            | "none"
-                            | "fixed"
-                            | "percentage",
-                          loanInterestAmount:
-                            event.target.value === "none"
-                              ? ""
-                              : prev.loanInterestAmount,
-                        }))
-                      }
-                      className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-                    >
-                      <option className="bg-[#070716] text-white" value="none">
-                        No interest added
-                      </option>
-
-                      <option className="bg-[#070716] text-white" value="fixed">
-                        Yes - fixed interest added on top
-                      </option>
-
-                      <option
-                        className="bg-[#070716] text-white"
-                        value="percentage"
-                      >
-                        Yes - percentage interest added on top
-                      </option>
-                    </select>
-
-                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
-                      Interest is only extra money charged by the lender. Do not
-                      use this for repayments.
-                    </p>
-                  </div>
-
-                  {sponsorForm.loanInterestType !== "none" && (
-                    <div>
-                      <label className="mb-2 block text-sm font-bold text-blue-100">
-                        {sponsorForm.loanInterestType === "percentage"
-                          ? "Interest percentage added by lender"
-                          : "Interest charge added by lender"}
-                      </label>
-
-                      <input
-                        value={sponsorForm.loanInterestAmount}
-                        onChange={(event) =>
-                          setSponsorForm((prev) => ({
-                            ...prev,
-                            loanInterestAmount: event.target.value,
-                          }))
-                        }
-                        placeholder={
-                          sponsorForm.loanInterestType === "percentage"
-                            ? "Example: 10 means 10% extra owed"
-                            : "Example: 200 means £200 extra interest added"
-                        }
-                        type="number"
-                        step="0.01"
-                        className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-                      />
-
-                      <div className="mt-3 rounded-xl border border-orange-300/20 bg-orange-500/10 p-3 text-xs leading-5 text-orange-100">
-                        Only use this if the lender is charging extra interest
-                        on top of the loan. Do not use this box for repayments.
-                        Repayments should be added using the “Record loan
-                        repayment” button after saving the loan.
-                      </div>
-
-                      <div className="mt-3 rounded-xl border border-yellow-300/20 bg-yellow-500/10 p-3 text-xs leading-5 text-yellow-100">
-                        This interest will be added to the total loan owed. For
-                        example, a £1,300 loan with £200 interest will show as
-                        £1,500 owed.
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="mb-2 block text-sm font-bold text-blue-100">
-                      Loan due date
-                    </label>
-
-                    <input
-                      type="date"
-                      value={sponsorForm.loanDueDate}
-                      onChange={(event) =>
-                        setSponsorForm((prev) => ({
-                          ...prev,
-                          loanDueDate: event.target.value,
-                        }))
-                      }
-                      className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-                    />
-
-                    <p className="mt-2 text-xs leading-5 text-blue-100/70">
-                      The date the loan should be fully paid back by.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-bold text-blue-100">
-                      Repayment terms
-                    </label>
-
-                    <textarea
-                      value={sponsorForm.loanRepaymentTerms}
-                      onChange={(event) =>
-                        setSponsorForm((prev) => ({
-                          ...prev,
-                          loanRepaymentTerms: event.target.value,
-                        }))
-                      }
-                      placeholder="Example: Planned repayment is £120.01 per month. Full loan must be paid by the due date."
-                      className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <textarea
-                value={sponsorForm.notes}
-                onChange={(event) =>
-                  setSponsorForm((prev) => ({
-                    ...prev,
-                    notes: event.target.value,
-                  }))
-                }
-                placeholder={notesPlaceholder(activeFundingType)}
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10"
-              />
-
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-                {activeFundingType === "loan" ? (
-                  <>
-                    This will be saved as <strong>Loan</strong>. Loan amount and
-                    interest show what is owed. Money paid back should be
-                    recorded later using <strong>Record loan repayment</strong>.
-                  </>
-                ) : (
-                  <>
-                    This will be saved as{" "}
-                    <strong>{activeFundingLabel}</strong>. You can track money
-                    received, money spent, and remaining balance in the funding
-                    breakdown.
-                  </>
-                )}
-              </div>
-
-              <button
-                type="button"
-                disabled={savingSponsor}
-                onClick={onSaveSponsor}
-                className="w-full rounded-xl bg-amber-500 px-4 py-3 font-bold text-black hover:bg-amber-400 disabled:opacity-60"
-              >
-                {savingSponsor
-                  ? editingSponsor
-                    ? "Updating..."
-                    : "Saving..."
-                  : editingSponsor
-                    ? "Update Funding"
-                    : "Save Funding"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {supplierFormOpen && supplierForm && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-cyan-300/20 bg-[#070716] p-4 text-white shadow-2xl sm:p-5">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="break-words text-xl font-bold">
-                  {editingSupplier ? "Edit Supplier / Contact" : "Add Supplier / Contact"}
-                </h2>
-
-                <p className="text-sm leading-6 text-white/60">
-                  Store regular suppliers such as printers, venues, insurance
-                  providers, entertainers, food vendors, security, equipment
-                  hire, or custom contacts, then link payments to them.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={onCloseSupplierForm}
-                disabled={savingSupplier}
-                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
-                aria-label="Close supplier form"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <input
-                value={supplierForm.supplierName}
-                onChange={(event) =>
-                  setSupplierForm?.((prev) => ({
-                    ...prev,
-                    supplierName: event.target.value,
-                  }))
-                }
-                placeholder="Supplier / business name, e.g. Local Printer"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-cyan-300/20 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
-
-              <input
-                value={supplierForm.contactName}
-                onChange={(event) =>
-                  setSupplierForm?.((prev) => ({
-                    ...prev,
-                    contactName: event.target.value,
-                  }))
-                }
-                placeholder="Contact name"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <input
-                  value={supplierForm.email}
-                  onChange={(event) =>
-                    setSupplierForm?.((prev) => ({
-                      ...prev,
-                      email: event.target.value,
-                    }))
-                  }
-                  placeholder="Email"
-                  type="email"
-                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-                />
-
-                <input
-                  value={supplierForm.phone}
-                  onChange={(event) =>
-                    setSupplierForm?.((prev) => ({
-                      ...prev,
-                      phone: event.target.value,
-                    }))
-                  }
-                  placeholder="Phone"
-                  className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-                />
-              </div>
-
-              <input
-                value={supplierForm.website}
-                onChange={(event) =>
-                  setSupplierForm?.((prev) => ({
-                    ...prev,
-                    website: event.target.value,
-                  }))
-                }
-                placeholder="Website"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
-
-              <div>
-                <label className="mb-2 block text-sm font-bold text-white/80">
-                  Supplier category
-                </label>
-
-                <select
-                  value={
-                    isCustomSupplierCategory(supplierForm.category)
-                      ? "__custom__"
-                      : supplierForm.category
-                  }
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-
-                    setSupplierForm?.((prev) => ({
-                      ...prev,
-                      category: nextValue === "__custom__" ? "" : nextValue,
-                    }));
-                  }}
-                  className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-cyan-300/20 focus:ring-cyan-300/40"
-                >
-                  <option className="bg-[#070716] text-white" value="">
-                    Choose category...
-                  </option>
-
-                  {supplierCategoryOptions.map((category) => (
-                    <option
-                      key={category}
-                      className="bg-[#070716] text-white"
-                      value={category}
-                    >
-                      {category}
-                    </option>
-                  ))}
-
-                  <option className="bg-[#070716] text-white" value="__custom__">
-                    Custom category...
-                  </option>
-                </select>
-
-                {(isCustomSupplierCategory(supplierForm.category) ||
-                  supplierForm.category === "") && (
-                  <div className="mt-3">
-                    <label className="mb-2 block text-xs font-bold text-cyan-100/80">
-                      Custom category
-                    </label>
-
-                    <input
-                      value={
-                        isCustomSupplierCategory(supplierForm.category)
-                          ? supplierForm.category
-                          : ""
-                      }
-                      onChange={(event) =>
-                        setSupplierForm?.((prev) => ({
-                          ...prev,
-                          category: event.target.value,
-                        }))
-                      }
-                      placeholder="Type your own category, e.g. Signage, First Aid, Toilets"
-                      className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-cyan-300/20 placeholder:text-white/35 focus:ring-cyan-300/40"
-                    />
-
-                    <p className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-cyan-100/70">
-                      Type a new category here if it is not listed above. It
-                      will be saved against this supplier and can be used for
-                      reports and searching.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <textarea
-                value={supplierForm.notes}
-                onChange={(event) =>
-                  setSupplierForm?.((prev) => ({
-                    ...prev,
-                    notes: event.target.value,
-                  }))
-                }
-                placeholder="Notes, e.g. quote details, usual service, payment terms, or contact history"
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 placeholder:text-white/35 focus:ring-cyan-300/40"
-              />
-
-              <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                <input
-                  type="checkbox"
-                  checked={supplierForm.isActive}
-                  onChange={(event) =>
-                    setSupplierForm?.((prev) => ({
-                      ...prev,
-                      isActive: event.target.checked,
-                    }))
-                  }
-                  className="mt-1 h-4 w-4 rounded border-white/20"
-                />
-
-                <span>
-                  <span className="block text-sm font-bold text-white">
-                    Active supplier
-                  </span>
-
-                  <span className="block text-xs leading-5 text-white/50">
-                    Turn this off to archive the supplier while keeping old
-                    linked transactions safe.
-                  </span>
-                </span>
-              </label>
-
-              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 text-sm leading-6 text-cyan-100">
-                This supplier can be linked to transactions so you can search,
-                filter and report payments by regular contacts.
-              </div>
-
-              <div className="flex flex-col justify-end gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={onCloseSupplierForm}
-                  disabled={savingSupplier}
-                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onSaveSupplier}
-                  disabled={
-                    savingSupplier ||
-                    !supplierForm.supplierName.trim() ||
-                    !onSaveSupplier
-                  }
-                  className="rounded-xl bg-cyan-500 px-4 py-3 text-sm font-bold text-black hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingSupplier
-                    ? editingSupplier
-                      ? "Updating..."
-                      : "Saving..."
-                    : editingSupplier
-                      ? "Update Supplier"
-                      : "Save Supplier"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {loanRepaymentSponsor && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-orange-300/20 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="break-words text-xl font-bold">
-                  Record loan repayment
-                </h2>
-
-                <p className="text-sm text-white/60">
-                  Record money paid back to{" "}
-                  <strong>{loanRepaymentSponsor.sponsor_name}</strong>.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={onCloseLoanRepayment}
-                disabled={savingLoanRepayment}
-                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
-                aria-label="Close loan repayment form"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4 text-sm leading-6 text-orange-100">
-                Use this form only when Burton Pride has actually paid money
-                back to the lender. This reduces the amount still to repay.
-              </div>
-
-              <input
-                value={loanRepaymentForm.amount}
-                onChange={(event) =>
-                  setLoanRepaymentForm((prev) => ({
-                    ...prev,
-                    amount: event.target.value,
-                  }))
-                }
-                placeholder="Amount paid back, e.g. 200"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
-              />
-
-              <select
-                value={loanRepaymentForm.paymentMethod}
-                onChange={(event) =>
-                  setLoanRepaymentForm((prev) => ({
-                    ...prev,
-                    paymentMethod: event.target.value,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
-              >
-                <option className="bg-[#070716] text-white" value="Bank Transfer">
-                  Bank Transfer
-                </option>
-                <option className="bg-[#070716] text-white" value="Cash">
-                  Cash
-                </option>
-                <option className="bg-[#070716] text-white" value="Card Machine">
-                  Card Machine
-                </option>
-                <option className="bg-[#070716] text-white" value="PayPal">
-                  PayPal
-                </option>
-                <option className="bg-[#070716] text-white" value="Online Payment">
-                  Online Payment
-                </option>
-                <option className="bg-[#070716] text-white" value="Other Types">
-                  Other Types
-                </option>
-              </select>
-
-              <input
-                type="date"
-                value={loanRepaymentForm.transactionDate}
-                onChange={(event) =>
-                  setLoanRepaymentForm((prev) => ({
-                    ...prev,
-                    transactionDate: event.target.value,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
-              />
-
-              <textarea
-                value={loanRepaymentForm.note}
-                onChange={(event) =>
-                  setLoanRepaymentForm((prev) => ({
-                    ...prev,
-                    note: event.target.value,
-                  }))
-                }
-                placeholder="Note, e.g. first repayment / monthly loan repayment"
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-orange-300/20 focus:ring-orange-300/40"
-              />
-
-              <div className="rounded-2xl border border-orange-300/20 bg-orange-500/10 p-4 text-sm text-orange-100">
-                This will be saved as an expense and linked to the loan.
-              </div>
-
-              <div className="flex flex-col justify-end gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={onCloseLoanRepayment}
-                  disabled={savingLoanRepayment}
-                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onSaveLoanRepayment}
-                  disabled={savingLoanRepayment}
-                  className="rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-black hover:bg-orange-400 disabled:opacity-60"
-                >
-                  {savingLoanRepayment ? "Saving..." : "Save Repayment"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {loanInterestSponsor && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl border border-blue-300/20 bg-[#070716] p-6 text-white shadow-2xl">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="break-words text-xl font-bold">
-                  Add lender interest
-                </h2>
-
-                <p className="text-sm text-white/60">
-                  Add extra interest charged by{" "}
-                  <strong>{loanInterestSponsor.sponsor_name}</strong>.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={onCloseLoanInterest}
-                disabled={savingLoanInterest}
-                className="shrink-0 rounded-xl bg-white/10 p-2 hover:bg-white/20 disabled:opacity-60"
-                aria-label="Close loan interest form"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
-                Use this only for extra interest or charges added by the lender.
-                Do not use this for money Burton Pride has paid back.
-              </div>
-
-              <input
-                value={loanInterestForm.amount}
-                onChange={(event) =>
-                  setLoanInterestForm((prev) => ({
-                    ...prev,
-                    amount: event.target.value,
-                  }))
-                }
-                placeholder="Interest charged by lender, e.g. 25"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-              />
-
-              <input
-                type="date"
-                value={loanInterestForm.transactionDate}
-                onChange={(event) =>
-                  setLoanInterestForm((prev) => ({
-                    ...prev,
-                    transactionDate: event.target.value,
-                  }))
-                }
-                className="w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-              />
-
-              <textarea
-                value={loanInterestForm.note}
-                onChange={(event) =>
-                  setLoanInterestForm((prev) => ({
-                    ...prev,
-                    note: event.target.value,
-                  }))
-                }
-                placeholder="Note, e.g. lender added interest charge"
-                className="min-h-24 w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-blue-300/20 focus:ring-blue-300/40"
-              />
-
-              <div className="rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4 text-sm text-blue-100">
-                This will increase the total amount owed on the loan.
-              </div>
-
-              <div className="flex flex-col justify-end gap-3 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={onCloseLoanInterest}
-                  disabled={savingLoanInterest}
-                  className="rounded-xl bg-white/10 px-4 py-3 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={onSaveLoanInterest}
-                  disabled={savingLoanInterest}
-                  className="rounded-xl bg-blue-500 px-4 py-3 text-sm font-bold text-white hover:bg-blue-400 disabled:opacity-60"
-                >
-                  {savingLoanInterest ? "Saving..." : "Save Lender Interest"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteYearOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="break-words text-xl font-bold">
-              Delete {selectedYear} transactions?
-            </h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              This will only delete transactions dated between January and
-              December {selectedYear}. Other years will stay safe.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-orange-400/20 bg-orange-500/10 p-4 text-sm text-orange-100">
-              This will delete {yearTransactionsLength} transaction
-              {yearTransactionsLength === 1 ? "" : "s"} from {selectedYear}.
-            </div>
-
-            <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
-            </label>
-
-            <input
-              type="password"
-              value={deleteYearPassword}
-              onChange={(event) => setDeleteYearPassword(event.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-delete-year-password"
-              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-orange-300/40"
-            />
-
-            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCloseDeleteYear}
-                disabled={deletingYear}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={onDeleteYear}
-                disabled={deletingYear || !deleteYearPassword.trim()}
-                className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingYear ? "Deleting..." : `Delete ${selectedYear}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteSponsorId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Delete funding record?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to delete this funding record? Existing
-              transactions will stay in your money tracker, but the funding link
-              will be removed from those transactions.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-              Export your Excel report first if you need to keep a full funding
-              breakdown before deleting.
-            </div>
-
-            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCloseDeleteSponsor}
-                disabled={deletingSponsor}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={onDeleteSponsor}
-                disabled={deletingSponsor}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deletingSponsor ? "Deleting..." : "Delete Funding"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {deleteSupplierId && (
-        <div className="fixed inset-0 z-[75] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Archive supplier?</h2>
-
-            <p className="mt-3 text-sm leading-6 text-white/70">
-              This will archive the supplier/contact so it will no longer show
-              as active. Existing linked transactions will stay in the money
-              tracker.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4 text-sm leading-6 text-cyan-100">
-              This is a safe archive action. It does not delete old payment
-              history.
-            </div>
-
-            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCloseDeleteSupplier || (() => setDeleteSupplierId?.(null))}
-                disabled={deletingSupplier}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={onDeleteSupplier}
-                disabled={deletingSupplier || !onDeleteSupplier}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deletingSupplier ? "Archiving..." : "Archive Supplier"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Hide payment?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to hide this transaction? It will be soft
-              deleted and hidden from the money tracker, totals, Excel exports,
-              and print reports.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              This will not permanently remove the transaction from Supabase. It
-              will only mark it as deleted and hide it from this page.
-            </div>
-
-            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCloseHidePayment}
-                disabled={deleting}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={onHidePayment}
-                disabled={deleting}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:opacity-60"
-              >
-                {deleting ? "Hiding..." : "Hide Payment"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteAllOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#070716] p-6 text-white shadow-2xl">
-            <h2 className="text-xl font-bold">Delete all transactions?</h2>
-
-            <p className="mt-3 text-sm text-white/70">
-              Are you sure you want to delete every transaction? This will delete
-              all money in, money out, manual transactions, synced donation
-              entries, and funding-linked transactions. This cannot be undone.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-              This will delete every transaction in the database. There are
-              currently {transactionsLength} total transaction
-              {transactionsLength === 1 ? "" : "s"} saved.
-            </div>
-
-            <label className="mt-5 block text-sm font-bold text-white/80">
-              Main admin delete password
-            </label>
-
-            <input
-              type="password"
-              value={deleteAllPassword}
-              onChange={(event) => setDeleteAllPassword(event.target.value)}
-              placeholder="Enter main admin delete password"
-              autoComplete="new-password"
-              name="money-delete-all-password"
-              className="mt-2 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-red-300/40"
-            />
-
-            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onCloseDeleteAll}
-                disabled={deletingAll}
-                className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={onDeleteAll}
-                disabled={deletingAll || !deleteAllPassword.trim()}
-                className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingAll ? "Deleting..." : "Delete Everything"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <FundingModal
+        open={sponsorFormOpen}
+        editingSponsor={editingSponsor}
+        sponsorForm={sponsorForm}
+        setSponsorForm={setSponsorForm}
+        savingSponsor={savingSponsor}
+        onClose={onCloseSponsorForm}
+        onSave={onSaveSponsor}
+      />
+
+      <SupplierModal
+        open={supplierFormOpen}
+        editingSupplier={editingSupplier}
+        supplierForm={supplierForm}
+        setSupplierForm={setSupplierForm}
+        savingSupplier={savingSupplier}
+        onClose={onCloseSupplierForm}
+        onSave={onSaveSupplier}
+      />
+
+      <LoanRepaymentModal
+        sponsor={loanRepaymentSponsor}
+        form={loanRepaymentForm}
+        setForm={setLoanRepaymentForm}
+        saving={savingLoanRepayment}
+        onClose={onCloseLoanRepayment}
+        onSave={onSaveLoanRepayment}
+      />
+
+      <LoanInterestModal
+        sponsor={loanInterestSponsor}
+        form={loanInterestForm}
+        setForm={setLoanInterestForm}
+        saving={savingLoanInterest}
+        onClose={onCloseLoanInterest}
+        onSave={onSaveLoanInterest}
+      />
+
+      <ConfirmModal
+        open={deleteYearOpen}
+        title={`Delete ${selectedYear} transactions?`}
+        message={`This will only delete transactions dated between January and December ${selectedYear}. Other years will stay safe.`}
+        warning={
+          <>
+            This will delete {yearTransactionsLength} transaction
+            {yearTransactionsLength === 1 ? "" : "s"} from {selectedYear}.
+          </>
+        }
+        count={yearTransactionsLength}
+        password={deleteYearPassword}
+        passwordLabel="Main admin delete password"
+        passwordName="money-delete-year-password"
+        setPassword={setDeleteYearPassword}
+        saving={deletingYear}
+        tone="orange"
+        confirmLabel={`Delete ${selectedYear}`}
+        savingLabel="Deleting..."
+        onClose={onCloseDeleteYear}
+        onConfirm={onDeleteYear}
+      />
+
+      <ConfirmModal
+        open={Boolean(deleteSponsorId)}
+        title="Delete funding record?"
+        message="Existing transactions will stay in your money tracker, but the funding link will be removed from those transactions."
+        warning="Export your Excel report first if you need to keep a full funding breakdown before deleting."
+        saving={deletingSponsor}
+        tone="red"
+        confirmLabel="Delete Funding"
+        savingLabel="Deleting..."
+        onClose={onCloseDeleteSponsor}
+        onConfirm={onDeleteSponsor}
+      />
+
+      <ConfirmModal
+        open={Boolean(deleteSupplierId)}
+        title="Archive supplier?"
+        message="This will archive the supplier/contact so it will no longer show as active. Existing linked transactions will stay in the money tracker."
+        warning="This is a safe archive action. It does not delete old payment history."
+        saving={deletingSupplier}
+        tone="cyan"
+        confirmLabel="Archive Supplier"
+        savingLabel="Archiving..."
+        onClose={onCloseDeleteSupplier || (() => setDeleteSupplierId?.(null))}
+        onConfirm={onDeleteSupplier}
+      />
+
+      <ConfirmModal
+        open={Boolean(deleteId)}
+        title="Hide payment?"
+        message="This will soft delete the transaction and hide it from the money tracker, totals, Excel exports and print reports."
+        warning="This will not permanently remove the transaction from Supabase. It will only mark it as deleted."
+        saving={deleting}
+        tone="red"
+        confirmLabel="Hide Payment"
+        savingLabel="Hiding..."
+        onClose={onCloseHidePayment}
+        onConfirm={onHidePayment}
+      />
+
+      <ConfirmModal
+        open={deleteAllOpen}
+        title="Delete all transactions?"
+        message="This will delete all money in, money out, manual transactions, synced donation entries and funding-linked transactions. This cannot be undone."
+        warning={
+          <>
+            This will delete every transaction in the database. There are
+            currently {transactionsLength} total transaction
+            {transactionsLength === 1 ? "" : "s"} saved.
+          </>
+        }
+        count={transactionsLength}
+        password={deleteAllPassword}
+        passwordLabel="Main admin delete password"
+        passwordName="money-delete-all-password"
+        setPassword={setDeleteAllPassword}
+        saving={deletingAll}
+        tone="red"
+        confirmLabel="Delete Everything"
+        savingLabel="Deleting..."
+        onClose={onCloseDeleteAll}
+        onConfirm={onDeleteAll}
+      />
     </>
   );
 }

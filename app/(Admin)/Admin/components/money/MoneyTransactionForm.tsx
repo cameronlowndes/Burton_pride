@@ -215,25 +215,87 @@ function supplierContactLine(supplier?: SupplierContact | null) {
   return parts.join(" · ");
 }
 
+type BudgetFormFields = FormState & {
+  budgetCategory?: string | null;
+  budgetCategoryKey?: string | null;
+  budget_category?: string | null;
+  budget_category_key?: string | null;
+  budgetCategoryLabel?: string | null;
+  budget_category_label?: string | null;
+  costArea?: string | null;
+  cost_area?: string | null;
+};
+
 function getBudgetFormValue(form: FormState) {
-  const item = form as FormState & {
-    budgetCategory?: string | null;
-    budgetCategoryKey?: string | null;
-    budget_category?: string | null;
-    budget_category_key?: string | null;
-    costArea?: string | null;
-    cost_area?: string | null;
-  };
+  const item = form as BudgetFormFields;
 
   return (
-    item.budgetCategory ||
     item.budgetCategoryKey ||
-    item.budget_category ||
     item.budget_category_key ||
+    item.budgetCategory ||
+    item.budget_category ||
     item.costArea ||
     item.cost_area ||
     ""
   );
+}
+
+function getBudgetLabelFormValue(form: FormState) {
+  const item = form as BudgetFormFields;
+
+  return item.budgetCategoryLabel || item.budget_category_label || "";
+}
+
+function makeBudgetKeyFromLabel(label: string) {
+  return String(label || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "other";
+}
+
+function findBudgetByKeyOrLabel(
+  budgetOptions: BudgetItem[],
+  value?: string | null,
+) {
+  const cleanValue = String(value || "").trim().toLowerCase();
+
+  if (!cleanValue) return null;
+
+  return (
+    budgetOptions.find((item) => {
+      const key = String(item.category_key || "").trim().toLowerCase();
+      const label = String(item.category_label || "").trim().toLowerCase();
+
+      return key === cleanValue || label === cleanValue;
+    }) || null
+  );
+}
+
+function setBudgetOnForm(
+  prev: FormState,
+  budgetKey: string,
+  budgetLabel: string,
+) {
+  const cleanKey = String(budgetKey || "").trim();
+  const cleanLabel = String(budgetLabel || "").trim();
+
+  return {
+    ...prev,
+    budgetCategory: cleanKey,
+    budgetCategoryKey: cleanKey,
+    budget_category: cleanKey,
+    budget_category_key: cleanKey,
+    budgetCategoryLabel: cleanLabel,
+    budget_category_label: cleanLabel,
+    costArea: cleanKey,
+    cost_area: cleanKey,
+  } as FormState;
+}
+
+function clearBudgetOnForm(prev: FormState) {
+  return setBudgetOnForm(prev, "", "");
 }
 
 type MoneyTransactionFormProps = {
@@ -439,8 +501,10 @@ export default function MoneyTransactionForm({
     useState(false);
   const [fundingOverspendWarningOpen, setFundingOverspendWarningOpen] =
     useState(false);
-  const [testMessageOpen, setTestMessageOpen] = useState(false);
   const [easyMode, setEasyMode] = useState(true);
+  const [showFullAccountingDetails, setShowFullAccountingDetails] =
+    useState(false);
+  const [budgetTextDraft, setBudgetTextDraft] = useState("");
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
@@ -464,6 +528,16 @@ export default function MoneyTransactionForm({
   const budgetOptions =
     budgetItems.length > 0 ? budgetItems : defaultBudgetItems;
   const selectedBudgetCategory = getBudgetFormValue(form);
+  const selectedBudgetLabelFromForm = getBudgetLabelFormValue(form);
+  const selectedBudgetOption =
+    findBudgetByKeyOrLabel(budgetOptions, selectedBudgetCategory) ||
+    findBudgetByKeyOrLabel(budgetOptions, selectedBudgetLabelFromForm);
+  const selectedBudgetLabel =
+    selectedBudgetOption?.category_label ||
+    selectedBudgetLabelFromForm ||
+    selectedBudgetCategory;
+  const selectedBudgetKey =
+    selectedBudgetOption?.category_key || selectedBudgetCategory;
   const selectedReceiptDueDate = getReceiptDueDateFormValue(form);
   const selectedSupplierId = getSupplierIdFormValue(form);
   const selectedSupplierName = getSupplierNameFormValue(form);
@@ -494,7 +568,20 @@ export default function MoneyTransactionForm({
     selectedReceiptDueDate,
   );
 
-  const canManuallyLinkBudget = !isItemDonation && !isPersonalFundsPayment;
+  const canManuallyLinkBudget =
+    form.type === "expense" && !isItemDonation && !isPersonalFundsPayment;
+
+  useEffect(() => {
+    if (form.type !== "income") {
+      return;
+    }
+
+    if (!selectedBudgetCategory && !selectedBudgetLabel) {
+      return;
+    }
+
+    setForm((prev) => clearBudgetOnForm(prev));
+  }, [form.type, selectedBudgetCategory, selectedBudgetLabel, setForm]);
 
   const loanMode = getLoanMode(form.category);
   const isLoanRepayment = isLoanFunding && loanMode === "Loan Repayment";
@@ -528,6 +615,49 @@ export default function MoneyTransactionForm({
       };
     });
   }, [lockLoanRepaymentAmount, plannedLoanRepaymentAmount, setForm]);
+
+  useEffect(() => {
+    setBudgetTextDraft(selectedBudgetLabel || "");
+  }, [selectedBudgetLabel]);
+
+  useEffect(() => {
+    if (!easyMode && (editingTransaction || hasAdvancedValues)) {
+      setShowFullAccountingDetails(true);
+    }
+  }, [easyMode, editingTransaction, hasAdvancedValues]);
+
+  function chooseBudgetCategory(selectedKey: string) {
+    const selectedBudget = findBudgetByKeyOrLabel(budgetOptions, selectedKey);
+
+    if (!selectedKey) {
+      setBudgetTextDraft("");
+      setForm((prev) => clearBudgetOnForm(prev));
+      return;
+    }
+
+    const label = selectedBudget?.category_label || selectedKey;
+    const key = selectedBudget?.category_key || makeBudgetKeyFromLabel(label);
+
+    setBudgetTextDraft(label);
+    setForm((prev) => setBudgetOnForm(prev, key, label));
+  }
+
+  function typeBudgetCategory(value: string) {
+    const cleanValue = value.trim();
+    const matchedBudget = findBudgetByKeyOrLabel(budgetOptions, cleanValue);
+    const label = matchedBudget?.category_label || cleanValue;
+    const key = matchedBudget?.category_key || makeBudgetKeyFromLabel(label);
+
+    setBudgetTextDraft(value);
+
+    setForm((prev) => {
+      if (!cleanValue) {
+        return clearBudgetOnForm(prev);
+      }
+
+      return setBudgetOnForm(prev, key, label);
+    });
+  }
 
   const selectedFundingLabel = fundingTypeLabel(selectedFundingType);
   const selectedFundingShortLabel = fundingTypeShortLabel(selectedFundingType);
@@ -751,15 +881,6 @@ export default function MoneyTransactionForm({
     setFundingOverspendWarningOpen(false);
   }
 
-  function handleTestButtonClick() {
-    // fillTestTransaction();
-    setTestMessageOpen(true);
-
-    setTimeout(() => {
-      setTestMessageOpen(false);
-    }, 3500);
-  }
-
   function resetWarnings() {
     // Keep typing fast: do not fire four state updates on every key press
     // when the warnings are already closed/empty.
@@ -902,12 +1023,6 @@ export default function MoneyTransactionForm({
               </button>
             )}
           </div>
-
-          {testMessageOpen && (
-            <div className="mt-3 rounded-2xl border border-emerald-300/30 bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 shadow-lg shadow-emerald-500/10">
-              This is a test
-            </div>
-          )}
         </div>
 
         <div className="mb-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
@@ -919,8 +1034,8 @@ export default function MoneyTransactionForm({
 
               <p className="mt-1 text-xs leading-5 text-sky-100/70">
                 {easyMode
-                  ? "Quick Add keeps this simple. Follow the numbered steps, choose how the money moved, add the amount and date, then save. Use Full Mode for advanced accounting options."
-                  : "All transaction options are shown, including funding, suppliers, budgets, finance notes, repeat payments and receipt reminders."}
+                  ? "Simple step-by-step form for quick entries."
+                  : "Clean full form. Open Advanced details only when you need supplier, budget, finance or repeat options."}
               </p>
 
               {easyMode && hasAdvancedValues && (
@@ -933,7 +1048,15 @@ export default function MoneyTransactionForm({
 
             <button
               type="button"
-              onClick={() => setEasyMode((previous) => !previous)}
+              onClick={() => {
+                setEasyMode((previous) => {
+                  const nextEasyMode = !previous;
+                  if (nextEasyMode) {
+                    setShowFullAccountingDetails(false);
+                  }
+                  return nextEasyMode;
+                });
+              }}
               className="inline-flex shrink-0 items-center justify-center rounded-xl bg-sky-500 px-4 py-3 text-sm font-black text-black transition hover:bg-sky-400"
             >
               {easyMode ? "Show Full Mode" : "Use Easy Mode"}
@@ -1024,12 +1147,14 @@ export default function MoneyTransactionForm({
                   type="button"
                   onClick={() => {
                     resetWarnings();
-                    setForm((prev) => ({
-                      ...prev,
-                      type: "income",
-                      isPersonalFunds: false,
-                      personalFundsName: "",
-                    }));
+                    setForm((prev) =>
+                      clearBudgetOnForm({
+                        ...prev,
+                        type: "income",
+                        isPersonalFunds: false,
+                        personalFundsName: "",
+                      } as FormState),
+                    );
                   }}
                   className={`rounded-2xl px-4 py-4 text-left text-base font-black ring-1 transition ${
                     form.type === "income"
@@ -1071,18 +1196,22 @@ export default function MoneyTransactionForm({
               onChange={(event) => {
                 resetWarnings();
 
-                setForm((prev) => ({
-                  ...prev,
-                  type: event.target.value as "income" | "expense",
-                  isPersonalFunds:
-                    event.target.value === "income"
-                      ? false
-                      : prev.isPersonalFunds,
-                  personalFundsName:
-                    event.target.value === "income"
-                      ? ""
-                      : prev.personalFundsName,
-                }));
+                const nextType = event.target.value as "income" | "expense";
+
+                setForm((prev) => {
+                  const nextForm = {
+                    ...prev,
+                    type: nextType,
+                    isPersonalFunds:
+                      nextType === "income" ? false : prev.isPersonalFunds,
+                    personalFundsName:
+                      nextType === "income" ? "" : prev.personalFundsName,
+                  } as FormState;
+
+                  return nextType === "income"
+                    ? clearBudgetOnForm(nextForm)
+                    : nextForm;
+                });
               }}
               className="w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40"
             >
@@ -1622,7 +1751,34 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && !isItemDonation && !isPersonalFundsPayment && (
+          {!easyMode && (
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-white">
+                    Advanced details
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-white/55">
+                    Supplier, budget tracker, finance notes, repeating payments and receipt due date.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowFullAccountingDetails((previous) => !previous)
+                  }
+                  className="inline-flex items-center justify-center rounded-xl bg-white/10 px-4 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20"
+                >
+                  {showFullAccountingDetails
+                    ? "Hide advanced details"
+                    : "Show advanced details"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!easyMode && showFullAccountingDetails && !isItemDonation && !isPersonalFundsPayment && (
             <div className="rounded-xl border border-violet-300/20 bg-violet-500/10 p-3">
               <label className="mb-1 flex items-center gap-2 text-sm font-black text-violet-100">
                 <Building2 className="h-4 w-4" />
@@ -1747,41 +1903,25 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && canManuallyLinkBudget && (
+          {!easyMode && showFullAccountingDetails && canManuallyLinkBudget && (
             <div className="rounded-xl border border-pink-300/25 bg-pink-500/10 p-3 ring-1 ring-pink-300/10">
               <label className="mb-1 block text-sm font-black text-pink-100">
                 Which budget is this going to?
               </label>
 
               <p className="mb-3 text-xs leading-5 text-pink-100/70">
-                Choose the Budget Planning row for this transaction. This lets
-                you fix it manually if automatic matching puts it in the wrong
-                place.
+                Choose the Budget Planning row for this transaction, or type a
+                budget name manually. This is saved with the transaction so
+                Budget Planning knows exactly where to place it.
               </p>
 
               <select
-                value={selectedBudgetCategory}
-                onChange={(event) => {
-                  const selectedKey = event.target.value;
-                  const selectedBudget = budgetOptions.find(
-                    (item) => item.category_key === selectedKey,
-                  );
-
-                  setForm(
-                    (prev) =>
-                      ({
-                        ...prev,
-                        budgetCategory: selectedKey,
-                        budgetCategoryKey: selectedKey,
-                        budget_category: selectedKey,
-                        budget_category_key: selectedKey,
-                        budgetCategoryLabel:
-                          selectedBudget?.category_label || "",
-                        budget_category_label:
-                          selectedBudget?.category_label || "",
-                      }) as FormState,
-                  );
-                }}
+                value={
+                  selectedBudgetOption
+                    ? selectedBudgetOption.category_key
+                    : selectedBudgetKey
+                }
+                onChange={(event) => chooseBudgetCategory(event.target.value)}
                 className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-pink-300/25 focus:ring-pink-300/60"
               >
                 <option className="bg-[#11111f] text-white" value="">
@@ -1799,21 +1939,52 @@ export default function MoneyTransactionForm({
                 ))}
               </select>
 
-              {selectedBudgetCategory ? (
-                <p className="mt-2 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/80">
-                  Selected budget:{" "}
-                  <strong className="text-white">
-                    {budgetOptions.find(
-                      (item) => item.category_key === selectedBudgetCategory,
-                    )?.category_label || selectedBudgetCategory}
-                  </strong>
-                </p>
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-black text-pink-100/80">
+                  Or type the budget name manually
+                </label>
+
+                <input
+                  value={budgetTextDraft}
+                  onChange={(event) => typeBudgetCategory(event.target.value)}
+                  placeholder="Example: Venue, Insurance, Printing, Security..."
+                  className="w-full rounded-xl bg-black/25 p-3 text-sm font-bold text-white outline-none ring-1 ring-pink-300/25 placeholder:text-white/35 focus:ring-pink-300/60"
+                />
+              </div>
+
+              {selectedBudgetKey ? (
+                <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
+                  <p>
+                    This will be saved in Budget Planning under:{" "}
+                    <strong className="text-white">
+                      {selectedBudgetLabel || selectedBudgetKey}
+                    </strong>
+                  </p>
+
+                  <p className="mt-1 text-emerald-100/75">
+                    Saved key:{" "}
+                    <span className="font-mono text-white">
+                      {selectedBudgetKey}
+                    </span>
+                  </p>
+                </div>
               ) : (
-                <p className="mt-2 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/70">
+                <p className="mt-3 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/70">
                   Auto match is on. Budget Planning will try to match this from
                   the title, notes, category, and payment information.
                 </p>
               )}
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => chooseBudgetCategory("")}
+                  disabled={!selectedBudgetKey && !budgetTextDraft}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Clear budget link
+                </button>
+              </div>
 
               {form.type === "income" && (
                 <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
@@ -1824,7 +1995,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && (
+          {!easyMode && showFullAccountingDetails && (
             <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3">
               <label className="mb-1 block text-sm font-bold text-cyan-100">
                 Finance notes and queries
@@ -1898,7 +2069,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && !editingTransaction && (
+          {!easyMode && showFullAccountingDetails && !editingTransaction && (
             <div className="rounded-xl border border-purple-300/20 bg-purple-500/10 p-3">
               <label className="flex items-start gap-3">
                 <input
@@ -2006,7 +2177,7 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && editingTransaction && (
+          {!easyMode && showFullAccountingDetails && editingTransaction && (
             <div className="rounded-xl border border-purple-300/20 bg-purple-500/10 p-3 text-xs text-purple-100/80">
               Repeating payments can only be created when adding a new
               transaction, not while editing an existing one.
@@ -2019,39 +2190,24 @@ export default function MoneyTransactionForm({
                 type="checkbox"
                 checked={form.isPersonalFunds}
                 onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    isPersonalFunds: event.target.checked,
-                    paymentMethod: event.target.checked
-                      ? "Personal Funds"
-                      : prev.paymentMethod === "Personal Funds"
-                        ? ""
-                        : prev.paymentMethod,
-                    personalFundsName: event.target.checked
-                      ? prev.personalFundsName
-                      : "",
+                  setForm((prev) => {
+                    const nextForm = {
+                      ...prev,
+                      isPersonalFunds: event.target.checked,
+                      paymentMethod: event.target.checked
+                        ? "Personal Funds"
+                        : prev.paymentMethod === "Personal Funds"
+                          ? ""
+                          : prev.paymentMethod,
+                      personalFundsName: event.target.checked
+                        ? prev.personalFundsName
+                        : "",
+                    } as FormState;
 
-                    // Personal Funds are not Burton Pride spending until paid back,
-                    // so clear any manual Budget Planning link.
-                    budgetCategory: event.target.checked
-                      ? ""
-                      : (prev as any).budgetCategory,
-                    budgetCategoryKey: event.target.checked
-                      ? ""
-                      : (prev as any).budgetCategoryKey,
-                    budget_category: event.target.checked
-                      ? ""
-                      : (prev as any).budget_category,
-                    budget_category_key: event.target.checked
-                      ? ""
-                      : (prev as any).budget_category_key,
-                    budgetCategoryLabel: event.target.checked
-                      ? ""
-                      : (prev as any).budgetCategoryLabel,
-                    budget_category_label: event.target.checked
-                      ? ""
-                      : (prev as any).budget_category_label,
-                  }))
+                    return event.target.checked
+                      ? clearBudgetOnForm(nextForm)
+                      : nextForm;
+                  })
                 }
                 className="mt-1 h-4 w-4 rounded border-white/20"
               />
@@ -2130,7 +2286,7 @@ export default function MoneyTransactionForm({
             </p>
           </div>
 
-          {!easyMode && !isItemDonation && (
+          {!easyMode && showFullAccountingDetails && !isItemDonation && (
             <div className="rounded-xl border border-amber-300/20 bg-amber-500/10 p-3">
               <label className="mb-1 block text-sm font-black text-amber-100">
                 Receipt due date

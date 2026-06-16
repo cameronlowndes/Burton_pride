@@ -14,6 +14,14 @@ import type {
 import MoneyTransactionForm from "./MoneyTransactionForm";
 import MoneyTransactionsTable from "./MoneyTransactionsTable";
 
+type MonthOption = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+type MoneyFilter = "all" | "income" | "expense" | "sponsorship" | "personal";
+
 type YearlySponsorBreakdown = {
   sponsor_id: string;
   sponsor_name: string;
@@ -50,47 +58,37 @@ type MoneyMainGridProps = {
   setInvoiceFiles: Dispatch<SetStateAction<File[]>>;
 
   editingTransaction: Transaction | null;
-  displaySponsors: Sponsor[];
-  yearlySponsorBreakdown: YearlySponsorBreakdown[];
-
-  /**
-   * Supplier / contact tracker.
-   * These are regular people/businesses Burton Pride pays, such as printers,
-   * venues, insurance providers, entertainers, food vendors, security, etc.
-   */
-  displaySuppliers?: SupplierContact[];
-  openNewSupplierForm?: () => void;
-
   saving: boolean;
   handleSubmit: (event: SyntheticEvent<HTMLFormElement>) => Promise<void>;
   cancelEditTransaction: () => void;
-  fillTestTransaction: () => void;
+  fillTestTransaction?: () => void;
+
+  displaySponsors: Sponsor[];
+  yearlySponsorBreakdown: YearlySponsorBreakdown[];
   openNewSponsorForm: () => void;
+
+  displaySuppliers?: SupplierContact[];
+  openNewSupplierForm?: () => void;
 
   loading: boolean;
   transactions: Transaction[];
   filteredTransactions: Transaction[];
   yearTransactions: Transaction[];
   printTransactionsList: Transaction[];
-  printMonthOptions: {
-    key: string;
-    label: string;
-    count: number;
-  }[];
+  printMonthOptions: MonthOption[];
 
   selectedYear: string;
   selectedViewMonth: string;
   setSelectedViewMonth: Dispatch<SetStateAction<string>>;
+
   selectedPrintMonth: string;
   setSelectedPrintMonth: Dispatch<SetStateAction<string>>;
 
   searchTerm: string;
   setSearchTerm: Dispatch<SetStateAction<string>>;
 
-  filter: "all" | "income" | "expense" | "sponsorship" | "personal";
-  setFilter: Dispatch<
-    SetStateAction<"all" | "income" | "expense" | "sponsorship" | "personal">
-  >;
+  filter: MoneyFilter;
+  setFilter: Dispatch<SetStateAction<MoneyFilter>>;
 
   selectedSponsorId: string;
   setSelectedSponsorId: Dispatch<SetStateAction<string>>;
@@ -101,19 +99,13 @@ type MoneyMainGridProps = {
 
   deletingYear: boolean;
   deletingAll: boolean;
+  deleting: boolean;
+
   repayingId: string | null;
   checkingId: string | null;
   bankReconcilingId: string | null;
   financeNoteUpdatingId: string | null;
-  deleting: boolean;
 
-  /**
-   * Number of days before an old expense with no receipt
-   * should show as overdue / needing a receipt check.
-   *
-   * Example:
-   * receiptReminderDays={7}
-   */
   receiptReminderDays?: number;
 
   onPrint: () => void;
@@ -121,42 +113,46 @@ type MoneyMainGridProps = {
   onExportYearlyReport: () => Promise<void>;
   onOpenDeleteYear: () => void;
   onOpenDeleteAll: () => void;
+
   onEditTransaction: (item: Transaction) => void;
   onHideTransaction: Dispatch<SetStateAction<string | null>>;
+
   onTogglePersonalFundsRepaid: (
     item: Transaction,
-    proofFiles?: File[]
+    proofFiles?: File[],
   ) => Promise<void>;
+
   onMarkTransactionChecked: (item: Transaction) => Promise<void>;
+
   onUpdateBankReconciliationStatus: (
     item: Transaction,
     status: BankReconciliationStatus,
-    note?: string
+    note?: string,
   ) => Promise<void>;
+
   onUpdateFinanceNote: (
     item: Transaction,
     status: FinanceNoteStatus,
-    note?: string
+    note?: string,
   ) => Promise<void>;
 };
 
 export default function MoneyMainGrid({
   form,
   setForm,
-
   invoiceFiles,
   setInvoiceFiles,
-
   editingTransaction,
-  displaySponsors,
-  yearlySponsorBreakdown,
-  displaySuppliers = [],
-  openNewSupplierForm,
   saving,
   handleSubmit,
   cancelEditTransaction,
-  fillTestTransaction,
+
+  displaySponsors,
+  yearlySponsorBreakdown,
   openNewSponsorForm,
+
+  displaySuppliers = [],
+  openNewSupplierForm,
 
   loading,
   transactions,
@@ -173,7 +169,6 @@ export default function MoneyMainGrid({
 
   searchTerm,
   setSearchTerm,
-
   filter,
   setFilter,
 
@@ -186,11 +181,11 @@ export default function MoneyMainGrid({
 
   deletingYear,
   deletingAll,
+  deleting,
   repayingId,
   checkingId,
   bankReconcilingId,
   financeNoteUpdatingId,
-  deleting,
 
   receiptReminderDays = 7,
 
@@ -214,11 +209,11 @@ export default function MoneyMainGrid({
         invoiceFiles={invoiceFiles}
         setInvoiceFiles={setInvoiceFiles}
         editingTransaction={editingTransaction}
+        saving={saving}
         displaySponsors={displaySponsors}
         yearlySponsorBreakdown={yearlySponsorBreakdown}
         displaySuppliers={displaySuppliers}
         openNewSupplierForm={openNewSupplierForm}
-        saving={saving}
         handleSubmit={handleSubmit}
         cancelEditTransaction={cancelEditTransaction}
         openNewSponsorForm={openNewSponsorForm}
