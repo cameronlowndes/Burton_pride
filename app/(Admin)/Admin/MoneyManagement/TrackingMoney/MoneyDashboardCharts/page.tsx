@@ -1454,8 +1454,6 @@ export default function MoneyDashboardPage() {
               openNewSponsorForm={moneyPage.openNewSponsorForm}
               startEditSponsor={moneyPage.startEditSponsor}
               setDeleteSponsorId={moneyPage.setDeleteSponsorId}
-              openLoanRepaymentModal={moneyPage.openLoanRepaymentModal}
-              openLoanInterestModal={moneyPage.openLoanInterestModal}
             />
           </div>
         </div>
