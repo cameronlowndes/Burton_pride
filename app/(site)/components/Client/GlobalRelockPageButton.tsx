@@ -37,7 +37,7 @@ export default function GlobalRelockPageButton() {
         return;
       }
 
-      const res = await fetch("/api/admin/site-pages/access-status", {
+      const res = await fetch("/api/admin/settings/site-pages/access-status", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -80,7 +80,7 @@ export default function GlobalRelockPageButton() {
 
       const routeToLock = pageRoute || pathname;
 
-      const res = await fetch("/api/admin/site-pages/lock", {
+      const res = await fetch("/api/admin/settings/site-pages/lock", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

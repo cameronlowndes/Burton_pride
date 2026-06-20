@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import path from "path";
 import { promises as fs } from "fs";
-import { auth } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 type DiscoveredPage = {
@@ -19,40 +19,15 @@ type SitePageRow = {
 
 const APP_DIR = path.join(process.cwd(), "app");
 
-/**
- * Only folders inside these public website roots will be scanned.
- *
- * Supported structures:
- * - app/site
- * - app/(site)
- *
- * Both structures create normal public URLs such as:
- * /BurtonPride2026
- *
- * They will NOT create:
- * /site/BurtonPride2026
- */
 const ALLOWED_PUBLIC_ROOTS = ["site", "(site)"];
 
-/**
- * Known route corrections.
- *
- * When a page folder has been renamed, this updates the existing database
- * record instead of creating a second page. This preserves settings such as:
- * - status
- * - navigation visibility
- * - hidden-page messages
- * - password protection
- */
 const ROUTE_RENAMES: Record<string, string> = {
   "/BurtronPride2026": "/BurtonPride2026",
 };
 
-/**
- * Files and folders that must never appear in the public page manager.
- */
 const BLOCKED_SEGMENTS = new Set([
   "admin",
+  "Admin",
   "api",
   "_components",
   "_lib",
@@ -75,47 +50,23 @@ function prettifySegment(value: string) {
 
 function buildTitleFromRoute(route: string) {
   if (route === "/") return "Home";
-
-  const parts = route
-    .split("/")
-    .filter(Boolean)
-    .map((part) => prettifySegment(part));
-
-  return parts.join(" / ");
+  return route.split("/").filter(Boolean).map(prettifySegment).join(" / ");
 }
 
 function buildNavLabelFromRoute(route: string) {
   if (route === "/") return "Home";
-
   const last = route.split("/").filter(Boolean).pop() || "Page";
   return prettifySegment(last);
 }
 
 function normaliseRouteFromSegments(segments: string[]) {
-  const cleaned = segments
-    .filter(Boolean)
-    .filter((segment) => {
-      /**
-       * Ignore route groups such as:
-       * app/(site)
-       */
-      if (segment.startsWith("(") && segment.endsWith(")")) {
-        return false;
-      }
-
-      /**
-       * Ignore parallel route folders such as:
-       * app/@modal
-       */
-      if (segment.startsWith("@")) {
-        return false;
-      }
-
-      return true;
-    });
+  const cleaned = segments.filter(Boolean).filter((segment) => {
+    if (segment.startsWith("(") && segment.endsWith(")")) return false;
+    if (segment.startsWith("@")) return false;
+    return true;
+  });
 
   const route = `/${cleaned.join("/")}`.replace(/\/+/g, "/");
-
   return route === "/" ? "/" : route.replace(/\/$/, "");
 }
 
@@ -133,7 +84,6 @@ function shouldSkipFolder(name: string) {
   if (!name) return true;
   if (name.startsWith("_")) return true;
   if (BLOCKED_SEGMENTS.has(name)) return true;
-
   return false;
 }
 
@@ -150,14 +100,36 @@ async function pathExists(targetPath: string) {
   }
 }
 
+async function requireSupabaseAdmin() {
+  const cookieStore = await cookies();
+
+  const adminId = cookieStore.get("burton_admin_id")?.value;
+  const adminEmail = cookieStore.get("burton_admin_email")?.value;
+
+  if (!adminId || !adminEmail) {
+    return false;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, email, role, is_active")
+    .eq("id", adminId)
+    .eq("email", adminEmail)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return false;
+  }
+
+  return data.role === "main_admin" || data.role === "admin";
+}
+
 async function walkForPages(
   dir: string,
   routeSegments: string[] = []
 ): Promise<DiscoveredPage[]> {
-  const entries = await fs.readdir(dir, {
-    withFileTypes: true,
-  });
-
+  const entries = await fs.readdir(dir, { withFileTypes: true });
   const found: DiscoveredPage[] = [];
 
   const hasPageFile = entries.some(
@@ -180,13 +152,13 @@ async function walkForPages(
     if (!entry.isDirectory()) continue;
 
     const folderName = entry.name;
-
     if (shouldSkipFolder(folderName)) continue;
 
-    const fullPath = path.join(dir, folderName);
-
     found.push(
-      ...(await walkForPages(fullPath, [...routeSegments, folderName]))
+      ...(await walkForPages(path.join(dir, folderName), [
+        ...routeSegments,
+        folderName,
+      ]))
     );
   }
 
@@ -195,53 +167,36 @@ async function walkForPages(
 
 export async function POST() {
   try {
-    const { userId } = await auth();
+    const allowed = await requireSupabaseAdmin();
 
-    if (!userId) {
+    if (!allowed) {
       return NextResponse.json(
         {
           ok: false,
           error: "Unauthorized",
         },
-        {
-          status: 401,
-        }
+        { status: 401 }
       );
     }
 
     const discovered: DiscoveredPage[] = [];
 
-    /**
-     * Scan each supported public website root.
-     *
-     * Start with an empty route array for both structures so:
-     * app/site/BurtonPride2026/page.tsx
-     *
-     * becomes:
-     * /BurtonPride2026
-     *
-     * rather than:
-     * /site/BurtonPride2026
-     */
     for (const root of ALLOWED_PUBLIC_ROOTS) {
       const rootPath = path.join(APP_DIR, root);
 
       if (await pathExists(rootPath)) {
-        const pages = await walkForPages(rootPath, []);
-        discovered.push(...pages);
+        discovered.push(...(await walkForPages(rootPath, [])));
       }
     }
 
-    /**
-     * Remove duplicate routes if the same URL appears in both supported
-     * public-site structures.
-     */
     const dedupedMap = new Map<string, DiscoveredPage>();
 
     for (const page of discovered) {
       const isBlockedRoute =
         page.route === "/admin" ||
         page.route.startsWith("/admin/") ||
+        page.route === "/Admin" ||
+        page.route.startsWith("/Admin/") ||
         page.route === "/api" ||
         page.route.startsWith("/api/");
 
@@ -254,21 +209,12 @@ export async function POST() {
       a.route.localeCompare(b.route)
     );
 
-    const discoveredRoutes = new Set(
-      dedupedPages.map((page) => page.route)
-    );
+    const discoveredRoutes = new Set(dedupedPages.map((page) => page.route));
 
     const warnings: string[] = [];
 
-    /**
-     * If the misspelled folder still exists, explain why the corrected route
-     * cannot be registered yet.
-     */
     for (const [oldRoute, newRoute] of Object.entries(ROUTE_RENAMES)) {
-      if (
-        discoveredRoutes.has(oldRoute) &&
-        !discoveredRoutes.has(newRoute)
-      ) {
+      if (discoveredRoutes.has(oldRoute) && !discoveredRoutes.has(newRoute)) {
         warnings.push(
           `The website folder is still using the old route "${oldRoute}". Rename the folder to create "${newRoute}".`
         );
@@ -276,9 +222,7 @@ export async function POST() {
     }
 
     const { data: existingRowsData, error: existingError } =
-      await supabaseAdmin
-        .from("site_pages")
-        .select("id, route");
+      await supabaseAdmin.from("site_pages").select("id, route");
 
     if (existingError) {
       throw new Error(existingError.message);
@@ -289,27 +233,15 @@ export async function POST() {
     let renamed = 0;
     let removedLegacyDuplicates = 0;
 
-    /**
-     * Update known renamed routes safely.
-     *
-     * This preserves all existing admin settings by changing the route on
-     * the existing database row instead of deleting it.
-     *
-     * If both routes already exist, remove only the duplicate old record.
-     */
     for (const [oldRoute, newRoute] of Object.entries(ROUTE_RENAMES)) {
       const correctedFolderExists = discoveredRoutes.has(newRoute);
 
-      if (!correctedFolderExists) {
-        continue;
-      }
+      if (!correctedFolderExists) continue;
 
       const oldRow = existingRows.find((row) => row.route === oldRoute);
       const newRow = existingRows.find((row) => row.route === newRoute);
 
-      if (!oldRow) {
-        continue;
-      }
+      if (!oldRow) continue;
 
       if (newRow) {
         const { error: deleteError } = await supabaseAdmin
@@ -317,9 +249,7 @@ export async function POST() {
           .delete()
           .eq("id", oldRow.id);
 
-        if (deleteError) {
-          throw new Error(deleteError.message);
-        }
+        if (deleteError) throw new Error(deleteError.message);
 
         const oldRowIndex = existingRows.findIndex(
           (row) => row.id === oldRow.id
@@ -335,32 +265,20 @@ export async function POST() {
 
       const { error: renameError } = await supabaseAdmin
         .from("site_pages")
-        .update({
-          route: newRoute,
-        })
+        .update({ route: newRoute })
         .eq("id", oldRow.id);
 
-      if (renameError) {
-        throw new Error(renameError.message);
-      }
+      if (renameError) throw new Error(renameError.message);
 
       oldRow.route = newRoute;
       renamed += 1;
     }
 
-    const existingByRoute = new Map(
-      existingRows.map((row) => [row.route, row])
-    );
+    const existingByRoute = new Map(existingRows.map((row) => [row.route, row]));
 
     let inserted = 0;
     let updated = 0;
 
-    /**
-     * Insert new pages and refresh basic details for existing pages.
-     *
-     * Existing settings such as status and navigation visibility are not
-     * overwritten.
-     */
     for (const page of dedupedPages) {
       const existing = existingByRoute.get(page.route);
 
@@ -383,12 +301,13 @@ export async function POST() {
             coming_soon_title: "Coming soon",
             coming_soon_message:
               "We are updating this page right now. Please check back soon.",
+            locked_title: "This page is locked",
+            locked_message:
+              "This page is password protected. Enter the password below to continue.",
             password_protected: false,
           });
 
-        if (insertError) {
-          throw new Error(insertError.message);
-        }
+        if (insertError) throw new Error(insertError.message);
 
         inserted += 1;
         continue;
@@ -404,9 +323,7 @@ export async function POST() {
         })
         .eq("id", existing.id);
 
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      if (updateError) throw new Error(updateError.message);
 
       updated += 1;
     }
@@ -426,13 +343,9 @@ export async function POST() {
       {
         ok: false,
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to sync pages",
+          error instanceof Error ? error.message : "Failed to sync pages",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

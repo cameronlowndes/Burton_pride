@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   RefreshCw,
@@ -47,6 +47,43 @@ type ApiResponse = {
   pages?: SitePage[];
 };
 
+type SyncResponse = {
+  ok: boolean;
+  error?: string;
+  scanned?: number;
+  inserted?: number;
+};
+
+type UpdateResponse = {
+  ok: boolean;
+  error?: string;
+  page?: SitePage;
+};
+
+type Notice = {
+  type: "success" | "error";
+  text: string;
+};
+
+type UpdatePageBody = {
+  id: string;
+  title: string;
+  status: SitePageStatus;
+  is_enabled: boolean;
+  show_in_nav: boolean;
+  nav_label: string;
+  template: string;
+  sort_order: number;
+  hidden_title: string;
+  hidden_message: string;
+  coming_soon_title: string;
+  coming_soon_message: string;
+  locked_title: string;
+  locked_message: string;
+  password_protected: boolean;
+  page_password?: string;
+};
+
 function formatDate(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -60,8 +97,24 @@ function formatDate(value: string) {
   });
 }
 
-function cleanText(value: string | null | undefined) {
-  return String(value || "").toLowerCase().trim();
+function cleanText(value: string | number | null | undefined) {
+  return String(value ?? "").toLowerCase().trim();
+}
+
+async function readJson<T>(res: Response): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error("The server returned an invalid response.");
+  }
+}
+
+function withEmptyPassword(page: SitePage): SitePage {
+  return { ...page, page_password: "" };
+}
+
+function toFormValue(value: string | null | undefined) {
+  return value ?? "";
 }
 
 function statusClasses(status: SitePageStatus) {
@@ -86,7 +139,7 @@ export default function SitePagesAdminPage() {
   const [pages, setPages] = useState<SitePage[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | SitePageStatus>(
     "all"
@@ -94,45 +147,37 @@ export default function SitePagesAdminPage() {
   const [visiblePasswords, setVisiblePasswords] = useState<
     Record<string, boolean>
   >({});
-  const [notice, setNotice] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  async function loadPages() {
+  const loadPages = useCallback(async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       setNotice(null);
 
-      const res = await fetch("/api/admin/site-pages", {
+      const res = await fetch("/api/admin/settings/site-pages", {
         cache: "no-store",
       });
 
-      const json: ApiResponse = await res.json();
+      const json = await readJson<ApiResponse>(res);
 
       if (!res.ok || !json.ok) {
         throw new Error(json.error || "Failed to load pages");
       }
 
-      setPages(
-        (json.pages || []).map((page) => ({
-          ...page,
-          page_password: "",
-        }))
-      );
+      setPages((json.pages ?? []).map(withEmptyPassword));
     } catch (error) {
       setNotice({
         type: "error",
         text: error instanceof Error ? error.message : "Failed to load pages",
       });
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    loadPages();
-  }, []);
+    void loadPages();
+  }, [loadPages]);
 
   useEffect(() => {
     if (!notice) return;
@@ -178,18 +223,18 @@ export default function SitePagesAdminPage() {
       setSyncing(true);
       setNotice(null);
 
-      const res = await fetch("/api/admin/site-pages/sync", {
+      const res = await fetch("/api/admin/settings/site-pages/sync", {
         method: "POST",
         cache: "no-store",
       });
 
-      const json = await res.json();
+      const json = await readJson<SyncResponse>(res);
 
       if (!res.ok || !json.ok) {
         throw new Error(json.error || "Failed to sync pages");
       }
 
-      await loadPages();
+      await loadPages(false);
 
       setNotice({
         type: "success",
@@ -226,32 +271,34 @@ export default function SitePagesAdminPage() {
     );
 
     setPages((prev) => prev.map((p) => (p.id === id ? optimistic : p)));
-    setSavingId(id);
+    setSavingIds((prev) => ({ ...prev, [id]: true }));
 
     try {
-      const body: Record<string, any> = {
+      const body: UpdatePageBody = {
         id,
         title: optimistic.title,
         status: optimistic.status,
         is_enabled: optimistic.is_enabled,
         show_in_nav: optimistic.show_in_nav,
-        nav_label: optimistic.nav_label || "",
-        template: optimistic.template || "",
-        sort_order: Number(optimistic.sort_order || 0),
-        hidden_title: optimistic.hidden_title || "",
-        hidden_message: optimistic.hidden_message || "",
-        coming_soon_title: optimistic.coming_soon_title || "",
-        coming_soon_message: optimistic.coming_soon_message || "",
-        locked_title: optimistic.locked_title || "",
-        locked_message: optimistic.locked_message || "",
+        nav_label: toFormValue(optimistic.nav_label),
+        template: toFormValue(optimistic.template),
+        sort_order: Number.isFinite(Number(optimistic.sort_order))
+          ? Number(optimistic.sort_order)
+          : 0,
+        hidden_title: toFormValue(optimistic.hidden_title),
+        hidden_message: toFormValue(optimistic.hidden_message),
+        coming_soon_title: toFormValue(optimistic.coming_soon_title),
+        coming_soon_message: toFormValue(optimistic.coming_soon_message),
+        locked_title: toFormValue(optimistic.locked_title),
+        locked_message: toFormValue(optimistic.locked_message),
         password_protected: optimistic.password_protected,
       };
 
       if (isSettingPassword) {
         body.page_password = String(optimistic.page_password || "").trim();
       }
-
-      const res = await fetch("/api/admin/site-pages", {
+      
+      const res = await fetch("/api/admin/settings/site-pages", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -259,21 +306,14 @@ export default function SitePagesAdminPage() {
         body: JSON.stringify(body),
       });
 
-      const json = await res.json();
+      const json = await readJson<UpdateResponse>(res);
 
-      if (!res.ok || !json.ok) {
+      if (!res.ok || !json.ok || !json.page) {
         throw new Error(json.error || "Failed to update page");
       }
 
       setPages((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? {
-                ...json.page,
-                page_password: "",
-              }
-            : p
-        )
+        prev.map((p) => (p.id === id ? withEmptyPassword(json.page!) : p))
       );
 
       setVisiblePasswords((prev) => ({
@@ -292,7 +332,11 @@ export default function SitePagesAdminPage() {
         text: error instanceof Error ? error.message : "Failed to update page",
       });
     } finally {
-      setSavingId(null);
+      setSavingIds((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     }
   }
 
@@ -324,7 +368,7 @@ export default function SitePagesAdminPage() {
       return;
     }
 
-    updatePage(
+    void updatePage(
       page.id,
       {
         page_password: page.page_password,
@@ -334,7 +378,7 @@ export default function SitePagesAdminPage() {
   }
 
   function resetPageDetails(page: SitePage) {
-    updatePage(
+    void updatePage(
       page.id,
       {
         nav_label: "",
@@ -481,7 +525,7 @@ export default function SitePagesAdminPage() {
             ) : (
               <div className="grid gap-4">
                 {filteredPages.map((page) => {
-                  const isSaving = savingId === page.id;
+                  const isSaving = Boolean(savingIds[page.id]);
                   const passwordIsVisible = visiblePasswords[page.id] === true;
 
                   return (

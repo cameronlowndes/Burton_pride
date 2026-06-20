@@ -6,12 +6,33 @@ import bcrypt from "bcryptjs";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type SitePageStatus = "live" | "hidden" | "coming_soon";
+
+type SitePageUpdateBody = {
+  id?: unknown;
+  title?: unknown;
+  status?: unknown;
+  is_enabled?: unknown;
+  show_in_nav?: unknown;
+  nav_label?: unknown;
+  template?: unknown;
+  sort_order?: unknown;
+  hidden_title?: unknown;
+  hidden_message?: unknown;
+  coming_soon_title?: unknown;
+  coming_soon_message?: unknown;
+  locked_title?: unknown;
+  locked_message?: unknown;
+  password_protected?: unknown;
+  page_password?: unknown;
+};
+
 function clean(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 function cleanNullable(value: unknown) {
-  const v = String(value || "").trim();
+  const v = String(value ?? "").trim();
   return v ? v : null;
 }
 
@@ -33,8 +54,8 @@ function cleanNumber(value: unknown, fallback = 999) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function cleanStatus(value: unknown) {
-  const v = String(value || "").trim().toLowerCase();
+function cleanStatus(value: unknown): SitePageStatus {
+  const v = String(value ?? "").trim().toLowerCase();
 
   if (v === "live" || v === "hidden" || v === "coming_soon") {
     return v;
@@ -44,12 +65,6 @@ function cleanStatus(value: unknown) {
 }
 
 async function requireSitePagesAccess() {
-  /*
-    New permissions system:
-    - Main admins automatically pass this check.
-    - Other admins must have site_pages:manage enabled in Admin Users.
-    - This replaces the old hardcoded email-only admin check.
-  */
   await requireAdminPermission("site_pages:manage");
 }
 
@@ -75,6 +90,22 @@ const selectFields = `
   updated_at
 `;
 
+function getErrorStatus(error: unknown) {
+  if (error instanceof Error && error.message === "Unauthorized") {
+    return 401;
+  }
+
+  return 403;
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message === "Unauthorized" ? "Unauthorized" : error.message;
+  }
+
+  return "Forbidden";
+}
+
 export async function GET() {
   try {
     await requireSitePagesAccess();
@@ -99,18 +130,15 @@ export async function GET() {
       ok: true,
       pages: data || [],
     });
-  } catch (error: any) {
-    console.error("GET /api/admin/site-pages error:", error);
+  } catch (error) {
+    console.error("GET /api/admin/settings/site-pages error:", error);
 
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: getErrorMessage(error),
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      { status: getErrorStatus(error) }
     );
   }
 }
@@ -119,8 +147,8 @@ export async function PATCH(req: Request) {
   try {
     await requireSitePagesAccess();
 
-    const body = await req.json().catch(() => ({}));
-    const id = clean(body?.id);
+    const body = (await req.json().catch(() => ({}))) as SitePageUpdateBody;
+    const id = clean(body.id);
 
     if (!id) {
       return NextResponse.json(
@@ -132,10 +160,10 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const passwordProtected = cleanBoolean(body?.password_protected, false);
-    const rawPassword = clean(body?.page_password);
+    const passwordProtected = cleanBoolean(body.password_protected, false);
+    const rawPassword = clean(body.page_password);
 
-    let pagePasswordHash: string | null | undefined = undefined;
+    let pagePasswordHash: string | null | undefined;
 
     if (passwordProtected) {
       if (rawPassword) {
@@ -146,19 +174,19 @@ export async function PATCH(req: Request) {
     }
 
     const updates: Record<string, unknown> = {
-      title: clean(body?.title),
-      status: cleanStatus(body?.status),
-      is_enabled: cleanBoolean(body?.is_enabled, true),
-      show_in_nav: cleanBoolean(body?.show_in_nav, false),
-      nav_label: cleanNullable(body?.nav_label),
-      template: cleanNullable(body?.template),
-      sort_order: cleanNumber(body?.sort_order, 999),
-      hidden_title: cleanNullable(body?.hidden_title),
-      hidden_message: cleanNullable(body?.hidden_message),
-      coming_soon_title: cleanNullable(body?.coming_soon_title),
-      coming_soon_message: cleanNullable(body?.coming_soon_message),
-      locked_title: cleanNullable(body?.locked_title),
-      locked_message: cleanNullable(body?.locked_message),
+      title: clean(body.title),
+      status: cleanStatus(body.status),
+      is_enabled: cleanBoolean(body.is_enabled, true),
+      show_in_nav: cleanBoolean(body.show_in_nav, false),
+      nav_label: cleanNullable(body.nav_label),
+      template: cleanNullable(body.template),
+      sort_order: cleanNumber(body.sort_order, 999),
+      hidden_title: cleanNullable(body.hidden_title),
+      hidden_message: cleanNullable(body.hidden_message),
+      coming_soon_title: cleanNullable(body.coming_soon_title),
+      coming_soon_message: cleanNullable(body.coming_soon_message),
+      locked_title: cleanNullable(body.locked_title),
+      locked_message: cleanNullable(body.locked_message),
       password_protected: passwordProtected,
       updated_at: new Date().toISOString(),
     };
@@ -188,18 +216,15 @@ export async function PATCH(req: Request) {
       ok: true,
       page: data,
     });
-  } catch (error: any) {
-    console.error("PATCH /api/admin/site-pages error:", error);
+  } catch (error) {
+    console.error("PATCH /api/admin/settings/site-pages error:", error);
 
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error?.message === "Unauthorized"
-            ? "Unauthorized"
-            : error?.message || "Forbidden",
+        error: getErrorMessage(error),
       },
-      { status: error?.message === "Unauthorized" ? 401 : 403 }
+      { status: getErrorStatus(error) }
     );
   }
 }

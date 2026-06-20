@@ -5,19 +5,38 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { Lock, Eye, EyeOff, Clock3, Loader2 } from "lucide-react";
 
-type Props = {
-  mode: string;
+export type PageStatusMode =
+  | "locked"
+  | "hidden"
+  | "disabled"
+  | "coming_soon";
+
+export type PageStatusIconName = "lock" | "clock" | "hidden";
+
+export type PageStatusCardProps = {
+  mode: PageStatusMode;
   pageId: string;
   route: string;
   badge: string;
   title: string;
   message: string;
-  iconName: "lock" | "clock" | "hidden";
+  iconName: PageStatusIconName;
 };
 
-function StatusIcon({ iconName }: { iconName: Props["iconName"] }) {
-  if (iconName === "lock") return <Lock className="h-3.5 w-3.5" />;
-  if (iconName === "clock") return <Clock3 className="h-3.5 w-3.5" />;
+type UnlockResponse = {
+  ok?: boolean;
+  error?: string;
+};
+
+function StatusIcon({ iconName }: { iconName: PageStatusIconName }) {
+  if (iconName === "lock") {
+    return <Lock className="h-3.5 w-3.5" />;
+  }
+
+  if (iconName === "clock") {
+    return <Clock3 className="h-3.5 w-3.5" />;
+  }
+
   return <EyeOff className="h-3.5 w-3.5" />;
 }
 
@@ -29,7 +48,7 @@ export default function PageStatusCard({
   title,
   message,
   iconName,
-}: Props) {
+}: PageStatusCardProps) {
   const router = useRouter();
   const isLocked = mode === "locked";
 
@@ -38,8 +57,13 @@ export default function PageStatusCard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleUnlock(e: FormEvent) {
+  async function handleUnlock(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    if (!pageId) {
+      setError("This page could not be unlocked right now.");
+      return;
+    }
 
     if (!password.trim()) {
       setError("Please enter the page password.");
@@ -50,7 +74,7 @@ export default function PageStatusCard({
       setSubmitting(true);
       setError("");
 
-      const res = await fetch("/api/admin/site-pages/unlock", {
+      const res = await fetch("/api/admin/settings/site-pages/unlock", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -63,32 +87,26 @@ export default function PageStatusCard({
         }),
       });
 
-      const text = await res.text();
-
-      let json: any = {};
+      let json: UnlockResponse = {};
 
       try {
-        json = text ? JSON.parse(text) : {};
+        json = await res.json();
       } catch {
-        console.error("Unlock API returned non-JSON response:", {
-          status: res.status,
-          statusText: res.statusText,
-          responseText: text,
-        });
-
-        throw new Error(
-          `Unlock API did not return JSON. Status: ${res.status}. Check that app/api/admin/site-pages/unlock/route.ts exists and that the fetch URL matches.`
-        );
+        throw new Error("We could not unlock this page right now.");
       }
 
       if (!res.ok || !json.ok) {
         throw new Error(json.error || "Incorrect password.");
       }
 
-      router.push(route);
+      router.replace(route);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Incorrect password.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We could not unlock this page right now."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -122,10 +140,7 @@ export default function PageStatusCard({
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
-
-                  if (error) {
-                    setError("");
-                  }
+                  if (error) setError("");
                 }}
                 placeholder="Enter page password"
                 disabled={submitting}
@@ -183,12 +198,6 @@ export default function PageStatusCard({
               Go to homepage
             </Link>
           </div>
-
-          <p className="mt-4 text-xs leading-5 text-white/45">
-            If this shows “Unlock API did not return JSON”, check that your API
-            file is exactly at app/api/admin/site-pages/unlock/route.ts and that
-            there is no old fetch still using /api/site-pages/unlock.
-          </p>
         </form>
       ) : (
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
