@@ -91,12 +91,6 @@ export default function HomeClient() {
               Our Core Values
             </Link>
 
-            <Link
-              href="/Raffle"
-              className="rounded-full bg-yellow-400 px-5 py-2.5 text-base font-extrabold text-black shadow-lg shadow-yellow-400/50 transition-transform hover:scale-105 hover:bg-yellow-300 sm:px-6 sm:py-3 sm:text-lg"
-            >
-              🎟️ Buy Raffle Tickets
-            </Link>
 
             <Link
               href="/BurtonPride2026/MainEvent"
@@ -243,69 +237,7 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
-            {/* Raffle CTA */}
-            <motion.section
-              variants={fadeUp}
-              transition={{ delay: 0.16, duration: 0.6 }}
-            >
-              <div className="relative overflow-hidden rounded-3xl border-2 border-yellow-300/70 bg-gradient-to-r from-purple-700 via-pink-600 to-yellow-400 p-8 text-center shadow-2xl shadow-yellow-400/40 sm:p-12">
-                <div className="pointer-events-none absolute -left-24 -top-24 h-72 w-72 rounded-full bg-yellow-300/40 blur-3xl animate-pulse mix-blend-overlay" />
-                <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-pink-300/40 blur-3xl animate-pulse mix-blend-overlay" />
-
-                <div className="relative mx-auto max-w-4xl">
-                  <p className="mb-3 inline-flex rounded-full bg-black/25 px-5 py-2 text-sm font-black uppercase tracking-wide text-white shadow-lg backdrop-blur-md">
-                    Burton Pride 2026 Raffle
-                  </p>
-
-                  <h2 className="mb-4 text-4xl font-extrabold drop-shadow-lg sm:text-6xl">
-                    🎟️ Win Cash Prizes
-                  </h2>
-
-                  <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/95 sm:text-xl">
-                    Buy your Burton Pride raffle tickets and help support your
-                    local grassroots Pride. Tickets are only{" "}
-                    <strong>£1 each</strong>, with cash prizes of{" "}
-                    <strong>£100, £60 and £30</strong> to be won.
-                  </p>
-
-                  <div className="mb-7 grid gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-white/30 bg-white/20 p-5 shadow-xl backdrop-blur-md">
-                      <p className="text-sm font-black uppercase tracking-wide text-white/80">
-                        1st Prize
-                      </p>
-                      <p className="mt-1 text-4xl font-black">£100</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/30 bg-white/20 p-5 shadow-xl backdrop-blur-md">
-                      <p className="text-sm font-black uppercase tracking-wide text-white/80">
-                        2nd Prize
-                      </p>
-                      <p className="mt-1 text-4xl font-black">£60</p>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/30 bg-white/20 p-5 shadow-xl backdrop-blur-md">
-                      <p className="text-sm font-black uppercase tracking-wide text-white/80">
-                        3rd Prize
-                      </p>
-                      <p className="mt-1 text-4xl font-black">£30</p>
-                    </div>
-                  </div>
-
-                  <Link
-                    href="/Raffle"
-                    className="inline-flex items-center justify-center rounded-full bg-white px-10 py-4 text-xl font-extrabold text-purple-700 shadow-2xl transition-transform hover:scale-105 hover:bg-yellow-100 sm:px-14 sm:py-5 sm:text-2xl"
-                  >
-                    🎟️ Buy Raffle Tickets
-                  </Link>
-
-                  <p className="mt-5 text-sm font-bold text-white/90">
-                    Licensed by East Staffordshire Council under registration
-                    number SL0507. Winners announced at Burton Pride 2026 on
-                    27th June 2026.
-                  </p>
-                </div>
-              </div>
-            </motion.section>
+           
 
             {/* Volunteer CTA */}
             <motion.section
@@ -400,32 +332,7 @@ export default function HomeClient() {
               </div>
             </motion.section>
 
-            {/* Competition */}
-            <motion.section
-              variants={fadeUp}
-              transition={{ delay: 0.2, duration: 0.6 }}
-            >
-              <div className="rounded-3xl border border-white/20 bg-white/10 p-8 text-center shadow-2xl backdrop-blur-lg sm:p-10">
-                <h2 className="mb-3 text-3xl font-extrabold sm:text-4xl">
-                  🌈 Windows Of Hope Competition 2026
-                </h2>
-
-                <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-lg">
-                  Show your creativity and Pride spirit! Enter our competition
-                  for a chance to win amazing prizes. Upload your design, photo,
-                  or artwork and take part in the celebration.
-                </p>
-
-                <p className="mb-6 text-xl font-bold">Entry Fee: £2</p>
-
-                <Link
-                  href="/Competition"
-                  className="inline-flex items-center justify-center rounded-full bg-yellow-400 px-9 py-3.5 text-lg font-bold text-black shadow-lg shadow-yellow-400/50 transition-transform hover:scale-105 hover:bg-yellow-300 sm:px-10 sm:py-4 sm:text-xl"
-                >
-                  Enter Competition
-                </Link>
-              </div>
-            </motion.section>
+           
 
             {/* Application Forms and Collaborate */}
             <motion.section
