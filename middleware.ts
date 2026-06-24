@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { updateSession } from "@/lib/supabase/middleware";
 
 type SitePageStatus = "live" | "hidden" | "coming_soon";
@@ -14,16 +13,6 @@ type SitePage = {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const supabase =
-  supabaseUrl && supabaseServiceKey
-    ? createClient(supabaseUrl, supabaseServiceKey, {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      })
-    : null;
 
 function normalisePath(pathname: string) {
   if (!pathname || pathname === "/") return "/";
@@ -60,25 +49,47 @@ function shouldSkipPageLocker(pathname: string) {
   );
 }
 
-async function getSitePage(route: string) {
-  if (!supabase) return null;
+async function getSitePage(route: string): Promise<SitePage | null> {
+  if (!supabaseUrl || !supabaseServiceKey) return null;
 
   const normalisedRoute = normalisePath(route);
   const lowerRoute = normalisedRoute.toLowerCase();
 
-  const { data, error } = await supabase
-    .from("site_pages")
-    .select("id, route, status, is_enabled, password_protected")
-    .in("route", [normalisedRoute, lowerRoute])
-    .limit(1)
-    .maybeSingle();
+  try {
+    const url = new URL(`${supabaseUrl}/rest/v1/site_pages`);
 
-  if (error) {
-    console.error("Website page locker error:", error.message);
+    url.searchParams.set(
+      "select",
+      "id,route,status,is_enabled,password_protected"
+    );
+
+    url.searchParams.set(
+      "or",
+      `(route.eq.${normalisedRoute},route.eq.${lowerRoute})`
+    );
+
+    url.searchParams.set("limit", "1");
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        apikey: supabaseServiceKey,
+        Authorization: `Bearer ${supabaseServiceKey}`,
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.error("Website page locker error:", await response.text());
+      return null;
+    }
+
+    const data = (await response.json()) as SitePage[];
+
+    return data[0] ?? null;
+  } catch (error) {
+    console.error("Website page locker error:", error);
     return null;
   }
-
-  return data as SitePage | null;
 }
 
 function buildPageStatusPath(pathname: string) {

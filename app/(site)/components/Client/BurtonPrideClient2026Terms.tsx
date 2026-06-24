@@ -6,7 +6,6 @@ const TermsPage = () => {
           Burton Pride 2026 – Terms & Conditions
         </h1>
 
-        {/* 1. Introduction */}
         <section>
           <h2 className="text-2xl font-semibold mb-2">1. Introduction</h2>
           <p>
@@ -18,19 +17,17 @@ const TermsPage = () => {
           </p>
         </section>
 
-        {/* 2. About the Event */}
         <section>
           <h2 className="text-2xl font-semibold mb-2">2. About the Event</h2>
           <p>
             Burton Pride 2026 is a free, public event organised by Burton Pride
             C.I.C. It celebrates and supports the LGBTQIA+ community, promoting
-            inclusion, diversity, and equality. The event is open to all and
-            aims to provide a safe, welcoming, and fun environment where people
-            of all ages and backgrounds can come together in celebration.
+            inclusion, diversity, and equality. The event is open to all and aims
+            to provide a safe, welcoming, and fun environment where people of all
+            ages and backgrounds can come together in celebration.
           </p>
         </section>
 
-        {/* 3. Visitor Guidelines */}
         <section>
           <h2 className="text-2xl font-semibold mb-2">3. Visitor Guidelines</h2>
           <p>
@@ -60,13 +57,13 @@ const TermsPage = () => {
               bins provided.
             </li>
             <li>
-              Minimizing litter helps maintain a clean, safe, and enjoyable
+              Minimising litter helps maintain a clean, safe, and enjoyable
               environment for all attendees.
             </li>
           </ul>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">
-            3.3 Alcohol and Food
+            3.3 Alcohol, Food, and Drinks
           </h3>
           <ul className="list-disc pl-6 space-y-1">
             <li>
@@ -74,21 +71,65 @@ const TermsPage = () => {
               from licensed vendors may be consumed.
             </li>
             <li>
-              Outside food and drinks are not permitted, except for special
-              dietary requirements, which should be discussed with event staff
-              in advance.
+              Due to the Weather Policy, visitors may bring water and soft
+              drinks into the event, but they must be in plastic bottles only.
+              Glass bottles are not permitted.
+            </li>
+            <li>
+              Outside food is not permitted, except for special dietary
+              requirements, which should be discussed with event staff in
+              advance.
             </li>
           </ul>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">
-            3.4 Health and Safety
+            3.4 Weather Policy
+          </h3>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>
+              At Burton Pride, the safety, wellbeing, and comfort of our visitors
+               is one of our highest priorities. With warm temperatures and extreme weather 
+               conditions forecast during the week of the event, we have introduced this 
+               Weather Policy to help everyone enjoy the day safely.
+            </li>
+            <li>
+             As a temporary measure for Burton Pride 2026, visitors will be permitted
+              to bring water and soft drinks into the event. This decision has been made to 
+              help attendees stay hydrated throughout the day and reduce the risk of heat-related illnesses.
+            </li>
+            <li>
+              We strongly encourage all visitors to take sensible precautions during the warm weather. 
+              This includes wearing plenty of sun cream, bringing appropriate sun protection, drinking 
+              water regularly, taking breaks in shaded areas where available, and looking after friends, 
+              family members, and fellow attendees throughout the day.
+            </li>
+            <li>
+              If you begin to feel unwell due to the heat, please seek assistance from a member of 
+              the Burton Pride Committee, a volunteer, security staff, or the event first aid 
+              team immediately.
+            </li>
+            <li>
+             Burton Pride is a community event created by the community,
+              for the community. We want everyone to have a fantastic,
+               safe, and enjoyable day celebrating together. 
+               Your wellbeing matters to us, your safety matters to us, and most importantly, you matter.
+            </li>
+            <li>
+            By attending Burton Pride 2026, all visitors agree to follow this Weather
+             Policy and any instructions given by event staff, volunteers, security 
+             personnel, or first aid teams relating to health and safety during the event
+            </li>
+          </ul>
+
+          <h3 className="text-xl font-semibold mt-4 mb-2">
+            3.5 Health and Safety
           </h3>
           <ul className="list-disc pl-6 space-y-1">
             <li>
               Visitors must behave responsibly and respect other attendees.
             </li>
             <li>
-              Dangerous, abusive, or disruptive behavior may result in removal
+              Dangerous, abusive, or disruptive behaviour may result in removal
               from the event.
             </li>
             <li>
@@ -98,7 +139,7 @@ const TermsPage = () => {
           </ul>
 
           <h3 className="text-xl font-semibold mt-4 mb-2">
-            3.5 Accessibility
+            3.6 Accessibility
           </h3>
           <ul className="list-disc pl-6 space-y-1">
             <li>
@@ -112,7 +153,6 @@ const TermsPage = () => {
           </ul>
         </section>
 
-        {/* 4. Stage Rules */}
         <section>
           <h2 className="text-2xl font-semibold mb-2">4. Stage Rules</h2>
           <p>
@@ -130,23 +170,22 @@ const TermsPage = () => {
             </li>
             <li>
               Authorised personnel will be clearly identifiable by
-              high-visibility clothing or badges labeled ‘Committee Team’ or
-              ‘Volunteers’.
+              high-visibility clothing or badges labelled “Committee Team” or
+              “Volunteers”.
             </li>
             <li>
-              Anyone found on stage without authorization may be asked to leave
+              Anyone found on stage without authorisation may be asked to leave
               immediately.
             </li>
           </ul>
         </section>
 
-        {/* 5. Restricted Areas */}
         <section>
           <h2 className="text-2xl font-semibold mb-2">5. Restricted Areas</h2>
           <ul className="list-disc pl-6 space-y-1">
             <li>
               Access is limited to Burton Pride C.I.C. committee members and
-              authorized volunteers.
+              authorised volunteers.
             </li>
             <li>
               Visitors may only enter these areas when accompanied by a
@@ -157,13 +196,12 @@ const TermsPage = () => {
               and behind funfair rides and attractions.
             </li>
             <li>
-              Anyone found in restricted areas without authorization may be
+              Anyone found in restricted areas without authorisation may be
               asked to leave immediately.
             </li>
           </ul>
         </section>
 
-        {/* Vendor Terms & Conditions */}
         <section className="space-y-8">
           <h2 className="text-3xl font-bold mb-4 text-center">
             Vendor Terms & Conditions
@@ -298,7 +336,7 @@ const TermsPage = () => {
                 volunteers at all times.
               </li>
               <li>
-                Unauthorized behavior, including entering restricted areas or
+                Unauthorised behaviour, including entering restricted areas or
                 allowing unapproved access to their stall, may result in removal
                 from the event.
               </li>
@@ -310,7 +348,6 @@ const TermsPage = () => {
           </div>
         </section>
 
-        {/* Political Party Policy */}
         <section className="space-y-4">
           <h2 className="text-3xl font-bold mb-4 text-center">
             Political Party Policy
@@ -367,15 +404,14 @@ const TermsPage = () => {
           </p>
         </section>
 
-        {/* Download Terms Button */}
         <div className="mt-8 text-center">
           <p className="text-sm text-black/70 mb-2">
             These Terms & Conditions are valid only in their official form. Any
-            modification, edit, or unauthorized change will automatically
+            modification, edit, or unauthorised change will automatically
             invalidate them.
           </p>
           <a
-            href="/Document/Burton_Pride_2026_Terms_PDF_Verison.pdf"
+            href="/Document/Burton_pocliy_ZIP.zip"
             download
             className="inline-block bg-yellow-400 text-black font-bold px-6 py-3 rounded-full hover:bg-yellow-300 transition transform hover:scale-105 shadow-lg"
           >

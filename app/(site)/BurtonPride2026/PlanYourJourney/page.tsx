@@ -16,9 +16,9 @@ export const metadata: Metadata = {
     "Pride travel guide",
   ],
   openGraph: {
-    title: "Getting Here | Burton Pride 2025",
+    title: "Getting Here | Burton Pride 2026",
     description:
-      "All your travel options for getting to Burton Pride 2025 at Shobnall Leisure Complex.",
+      "All your travel options for getting to Burton Pride 2026 at Shobnall Leisure Complex.",
     siteName: "Burton Pride",
     type: "website",
     locale: "en_GB",
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
         url: "/image/logo.jpg",
         width: 1200,
         height: 630,
-        alt: "Burton Pride 2025 - Getting Here",
+        alt: "Burton Pride 2026 - Getting Here",
       },
     ],
   },
@@ -40,7 +40,7 @@ const PlanYourVisitPage = () => {
     <main className="min-h-screen text-white px-6 pt-28 pb-12 sm:px-16 sm:pt-32">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl sm:text-5xl font-bold mb-10 text-center">
-          Getting Here – Burton Pride 
+          Getting Here – Burton Pride 2026
         </h1>
 
         <div className="grid gap-8">

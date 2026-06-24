@@ -33,9 +33,19 @@ export default function PrideEventClient({
       text: "Outside alcohol is not permitted on site. Alcohol may only be consumed if purchased from licensed vendors at the event.",
     },
     {
+      title: "Weather Policy",
+      icon: "☀️",
+      text: "Due to warm weather, visitors may bring water and soft drinks into the event. Drinks must be in plastic bottles only. No glass bottles are permitted.",
+    },
+    {
+      title: "Sun Safety",
+      icon: "🧴",
+      text: "Please wear plenty of sun cream, stay hydrated, take breaks where needed, and look after yourself and others throughout the day.",
+    },
+    {
       title: "Food & Drink",
-      icon: "🍔",
-      text: "Outside food and drinks are not permitted, except for special dietary requirements. Please speak to event staff if support is needed.",
+      icon: "🥤",
+      text: "Water and soft drinks are allowed under the Weather Policy. Outside food is not permitted, except for special dietary requirements.",
     },
     {
       title: "Respect Everyone",
@@ -51,16 +61,6 @@ export default function PrideEventClient({
       title: "Stage Access",
       icon: "🎤",
       text: "No one is allowed on stage without approval. Only scheduled performers, staff, and authorised volunteers may access the stage.",
-    },
-    {
-      title: "Restricted Areas",
-      icon: "🚧",
-      text: "Restricted areas, including behind the stage and behind funfair rides, are only for committee members and authorised volunteers.",
-    },
-    {
-      title: "Vendor Rules",
-      icon: "🛍️",
-      text: "Vendors must stay within their pitch, keep their area clean, bring their own equipment, and follow committee instructions at all times.",
     },
     {
       title: "Political Party Policy",
@@ -86,7 +86,6 @@ export default function PrideEventClient({
         </div>
       )}
 
-      {/* Hero */}
       <motion.header
         className="text-center flex flex-col items-center gap-6 max-w-5xl"
         variants={{
@@ -167,6 +166,7 @@ export default function PrideEventClient({
             Event Terms & Conditions
           </Link>
 
+        
           <Link
             href="/ContactUS"
             className="inline-block bg-white text-purple-700 px-8 py-4 rounded-full font-bold text-lg hover:bg-gray-100 transition duration-300 hover:scale-105 shadow-lg"
@@ -176,7 +176,29 @@ export default function PrideEventClient({
         </motion.div>
       </motion.header>
 
-      {/* Event information */}
+      <motion.section
+        className="w-full max-w-6xl rounded-3xl bg-yellow-100 text-black p-8 sm:p-12 text-center shadow-2xl border-4 border-yellow-400"
+        initial={{ opacity: 0, y: 35 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+      >
+        <h2 className="text-4xl font-extrabold mb-4">
+          Weather Policy Update ☀️
+        </h2>
+
+        <p className="text-lg sm:text-xl leading-relaxed mb-4">
+          Due to the warm weather expected during Burton Pride 2026, visitors
+          may bring water and soft drinks into the event.
+        </p>
+
+        <p className="text-lg sm:text-xl leading-relaxed mb-6">
+          Drinks must be in plastic bottles only. Glass bottles and outside
+          alcohol are not permitted. Please wear sun cream, stay hydrated, and
+          look after yourself and others.
+        </p>
+
+      </motion.section>
+
       <motion.section
         className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-6"
         initial={{ opacity: 0, y: 30 }}
@@ -208,7 +230,6 @@ export default function PrideEventClient({
         </div>
       </motion.section>
 
-      {/* Main message */}
       <motion.section
         className="w-full max-w-5xl rounded-3xl bg-white/10 backdrop-blur-md border border-white/20 p-8 sm:p-12 text-center shadow-2xl"
         initial={{ opacity: 0, y: 35 }}
@@ -239,7 +260,6 @@ export default function PrideEventClient({
         </p>
       </motion.section>
 
-      {/* Top event terms */}
       <motion.section
         className="w-full max-w-6xl rounded-3xl bg-white/10 backdrop-blur-md border border-white/20 p-8 sm:p-12 shadow-2xl"
         initial={{ opacity: 0, y: 40 }}
@@ -289,17 +309,17 @@ export default function PrideEventClient({
           ))}
         </div>
 
-        <div className="mt-10 text-center">
+        <div className="mt-10 flex flex-col sm:flex-row justify-center gap-4">
           <Link
             href="/BurtonPride2026/Terms"
             className="inline-block bg-orange-400 text-black px-8 py-4 rounded-full font-bold text-lg hover:bg-orange-500 transition duration-300 hover:scale-105 shadow-lg"
           >
             Read Full Terms & Conditions
           </Link>
+
         </div>
       </motion.section>
 
-      {/* Plan your journey */}
       <motion.section
         className="w-full max-w-5xl rounded-3xl bg-white text-black p-8 sm:p-12 text-center shadow-2xl"
         initial={{ opacity: 0, y: 40 }}
@@ -321,7 +341,6 @@ export default function PrideEventClient({
         </Link>
       </motion.section>
 
-      {/* Event terms */}
       <motion.section
         className="w-full max-w-5xl rounded-3xl bg-yellow-100 text-black p-8 sm:p-12 text-center shadow-2xl border-4 border-yellow-400"
         initial={{ opacity: 0, y: 40 }}
@@ -346,7 +365,6 @@ export default function PrideEventClient({
         </Link>
       </motion.section>
 
-      {/* Support section */}
       <motion.section
         className="relative w-full max-w-6xl bg-gradient-to-r p-8 sm:p-12 rounded-3xl shadow-2xl shadow-pink-400/50 flex flex-col items-center text-center overflow-hidden"
         initial={{ opacity: 0, y: 40 }}
@@ -376,7 +394,6 @@ export default function PrideEventClient({
         </div>
       </motion.section>
 
-      {/* Get involved */}
       <motion.section
         className="text-center w-full max-w-5xl"
         initial={{ opacity: 0, y: 40 }}
@@ -408,7 +425,6 @@ export default function PrideEventClient({
         </div>
       </motion.section>
 
-      {/* After party */}
       <motion.section
         className="w-full max-w-5xl rounded-3xl bg-white text-black p-8 sm:p-12 text-center shadow-2xl"
         initial={{ opacity: 0, y: 40 }}
@@ -438,7 +454,6 @@ export default function PrideEventClient({
         </Link>
       </motion.section>
 
-      {/* Final CTA */}
       <motion.section
         className="text-center w-full max-w-4xl pb-6"
         initial={{ opacity: 0, y: 40 }}
