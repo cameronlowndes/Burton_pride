@@ -66,7 +66,7 @@ function WeatherWarningPopup() {
         </p>
 
         <a
-          href="//BurtonPride2026/Terms"
+          href="/BurtonPride2026/Terms"
           className="inline-block rounded-full bg-pink-600 px-6 py-3 font-bold text-white hover:bg-pink-700"
         >
           Read Full Policy
