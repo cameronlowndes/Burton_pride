@@ -1,29 +1,45 @@
 import { NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 
-const MAIN_ADMIN_EMAIL = "cameronlowndes@gmail.com";
-
 function clean(value: unknown) {
-  return String(value || "").trim();
+  return String(value ?? "").trim();
 }
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
+    const supabase = await createSupabaseServerClient();
 
-    if (!userId) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 }
+      );
     }
 
-    const user = await currentUser();
-    const email =
-      user?.primaryEmailAddress?.emailAddress?.toLowerCase().trim() || "";
+    const { data: adminUser, error: adminError } = await supabaseAdmin
+      .from("admin_users")
+      .select("role, is_active")
+      .eq("supabase_user_id", user.id)
+      .single();
 
-    if (email !== MAIN_ADMIN_EMAIL) {
-      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    if (
+      adminError ||
+      !adminUser ||
+      !adminUser.is_active ||
+      adminUser.role !== "main_admin"
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "Forbidden" },
+        { status: 403 }
+      );
     }
 
     const body = await req.json();
@@ -39,7 +55,9 @@ export async function POST(req: Request) {
       image_url: clean(body?.image_url) || null,
       display_order: Number(body?.display_order ?? 999),
       is_published:
-        typeof body?.is_published === "boolean" ? body.is_published : true,
+        typeof body?.is_published === "boolean"
+          ? body.is_published
+          : true,
     };
 
     if (!payload.full_name || !payload.role) {
@@ -53,7 +71,19 @@ export async function POST(req: Request) {
       .from("committee_members")
       .insert(payload)
       .select(
-        "id, full_name, email, image_url, role, pronouns, section_title, story_title, story, display_order, is_published"
+        `
+        id,
+        full_name,
+        email,
+        image_url,
+        role,
+        pronouns,
+        section_title,
+        story_title,
+        story,
+        display_order,
+        is_published
+      `
       )
       .single();
 
@@ -72,7 +102,10 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unexpected server error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unexpected server error",
       },
       { status: 500 }
     );
