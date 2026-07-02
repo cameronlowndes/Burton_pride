@@ -354,48 +354,27 @@ export default function HomeClient() {
             </div>
           </motion.section>
 
-          {/* APPLICATIONS / COLLABORATE */}
+          {/* COLLABORATE */}
           <motion.section
             variants={fadeUp}
             transition={{ delay: 0.26, duration: 0.6 }}
           >
-            <div className="grid gap-6 sm:grid-cols-2">
-              <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">
-                  Future Burton Pride Applications
-                </h2>
+            <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 text-center shadow-2xl backdrop-blur-md sm:p-10">
+              <h2 className="mb-3 text-2xl font-black sm:text-3xl">
+                Collaborate With Us
+              </h2>
 
-                <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                  We will share future application details for stallholders,
-                  charities, performers, food vendors, volunteers and community
-                  groups when planning opens.
-                </p>
+              <p className="mx-auto mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-lg">
+                We welcome local businesses, organisations and individuals who
+                want to support inclusion, equality and community Pride.
+              </p>
 
-                <Link
-                  href="/BurtonPride2026"
-                  className="mt-auto inline-flex w-fit rounded-full bg-green-500 px-7 py-3 text-base font-bold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400"
-                >
-                  View Applications
-                </Link>
-              </div>
-
-              <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 shadow-2xl backdrop-blur-md sm:p-10">
-                <h2 className="mb-3 text-2xl font-black sm:text-3xl">
-                  Collaborate With Us
-                </h2>
-
-                <p className="mb-6 text-base leading-relaxed text-white/90 sm:text-lg">
-                  We welcome local businesses, organisations and individuals who
-                  want to support inclusion, equality and community Pride.
-                </p>
-
-                <Link
-                  href="/Collaborate"
-                  className="mt-auto inline-flex w-fit rounded-full bg-green-500 px-7 py-3 text-base font-bold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400"
-                >
-                  Collaborate
-                </Link>
-              </div>
+              <Link
+                href="/Collaborate"
+                className="mx-auto inline-flex w-fit rounded-full bg-green-500 px-7 py-3 text-base font-bold text-white shadow-lg transition-transform hover:scale-105 hover:bg-green-400"
+              >
+                Collaborate
+              </Link>
             </div>
           </motion.section>
 
