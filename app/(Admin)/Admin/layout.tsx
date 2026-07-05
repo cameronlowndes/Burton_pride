@@ -64,6 +64,15 @@ function getRequiredPermission(pathname: string | null) {
 
   if (!path || path === "/admin/login") return null;
 
+  /**
+   * IMPORTANT:
+   * Burton Pride Event Hub must not be controlled by this Admin layout.
+   * It should use its own layout, sidebar, title, permissions and routing.
+   */
+  if (path.startsWith("/admin/burtonprideeventhub")) {
+    return null;
+  }
+
   if (path.startsWith("/admin/dashboard/settings/pageeditor")) {
     return "site_pages:manage";
   }
@@ -205,10 +214,6 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [permissionsError, setPermissionsError] = useState("");
 
-  useEffect(() => {
-    document.title = "Burton Pride Admin Portal APP";
-  }, []);
-
   const path = normalisePath(pathname);
 
   const isLoginPage = path === "/admin/login";
@@ -216,11 +221,33 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
   const isEmailRoute = path.startsWith("/admin/email");
   const isMoneyRoute = path.startsWith("/admin/money");
 
+  /**
+   * Burton Pride Event Hub is now separate.
+   * This Admin layout must not:
+   * - load permissions for it
+   * - redirect it
+   * - wrap it in AdminSidebar
+   * - set the Admin Portal document title
+   * - show Admin loading/error/no-access screens
+   */
+  const isEventHubRoute = path.startsWith("/admin/burtonprideeventhub");
+
   const leaveMoneyLayoutUntouched = Boolean(isMoneyRoute);
+  const leaveEventHubLayoutUntouched = Boolean(isEventHubRoute);
+
+  const leaveAdminLayoutUntouched =
+    leaveMoneyLayoutUntouched || leaveEventHubLayoutUntouched;
+
   const showAdminNav = Boolean(isDashboardRoute);
   const useFullWidthLayout = Boolean(isEmailRoute);
 
   const displayName = adminEmail || "Committee Member";
+
+  useEffect(() => {
+    if (leaveAdminLayoutUntouched) return;
+
+    document.title = "Burton Pride Admin Portal APP";
+  }, [leaveAdminLayoutUntouched]);
 
   const requiredPermission = useMemo(
     () => getRequiredPermission(pathname),
@@ -240,7 +267,7 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function loadPermissions() {
-      if (isLoginPage) {
+      if (isLoginPage || leaveAdminLayoutUntouched) {
         setPermissionsLoaded(true);
         setPermissionsError("");
         setPermissions([]);
@@ -292,10 +319,11 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoginPage]);
+  }, [isLoginPage, leaveAdminLayoutUntouched]);
 
   useEffect(() => {
     if (isLoginPage) return;
+    if (leaveAdminLayoutUntouched) return;
     if (!permissionsLoaded) return;
     if (permissionsError) return;
     if (canAccessCurrentPage) return;
@@ -309,6 +337,7 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     adminRole,
     canAccessCurrentPage,
     isLoginPage,
+    leaveAdminLayoutUntouched,
     permissionsError,
     permissionsLoaded,
     pathname,
@@ -316,72 +345,93 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     safePermissions,
   ]);
 
+  /**
+   * Very important:
+   * Return children before loading/error/permission screens.
+   * This stops AdminLayout controlling BurtonPrideEventHub.
+   */
+  if (leaveAdminLayoutUntouched) {
+    return <>{children}</>;
+  }
+
   if (isLoginPage) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-        {children}
-      </div>
+      <AdminProvider>
+        <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+          {children}
+        </div>
+      </AdminProvider>
     );
   }
 
   if (!permissionsLoaded) {
-    return <LoadingPermissionsScreen />;
+    return (
+      <AdminProvider>
+        <LoadingPermissionsScreen />
+      </AdminProvider>
+    );
   }
 
   if (permissionsError) {
-    return <PermissionErrorScreen permissionsError={permissionsError} />;
+    return (
+      <AdminProvider>
+        <PermissionErrorScreen permissionsError={permissionsError} />
+      </AdminProvider>
+    );
   }
 
   if (!canAccessCurrentPage) {
     const fallback = getFirstAllowedPage(safePermissions, adminRole);
 
     if (fallback) {
-      return <RedirectingScreen />;
+      return (
+        <AdminProvider>
+          <RedirectingScreen />
+        </AdminProvider>
+      );
     }
 
-    return <NoAccessScreen />;
-  }
-
-  if (leaveMoneyLayoutUntouched) {
-    return <>{children}</>;
+    return (
+      <AdminProvider>
+        <NoAccessScreen />
+      </AdminProvider>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen flex-col md:flex-row">
-        {showAdminNav && (
-          <AdminSidebar permissions={safePermissions} adminRole={adminRole} />
-        )}
-
-        <div className="flex min-w-0 flex-1 flex-col">
+    <AdminProvider>
+      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+        <div className="flex min-h-screen flex-col md:flex-row">
           {showAdminNav && (
-            <header className="hidden h-16 items-center justify-between bg-white/10 px-8 shadow-sm backdrop-blur-xl md:flex">
-              <div className="font-semibold text-white/90">Admin Portal</div>
-
-              <div className="text-sm text-white/80">
-                Signed in as{" "}
-                <span className="font-semibold">{displayName}</span>
-              </div>
-            </header>
+            <AdminSidebar permissions={safePermissions} adminRole={adminRole} />
           )}
 
-          {useFullWidthLayout ? (
-            <main className="min-w-0 flex-1">{children}</main>
-          ) : (
-            <main className="flex-1 px-4 py-6 md:px-8 md:py-10">
-              <div className="mx-auto max-w-6xl">{children}</div>
-            </main>
-          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {showAdminNav && (
+              <header className="hidden h-16 items-center justify-between bg-white/10 px-8 shadow-sm backdrop-blur-xl md:flex">
+                <div className="font-semibold text-white/90">Admin Portal</div>
+
+                <div className="text-sm text-white/80">
+                  Signed in as{" "}
+                  <span className="font-semibold">{displayName}</span>
+                </div>
+              </header>
+            )}
+
+            {useFullWidthLayout ? (
+              <main className="min-w-0 flex-1">{children}</main>
+            ) : (
+              <main className="flex-1 px-4 py-6 md:px-8 md:py-10">
+                <div className="mx-auto max-w-6xl">{children}</div>
+              </main>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </AdminProvider>
   );
 }
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <AdminProvider>
-      <AdminLayoutInner>{children}</AdminLayoutInner>
-    </AdminProvider>
-  );
+  return <AdminLayoutInner>{children}</AdminLayoutInner>;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 type Donation = {
   id: string;
@@ -43,6 +43,16 @@ type CreateForm = {
   identityLabel: string;
 };
 
+type ApiResponse = {
+  ok?: boolean;
+  error?: string;
+  donations?: Donation[];
+  donation?: Donation;
+  rawResponse?: string;
+  status?: number;
+  [key: string]: unknown;
+};
+
 const identityOptions = [
   "Gay",
   "Lesbian",
@@ -71,6 +81,63 @@ const emptyCreateForm: CreateForm = {
   pronouns: "",
   identityLabel: "",
 };
+
+function clsx(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
+async function readApiJson(res: Response): Promise<ApiResponse> {
+  const text = await res.text();
+
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {
+      ok: false,
+      error: "API returned invalid JSON.",
+      rawResponse: text,
+      status: res.status,
+    };
+  }
+}
+
+function getApiError(data: ApiResponse, fallback: string) {
+  if (typeof data.error === "string" && data.error.trim()) {
+    return data.error;
+  }
+
+  if (typeof data.rawResponse === "string" && data.rawResponse.trim()) {
+    return `${fallback}. The API returned a non-JSON response. Status: ${
+      data.status || "unknown"
+    }`;
+  }
+
+  return fallback;
+}
+
+function InfoCell({
+  label,
+  children,
+  valueClassName,
+}: {
+  label: string;
+  children: ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-sm text-white/50">{label}</p>
+      <p
+        className={clsx(
+          "min-w-0 font-bold leading-6 text-white",
+          valueClassName,
+        )}
+      >
+        {children}
+      </p>
+    </div>
+  );
+}
 
 export default function AdminDonationsPage() {
   const [donations, setDonations] = useState<Donation[]>([]);
@@ -102,11 +169,11 @@ export default function AdminDonationsPage() {
   const [cancellingSub, setCancellingSub] = useState(false);
 
   const monthlyCount = donations.filter(
-    (donation) => donation.donation_type === "monthly"
+    (donation) => donation.donation_type === "monthly",
   ).length;
 
   const oneTimeCount = donations.filter(
-    (donation) => donation.donation_type !== "monthly"
+    (donation) => donation.donation_type !== "monthly",
   ).length;
 
   const filteredDonations = donations.filter((donation) => {
@@ -122,15 +189,16 @@ export default function AdminDonationsPage() {
 
       const res = await fetch("/api/admin/donations", {
         cache: "no-store",
+        credentials: "include",
       });
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load donations");
+        throw new Error(getApiError(data, "Failed to load donations"));
       }
 
-      setDonations(data.donations || []);
+      setDonations(Array.isArray(data.donations) ? data.donations : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load donations");
     } finally {
@@ -141,7 +209,7 @@ export default function AdminDonationsPage() {
   async function updateStory(
     id: string,
     supporterStoryStatus: "approved" | "rejected" | "pending",
-    supporterWallApproved: boolean
+    supporterWallApproved: boolean,
   ) {
     try {
       setUpdatingId(id);
@@ -150,6 +218,7 @@ export default function AdminDonationsPage() {
 
       const res = await fetch(`/api/admin/donations/${id}/supporter-wall`, {
         method: "PATCH",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           supporterStoryStatus,
@@ -157,10 +226,10 @@ export default function AdminDonationsPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to update story");
+        setError(getApiError(data, "Failed to update story"));
         return;
       }
 
@@ -185,6 +254,7 @@ export default function AdminDonationsPage() {
         `/api/admin/donations/${editing.id}/edit-supporter`,
         {
           method: "PATCH",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fullName: editing.fullName || "",
@@ -193,13 +263,13 @@ export default function AdminDonationsPage() {
             pronouns: editing.pronouns || "",
             identityLabel: editing.identityLabel || "",
           }),
-        }
+        },
       );
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to save supporter details");
+        setError(getApiError(data, "Failed to save supporter details"));
         return;
       }
 
@@ -208,7 +278,7 @@ export default function AdminDonationsPage() {
       await loadDonations();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to save supporter details"
+        err instanceof Error ? err.message : "Failed to save supporter details",
       );
     } finally {
       setSavingEdit(false);
@@ -235,6 +305,7 @@ export default function AdminDonationsPage() {
 
       const res = await fetch("/api/admin/donations/create-supporter", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fullName: createForm.fullName,
@@ -247,10 +318,10 @@ export default function AdminDonationsPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to create supporter");
+        setError(getApiError(data, "Failed to create supporter"));
         return;
       }
 
@@ -275,12 +346,13 @@ export default function AdminDonationsPage() {
 
       const res = await fetch(`/api/admin/donations/${deleteOneId}/delete`, {
         method: "DELETE",
+        credentials: "include",
       });
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to delete donation");
+        setError(getApiError(data, "Failed to delete donation"));
         return;
       }
 
@@ -309,16 +381,17 @@ export default function AdminDonationsPage() {
 
       const res = await fetch("/api/admin/donations/delete-all", {
         method: "DELETE",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           password: deletePassword,
         }),
       });
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to delete all donations");
+        setError(getApiError(data, "Failed to delete all donations"));
         return;
       }
 
@@ -328,7 +401,7 @@ export default function AdminDonationsPage() {
       await loadDonations();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to delete all donations"
+        err instanceof Error ? err.message : "Failed to delete all donations",
       );
     } finally {
       setDeletingAll(false);
@@ -369,17 +442,18 @@ export default function AdminDonationsPage() {
         `/api/admin/donations/${cancelSubId}/cancel-subscription`,
         {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             password: cancelSubPassword,
           }),
-        }
+        },
       );
 
-      const data = await res.json();
+      const data = await readApiJson(res);
 
       if (!res.ok || !data.ok) {
-        setError(data.error || "Failed to cancel subscription");
+        setError(getApiError(data, "Failed to cancel subscription"));
         return;
       }
 
@@ -391,7 +465,7 @@ export default function AdminDonationsPage() {
       await loadDonations();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to cancel subscription"
+        err instanceof Error ? err.message : "Failed to cancel subscription",
       );
     } finally {
       setCancellingSub(false);
@@ -559,49 +633,39 @@ export default function AdminDonationsPage() {
               return (
                 <div
                   key={donation.id}
-                  className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur"
+                  className="overflow-hidden rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur"
                 >
-                  <div className="grid gap-4 lg:grid-cols-5">
-                    <div>
-                      <p className="text-sm text-white/50">Name</p>
-                      <p className="font-bold">
-                        {donation.full_name || "Unknown"}
-                      </p>
-                    </div>
+                  <div className="grid min-w-0 gap-5 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_minmax(105px,0.7fr)_minmax(120px,0.8fr)_minmax(150px,1fr)]">
+                    <InfoCell label="Name" valueClassName="break-words">
+                      {donation.full_name || "Unknown"}
+                    </InfoCell>
 
-                    <div>
-                      <p className="text-sm text-white/50">Email</p>
-                      <p className="font-bold">
-                        {donation.email || "No email"}
-                      </p>
-                    </div>
+                    <InfoCell
+                      label="Email"
+                      valueClassName="break-all text-sm leading-6"
+                    >
+                      {donation.email || "No email"}
+                    </InfoCell>
 
-                    <div>
-                      <p className="text-sm text-white/50">Amount</p>
-                      <p className="font-bold">
-                        £{((donation.amount_pence || 0) / 100).toFixed(2)}
-                      </p>
-                    </div>
+                    <InfoCell label="Amount" valueClassName="whitespace-nowrap">
+                      £{((donation.amount_pence || 0) / 100).toFixed(2)}
+                    </InfoCell>
 
-                    <div>
-                      <p className="text-sm text-white/50">Type</p>
-                      <p className="font-bold">
-                        {isMonthly ? "Monthly" : "One-Time"}
-                      </p>
-                    </div>
+                    <InfoCell label="Type" valueClassName="break-words">
+                      {isMonthly ? "Monthly" : "One-Time"}
+                    </InfoCell>
 
-                    <div>
-                      <p className="text-sm text-white/50">Payment Status</p>
-                      <p
-                        className={`font-bold ${
-                          isCancelled ? "text-red-200" : "text-green-200"
-                        }`}
-                      >
-                        {isCancelled
-                          ? "Cancelled"
-                          : donation.status || "Active / paid"}
-                      </p>
-                    </div>
+                    <InfoCell
+                      label="Payment Status"
+                      valueClassName={clsx(
+                        "break-words",
+                        isCancelled ? "text-red-200" : "text-green-200",
+                      )}
+                    >
+                      {isCancelled
+                        ? "Cancelled"
+                        : donation.status || "Active / paid"}
+                    </InfoCell>
                   </div>
 
                   {(donation.pronouns || donation.identity_label) && (
@@ -623,7 +687,7 @@ export default function AdminDonationsPage() {
                   {donation.message && (
                     <div className="mt-5 rounded-2xl bg-white/10 p-4">
                       <p className="text-sm text-white/50">Message</p>
-                      <p className="mt-1">{donation.message}</p>
+                      <p className="mt-1 break-words">{donation.message}</p>
                     </div>
                   )}
 
@@ -711,12 +775,12 @@ export default function AdminDonationsPage() {
                             </div>
                           </div>
 
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-sm font-bold text-white/60">
                               Supporter Story
                             </p>
 
-                            <p className="mt-2 leading-7 text-white/90">
+                            <p className="mt-2 break-words leading-7 text-white/90">
                               {donation.supporter_story || "No story written."}
                             </p>
 
