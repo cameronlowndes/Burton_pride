@@ -84,7 +84,15 @@ function getRequiredPermission(pathname: string | null) {
   if (path.startsWith("/admin/dashboard/logs")) return "audit_logs:view";
   if (path.startsWith("/admin/dashboard/donations")) return "donations:view";
   if (path.startsWith("/admin/dashboard/raffle")) return "raffle:view";
+
+  /**
+   * Covers:
+   * /Admin/Money
+   * /Admin/MoneyManagement
+   * /Admin/MoneyManagement/TrackingMoney
+   */
   if (path.startsWith("/admin/money")) return "money:view";
+
   if (path.startsWith("/admin/dashboard/money")) return "money:view";
   if (path.startsWith("/admin/dashboard/users")) return "admin:users:manage";
   if (path.startsWith("/admin/dashboard")) return "admin:dashboard:view";
@@ -220,23 +228,19 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
   const isDashboardRoute = path.startsWith("/admin/dashboard");
   const isEmailRoute = path.startsWith("/admin/email");
   const isMoneyRoute = path.startsWith("/admin/money");
-
-  /**
-   * Burton Pride Event Hub is now separate.
-   * This Admin layout must not:
-   * - load permissions for it
-   * - redirect it
-   * - wrap it in AdminSidebar
-   * - set the Admin Portal document title
-   * - show Admin loading/error/no-access screens
-   */
   const isEventHubRoute = path.startsWith("/admin/burtonprideeventhub");
 
+  /**
+   * Money pages have their own layout/sidebar, so we do not add the old Admin shell.
+   * But they still NEED AdminProvider, because pages inside Money use useAdmin().
+   */
   const leaveMoneyLayoutUntouched = Boolean(isMoneyRoute);
-  const leaveEventHubLayoutUntouched = Boolean(isEventHubRoute);
 
-  const leaveAdminLayoutUntouched =
-    leaveMoneyLayoutUntouched || leaveEventHubLayoutUntouched;
+  /**
+   * Burton Pride Event Hub is fully separate.
+   * This layout does not control it or wrap it.
+   */
+  const leaveEventHubLayoutUntouched = Boolean(isEventHubRoute);
 
   const showAdminNav = Boolean(isDashboardRoute);
   const useFullWidthLayout = Boolean(isEmailRoute);
@@ -244,10 +248,10 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
   const displayName = adminEmail || "Committee Member";
 
   useEffect(() => {
-    if (leaveAdminLayoutUntouched) return;
+    if (leaveEventHubLayoutUntouched) return;
 
     document.title = "Burton Pride Admin Portal APP";
-  }, [leaveAdminLayoutUntouched]);
+  }, [leaveEventHubLayoutUntouched]);
 
   const requiredPermission = useMemo(
     () => getRequiredPermission(pathname),
@@ -267,7 +271,16 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function loadPermissions() {
-      if (isLoginPage || leaveAdminLayoutUntouched) {
+      /**
+       * Login, Money and Event Hub do not use this old permission loading screen.
+       * Money still gets AdminProvider lower down.
+       * Event Hub stays fully separate.
+       */
+      if (
+        isLoginPage ||
+        leaveMoneyLayoutUntouched ||
+        leaveEventHubLayoutUntouched
+      ) {
         setPermissionsLoaded(true);
         setPermissionsError("");
         setPermissions([]);
@@ -314,16 +327,17 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
       }
     }
 
-    loadPermissions();
+    void loadPermissions();
 
     return () => {
       cancelled = true;
     };
-  }, [isLoginPage, leaveAdminLayoutUntouched]);
+  }, [isLoginPage, leaveMoneyLayoutUntouched, leaveEventHubLayoutUntouched]);
 
   useEffect(() => {
     if (isLoginPage) return;
-    if (leaveAdminLayoutUntouched) return;
+    if (leaveMoneyLayoutUntouched) return;
+    if (leaveEventHubLayoutUntouched) return;
     if (!permissionsLoaded) return;
     if (permissionsError) return;
     if (canAccessCurrentPage) return;
@@ -337,7 +351,8 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
     adminRole,
     canAccessCurrentPage,
     isLoginPage,
-    leaveAdminLayoutUntouched,
+    leaveMoneyLayoutUntouched,
+    leaveEventHubLayoutUntouched,
     permissionsError,
     permissionsLoaded,
     pathname,
@@ -346,12 +361,19 @@ function AdminLayoutInner({ children }: { children: ReactNode }) {
   ]);
 
   /**
-   * Very important:
-   * Return children before loading/error/permission screens.
-   * This stops AdminLayout controlling BurtonPrideEventHub.
+   * Event Hub stays fully separate.
    */
-  if (leaveAdminLayoutUntouched) {
+  if (leaveEventHubLayoutUntouched) {
     return <>{children}</>;
+  }
+
+  /**
+   * Money pages keep their own layout, but still receive AdminProvider.
+   * This fixes:
+   * useAdmin must be used inside AdminProvider.
+   */
+  if (leaveMoneyLayoutUntouched) {
+    return <AdminProvider>{children}</AdminProvider>;
   }
 
   if (isLoginPage) {
