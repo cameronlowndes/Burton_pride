@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ElementType,
+  type FormEvent,
+} from "react";
 import {
   AlertTriangle,
   Banknote,
@@ -26,15 +32,11 @@ import {
   Trophy,
   Users,
   Wallet,
+  X,
+  Trash2,
 } from "lucide-react";
 
-const EVENT_APP_ROOT = "/Admin/BurtonPrideEventHub";
-const TRACKING_MONEY_ROOT = "/Admin/BurtonPrideEventHub/TrackingMoney";
-const AUDIT_LOGS_ROUTE = "/Admin/BurtonPrideEventHub/TrackingMoney/AuditLogs";
-const EVENT_PLANNING_ROUTE = "/Admin/BurtonPrideEventHub/EventPlanning";
-const VOLUNTEERS_ROUTE = "/Admin/BurtonPrideEventHub/Volunteers";
-
-const STORAGE_KEY = "burton_pride_event_hub_sidebar_items";
+const SIDEBAR_API = "/api/admin/burton-pride-event-hub/sidebar";
 
 type Notice =
   | { type: "success"; message: string; details?: unknown }
@@ -49,6 +51,24 @@ type EventAppSidebarItem = {
   sort_order: number;
   is_enabled: boolean;
   created_at?: string;
+  updated_at?: string;
+};
+
+type SidebarApiResponse = {
+  ok?: boolean;
+  source?: string;
+  api?: string;
+  table?: string;
+  count?: number;
+  item?: EventAppSidebarItem;
+  items?: EventAppSidebarItem[];
+  data?: EventAppSidebarItem[];
+  deleted_id?: string;
+  error?: string;
+  message?: string;
+  hint?: string;
+  details?: unknown;
+  technicalDetails?: unknown;
 };
 
 type EditorMode = "create" | "edit";
@@ -68,54 +88,6 @@ const defaultForm: FormState = {
   sort_order: 0,
   is_enabled: true,
 };
-
-const defaultItems: EventAppSidebarItem[] = [
-  {
-    id: "home",
-    label: "Event Hub Home",
-    href: EVENT_APP_ROOT,
-    icon: "LayoutDashboard",
-    sort_order: 0,
-    is_enabled: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "tracking-money",
-    label: "Money Tracking",
-    href: TRACKING_MONEY_ROOT,
-    icon: "Banknote",
-    sort_order: 10,
-    is_enabled: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "audit-logs",
-    label: "Audit Logs",
-    href: AUDIT_LOGS_ROUTE,
-    icon: "Logs",
-    sort_order: 20,
-    is_enabled: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "event-planning",
-    label: "Event Planning",
-    href: EVENT_PLANNING_ROUTE,
-    icon: "CalendarDays",
-    sort_order: 30,
-    is_enabled: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "volunteers",
-    label: "Volunteers",
-    href: VOLUNTEERS_ROUTE,
-    icon: "Users",
-    sort_order: 40,
-    is_enabled: true,
-    created_at: new Date().toISOString(),
-  },
-];
 
 const iconOptions = [
   "LayoutDashboard",
@@ -142,7 +114,7 @@ const iconOptions = [
   "Tags",
 ] as const;
 
-function getIcon(name: string) {
+function getIcon(name: string | null | undefined): ElementType {
   switch (name) {
     case "LayoutDashboard":
       return LayoutDashboard;
@@ -204,20 +176,23 @@ function normaliseHref(value: string) {
   return `/${clean}`;
 }
 
-function makeId(label: string) {
-  const clean = label
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return `${clean || "event-hub-link"}-${Date.now()}`;
-}
-
 function sortItems(items: EventAppSidebarItem[]) {
   return [...items].sort(
     (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0),
   );
+}
+
+function normaliseItem(item: EventAppSidebarItem): EventAppSidebarItem {
+  return {
+    id: String(item.id || ""),
+    label: String(item.label || ""),
+    href: String(item.href || ""),
+    icon: String(item.icon || "LayoutDashboard"),
+    sort_order: Number(item.sort_order || 0),
+    is_enabled: Boolean(item.is_enabled),
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
 }
 
 function toReadableDetails(value: unknown) {
@@ -228,22 +203,62 @@ function toReadableDetails(value: unknown) {
   }
 }
 
-function loadStoredItems(): EventAppSidebarItem[] {
+async function apiRequest<T>(
+  endpoint: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(endpoint, {
+    ...init,
+    cache: "no-store",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers || {}),
+    },
+  });
+
+  const rawText = await response.text();
+
+  let data: SidebarApiResponse = {};
+
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultItems;
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return defaultItems;
-
-    return sortItems(parsed as EventAppSidebarItem[]);
+    data = rawText ? JSON.parse(rawText) : {};
   } catch {
-    return defaultItems;
+    throw {
+      message: "The Event Hub sidebar API returned invalid JSON.",
+      details: {
+        endpoint,
+        method: init?.method || "GET",
+        status: response.status,
+        statusText: response.statusText,
+        responsePreview: rawText.slice(0, 1200),
+        expected:
+          "Expected JSON from /api/admin/burton-pride-event-hub/sidebar.",
+      },
+    };
   }
-}
 
-function saveStoredItems(items: EventAppSidebarItem[]) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sortItems(items)));
+  if (!response.ok || data.ok === false) {
+    throw {
+      message:
+        data.error ||
+        data.message ||
+        `The Event Hub sidebar API failed with HTTP ${response.status}.`,
+      details: {
+        endpoint,
+        method: init?.method || "GET",
+        status: response.status,
+        statusText: response.statusText,
+        hint: data.hint,
+        details: data.details,
+        technicalDetails: data.technicalDetails,
+        response: data,
+      },
+    };
+  }
+
+  return data as T;
 }
 
 export default function BurtonPrideEventHubSidebarAdminClient() {
@@ -257,33 +272,47 @@ export default function BurtonPrideEventHubSidebarAdminClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  const [deleteItem, setDeleteItem] = useState<EventAppSidebarItem | null>(
+    null,
+  );
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   useEffect(() => {
     document.title = "Burton Pride Event Hub Sidebar Editor";
-    loadItems();
+    void loadItems();
   }, []);
 
-  function loadItems() {
+  async function loadItems() {
     setLoading(true);
     setNotice(null);
 
     try {
-      const stored = loadStoredItems();
-      setItems(sortItems(stored));
-    } catch (error) {
+      const data = await apiRequest<SidebarApiResponse>(
+        `${SIDEBAR_API}?t=${Date.now()}`,
+        {
+          method: "GET",
+        },
+      );
+
+      const databaseItems = Array.isArray(data.items)
+        ? data.items
+        : Array.isArray(data.data)
+          ? data.data
+          : [];
+
+      setItems(sortItems(databaseItems.map(normaliseItem)));
+    } catch (error: any) {
+      setItems([]);
       setNotice({
         type: "error",
-        message: "Failed to load Event Hub sidebar items.",
-        details: error,
+        message:
+          error?.message ||
+          "Failed to load Event Hub sidebar items from the database.",
+        details: error?.details || error,
       });
     } finally {
       setLoading(false);
     }
-  }
-
-  function updateItems(nextItems: EventAppSidebarItem[]) {
-    const sorted = sortItems(nextItems);
-    setItems(sorted);
-    saveStoredItems(sorted);
   }
 
   const filteredItems = useMemo(() => {
@@ -294,7 +323,8 @@ export default function BurtonPrideEventHubSidebarAdminClient() {
       (item) =>
         item.label.toLowerCase().includes(q) ||
         item.href.toLowerCase().includes(q) ||
-        item.icon.toLowerCase().includes(q),
+        item.icon.toLowerCase().includes(q) ||
+        item.id.toLowerCase().includes(q),
     );
   }, [items, search]);
 
@@ -315,76 +345,6 @@ export default function BurtonPrideEventHubSidebarAdminClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function prepareHomeLink() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label: "Event Hub Home",
-      href: EVENT_APP_ROOT,
-      icon: "LayoutDashboard",
-      sort_order: items.length * 10,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function prepareTrackingMoneyLink() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label: "Money Tracking",
-      href: TRACKING_MONEY_ROOT,
-      icon: "Banknote",
-      sort_order: items.length * 10,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function prepareAuditLogsLink() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label: "Audit Logs",
-      href: AUDIT_LOGS_ROUTE,
-      icon: "Logs",
-      sort_order: items.length * 10,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function prepareEventPlanningLink() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label: "Event Planning",
-      href: EVENT_PLANNING_ROUTE,
-      icon: "CalendarDays",
-      sort_order: items.length * 10,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function prepareVolunteersLink() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label: "Volunteers",
-      href: VOLUNTEERS_ROUTE,
-      icon: "Users",
-      sort_order: items.length * 10,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
   function startEdit(item: EventAppSidebarItem) {
     setEditorMode("edit");
     setEditingId(item.id);
@@ -399,8 +359,9 @@ export default function BurtonPrideEventHubSidebarAdminClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
     setSaving(true);
     setNotice(null);
 
@@ -413,412 +374,558 @@ export default function BurtonPrideEventHubSidebarAdminClient() {
         is_enabled: form.is_enabled,
       };
 
-      if (!payload.label) throw new Error("Please enter a label.");
-      if (!payload.href) throw new Error("Please enter a URL / href.");
+      if (!payload.label) {
+        throw new Error("Please enter a label.");
+      }
+
+      if (!payload.href) {
+        throw new Error("Please enter a URL / href.");
+      }
 
       if (editingId) {
-        const nextItems = items.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                ...payload,
-              }
-            : item,
+        await apiRequest<SidebarApiResponse>(
+          `${SIDEBAR_API}?id=${encodeURIComponent(editingId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          },
         );
 
-        updateItems(nextItems);
-
         setNotice({
           type: "success",
-          message: "Event Hub sidebar item updated successfully.",
+          message: "Event Hub sidebar item updated in the database.",
         });
       } else {
-        const newItem: EventAppSidebarItem = {
-          id: makeId(payload.label),
-          ...payload,
-          created_at: new Date().toISOString(),
-        };
-
-        updateItems([...items, newItem]);
+        await apiRequest<SidebarApiResponse>(SIDEBAR_API, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
 
         setNotice({
           type: "success",
-          message: "Event Hub sidebar item created successfully.",
+          message: "Event Hub sidebar item created in the database.",
         });
       }
 
       resetEditor();
+      await loadItems();
     } catch (error: any) {
       setNotice({
         type: "error",
         message:
-          error?.message || "Failed to save Burton Pride Event Hub sidebar item.",
-        details: error,
+          error?.message ||
+          "Failed to save Burton Pride Event Hub sidebar item.",
+        details: error?.details || error,
       });
     } finally {
       setSaving(false);
     }
   }
 
-  function handleDelete(id: string) {
-    const ok = window.confirm(
-      "Are you sure you want to delete this Event Hub sidebar item?",
-    );
-
-    if (!ok) return;
-
-    updateItems(items.filter((item) => item.id !== id));
-
-    if (editingId === id) resetEditor();
-
-    setNotice({
-      type: "success",
-      message: "Event Hub sidebar item deleted successfully.",
-    });
+  function openDeletePopup(item: EventAppSidebarItem) {
+    setNotice(null);
+    setDeleteItem(item);
   }
 
-  function toggleEnabled(item: EventAppSidebarItem) {
-    updateItems(
-      items.map((current) =>
-        current.id === item.id
-          ? {
-              ...current,
-              is_enabled: !current.is_enabled,
-            }
-          : current,
-      ),
-    );
+  function closeDeletePopup() {
+    if (deleteLoading) return;
+    setDeleteItem(null);
   }
 
-  function duplicateItem(item: EventAppSidebarItem) {
-    const copy: EventAppSidebarItem = {
-      ...item,
-      id: makeId(`${item.label} Copy`),
-      label: `${item.label} Copy`,
-      href: `${item.href}-copy`,
-      sort_order: Number(item.sort_order || 0) + 1,
-      is_enabled: false,
-      created_at: new Date().toISOString(),
-    };
+  async function confirmDelete() {
+    if (!deleteItem) return;
 
-    updateItems([...items, copy]);
+    setDeleteLoading(true);
+    setNotice(null);
 
-    setNotice({
-      type: "success",
-      message: "Event Hub sidebar item duplicated successfully.",
-    });
+    try {
+      await apiRequest<SidebarApiResponse>(
+        `${SIDEBAR_API}?id=${encodeURIComponent(deleteItem.id)}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (editingId === deleteItem.id) {
+        resetEditor();
+      }
+
+      setNotice({
+        type: "success",
+        message: "Event Hub sidebar item deleted from the database.",
+      });
+
+      setDeleteItem(null);
+      await loadItems();
+    } catch (error: any) {
+      setNotice({
+        type: "error",
+        message: error?.message || "Failed to delete Event Hub sidebar item.",
+        details: error?.details || error,
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
   }
 
-  function moveItem(item: EventAppSidebarItem, direction: "up" | "down") {
-    const siblings = sortItems(items);
-    const index = siblings.findIndex((x) => x.id === item.id);
-    if (index === -1) return;
+  async function toggleEnabled(item: EventAppSidebarItem) {
+    setNotice(null);
 
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= siblings.length) return;
+    try {
+      await apiRequest<SidebarApiResponse>(
+        `${SIDEBAR_API}?id=${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            is_enabled: !item.is_enabled,
+          }),
+        },
+      );
 
-    const reordered = [...siblings];
+      setNotice({
+        type: "success",
+        message: item.is_enabled
+          ? "Sidebar item disabled in the database."
+          : "Sidebar item enabled in the database.",
+      });
 
-    [reordered[index], reordered[targetIndex]] = [
-      reordered[targetIndex],
-      reordered[index],
-    ];
-
-    const nextItems = reordered.map((x, i) => ({
-      ...x,
-      sort_order: i * 10,
-    }));
-
-    updateItems(nextItems);
+      await loadItems();
+    } catch (error: any) {
+      setNotice({
+        type: "error",
+        message: error?.message || "Failed to update enabled status.",
+        details: error?.details || error,
+      });
+    }
   }
 
-  function resetToDefaultItems() {
-    const ok = window.confirm(
-      "Reset Event Hub sidebar links back to the default setup?",
-    );
+  async function duplicateItem(item: EventAppSidebarItem) {
+    setNotice(null);
 
-    if (!ok) return;
+    try {
+      await apiRequest<SidebarApiResponse>(SIDEBAR_API, {
+        method: "POST",
+        body: JSON.stringify({
+          label: `${item.label} Copy`,
+          href: `${item.href}-copy`,
+          icon: item.icon,
+          sort_order: Number(item.sort_order || 0) + 1,
+          is_enabled: false,
+        }),
+      });
 
-    updateItems(defaultItems);
-    resetEditor();
+      setNotice({
+        type: "success",
+        message: "Event Hub sidebar item duplicated in the database.",
+      });
 
-    setNotice({
-      type: "success",
-      message: "Event Hub sidebar reset to default links.",
-    });
+      await loadItems();
+    } catch (error: any) {
+      setNotice({
+        type: "error",
+        message: error?.message || "Failed to duplicate sidebar item.",
+        details: error?.details || error,
+      });
+    }
+  }
+
+  async function moveItem(item: EventAppSidebarItem, direction: "up" | "down") {
+    setNotice(null);
+
+    try {
+      const siblings = sortItems(items);
+      const index = siblings.findIndex((current) => current.id === item.id);
+
+      if (index === -1) return;
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+
+      if (targetIndex < 0 || targetIndex >= siblings.length) return;
+
+      const reordered = [...siblings];
+
+      [reordered[index], reordered[targetIndex]] = [
+        reordered[targetIndex],
+        reordered[index],
+      ];
+
+      const nextItems = reordered.map((current, newIndex) => ({
+        ...current,
+        sort_order: newIndex * 10,
+      }));
+
+      await Promise.all(
+        nextItems.map((current) =>
+          apiRequest<SidebarApiResponse>(
+            `${SIDEBAR_API}?id=${encodeURIComponent(current.id)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                sort_order: current.sort_order,
+              }),
+            },
+          ),
+        ),
+      );
+
+      setItems(sortItems(nextItems));
+
+      setNotice({
+        type: "success",
+        message: "Sidebar order updated in the database.",
+      });
+    } catch (error: any) {
+      setNotice({
+        type: "error",
+        message: error?.message || "Failed to reorder sidebar items.",
+        details: error?.details || error,
+      });
+    }
   }
 
   const editorTitle =
     editorMode === "edit"
       ? "Edit Event Hub sidebar item"
-      : "Create Event Hub link";
+      : "Create Event Hub sidebar item";
 
   const SelectedIcon = getIcon(form.icon);
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6">
-      <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
-        <h1 className="text-2xl font-extrabold text-white">
-          Burton Pride Event Hub Sidebar Editor
-        </h1>
+    <>
+      <div className="mx-auto max-w-7xl p-4 md:p-6">
+        <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
+          <h1 className="text-2xl font-extrabold text-white">
+            Burton Pride Event Hub Sidebar Editor
+          </h1>
 
-        <p className="mt-2 text-sm text-white/70">
-          Manage the Event Hub / Event App sidebar links. This version works
-          without an API route and saves changes in this browser.
-        </p>
-      </div>
+          <p className="mt-2 text-sm text-white/70">
+            Manage the Event Hub sidebar links from the database. This page is
+            connected to{" "}
+            <span className="rounded-lg bg-black/25 px-2 py-1 font-mono text-xs text-white">
+              {SIDEBAR_API}
+            </span>
+            .
+          </p>
+        </div>
 
-      {notice && <NoticeBox notice={notice} onRetry={loadItems} />}
+        {notice && <NoticeBox notice={notice} onRetry={loadItems} />}
 
-      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <h2 className="mb-4 text-lg font-bold text-white">Quick actions</h2>
+        <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+              <h2 className="mb-4 text-lg font-bold text-white">Actions</h2>
 
-            <div className="grid gap-3">
-              <button
-                type="button"
-                onClick={startCreate}
-                className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                + Create Event Hub link
-              </button>
-
-              <button
-                type="button"
-                onClick={prepareHomeLink}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                Prepare Event Hub Home link
-              </button>
-
-              <button
-                type="button"
-                onClick={prepareTrackingMoneyLink}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                <Banknote className="h-4 w-4" />
-                Prepare Money Tracking link
-              </button>
-
-              <button
-                type="button"
-                onClick={prepareAuditLogsLink}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                <Logs className="h-4 w-4" />
-                Prepare Audit Logs link
-              </button>
-
-              <button
-                type="button"
-                onClick={prepareEventPlanningLink}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                <CalendarDays className="h-4 w-4" />
-                Prepare Event Planning link
-              </button>
-
-              <button
-                type="button"
-                onClick={prepareVolunteersLink}
-                className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                <Users className="h-4 w-4" />
-                Prepare Volunteers link
-              </button>
-
-              <button
-                type="button"
-                onClick={resetToDefaultItems}
-                className="rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-left text-sm font-semibold text-red-200 transition hover:bg-red-500/20"
-              >
-                Reset to default links
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <h2 className="mb-4 text-lg font-bold text-white">{editorTitle}</h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Label
-                </label>
-
-                <input
-                  value={form.label}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, label: e.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="e.g. Event Planning"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  URL / href
-                </label>
-
-                <input
-                  value={form.href}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, href: e.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder={EVENT_PLANNING_ROUTE}
-                  required
-                />
-
-                <p className="mt-2 text-xs text-white/50">
-                  Example: {EVENT_PLANNING_ROUTE}
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Icon
-                </label>
-
-                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                  <select
-                    value={form.icon}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, icon: e.target.value }))
-                    }
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  >
-                    {iconOptions.map((icon) => (
-                      <option
-                        key={icon}
-                        value={icon}
-                        className="bg-[#11111f] text-white"
-                      >
-                        {icon}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 px-5 text-white">
-                    <SelectedIcon className="h-5 w-5" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Sort order
-                </label>
-
-                <input
-                  type="number"
-                  value={form.sort_order}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      sort_order: Number(e.target.value) || 0,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                />
-              </div>
-
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/85">
-                <input
-                  type="checkbox"
-                  checked={form.is_enabled}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      is_enabled: e.target.checked,
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-
-              <div className="flex flex-wrap gap-3">
+              <div className="grid gap-3">
                 <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:opacity-60"
+                  type="button"
+                  onClick={startCreate}
+                  className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
                 >
-                  {saving
-                    ? "Saving..."
-                    : editingId
-                      ? "Update item"
-                      : "Create link"}
+                  + Create new sidebar item
                 </button>
 
                 <button
                   type="button"
-                  onClick={resetEditor}
-                  className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                  onClick={() => void loadItems()}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
                 >
-                  Clear
+                  <RefreshCw className="h-4 w-4" />
+                  Reload from database
                 </button>
               </div>
-            </form>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+              <h2 className="mb-4 text-lg font-bold text-white">
+                {editorTitle}
+              </h2>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-white/80">
+                    Label
+                  </label>
+
+                  <input
+                    value={form.label}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        label: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+                    placeholder="e.g. Event Planning"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-white/80">
+                    URL / href
+                  </label>
+
+                  <input
+                    value={form.href}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        href: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+                    placeholder="/Admin/BurtonPrideEventHub/EventPlanning"
+                    required
+                  />
+
+                  <p className="mt-2 text-xs text-white/50">
+                    This must match the real route/page you want the sidebar
+                    item to open.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-white/80">
+                    Icon
+                  </label>
+
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <select
+                      value={form.icon}
+                      onChange={(event) =>
+                        setForm((previous) => ({
+                          ...previous,
+                          icon: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      {iconOptions.map((icon) => (
+                        <option
+                          key={icon}
+                          value={icon}
+                          className="bg-[#11111f] text-white"
+                        >
+                          {icon}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 px-5 text-white">
+                      <SelectedIcon className="h-5 w-5" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-white/80">
+                    Sort order
+                  </label>
+
+                  <input
+                    type="number"
+                    value={form.sort_order}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        sort_order: Number(event.target.value) || 0,
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
+                  />
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/85">
+                  <input
+                    type="checkbox"
+                    checked={form.is_enabled}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        is_enabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  Enabled
+                </label>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:opacity-60"
+                  >
+                    {saving
+                      ? "Saving to database..."
+                      : editingId
+                        ? "Update database item"
+                        : "Create database item"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetEditor}
+                    className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+              <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <h2 className="text-lg font-bold text-white">
+                  Database sidebar items
+                </h2>
+
+                <button
+                  type="button"
+                  onClick={() => void loadItems()}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Refresh
+                </button>
+              </div>
+
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search label, URL, icon, or ID..."
+                className="mb-5 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
+              />
+
+              {loading ? (
+                <div className="text-sm text-white/70">
+                  Loading Event Hub sidebar items from database...
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
+                  No Event Hub sidebar items found from the database API.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    >
+                      <ItemRow
+                        item={item}
+                        onEdit={() => startEdit(item)}
+                        onDelete={() => openDeletePopup(item)}
+                        onMoveUp={() => void moveItem(item, "up")}
+                        onMoveDown={() => void moveItem(item, "down")}
+                        onToggle={() => void toggleEnabled(item)}
+                        onDuplicate={() => void duplicateItem(item)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {deleteItem ? (
+        <DeleteMessagePopup
+          item={deleteItem}
+          loading={deleteLoading}
+          onCancel={closeDeletePopup}
+          onConfirm={() => void confirmDelete()}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function DeleteMessagePopup({
+  item,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  item: EventAppSidebarItem;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md">
+      <div className="relative w-full max-w-xl overflow-hidden rounded-3xl border border-red-400/40 bg-[#160f24] shadow-2xl">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={loading}
+          className="absolute right-5 top-5 rounded-full p-2 text-white/60 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+          aria-label="Close delete popup"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="bg-gradient-to-br from-red-500/20 via-pink-500/10 to-purple-700/20 px-6 py-8 text-center">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-red-300/30 bg-red-500/20 text-red-200 shadow-lg">
+            <AlertTriangle className="h-11 w-11" />
+          </div>
+
+          <h2 className="mt-5 text-2xl font-extrabold text-white">
+            Delete Sidebar Item
+          </h2>
+
+          <p className="mt-2 text-sm text-white/70">
+            This is a custom confirmation message for Burton Pride Event Hub.
+          </p>
+        </div>
+
+        <div className="space-y-5 px-6 py-6">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-white/45">
+              You are deleting
+            </p>
+
+            <p className="mt-2 text-lg font-extrabold text-white">
+              {item.label}
+            </p>
+
+            <p className="mt-1 break-all text-sm text-white/55">
+              {item.href}
+            </p>
+          </div>
+
+          <p className="text-center text-sm leading-6 text-white/75">
+            Are you sure you want to delete this Event Hub sidebar item from
+            the database?
+          </p>
+
+          <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+            Once deleted, this item will be removed from the database and will
+            no longer appear in the Burton Pride Event Hub sidebar.
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h2 className="text-lg font-bold text-white">
-                Event Hub sidebar structure
-              </h2>
+        <div className="grid gap-3 border-t border-white/10 bg-black/20 p-6 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
 
-              <button
-                type="button"
-                onClick={loadItems}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-            </div>
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search label, URL, or icon..."
-              className="mb-5 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-            />
-
-            {loading ? (
-              <div className="text-sm text-white/70">
-                Loading Event Hub sidebar items...
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
-                No Event Hub sidebar items yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                  >
-                    <ItemRow
-                      item={item}
-                      onEdit={() => startEdit(item)}
-                      onDelete={() => handleDelete(item.id)}
-                      onMoveUp={() => moveItem(item, "up")}
-                      onMoveDown={() => moveItem(item, "down")}
-                      onToggle={() => toggleEnabled(item)}
-                      onDuplicate={() => duplicateItem(item)}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-red-950/40 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {loading ? "Deleting..." : "Delete Item"}
+          </button>
         </div>
       </div>
     </div>
@@ -926,8 +1033,11 @@ function ItemRow({
         </div>
 
         <div className="mt-1 break-all text-xs text-white/60">{item.href}</div>
-        <div className="mt-1 text-xs text-white/40">
-          Sort order: {item.sort_order}
+
+        <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/40">
+          <span>ID: {item.id}</span>
+          <span>•</span>
+          <span>Sort order: {item.sort_order}</span>
         </div>
       </div>
 
