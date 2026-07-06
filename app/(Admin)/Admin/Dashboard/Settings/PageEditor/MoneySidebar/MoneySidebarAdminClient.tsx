@@ -218,6 +218,10 @@ export default function MoneySidebarAdminClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     loadItems();
   }, []);
@@ -398,15 +402,26 @@ export default function MoneySidebarAdminClient() {
     }
   }
 
-  async function handleDelete(id: string) {
-    const ok = window.confirm(
-      "Are you sure you want to delete this money sidebar item?"
-    );
+  function handleDelete(id: string) {
+    setDeleteId(id);
+    setDeleteDialogOpen(true);
+  }
 
-    if (!ok) return;
+  function closeDeleteDialog() {
+    if (deleting) return;
+
+    setDeleteDialogOpen(false);
+    setDeleteId(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteId) return;
+
+    setDeleting(true);
+    setNotice(null);
 
     try {
-      const res = await fetch(`${API_ROUTE}?id=${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_ROUTE}?id=${encodeURIComponent(deleteId)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -415,7 +430,10 @@ export default function MoneySidebarAdminClient() {
 
       if (!res.ok || !data.ok) {
         throw {
-          message: getErrorMessage(data, "Failed to delete item."),
+          message: getErrorMessage(
+            data,
+            "Failed to delete money sidebar item."
+          ),
           details: data,
         };
       }
@@ -425,15 +443,20 @@ export default function MoneySidebarAdminClient() {
         message: "Money sidebar item deleted successfully.",
       });
 
-      if (editingId === id) resetEditor();
+      if (editingId === deleteId) resetEditor();
+
+      setDeleteDialogOpen(false);
+      setDeleteId(null);
 
       await loadItems();
     } catch (error: any) {
       setNotice({
         type: "error",
-        message: error?.message || "Failed to delete item.",
+        message: error?.message || "Failed to delete money sidebar item.",
         details: error?.details || error,
       });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -846,6 +869,77 @@ export default function MoneySidebarAdminClient() {
           </div>
         </div>
       </div>
+
+      {deleteDialogOpen ? (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-money-sidebar-title"
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-400/20 bg-[#17172b] shadow-2xl">
+            <div className="border-b border-white/10 p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-red-400/20 bg-red-500/15 text-red-200">
+                  <AlertTriangle className="h-7 w-7" />
+                </div>
+
+                <div>
+                  <h2
+                    id="delete-money-sidebar-title"
+                    className="text-xl font-extrabold text-white"
+                  >
+                    Delete money sidebar item?
+                  </h2>
+
+                  <p className="mt-1 text-sm text-white/60">
+                    Please check before deleting this link.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-6">
+              <p className="text-sm leading-6 text-white/80">
+                Are you sure you want to delete this money sidebar item from the
+                Money Management system?
+              </p>
+
+              <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
+                This cannot be undone. If this link is still needed, press
+                Cancel instead.
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={deleting}
+                className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete item"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
-import EmailSidebarAdminClient from "./EmailSidebarAdminClient";
+import EmailSidebarAdminClient from "./MoneySidebarAdminClient";
 import { requireAdminPermission } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";

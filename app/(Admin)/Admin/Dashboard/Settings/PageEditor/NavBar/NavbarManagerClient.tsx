@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Plus,
+  AlertTriangle,
   Trash2,
   Save,
   RefreshCw,
@@ -81,6 +82,9 @@ export default function NavbarAdminPage() {
     text: string;
   } | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<NavItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function loadItems() {
     try {
@@ -249,15 +253,31 @@ export default function NavbarAdminPage() {
     }
   }
 
-  async function deleteItem(id: string) {
+  function deleteItem(id: string) {
+    const item = items.find((navItem) => navItem.id === id) || null;
+    setDeleteTarget(item);
+    setDeleteDialogOpen(true);
+    setNotice(null);
+  }
+
+  function closeDeleteDialog() {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteTarget(null);
+  }
+
+  async function confirmDeleteItem() {
+    if (!deleteTarget) return;
+
     try {
-      setSavingId(id);
+      setDeleting(true);
+      setSavingId(deleteTarget.id);
       setNotice(null);
 
       const res = await fetch("/api/admin/navbar", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id: deleteTarget.id }),
       });
 
       const json = await res.json();
@@ -266,11 +286,20 @@ export default function NavbarAdminPage() {
         throw new Error(json.error || "Failed to delete navbar item");
       }
 
-      setItems((prev) => prev.filter((item) => item.id !== id));
+      setItems((prev) =>
+        prev.filter(
+          (item) =>
+            item.id !== deleteTarget.id && item.parent_id !== deleteTarget.id
+        )
+      );
+
       setNotice({
         type: "success",
         text: "Navbar item deleted",
       });
+
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
     } catch (error) {
       setNotice({
         type: "error",
@@ -280,6 +309,7 @@ export default function NavbarAdminPage() {
             : "Failed to delete navbar item",
       });
     } finally {
+      setDeleting(false);
       setSavingId(null);
     }
   }
@@ -712,6 +742,83 @@ export default function NavbarAdminPage() {
           </div>
         </div>
       </div>
+
+      {deleteDialogOpen && deleteTarget ? (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-[28px] border border-rose-400/25 bg-[#111827] shadow-[0_24px_90px_rgba(0,0,0,0.55)]">
+            <div className="border-b border-white/10 p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-rose-400/25 bg-rose-500/15 text-rose-100">
+                  <AlertTriangle className="h-7 w-7" />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    Delete navbar item?
+                  </h2>
+                  <p className="mt-1 text-sm leading-6 text-white/65">
+                    This will remove the selected navbar item from the website navigation.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-6">
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/45">
+                  Item selected
+                </p>
+                <p className="mt-2 break-words text-base font-bold text-white">
+                  {deleteTarget.label}
+                </p>
+                <p className="mt-1 break-all text-sm text-white/55">
+                  {deleteTarget.href || "No URL"}
+                </p>
+              </div>
+
+              {deleteTarget.item_type === "dropdown" ? (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+                  This is a dropdown parent. Any child links inside this dropdown may also be removed.
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-sm leading-6 text-rose-100">
+                This action cannot be undone. Please make sure you want to delete this sidebar item before continuing.
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={deleting}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmDeleteItem}
+                disabled={deleting}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-rose-400/30 bg-rose-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Delete item
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

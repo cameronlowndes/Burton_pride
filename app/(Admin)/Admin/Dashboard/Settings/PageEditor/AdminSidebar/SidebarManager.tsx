@@ -40,6 +40,9 @@ export default function SidebarManager() {
   const [form, setForm] = useState<FormState>(defaultForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteItem, setDeleteItem] = useState<AdminSidebarItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadItems();
@@ -239,14 +242,26 @@ export default function SidebarManager() {
     }
   }
 
-  async function handleDelete(id: string) {
-    const ok = window.confirm(
-      "Are you sure you want to delete this item? If it is a group, its child links will also be removed."
-    );
-    if (!ok) return;
+  function handleDelete(item: AdminSidebarItem) {
+    setDeleteItem(item);
+    setDeleteDialogOpen(true);
+    setNotice(null);
+  }
+
+  function closeDeleteDialog() {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteItem(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteItem) return;
+
+    setDeleting(true);
+    setNotice(null);
 
     try {
-      const res = await fetch(`/api/admin/sidebar/${id}`, {
+      const res = await fetch(`/api/admin/sidebar/${deleteItem.id}`, {
         method: "DELETE",
       });
 
@@ -261,9 +276,12 @@ export default function SidebarManager() {
         message: "Sidebar item deleted successfully.",
       });
 
-      if (editingId === id) {
+      if (editingId === deleteItem.id) {
         resetEditor("top-link");
       }
+
+      setDeleteDialogOpen(false);
+      setDeleteItem(null);
 
       await loadItems();
     } catch (error) {
@@ -271,6 +289,8 @@ export default function SidebarManager() {
         type: "error",
         message: error instanceof Error ? error.message : "Failed to delete item",
       });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -649,7 +669,7 @@ export default function SidebarManager() {
                             <ItemRow
                               item={group}
                               onEdit={() => startEdit(group)}
-                              onDelete={() => handleDelete(group.id)}
+                              onDelete={() => handleDelete(group)}
                               onMoveUp={() => moveItem(group, "up")}
                               onMoveDown={() => moveItem(group, "down")}
                               onToggle={() => toggleEnabled(group)}
@@ -681,7 +701,7 @@ export default function SidebarManager() {
                                       <ItemRow
                                         item={child}
                                         onEdit={() => startEdit(child)}
-                                        onDelete={() => handleDelete(child.id)}
+                                        onDelete={() => handleDelete(child)}
                                         onMoveUp={() => moveItem(child, "up")}
                                         onMoveDown={() => moveItem(child, "down")}
                                         onToggle={() => toggleEnabled(child)}
@@ -719,7 +739,7 @@ export default function SidebarManager() {
                           <ItemRow
                             item={item}
                             onEdit={() => startEdit(item)}
-                            onDelete={() => handleDelete(item.id)}
+                            onDelete={() => handleDelete(item)}
                             onMoveUp={() => moveItem(item, "up")}
                             onMoveDown={() => moveItem(item, "down")}
                             onToggle={() => toggleEnabled(item)}
@@ -735,6 +755,76 @@ export default function SidebarManager() {
           </div>
         </div>
       </div>
+
+      {deleteDialogOpen && deleteItem && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-sidebar-item-title"
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-400/25 bg-[#17172b] shadow-2xl">
+            <div className="border-b border-white/10 p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-red-400/25 bg-red-500/15 text-2xl">
+                  ⚠️
+                </div>
+
+                <div className="min-w-0">
+                  <h2
+                    id="delete-sidebar-item-title"
+                    className="text-xl font-extrabold text-white"
+                  >
+                    Delete sidebar item
+                  </h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    Please confirm before removing this from the admin sidebar.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-6">
+              <p className="text-sm leading-6 text-white/80">
+                Are you sure you want to permanently delete{" "}
+                <span className="font-bold text-white">{deleteItem.label}</span>?
+              </p>
+
+              {deleteItem.item_type === "group" ? (
+                <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
+                  This is a dropdown group. Deleting it may also remove any child
+                  links inside the group.
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  This link will be removed from the admin sidebar. This action
+                  cannot be undone.
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={deleting}
+                className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white/85 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Delete item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

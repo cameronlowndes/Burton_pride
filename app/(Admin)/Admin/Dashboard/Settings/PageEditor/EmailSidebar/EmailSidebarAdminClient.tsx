@@ -34,6 +34,8 @@ type FormState = {
   is_enabled: boolean;
 };
 
+const EMAIL_SIDEBAR_API = "/api/admin/email-sidebar";
+
 const defaultForm: FormState = {
   label: "",
   href: "",
@@ -51,6 +53,7 @@ const iconOptions = [
   "Settings",
   "PenSquare",
 ];
+
 async function readJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
 
@@ -71,6 +74,12 @@ async function readJsonResponse<T>(res: Response): Promise<T> {
   }
 }
 
+function normaliseHref(value: string) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("/")) return clean;
+  return `/${clean}`;
+}
 
 export default function EmailSidebarAdminClient() {
   const [items, setItems] = useState<EmailSidebarItem[]>([]);
@@ -83,6 +92,10 @@ export default function EmailSidebarAdminClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     loadItems();
   }, []);
@@ -91,18 +104,19 @@ export default function EmailSidebarAdminClient() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/admin/email-sidebar", {
+      const res = await fetch(EMAIL_SIDEBAR_API, {
         cache: "no-store",
+        credentials: "include",
       });
 
       const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to load email sidebar items");
+        throw new Error(data.error || "Failed to load email sidebar items.");
       }
 
       const sorted = [...(data.items || [])].sort(
-        (a, b) => a.sort_order - b.sort_order
+        (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
       );
 
       setItems(sorted);
@@ -112,7 +126,7 @@ export default function EmailSidebarAdminClient() {
         message:
           error instanceof Error
             ? error.message
-            : "Failed to load email sidebar items",
+            : "Failed to load email sidebar items.",
       });
     } finally {
       setLoading(false);
@@ -144,6 +158,7 @@ export default function EmailSidebarAdminClient() {
       ...defaultForm,
       sort_order: items.length,
     });
+    setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -154,9 +169,10 @@ export default function EmailSidebarAdminClient() {
       label: item.label,
       href: item.href || "",
       icon: item.icon || "Mail",
-      sort_order: item.sort_order,
-      is_enabled: item.is_enabled,
+      sort_order: Number(item.sort_order || 0),
+      is_enabled: Boolean(item.is_enabled),
     });
+    setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -168,20 +184,24 @@ export default function EmailSidebarAdminClient() {
     try {
       const payload = {
         label: form.label.trim(),
-        href: form.href.trim(),
+        href: normaliseHref(form.href),
         icon: form.icon,
         sort_order: Number(form.sort_order) || 0,
         is_enabled: form.is_enabled,
       };
 
+      if (!payload.label) throw new Error("Please enter a label.");
+      if (!payload.href) throw new Error("Please enter a URL / href.");
+
       const url = editingId
-        ? `/api/admin/email-sidebar/${editingId}`
-        : "/api/admin/email-sidebar";
+        ? `${EMAIL_SIDEBAR_API}/${encodeURIComponent(editingId)}`
+        : EMAIL_SIDEBAR_API;
 
       const method = editingId ? "PATCH" : "POST";
 
       const res = await fetch(url, {
         method,
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -189,7 +209,7 @@ export default function EmailSidebarAdminClient() {
       const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to save email sidebar item");
+        throw new Error(data.error || "Failed to save email sidebar item.");
       }
 
       setNotice({
@@ -207,28 +227,43 @@ export default function EmailSidebarAdminClient() {
         message:
           error instanceof Error
             ? error.message
-            : "Failed to save email sidebar item",
+            : "Failed to save email sidebar item.",
       });
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    const ok = window.confirm(
-      "Are you sure you want to delete this email sidebar item?"
-    );
-    if (!ok) return;
+  function handleDelete(id: string) {
+    setDeleteId(id);
+    setDeleteDialogOpen(true);
+  }
+
+  function closeDeleteDialog() {
+    if (deleting) return;
+    setDeleteDialogOpen(false);
+    setDeleteId(null);
+  }
+
+  async function confirmDelete() {
+    if (!deleteId) return;
+
+    setDeleting(true);
+    setNotice(null);
 
     try {
-      const res = await fetch(`/api/admin/email-sidebar/${id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `${EMAIL_SIDEBAR_API}/${encodeURIComponent(deleteId)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
 
       const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to delete item");
+        throw new Error(data.error || "Failed to delete email sidebar item.");
       }
 
       setNotice({
@@ -236,38 +271,48 @@ export default function EmailSidebarAdminClient() {
         message: "Email sidebar item deleted successfully.",
       });
 
-      if (editingId === id) {
+      if (editingId === deleteId) {
         resetEditor();
       }
 
+      setDeleteDialogOpen(false);
+      setDeleteId(null);
       await loadItems();
     } catch (error) {
       setNotice({
         type: "error",
         message:
-          error instanceof Error ? error.message : "Failed to delete item",
+          error instanceof Error
+            ? error.message
+            : "Failed to delete email sidebar item.",
       });
+    } finally {
+      setDeleting(false);
     }
   }
 
   async function toggleEnabled(item: EmailSidebarItem) {
     try {
-      const res = await fetch(`/api/admin/email-sidebar/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label: item.label,
-          href: item.href,
-          icon: item.icon,
-          sort_order: item.sort_order,
-          is_enabled: !item.is_enabled,
-        }),
-      });
+      const res = await fetch(
+        `${EMAIL_SIDEBAR_API}/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: item.label,
+            href: item.href,
+            icon: item.icon,
+            sort_order: Number(item.sort_order || 0),
+            is_enabled: !item.is_enabled,
+          }),
+        }
+      );
 
       const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to update item");
+        throw new Error(data.error || "Failed to update item.");
       }
 
       await loadItems();
@@ -275,21 +320,22 @@ export default function EmailSidebarAdminClient() {
       setNotice({
         type: "error",
         message:
-          error instanceof Error ? error.message : "Failed to update item",
+          error instanceof Error ? error.message : "Failed to update item.",
       });
     }
   }
 
   async function duplicateItem(item: EmailSidebarItem) {
     try {
-      const res = await fetch("/api/admin/email-sidebar", {
+      const res = await fetch(EMAIL_SIDEBAR_API, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           label: `${item.label} Copy`,
           href: item.href,
           icon: item.icon,
-          sort_order: item.sort_order + 1,
+          sort_order: Number(item.sort_order || 0) + 1,
           is_enabled: item.is_enabled,
         }),
       });
@@ -297,7 +343,7 @@ export default function EmailSidebarAdminClient() {
       const data = await readJsonResponse<EmailSidebarResponse>(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to duplicate item");
+        throw new Error(data.error || "Failed to duplicate item.");
       }
 
       setNotice({
@@ -310,13 +356,16 @@ export default function EmailSidebarAdminClient() {
       setNotice({
         type: "error",
         message:
-          error instanceof Error ? error.message : "Failed to duplicate item",
+          error instanceof Error ? error.message : "Failed to duplicate item.",
       });
     }
   }
 
   async function moveItem(item: EmailSidebarItem, direction: "up" | "down") {
-    const siblings = [...items].sort((a, b) => a.sort_order - b.sort_order);
+    const siblings = [...items].sort(
+      (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
+    );
+
     const index = siblings.findIndex((x) => x.id === item.id);
     if (index === -1) return;
 
@@ -332,22 +381,26 @@ export default function EmailSidebarAdminClient() {
     try {
       const responses = await Promise.all(
         reordered.map(async (x, i) => {
-          const res = await fetch(`/api/admin/email-sidebar/${x.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              label: x.label,
-              href: x.href,
-              icon: x.icon,
-              sort_order: i,
-              is_enabled: x.is_enabled,
-            }),
-          });
+          const res = await fetch(
+            `${EMAIL_SIDEBAR_API}/${encodeURIComponent(x.id)}`,
+            {
+              method: "PATCH",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                label: x.label,
+                href: x.href,
+                icon: x.icon,
+                sort_order: i,
+                is_enabled: x.is_enabled,
+              }),
+            }
+          );
 
           const data = await readJsonResponse<EmailSidebarResponse>(res);
 
           if (!res.ok || !data.ok) {
-            throw new Error(data.error || `Failed to reorder ${x.label}`);
+            throw new Error(data.error || `Failed to reorder ${x.label}.`);
           }
 
           return data;
@@ -363,10 +416,12 @@ export default function EmailSidebarAdminClient() {
       setNotice({
         type: "error",
         message:
-          error instanceof Error ? error.message : "Failed to reorder items",
+          error instanceof Error ? error.message : "Failed to reorder items.",
       });
     }
   }
+
+  const selectedDeleteItem = items.find((item) => item.id === deleteId) || null;
 
   const editorTitle =
     editorMode === "edit" ? "Edit email sidebar item" : "Create email link";
@@ -456,7 +511,7 @@ export default function EmailSidebarAdminClient() {
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
                 >
                   {iconOptions.map((icon) => (
-                    <option key={icon} value={icon}>
+                    <option key={icon} value={icon} className="bg-[#11111f] text-white">
                       {icon}
                     </option>
                   ))}
@@ -503,8 +558,8 @@ export default function EmailSidebarAdminClient() {
                   {saving
                     ? "Saving..."
                     : editingId
-                    ? "Update item"
-                    : "Create link"}
+                      ? "Update item"
+                      : "Create link"}
                 </button>
 
                 <button
@@ -538,7 +593,7 @@ export default function EmailSidebarAdminClient() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search label or URL..."
+              placeholder="Search label, URL, or icon..."
               className="mb-5 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
             />
 
@@ -573,6 +628,74 @@ export default function EmailSidebarAdminClient() {
           </div>
         </div>
       </div>
+
+      {deleteDialogOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/20 bg-[#17172b] shadow-2xl">
+            <div className="border-b border-white/10 p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-red-400/20 bg-red-500/15 text-3xl">
+                  ⚠️
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-white">
+                    Delete Email Sidebar Item
+                  </h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    Please confirm before removing this sidebar link.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="text-sm leading-6 text-white/80">
+                Are you sure you want to permanently delete this email sidebar
+                item?
+              </p>
+
+              {selectedDeleteItem ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <p className="text-sm font-bold text-white">
+                    {selectedDeleteItem.label}
+                  </p>
+                  <p className="mt-1 break-all text-xs text-white/55">
+                    {selectedDeleteItem.href}
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-500/10 p-4">
+                <p className="text-sm text-red-200">
+                  This action cannot be undone. The link will be removed from
+                  the Email sidebar.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={deleting}
+                className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete Item"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -616,6 +739,9 @@ function ItemRow({
         </div>
 
         <div className="mt-1 break-all text-xs text-white/60">{item.href}</div>
+        <div className="mt-1 text-xs text-white/40">
+          Sort order: {item.sort_order}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -626,6 +752,7 @@ function ItemRow({
         >
           {item.is_enabled ? "Disable" : "Enable"}
         </button>
+
         <button
           type="button"
           onClick={onMoveUp}
@@ -633,6 +760,7 @@ function ItemRow({
         >
           Up
         </button>
+
         <button
           type="button"
           onClick={onMoveDown}
@@ -640,6 +768,7 @@ function ItemRow({
         >
           Down
         </button>
+
         <button
           type="button"
           onClick={onDuplicate}
@@ -647,6 +776,7 @@ function ItemRow({
         >
           Duplicate
         </button>
+
         <button
           type="button"
           onClick={onEdit}
@@ -654,6 +784,7 @@ function ItemRow({
         >
           Edit
         </button>
+
         <button
           type="button"
           onClick={onDelete}
