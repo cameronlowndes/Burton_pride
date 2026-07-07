@@ -2,23 +2,31 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Building2,
-  Mail,
-  Phone,
+  CheckCircle2,
+  Download,
+  Edit,
+  Eye,
   Globe,
+  ImagePlus,
+  Lock,
+  Mail,
   MapPin,
+  Phone,
   RefreshCw,
   Save,
   Search,
+  Send,
   Trash2,
   X,
-  Edit,
-  ImagePlus,
-  Eye,
 } from "lucide-react";
+import { useBurtonPrideEvent } from "../../components/event-hub/BurtonPrideEventProvider";
 
 type Contact = {
   id: string;
+  event_id?: string | null;
+  event_year?: number | null;
   business_name: string;
   contact_name: string | null;
   email: string | null;
@@ -28,8 +36,10 @@ type Contact = {
   service_type: string | null;
   selling: string | null;
   selling_image_url: string | null;
+  selling_image_path?: string | null;
   notes: string | null;
   is_active: boolean;
+  sent_to_checklist?: boolean | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -42,6 +52,7 @@ type ApiResponse = {
   contacts?: Contact[];
   contact?: Contact;
   url?: string;
+  path?: string;
 };
 
 type NoticeMessage = {
@@ -70,9 +81,15 @@ type FormState = {
   service_type: string;
   selling: string;
   selling_image_url: string;
+  selling_image_path: string;
   notes: string;
   is_active: boolean;
+  sent_to_checklist: boolean;
 };
+
+const CONTACTS_API = "/api/admin/burton-pride-event-hub/contacts";
+const IMAGE_UPLOAD_API = "/api/admin/burton-pride-event-hub/contacts/event-hub-selling-images";
+const CHECKLIST_API = "/api/admin/burton-pride-event-hub/checklist";
 
 const emptyForm: FormState = {
   business_name: "",
@@ -84,8 +101,10 @@ const emptyForm: FormState = {
   service_type: "",
   selling: "",
   selling_image_url: "",
+  selling_image_path: "",
   notes: "",
   is_active: true,
+  sent_to_checklist: false,
 };
 
 const serviceTypes = [
@@ -106,30 +125,60 @@ const serviceTypes = [
   "Other",
 ];
 
-const IMAGE_CACHE_KEY = "event-hub-contact-image-urls";
+const activeFilters = [
+  { value: "", label: "All contacts" },
+  { value: "active", label: "Active only" },
+  { value: "inactive", label: "Inactive only" },
+];
 
-function readCachedImages() {
-  if (typeof window === "undefined") return {};
+const dataFilters = [
+  { value: "", label: "All data" },
+  { value: "missing_email", label: "Missing email" },
+  { value: "has_email", label: "Has email" },
+  { value: "missing_selling", label: "Missing selling info" },
+  { value: "has_selling", label: "Has selling info" },
+  { value: "missing_image", label: "Missing image" },
+  { value: "has_image", label: "Has image" },
+  { value: "not_sent_to_checklist", label: "Not sent to checklist" },
+];
 
-  try {
-    const raw = window.localStorage.getItem(IMAGE_CACHE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-  } catch {
-    return {};
-  }
+function clean(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-function writeCachedImages(images: Record<string, string>) {
-  if (typeof window === "undefined") return;
+function isFoodVendor(contact: Pick<Contact, "service_type"> | Pick<FormState, "service_type">) {
+  return clean(contact.service_type).toLowerCase().includes("food");
+}
 
-  try {
-    window.localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify(images));
-  } catch {
-    // Local storage is only a backup. If it fails, the database save still matters.
-  }
+function isSeller(contact: Pick<Contact, "service_type"> | Pick<FormState, "service_type">) {
+  const type = clean(contact.service_type).toLowerCase();
+  return type.includes("vendor") || type.includes("supplier") || type.includes("sponsor") || type.includes("charity");
+}
+
+function normaliseWebsite(value: string) {
+  const text = clean(value);
+  if (!text) return "";
+  if (text.startsWith("http://") || text.startsWith("https://")) return text;
+  return `https://${text}`;
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
 export default function EventHubContactsPage() {
+  const {
+    currentEvent,
+    eventId,
+    eventYear,
+    isEventLocked,
+    loading: eventLoading,
+    error: eventError,
+    refreshEvent,
+  } = useBurtonPrideEvent();
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -137,9 +186,12 @@ export default function EventHubContactsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [actionId, setActionId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [serviceTypeFilter, setServiceTypeFilter] = useState("");
+  const [activeFilter, setActiveFilter] = useState("");
+  const [dataFilter, setDataFilter] = useState("");
   const [notice, setNotice] = useState<NoticeMessage | null>(null);
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -153,28 +205,21 @@ export default function EventHubContactsPage() {
 
   const [imagePreviewFailed, setImagePreviewFailed] = useState(false);
   const [formLocalImageUrl, setFormLocalImageUrl] = useState("");
-  const [localImageUrls, setLocalImageUrls] = useState<Record<string, string>>(
-    {},
-  );
+  const [localImageUrls, setLocalImageUrls] = useState<Record<string, string>>({});
 
-  const [cachedImageUrls, setCachedImageUrls] = useState<
-    Record<string, string>
-  >({});
-
-  useEffect(() => {
-    setCachedImageUrls(readCachedImages());
-  }, []);
+  const canEdit = !eventLoading && !isEventLocked;
 
   async function readJson(res: Response): Promise<ApiResponse> {
     const text = await res.text();
 
     try {
-      return text ? JSON.parse(text) : { ok: false };
+      return text
+        ? JSON.parse(text)
+        : { ok: false, error: "Server returned an empty response." };
     } catch {
       return {
         ok: false,
-        error:
-          "Server returned invalid JSON instead of the expected API response.",
+        error: "Server returned invalid JSON instead of the expected API response.",
         details: text
           ? `Raw server response: ${text.slice(0, 500)}`
           : "The server response was empty.",
@@ -225,9 +270,7 @@ export default function EventHubContactsPage() {
       status ? `Status code: ${status}` : "Status code: Not available",
     ];
 
-    if (error.details) {
-      baseDetails.push(`Server details: ${error.details}`);
-    }
+    if (error.details) baseDetails.push(`Server details: ${error.details}`);
 
     if (status === 401) {
       baseDetails.push(
@@ -237,9 +280,8 @@ export default function EventHubContactsPage() {
         "",
         "What to check:",
         "1. Sign out and sign back into the admin portal.",
-        '2. Make sure the fetch request includes credentials: "include".',
+        '2. Make sure fetch requests include credentials: "include".',
         "3. Make sure the API route checks your Burton admin cookies or Supabase session.",
-        "4. Check the cookies burton_admin_session, burton_admin_id, and burton_admin_email exist in the browser.",
       );
     } else if (status === 403) {
       baseDetails.push(
@@ -271,8 +313,8 @@ export default function EventHubContactsPage() {
         "",
         "What to check:",
         "1. Make sure the required fields are filled in.",
-        "2. For image uploads, only use JPG, PNG, WEBP, or GIF.",
-        "3. Make sure the image is smaller than 5MB.",
+        "2. Check the event_id is being saved correctly.",
+        "3. For image uploads, only use JPG, PNG, WEBP, or GIF under 5MB.",
       );
     } else if (status === 413 || message.includes("smaller than 5mb")) {
       baseDetails.push(
@@ -293,8 +335,8 @@ export default function EventHubContactsPage() {
         "1. Check the terminal/server logs.",
         "2. Check NEXT_PUBLIC_SUPABASE_URL is set.",
         "3. Check SUPABASE_SERVICE_ROLE_KEY is set.",
-        "4. Check the Supabase bucket name is event-hub-selling-images.",
-        "5. Check the bucket exists and storage upload is allowed.",
+        "4. Check the Supabase table columns match this page.",
+        "5. Check the storage bucket exists if uploading images.",
       );
     } else if (message.includes("image file")) {
       baseDetails.push(
@@ -346,12 +388,45 @@ export default function EventHubContactsPage() {
     };
   }
 
+  function requireEditableEvent() {
+    if (eventLoading) {
+      throw createLocalError(
+        "Check active event",
+        "The active Burton Pride event is still loading.",
+        "Wait for the active event bar to finish loading, then try again.",
+      );
+    }
+
+    if (isEventLocked) {
+      const eventLabel = currentEvent
+        ? `${currentEvent.event_name} ${currentEvent.event_year}`
+        : "The current event";
+
+      throw createLocalError(
+        "Check event lock",
+        `${eventLabel} is locked.`,
+        "Unlock the event in Event Management before adding, editing, uploading, deleting, or sending contacts to the checklist.",
+      );
+    }
+  }
+
+  function eventQuery() {
+    const params = new URLSearchParams();
+    if (eventId) params.set("event_id", eventId);
+    if (eventYear) params.set("event_year", String(eventYear));
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
+
   async function loadContacts() {
     try {
       setLoading(true);
       setNotice(null);
 
-      const res = await fetch("/api/admin/burton-pride-event-hub/contacts", {
+      if (eventLoading) return;
+
+      const endpoint = `${CONTACTS_API}${eventQuery()}`;
+      const res = await fetch(endpoint, {
         cache: "no-store",
         credentials: "include",
       });
@@ -361,7 +436,7 @@ export default function EventHubContactsPage() {
       if (!res.ok || !data.ok) {
         throw createApiError({
           action: "Load saved contacts",
-          endpoint: "/api/admin/burton-pride-event-hub/contacts",
+          endpoint,
           res,
           data,
           fallbackMessage: "Failed to load contacts.",
@@ -370,23 +445,6 @@ export default function EventHubContactsPage() {
 
       const loadedContacts = data.contacts || [];
       setContacts(loadedContacts);
-
-      const cached = readCachedImages();
-      let changed = false;
-
-      for (const contact of loadedContacts) {
-        const imageUrl = (contact.selling_image_url || "").trim();
-
-        if (imageUrl && cached[contact.id] !== imageUrl) {
-          cached[contact.id] = imageUrl;
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        writeCachedImages(cached);
-        setCachedImageUrls(cached);
-      }
     } catch (error) {
       setNotice(
         buildErrorNotice(
@@ -401,34 +459,91 @@ export default function EventHubContactsPage() {
   }
 
   useEffect(() => {
-    loadContacts();
-  }, []);
+    if (!eventLoading) loadContacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventLoading, eventId, eventYear]);
+
+  const stats = useMemo(() => {
+    const total = contacts.length;
+    const active = contacts.filter((contact) => contact.is_active).length;
+    const foodVendors = contacts.filter((contact) => isFoodVendor(contact)).length;
+    const missingEmail = contacts.filter((contact) => !clean(contact.email)).length;
+    const missingSelling = contacts.filter((contact) => isSeller(contact) && !clean(contact.selling)).length;
+    const missingImage = contacts.filter((contact) => isSeller(contact) && !getContactImageUrl(contact)).length;
+    const notSentToChecklist = contacts.filter((contact) => !contact.sent_to_checklist).length;
+
+    return {
+      total,
+      active,
+      foodVendors,
+      missingEmail,
+      missingSelling,
+      missingImage,
+      notSentToChecklist,
+    };
+  }, [contacts, localImageUrls, editingId, form.selling_image_url, formLocalImageUrl]);
+
+  const duplicateWarning = useMemo(() => {
+    const name = clean(form.business_name).toLowerCase();
+    const email = clean(form.email).toLowerCase();
+
+    if (!name && !email) return "";
+
+    const duplicate = contacts.find((contact) => {
+      if (editingId && contact.id === editingId) return false;
+      const sameName = name && clean(contact.business_name).toLowerCase() === name;
+      const sameEmail = email && clean(contact.email).toLowerCase() === email;
+      return sameName || sameEmail;
+    });
+
+    if (!duplicate) return "";
+    return `Possible duplicate: ${duplicate.business_name}${duplicate.email ? ` (${duplicate.email})` : ""}`;
+  }, [contacts, editingId, form.business_name, form.email]);
 
   const filteredContacts = useMemo(() => {
     const q = search.trim().toLowerCase();
     const selectedType = serviceTypeFilter.trim().toLowerCase();
 
     return contacts.filter((contact) => {
-      const serviceType = (contact.service_type || "").trim().toLowerCase();
+      const serviceType = clean(contact.service_type).toLowerCase();
+      const imageUrl = getContactImageUrl(contact);
 
       const matchesServiceType = !selectedType || serviceType === selectedType;
+
+      const matchesActive =
+        !activeFilter ||
+        (activeFilter === "active" && contact.is_active) ||
+        (activeFilter === "inactive" && !contact.is_active);
+
+      const matchesData =
+        !dataFilter ||
+        (dataFilter === "missing_email" && !clean(contact.email)) ||
+        (dataFilter === "has_email" && Boolean(clean(contact.email))) ||
+        (dataFilter === "missing_selling" && !clean(contact.selling)) ||
+        (dataFilter === "has_selling" && Boolean(clean(contact.selling))) ||
+        (dataFilter === "missing_image" && !imageUrl) ||
+        (dataFilter === "has_image" && Boolean(imageUrl)) ||
+        (dataFilter === "not_sent_to_checklist" && !contact.sent_to_checklist);
 
       const matchesSearch =
         !q ||
         contact.business_name.toLowerCase().includes(q) ||
-        (contact.contact_name || "").toLowerCase().includes(q) ||
-        (contact.email || "").toLowerCase().includes(q) ||
-        (contact.phone || "").toLowerCase().includes(q) ||
-        (contact.website || "").toLowerCase().includes(q) ||
-        (contact.address || "").toLowerCase().includes(q) ||
+        clean(contact.contact_name).toLowerCase().includes(q) ||
+        clean(contact.email).toLowerCase().includes(q) ||
+        clean(contact.phone).toLowerCase().includes(q) ||
+        clean(contact.website).toLowerCase().includes(q) ||
+        clean(contact.address).toLowerCase().includes(q) ||
         serviceType.includes(q) ||
-        (contact.selling || "").toLowerCase().includes(q) ||
-        (contact.selling_image_url || "").toLowerCase().includes(q) ||
-        (contact.notes || "").toLowerCase().includes(q);
+        clean(contact.selling).toLowerCase().includes(q) ||
+        clean(contact.notes).toLowerCase().includes(q);
 
-      return matchesServiceType && matchesSearch;
+      return matchesServiceType && matchesActive && matchesData && matchesSearch;
     });
-  }, [contacts, search, serviceTypeFilter]);
+  }, [contacts, search, serviceTypeFilter, activeFilter, dataFilter, localImageUrls]);
+
+  function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
 
   function resetForm() {
     setForm(emptyForm);
@@ -454,62 +569,25 @@ export default function EventHubContactsPage() {
 
   function rememberLocalContactImage(contactId: string, imageUrl: string) {
     const cleanUrl = imageUrl.trim();
-
     if (!contactId || !cleanUrl) return;
 
-    setLocalImageUrls((prev) => ({
-      ...prev,
-      [contactId]: cleanUrl,
-    }));
-
+    setLocalImageUrls((prev) => ({ ...prev, [contactId]: cleanUrl }));
     setContacts((prev) =>
       prev.map((contact) =>
         contact.id === contactId
-          ? {
-              ...contact,
-              selling_image_url: contact.selling_image_url || cleanUrl,
-            }
+          ? { ...contact, selling_image_url: contact.selling_image_url || cleanUrl }
           : contact,
       ),
     );
   }
 
-  function cacheContactImageUrl(contactId: string, imageUrl: string) {
-    const cleanUrl = imageUrl.trim();
-
-    if (!contactId || !cleanUrl) return;
-
-    setCachedImageUrls((prev) => {
-      const next = {
-        ...prev,
-        [contactId]: cleanUrl,
-      };
-
-      writeCachedImages(next);
-      return next;
-    });
-  }
-
   function getContactImageUrl(contact: Contact) {
-    const savedImageUrl = (contact.selling_image_url || "").trim();
-    const localImageUrl = (localImageUrls[contact.id] || "").trim();
-    const cachedImageUrl = (cachedImageUrls[contact.id] || "").trim();
-    const editingFormImageUrl =
-      editingId === contact.id ? form.selling_image_url.trim() : "";
-    const editingLocalImageUrl =
-      editingId === contact.id ? formLocalImageUrl.trim() : "";
+    const savedImageUrl = clean(contact.selling_image_url);
+    const localImageUrl = clean(localImageUrls[contact.id]);
+    const editingFormImageUrl = editingId === contact.id ? clean(form.selling_image_url) : "";
+    const editingLocalImageUrl = editingId === contact.id ? clean(formLocalImageUrl) : "";
 
-    // Priority matters:
-    // 1. Local selected file, so the button pops immediately even before upload finishes.
-    // 2. Database URL, so saved contacts work after refresh.
-    // 3. Form URL and browser cache as backups.
-    return (
-      editingLocalImageUrl ||
-      localImageUrl ||
-      savedImageUrl ||
-      editingFormImageUrl ||
-      cachedImageUrl
-    );
+    return editingLocalImageUrl || localImageUrl || savedImageUrl || editingFormImageUrl;
   }
 
   function handleViewContactImage(contact: Contact) {
@@ -528,15 +606,62 @@ export default function EventHubContactsPage() {
         details:
           "Once the upload has finished, the View image button will open it automatically.",
       });
-
       return;
     }
 
     openMissingImagePreview(contact.business_name);
   }
 
+  function buildEmail(contact: Contact) {
+    const contactName = clean(contact.contact_name);
+    const businessName = clean(contact.business_name);
+    const serviceType = clean(contact.service_type);
+    const selling = clean(contact.selling);
+
+    const eventName = currentEvent
+      ? `${currentEvent.event_name} ${currentEvent.event_year}`
+      : "Burton Pride";
+
+    const eventDate = currentEvent?.event_date || "the event date";
+    const eventTimes = currentEvent
+      ? `${currentEvent.event_start_time || "12:00"} to ${currentEvent.event_end_time || "18:00"}`
+      : "12:00 to 18:00";
+    const venue = currentEvent?.venue_name || "our event venue";
+    const address = currentEvent?.venue_address || "";
+
+    const subject = `Invitation to ${eventName} - ${businessName}`;
+
+    const body = [
+      `Hello ${contactName || businessName},`,
+      "",
+      "I hope you are well.",
+      "",
+      `We are getting in touch from Burton Pride C.I.C. to invite ${businessName} to be part of ${eventName}.`,
+      "",
+      `The event is currently planned for ${eventDate}, running from ${eventTimes} at ${venue}${address ? `, ${address}` : ""}.`,
+      "",
+      serviceType
+        ? `We currently have you listed in our Event Hub as: ${serviceType}.`
+        : "We currently have you saved as a contact in our Event Hub.",
+      selling ? `We also have you noted as selling/providing: ${selling}.` : "",
+      "",
+      "We would love to welcome you as part of our community Pride event.",
+      "",
+      "Please could you confirm whether you would like to take part, and whether your contact details and setup requirements are still correct.",
+      "",
+      "If you have any access needs, setup notes, or questions, please include them in your reply so our committee team can plan everything properly.",
+      "",
+      "Kind regards,",
+      "Burton Pride C.I.C.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return { subject, body };
+  }
+
   function openEmailAppForContact(contact: Contact) {
-    const email = (contact.email || "").trim();
+    const email = clean(contact.email);
 
     if (!email) {
       setNotice({
@@ -546,52 +671,18 @@ export default function EventHubContactsPage() {
         details:
           "Add an email address to this contact first, then the Email button will open the Burton Pride email sending app.",
       });
-
       return;
     }
 
-    const contactName = (contact.contact_name || "").trim();
-    const businessName = contact.business_name.trim();
-    const serviceType = (contact.service_type || "").trim();
-
-    const selling = (contact.selling || "").trim();
-
-    const subject = serviceType
-      ? `Invitation to Burton Pride - ${businessName}`
-      : `Invitation to Burton Pride - ${businessName}`;
-
-    const body = [
-      `Hello ${contactName || businessName},`,
-      "",
-      "I hope you are well.",
-      "",
-      `We are getting in touch from Burton Pride C.I.C. to invite ${businessName} back to be part of Burton Pride.`,
-      "",
-      serviceType
-        ? `We currently have you listed in our Event Hub as: ${serviceType}.`
-        : "We currently have you saved as a contact in our Event Hub.",
-      selling ? `We also have you noted as selling/providing: ${selling}.` : "",
-      "",
-      "We would love to welcome you back and have you involved again as part of our community Pride event.",
-      "",
-      "Please could you let us know if you would be interested in joining us again. It would also be helpful if you could confirm that your contact details are still correct and let us know if anything needs updating.",
-      "",
-      "If you have any requirements, access needs, setup notes, or questions, please include them in your reply so our committee team can plan everything properly.",
-      "",
-      "Thank you for your continued support. Burton Pride is only possible because of the amazing businesses, vendors, charities, and community partners who support the event.",
-      "",
-      "Kind regards,",
-      "Burton Pride C.I.C.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
+    const { subject, body } = buildEmail(contact);
     const params = new URLSearchParams({
       to: email,
       subject,
       body,
       contactId: contact.id,
-      businessName,
+      businessName: contact.business_name,
+      eventId: eventId || "",
+      eventYear: eventYear ? String(eventYear) : "",
     });
 
     window.location.href = `/Admin/Email/Sending?${params.toString()}`;
@@ -610,45 +701,20 @@ export default function EventHubContactsPage() {
       service_type: contact.service_type || "",
       selling: contact.selling || "",
       selling_image_url: contact.selling_image_url || "",
+      selling_image_path: contact.selling_image_path || "",
       notes: contact.notes || "",
       is_active: Boolean(contact.is_active),
+      sent_to_checklist: Boolean(contact.sent_to_checklist),
     });
 
     setFormLocalImageUrl(localImageUrls[contact.id] || "");
-
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function refreshContactsKeepingImage(
-    contactId: string,
-    imageUrl: string,
-  ) {
-    const verifyRes = await fetch(
-      "/api/admin/burton-pride-event-hub/contacts",
-      {
-        cache: "no-store",
-        credentials: "include",
-      },
-    );
-
-    const verifyData = await readJson(verifyRes);
-
-    if (!verifyRes.ok || !verifyData.ok) {
-      // The button should still work because the URL is already cached locally.
-      setContacts((prev) =>
-        prev.map((contact) =>
-          contact.id === contactId
-            ? { ...contact, selling_image_url: imageUrl }
-            : contact,
-        ),
-      );
-      return;
-    }
-
-    const loadedContacts = verifyData.contacts || [];
-
-    setContacts(
-      loadedContacts.map((contact) =>
+  async function refreshContactsKeepingImage(contactId: string, imageUrl: string) {
+    await loadContacts();
+    setContacts((prev) =>
+      prev.map((contact) =>
         contact.id === contactId && !contact.selling_image_url
           ? { ...contact, selling_image_url: imageUrl }
           : contact,
@@ -656,17 +722,18 @@ export default function EventHubContactsPage() {
     );
   }
 
-  async function saveImageUrlToContact(contactId: string, imageUrl: string) {
+  async function saveImageUrlToContact(contactId: string, imageUrl: string, imagePath?: string) {
     const cleanImageUrl = imageUrl.trim();
-
     if (!contactId || !cleanImageUrl) return;
-
-    cacheContactImageUrl(contactId, cleanImageUrl);
 
     setContacts((prev) =>
       prev.map((contact) =>
         contact.id === contactId
-          ? { ...contact, selling_image_url: cleanImageUrl }
+          ? {
+              ...contact,
+              selling_image_url: cleanImageUrl,
+              selling_image_path: imagePath || contact.selling_image_path,
+            }
           : contact,
       ),
     );
@@ -674,13 +741,16 @@ export default function EventHubContactsPage() {
     const updatedForm = {
       ...form,
       selling_image_url: cleanImageUrl,
+      selling_image_path: imagePath || form.selling_image_path,
     };
 
-    const res = await fetch("/api/admin/burton-pride-event-hub/contacts", {
+    const res = await fetch(CONTACTS_API, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: contactId,
+        event_id: eventId || null,
+        event_year: eventYear || null,
         ...updatedForm,
       }),
       credentials: "include",
@@ -691,7 +761,7 @@ export default function EventHubContactsPage() {
     if (!res.ok || !data.ok) {
       throw createApiError({
         action: "Save uploaded image URL to contact",
-        endpoint: "/api/admin/burton-pride-event-hub/contacts",
+        endpoint: CONTACTS_API,
         res,
         data,
         fallbackMessage:
@@ -704,6 +774,7 @@ export default function EventHubContactsPage() {
 
   async function uploadSellingImage(file: File) {
     try {
+      requireEditableEvent();
       setUploadingImage(true);
       setNotice(null);
 
@@ -716,7 +787,6 @@ export default function EventHubContactsPage() {
       }
 
       const maxSize = 5 * 1024 * 1024;
-
       if (file.size > maxSize) {
         throw createLocalError(
           "Validate selected image size",
@@ -727,30 +797,25 @@ export default function EventHubContactsPage() {
 
       const localPreviewUrl = URL.createObjectURL(file);
       setFormLocalImageUrl(localPreviewUrl);
-
-      if (editingId) {
-        rememberLocalContactImage(editingId, localPreviewUrl);
-      }
+      if (editingId) rememberLocalContactImage(editingId, localPreviewUrl);
 
       const formData = new FormData();
       formData.append("file", file);
+      if (eventId) formData.append("event_id", eventId);
+      if (eventYear) formData.append("event_year", String(eventYear));
 
-      const res = await fetch(
-        "/api/admin/burton-pride-event-hub/contacts/event-hub-selling-images",
-        {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        },
-      );
+      const res = await fetch(IMAGE_UPLOAD_API, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
 
       const data = await readJson(res);
 
       if (!res.ok || !data.ok || !data.url) {
         throw createApiError({
           action: "Upload selling image",
-          endpoint:
-            "/api/admin/burton-pride-event-hub/contacts/event-hub-selling-images",
+          endpoint: IMAGE_UPLOAD_API,
           res,
           data,
           fallbackMessage: "Failed to upload image.",
@@ -758,34 +823,23 @@ export default function EventHubContactsPage() {
       }
 
       const uploadedImageUrl = data.url.trim();
+      const uploadedImagePath = clean(data.path);
 
       setForm((prev) => ({
         ...prev,
         selling_image_url: uploadedImageUrl,
+        selling_image_path: uploadedImagePath || prev.selling_image_path,
       }));
-
       setFormLocalImageUrl(uploadedImageUrl);
 
       if (editingId && uploadedImageUrl) {
-        setContacts((prev) =>
-          prev.map((contact) =>
-            contact.id === editingId
-              ? { ...contact, selling_image_url: uploadedImageUrl }
-              : contact,
-          ),
-        );
-
-        await saveImageUrlToContact(editingId, uploadedImageUrl);
-
+        await saveImageUrlToContact(editingId, uploadedImageUrl, uploadedImagePath);
         setNotice({
           type: "success",
           title: "Image uploaded and saved",
           message:
             "The image has been uploaded and attached to this contact. The View image button will work now.",
-          details:
-            "The image URL has been saved to the contact and also cached in this browser as a backup.",
         });
-
         return;
       }
 
@@ -794,8 +848,6 @@ export default function EventHubContactsPage() {
         title: "Image uploaded",
         message:
           "Selling image uploaded successfully. Click Add contact to save it to the new contact.",
-        details:
-          "The image URL has been added to the form. Because this is a new contact, it will be saved when you click Add contact.",
       });
     } catch (error) {
       setNotice(
@@ -810,12 +862,34 @@ export default function EventHubContactsPage() {
     }
   }
 
+  function buildContactPayload() {
+    return {
+      id: editingId || undefined,
+      event_id: eventId || null,
+      event_year: eventYear || null,
+      business_name: clean(form.business_name),
+      contact_name: clean(form.contact_name) || null,
+      email: clean(form.email) || null,
+      phone: clean(form.phone) || null,
+      website: normaliseWebsite(form.website) || null,
+      address: clean(form.address) || null,
+      service_type: clean(form.service_type) || null,
+      selling: clean(form.selling) || null,
+      selling_image_url: clean(form.selling_image_url) || null,
+      selling_image_path: clean(form.selling_image_path) || null,
+      notes: clean(form.notes) || null,
+      is_active: Boolean(form.is_active),
+      sent_to_checklist: Boolean(form.sent_to_checklist),
+    };
+  }
+
   async function saveContact() {
     try {
+      requireEditableEvent();
       setSaving(true);
       setNotice(null);
 
-      if (!form.business_name.trim()) {
+      if (!clean(form.business_name)) {
         throw createLocalError(
           "Validate contact form",
           "Please enter the business name.",
@@ -823,12 +897,16 @@ export default function EventHubContactsPage() {
         );
       }
 
-      const payload = {
-        id: editingId || undefined,
-        ...form,
-      };
+      if (clean(form.email) && !clean(form.email).includes("@")) {
+        throw createLocalError(
+          "Validate contact email",
+          "Please enter a valid email address.",
+          "The email address should include @, for example info@example.com.",
+        );
+      }
 
-      const res = await fetch("/api/admin/burton-pride-event-hub/contacts", {
+      const payload = buildContactPayload();
+      const res = await fetch(CONTACTS_API, {
         method: editingId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -839,30 +917,15 @@ export default function EventHubContactsPage() {
 
       if (!res.ok || !data.ok) {
         throw createApiError({
-          action: editingId
-            ? "Update business contact"
-            : "Add business contact",
-          endpoint: "/api/admin/burton-pride-event-hub/contacts",
+          action: editingId ? "Update business contact" : "Add business contact",
+          endpoint: CONTACTS_API,
           res,
           data,
           fallbackMessage: "Failed to save contact.",
         });
       }
 
-      const savedContactId = editingId || data.contact?.id;
-      const expectedImageUrl = form.selling_image_url.trim();
-      const temporaryImageUrl = formLocalImageUrl.trim();
-
-      if (savedContactId && expectedImageUrl) {
-        cacheContactImageUrl(savedContactId, expectedImageUrl);
-        await refreshContactsKeepingImage(savedContactId, expectedImageUrl);
-      } else {
-        await loadContacts();
-
-        if (savedContactId && temporaryImageUrl) {
-          rememberLocalContactImage(savedContactId, temporaryImageUrl);
-        }
-      }
+      await loadContacts();
 
       setNotice({
         type: "success",
@@ -870,19 +933,12 @@ export default function EventHubContactsPage() {
         message: editingId
           ? "Business contact updated successfully."
           : "Business contact added successfully.",
-        details: expectedImageUrl
-          ? "The View image button will now use the saved image URL for this contact."
-          : undefined,
       });
 
       resetForm();
     } catch (error) {
       setNotice(
-        buildErrorNotice(
-          error,
-          "Could not save contact",
-          "Failed to save contact.",
-        ),
+        buildErrorNotice(error, "Could not save contact", "Failed to save contact."),
       );
     } finally {
       setSaving(false);
@@ -893,13 +949,14 @@ export default function EventHubContactsPage() {
     if (!deleteId) return;
 
     try {
+      requireEditableEvent();
       setSaving(true);
       setNotice(null);
 
-      const res = await fetch("/api/admin/burton-pride-event-hub/contacts", {
+      const res = await fetch(CONTACTS_API, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: deleteId }),
+        body: JSON.stringify({ id: deleteId, event_id: eventId || null, event_year: eventYear || null }),
         credentials: "include",
       });
 
@@ -908,7 +965,7 @@ export default function EventHubContactsPage() {
       if (!res.ok || !data.ok) {
         throw createApiError({
           action: "Delete business contact",
-          endpoint: "/api/admin/burton-pride-event-hub/contacts",
+          endpoint: CONTACTS_API,
           res,
           data,
           fallbackMessage: "Failed to delete contact.",
@@ -921,23 +978,154 @@ export default function EventHubContactsPage() {
         message: "Business contact deleted successfully.",
       });
 
-      if (editingId === deleteId) {
-        resetForm();
+      if (editingId === deleteId) resetForm();
+      setDeleteId(null);
+      await loadContacts();
+    } catch (error) {
+      setNotice(
+        buildErrorNotice(error, "Could not delete contact", "Failed to delete contact."),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function sendToChecklist(contact: Contact) {
+    try {
+      requireEditableEvent();
+      setActionId(contact.id);
+      setNotice(null);
+
+      const checklistPayload = {
+        event_id: eventId || null,
+        event_year: eventYear || null,
+        organisation_name: contact.business_name,
+        contact_name: contact.contact_name || "",
+        email: contact.email || "",
+        phone: contact.phone || "",
+        organisation_type: contact.service_type || "Vendor",
+        pitch_number: "",
+        arrival_time: currentEvent?.setup_start_time || "",
+        checklist_sent: false,
+        checklist_confirmed: false,
+        notes: [
+          contact.selling ? `Selling/providing: ${contact.selling}` : "",
+          contact.address ? `Address: ${contact.address}` : "",
+          contact.website ? `Website: ${contact.website}` : "",
+          contact.notes || "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        is_active: contact.is_active,
+                      selling: contact.selling || "",
+        selling_image_url: contact.selling_image_url || "",
+      };
+
+      const res = await fetch(CHECKLIST_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(checklistPayload),
+        credentials: "include",
+      });
+
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw createApiError({
+          action: "Send contact to checklist",
+          endpoint: CHECKLIST_API,
+          res,
+          data,
+          fallbackMessage: "Failed to send this contact to the checklist.",
+        });
       }
 
-      setDeleteId(null);
+      const updateRes = await fetch(CONTACTS_API, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: contact.id,
+          event_id: eventId,
+          event_year: eventYear,
+          sent_to_checklist: true,
+        }),
+        credentials: "include",
+      });
+
+      const updateData = await readJson(updateRes);
+      if (!updateRes.ok || !updateData.ok) {
+        throw createApiError({
+          action: "Mark contact as sent to checklist",
+          endpoint: CONTACTS_API,
+          res: updateRes,
+          data: updateData,
+          fallbackMessage:
+            "The contact was sent to the checklist, but it could not be marked as sent.",
+        });
+      }
+
+      setNotice({
+        type: "success",
+        title: "Sent to checklist",
+        message: `${contact.business_name} has been sent to the stallholders and charities checklist.`,
+      });
+
       await loadContacts();
     } catch (error) {
       setNotice(
         buildErrorNotice(
           error,
-          "Could not delete contact",
-          "Failed to delete contact.",
+          "Could not send to checklist",
+          "Failed to send contact to checklist.",
         ),
       );
     } finally {
-      setSaving(false);
+      setActionId(null);
     }
+  }
+
+  function exportContacts() {
+    const headers = [
+      "business_name",
+      "contact_name",
+      "email",
+      "phone",
+      "website",
+      "address",
+      "service_type",
+      "selling",
+      "selling_image_url",
+      "is_active",
+      "sent_to_checklist",
+      "notes",
+    ];
+
+    const rows = filteredContacts.map((contact) => [
+      contact.business_name,
+      contact.contact_name || "",
+      contact.email || "",
+      contact.phone || "",
+      contact.website || "",
+      contact.address || "",
+      contact.service_type || "",
+      contact.selling || "",
+      contact.selling_image_url || "",
+      contact.is_active ? "yes" : "no",
+      contact.sent_to_checklist ? "yes" : "no",
+      contact.notes || "",
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map(csvEscape).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `burton-pride-contacts-${eventYear || "event"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -948,33 +1136,87 @@ export default function EventHubContactsPage() {
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-pink-400/30 bg-pink-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-pink-100">
                 <Building2 className="h-4 w-4" />
-                Event Hub
+                Event Hub Contacts
               </div>
 
               <h1 className="text-3xl font-extrabold tracking-tight">
                 Business Contacts
               </h1>
 
-              <p className="mt-2 max-w-3xl text-sm text-white/70">
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
                 Store suppliers, vendors, sponsors, venues, entertainers,
-                charities, contractors, and community partners for Burton Pride
-                event planning.
+                charities, contractors, and community partners for the active
+                Burton Pride event.
               </p>
+
+              {currentEvent && (
+                <p className="mt-2 text-xs font-bold text-pink-100/80">
+                  Managing: {currentEvent.event_name} {currentEvent.event_year}
+                  {currentEvent.event_date ? ` · ${currentEvent.event_date}` : ""}
+                </p>
+              )}
             </div>
 
-            <button
-              type="button"
-              onClick={loadContacts}
-              disabled={loading}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/15 disabled:opacity-60"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-              />
-              Refresh
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={refreshEvent}
+                disabled={eventLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-5 py-3 text-sm font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${eventLoading ? "animate-spin" : ""}`} />
+                Event
+              </button>
+
+              <button
+                type="button"
+                onClick={exportContacts}
+                disabled={filteredContacts.length === 0}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-5 py-3 text-sm font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:opacity-60"
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </button>
+
+              <button
+                type="button"
+                onClick={loadContacts}
+                disabled={loading || eventLoading}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/15 disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
+
+        {(eventError || !currentEvent || isEventLocked) && (
+          <div
+            className={`mb-6 rounded-3xl border p-4 text-sm font-semibold shadow-xl ${
+              isEventLocked
+                ? "border-amber-400/30 bg-amber-500/10 text-amber-100"
+                : "border-sky-400/25 bg-sky-500/10 text-sky-100"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              {isEventLocked ? <Lock className="mt-0.5 h-5 w-5" /> : <AlertTriangle className="mt-0.5 h-5 w-5" />}
+              <div>
+                <p className="font-black">
+                  {isEventLocked
+                    ? "This event is locked"
+                    : "No active event is selected"}
+                </p>
+                <p className="mt-1 text-white/75">
+                  {isEventLocked
+                    ? "Contacts can be viewed, but adding, editing, deleting, uploading, and sending to the checklist are disabled until the event is unlocked."
+                    : "You can still manage your master contact list. These contacts will not be linked to a specific Burton Pride event until an active event is selected in Event Management."}
+                </p>
+                {eventError && <p className="mt-2 text-xs text-white/70">{eventError}</p>}
+              </div>
+            </div>
+          </div>
+        )}
 
         {notice && (
           <div
@@ -1024,6 +1266,16 @@ export default function EventHubContactsPage() {
           </div>
         )}
 
+        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Total contacts" value={stats.total} />
+          <StatCard label="Active" value={stats.active} good />
+          <StatCard label="Food vendors" value={stats.foodVendors} />
+          <StatCard label="Missing email" value={stats.missingEmail} warning={stats.missingEmail > 0} />
+          <StatCard label="Missing selling info" value={stats.missingSelling} warning={stats.missingSelling > 0} />
+          <StatCard label="Missing image" value={stats.missingImage} warning={stats.missingImage > 0} />
+          <StatCard label="Not sent to checklist" value={stats.notSentToChecklist} warning={stats.notSentToChecklist > 0} />
+        </div>
+
         <div className="grid gap-6 xl:grid-cols-[430px_minmax(0,1fr)]">
           <div className="rounded-[32px] border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
             <h2 className="mb-4 text-xl font-bold">
@@ -1031,104 +1283,37 @@ export default function EventHubContactsPage() {
             </h2>
 
             <div className="grid gap-4">
-              <input
-                value={form.business_name}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    business_name: e.target.value,
-                  }))
-                }
-                placeholder="Business name"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
+              <Input label="Business name" value={form.business_name} onChange={(value) => updateForm("business_name", value)} required />
+              {duplicateWarning && (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs font-bold text-amber-100">
+                  {duplicateWarning}
+                </div>
+              )}
+              <Input label="Contact person" value={form.contact_name} onChange={(value) => updateForm("contact_name", value)} />
+              <Input label="Email address" value={form.email} onChange={(value) => updateForm("email", value)} />
+              <Input label="Phone number" value={form.phone} onChange={(value) => updateForm("phone", value)} />
+              <Input label="Website" value={form.website} onChange={(value) => updateForm("website", value)} />
+              <Input label="Address" value={form.address} onChange={(value) => updateForm("address", value)} />
 
-              <input
-                value={form.contact_name}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    contact_name: e.target.value,
-                  }))
-                }
-                placeholder="Contact person"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
-
-              <input
-                value={form.email}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    email: e.target.value,
-                  }))
-                }
-                placeholder="Email address"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
-
-              <input
-                value={form.phone}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    phone: e.target.value,
-                  }))
-                }
-                placeholder="Phone number"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
-
-              <input
-                value={form.website}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    website: e.target.value,
-                  }))
-                }
-                placeholder="Website"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
-
-              <input
-                value={form.address}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    address: e.target.value,
-                  }))
-                }
-                placeholder="Address"
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
-              />
-
-              <select
-                value={form.service_type}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    service_type: e.target.value,
-                  }))
-                }
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
-              >
-                <option value="">Select service type</option>
-                {serviceTypes.map((type) => (
-                  <option key={type} value={type} className="bg-[#1f1030]">
-                    {type}
-                  </option>
-                ))}
-              </select>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-white/75">Service type</label>
+                <select
+                  value={form.service_type}
+                  onChange={(e) => updateForm("service_type", e.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                >
+                  <option value="" className="bg-[#1f1030]">Select service type</option>
+                  {serviceTypes.map((type) => (
+                    <option key={type} value={type} className="bg-[#1f1030]">
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <textarea
                 value={form.selling}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    selling: e.target.value,
-                  }))
-                }
+                onChange={(e) => updateForm("selling", e.target.value)}
                 placeholder="What are they selling? Example: cakes, burgers, jewellery, pride items..."
                 rows={3}
                 className="resize-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
@@ -1143,7 +1328,7 @@ export default function EventHubContactsPage() {
                 <input
                   type="file"
                   accept="image/*"
-                  disabled={uploadingImage}
+                  disabled={uploadingImage || !canEdit}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) uploadSellingImage(file);
@@ -1152,9 +1337,7 @@ export default function EventHubContactsPage() {
                 />
 
                 {uploadingImage && (
-                  <p className="mt-3 text-xs font-semibold text-pink-100">
-                    Uploading image...
-                  </p>
+                  <p className="mt-3 text-xs font-semibold text-pink-100">Uploading image...</p>
                 )}
 
                 {(formLocalImageUrl || form.selling_image_url) && (
@@ -1182,14 +1365,13 @@ export default function EventHubContactsPage() {
 
                       <button
                         type="button"
+                        disabled={!canEdit}
                         onClick={() => {
-                          setForm((prev) => ({
-                            ...prev,
-                            selling_image_url: "",
-                          }));
+                          updateForm("selling_image_url", "");
+                          updateForm("selling_image_path", "");
                           setFormLocalImageUrl("");
                         }}
-                        className="rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20"
+                        className="rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20 disabled:opacity-60"
                       >
                         Remove image
                       </button>
@@ -1200,44 +1382,26 @@ export default function EventHubContactsPage() {
 
               <textarea
                 value={form.notes}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    notes: e.target.value,
-                  }))
-                }
+                onChange={(e) => updateForm("notes", e.target.value)}
                 placeholder="Notes about this business"
                 rows={5}
                 className="resize-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35"
               />
 
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      is_active: e.target.checked,
-                    }))
-                  }
-                />
-                Active contact
-              </label>
+              <div className="grid gap-2">
+                <CheckBox label="Active contact" checked={form.is_active} onChange={(checked) => updateForm("is_active", checked)} />
+                <CheckBox label="Sent to checklist" checked={form.sent_to_checklist} onChange={(checked) => updateForm("sent_to_checklist", checked)} />
+              </div>
 
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
                   onClick={saveContact}
-                  disabled={saving || uploadingImage}
+                  disabled={saving || uploadingImage || !canEdit}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:opacity-60"
                 >
                   <Save className="h-4 w-4" />
-                  {saving
-                    ? "Saving..."
-                    : editingId
-                      ? "Update contact"
-                      : "Add contact"}
+                  {saving ? "Saving..." : editingId ? "Update contact" : "Add contact"}
                 </button>
 
                 <button
@@ -1254,50 +1418,53 @@ export default function EventHubContactsPage() {
           </div>
 
           <div className="rounded-[32px] border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <h2 className="text-xl font-bold">Saved contacts</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  {filteredContacts.length} contact
-                  {filteredContacts.length === 1 ? "" : "s"} found.
+                  {filteredContacts.length} contact{filteredContacts.length === 1 ? "" : "s"} found.
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search name, email, selling, notes, or service..."
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35 md:w-72"
+                    placeholder="Search..."
+                    className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm outline-none placeholder:text-white/35"
                   />
                 </div>
 
-                <select
-                  value={serviceTypeFilter}
-                  onChange={(e) => setServiceTypeFilter(e.target.value)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none md:w-56"
-                >
-                  <option value="" className="bg-[#1f1030]">
-                    All service types
-                  </option>
+                <select value={serviceTypeFilter} onChange={(e) => setServiceTypeFilter(e.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none">
+                  <option value="" className="bg-[#1f1030]">All service types</option>
                   {serviceTypes.map((type) => (
-                    <option key={type} value={type} className="bg-[#1f1030]">
-                      {type}
-                    </option>
+                    <option key={type} value={type} className="bg-[#1f1030]">{type}</option>
+                  ))}
+                </select>
+
+                <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none">
+                  {activeFilters.map((filter) => (
+                    <option key={filter.value} value={filter.value} className="bg-[#1f1030]">{filter.label}</option>
+                  ))}
+                </select>
+
+                <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none">
+                  {dataFilters.map((filter) => (
+                    <option key={filter.value} value={filter.value} className="bg-[#1f1030]">{filter.label}</option>
                   ))}
                 </select>
               </div>
             </div>
 
-            {loading ? (
+            {loading || eventLoading ? (
               <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/60">
                 Loading contacts...
               </div>
             ) : filteredContacts.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-white/15 bg-black/20 p-8 text-center text-white/60">
-                No business contacts found yet.
+                No business contacts found for this event.
               </div>
             ) : (
               <div className="grid gap-4">
@@ -1305,172 +1472,18 @@ export default function EventHubContactsPage() {
                   const contactImageUrl = getContactImageUrl(contact);
 
                   return (
-                    <div
+                    <ContactCard
                       key={contact.id}
-                      className="rounded-3xl border border-white/10 bg-black/20 p-5"
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-lg font-extrabold text-white">
-                              {contact.business_name}
-                            </h3>
-
-                            {contact.service_type && (
-                              <span className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs font-semibold text-pink-100">
-                                {contact.service_type}
-                              </span>
-                            )}
-
-                            {contact.is_active ? (
-                              <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100">
-                                Active
-                              </span>
-                            ) : (
-                              <span className="rounded-full border border-red-400/20 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100">
-                                Inactive
-                              </span>
-                            )}
-                          </div>
-
-                          {contact.contact_name && (
-                            <p className="mt-1 text-sm text-white/70">
-                              Contact: {contact.contact_name}
-                            </p>
-                          )}
-
-                          <div className="mt-4 grid gap-2 text-sm text-white/70">
-                            {contact.email && (
-                              <div className="flex items-center gap-2">
-                                <Mail className="h-4 w-4 text-white/40" />
-                                <button
-                                  type="button"
-                                  onClick={() => openEmailAppForContact(contact)}
-                                  className="break-all text-left hover:text-white"
-                                  title="Open in Burton Pride email app"
-                                >
-                                  {contact.email}
-                                </button>
-                              </div>
-                            )}
-
-                            {contact.phone && (
-                              <div className="flex items-center gap-2">
-                                <Phone className="h-4 w-4 text-white/40" />
-                                <a
-                                  href={`tel:${contact.phone}`}
-                                  className="hover:text-white"
-                                >
-                                  {contact.phone}
-                                </a>
-                              </div>
-                            )}
-
-                            {contact.website && (
-                              <div className="flex items-center gap-2">
-                                <Globe className="h-4 w-4 text-white/40" />
-                                <a
-                                  href={contact.website}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="break-all hover:text-white"
-                                >
-                                  {contact.website}
-                                </a>
-                              </div>
-                            )}
-
-                            {contact.address && (
-                              <div className="flex items-start gap-2">
-                                <MapPin className="mt-0.5 h-4 w-4 text-white/40" />
-                                <span>{contact.address}</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {contact.selling && (
-                            <div className="mt-4 rounded-2xl border border-yellow-400/20 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-                              <strong>What they are selling:</strong>{" "}
-                              {contact.selling}
-                            </div>
-                          )}
-
-                          {contactImageUrl && (
-                            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-                              <div className="mb-3 flex items-center justify-between gap-3">
-                                <p className="text-sm font-bold text-white">
-                                  Selling image
-                                </p>
-
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    openImagePreview(
-                                      contactImageUrl,
-                                      contact.business_name,
-                                    )
-                                  }
-                                  className="inline-flex items-center gap-2 rounded-xl border border-blue-400/20 bg-blue-500/10 px-4 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  View image
-                                </button>
-                              </div>
-
-                              <img
-                                src={contactImageUrl}
-                                alt={`${contact.business_name} selling image`}
-                                className="max-h-40 w-full rounded-2xl object-cover"
-                              />
-                            </div>
-                          )}
-
-                          {contact.notes && (
-                            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                              {contact.notes}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewContactImage(contact)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
-                          >
-                            <Eye className="h-4 w-4" />
-                            View image
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => openEmailAppForContact(contact)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20"
-                          >
-                            <Mail className="h-4 w-4" />
-                            Email
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => startEdit(contact)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/10"
-                          >
-                            <Edit className="h-4 w-4" />
-                            Edit
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setDeleteId(contact.id)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                      contact={contact}
+                      imageUrl={contactImageUrl}
+                      locked={!canEdit}
+                      actionLoading={actionId === contact.id}
+                      onViewImage={() => handleViewContactImage(contact)}
+                      onEmail={() => openEmailAppForContact(contact)}
+                      onEdit={() => startEdit(contact)}
+                      onDelete={() => setDeleteId(contact.id)}
+                      onSendToChecklist={() => sendToChecklist(contact)}
+                    />
                   );
                 })}
               </div>
@@ -1483,20 +1496,11 @@ export default function EventHubContactsPage() {
             <div className="w-full max-w-5xl rounded-[32px] border border-white/10 bg-[#1b1028] shadow-2xl">
               <div className="flex items-center justify-between gap-4 border-b border-white/10 p-5">
                 <div>
-                  <h2 className="text-xl font-extrabold text-white">
-                    {imagePreview.title}
-                  </h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Selling image preview
-                  </p>
+                  <h2 className="text-xl font-extrabold text-white">{imagePreview.title}</h2>
+                  <p className="mt-1 text-sm text-white/60">Selling image preview</p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setImagePreview(null)}
-                  className="rounded-full border border-white/15 bg-white/10 p-2 text-white transition hover:bg-white/20"
-                  aria-label="Close image preview"
-                >
+                <button type="button" onClick={() => setImagePreview(null)} className="rounded-full border border-white/15 bg-white/10 p-2 text-white transition hover:bg-white/20" aria-label="Close image preview">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -1506,46 +1510,27 @@ export default function EventHubContactsPage() {
                   <div className="rounded-3xl border border-yellow-400/20 bg-yellow-500/10 p-8 text-center text-yellow-100">
                     <ImagePlus className="mx-auto mb-4 h-10 w-10" />
                     <p className="text-lg font-extrabold">No image saved yet</p>
-                    <p className="mt-2 text-sm text-yellow-50/80">
-                      {imagePreview.message}
-                    </p>
+                    <p className="mt-2 text-sm text-yellow-50/80">{imagePreview.message}</p>
                   </div>
                 ) : imagePreviewFailed ? (
                   <div className="rounded-3xl border border-red-400/20 bg-red-500/10 p-8 text-center text-red-100">
-                    <p className="text-lg font-extrabold">
-                      Image could not load
-                    </p>
+                    <p className="text-lg font-extrabold">Image could not load</p>
                     <p className="mt-2 text-sm text-red-50/80">
-                      The popup is working, but the saved image URL could not be
-                      loaded by the browser.
+                      The popup is working, but the saved image URL could not be loaded by the browser.
                     </p>
-                    {imagePreview.url && (
-                      <a
-                        href={imagePreview.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-4 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90"
-                      >
+                    {imagePreview?.url ? (
+                      <a href={imagePreview.url} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90">
                         Open image in new tab
                       </a>
-                    )}
+                    ) : null}
                   </div>
                 ) : (
-                  <img
-                    src={imagePreview.url}
-                    alt={`${imagePreview.title} preview`}
-                    onError={() => setImagePreviewFailed(true)}
-                    className="max-h-[75vh] w-full rounded-2xl object-contain"
-                  />
+                  <img src={imagePreview?.url ?? ""} alt={(imagePreview?.title ?? 'Image') + ' preview'} onError={() => setImagePreviewFailed(true)} className="max-h-[75vh] w-full rounded-2xl object-contain" />
                 )}
               </div>
 
               <div className="flex justify-end border-t border-white/10 p-5">
-                <button
-                  type="button"
-                  onClick={() => setImagePreview(null)}
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90"
-                >
+                <button type="button" onClick={() => setImagePreview(null)} className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90">
                   Close
                 </button>
               </div>
@@ -1557,44 +1542,207 @@ export default function EventHubContactsPage() {
           <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
             <div className="w-full max-w-lg rounded-[32px] border border-red-500/20 bg-[#1b1028] shadow-2xl">
               <div className="border-b border-white/10 p-6">
-                <h2 className="text-xl font-extrabold text-white">
-                  Delete business contact?
-                </h2>
-
-                <p className="mt-2 text-sm text-white/60">
-                  This will permanently remove this contact from the Event Hub.
-                </p>
+                <h2 className="text-xl font-extrabold text-white">Delete business contact?</h2>
+                <p className="mt-2 text-sm text-white/60">This will permanently remove this contact from the Event Hub.</p>
               </div>
 
               <div className="p-6">
                 <p className="text-sm text-white/75">
-                  Are you sure you want to delete this business contact? This
-                  action cannot be undone.
+                  Are you sure you want to delete this business contact? This action cannot be undone.
                 </p>
               </div>
 
               <div className="flex justify-end gap-3 border-t border-white/10 p-6">
-                <button
-                  type="button"
-                  onClick={() => setDeleteId(null)}
-                  disabled={saving}
-                  className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:opacity-60"
-                >
+                <button type="button" onClick={() => setDeleteId(null)} disabled={saving} className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:opacity-60">
                   Cancel
                 </button>
 
-                <button
-                  type="button"
-                  onClick={confirmDelete}
-                  disabled={saving}
-                  className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-60"
-                >
+                <button type="button" onClick={confirmDelete} disabled={saving || !canEdit} className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-700 disabled:opacity-60">
                   {saving ? "Deleting..." : "Delete contact"}
                 </button>
               </div>
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, warning = false, good = false }: { label: string; value: number; warning?: boolean; good?: boolean }) {
+  const colour = good
+    ? "border-emerald-400/20 bg-emerald-500/10"
+    : warning
+      ? "border-amber-400/20 bg-amber-500/10"
+      : "border-white/10 bg-white/10";
+
+  return (
+    <div className={`rounded-3xl border p-5 ${colour}`}>
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-white/50">{label}</p>
+      <p className="mt-2 text-3xl font-extrabold">{value}</p>
+    </div>
+  );
+}
+
+function Input({ label, value, onChange, placeholder, required }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; required?: boolean }) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-white/75">
+        {label}{required ? <span className="text-red-300"> *</span> : null}
+      </label>
+      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder || label} className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none placeholder:text-white/35" />
+    </div>
+  );
+}
+
+function CheckBox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span className="text-white/85">{label}</span>
+    </label>
+  );
+}
+
+function MiniStatus({ good, label }: { good: boolean; label: string }) {
+  return good ? (
+    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-100">
+      <CheckCircle2 className="h-3.5 w-3.5" /> {label}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-100">
+      <AlertTriangle className="h-3.5 w-3.5" /> {label}
+    </span>
+  );
+}
+
+function ContactCard({
+  contact,
+  imageUrl,
+  locked,
+  actionLoading,
+  onViewImage,
+  onEmail,
+  onEdit,
+  onDelete,
+  onSendToChecklist,
+}: {
+  contact: Contact;
+  imageUrl: string;
+  locked: boolean;
+  actionLoading: boolean;
+  onViewImage: () => void;
+  onEmail: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSendToChecklist: () => void;
+}) {
+  return (
+    <div className="rounded-[30px] border border-white/10 bg-white/[0.07] p-5 shadow-xl shadow-black/20 backdrop-blur-xl transition hover:border-white/15 hover:bg-white/[0.09]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-extrabold text-white">{contact.business_name}</h3>
+
+            {contact.service_type && (
+              <span className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs font-semibold text-pink-100">
+                {contact.service_type}
+              </span>
+            )}
+
+            {contact.is_active ? <MiniStatus good label="Active" /> : <MiniStatus good={false} label="Inactive" />}
+            {contact.sent_to_checklist ? <MiniStatus good label="Checklist" /> : <MiniStatus good={false} label="Not checklist" />}
+          </div>
+
+          {contact.contact_name && <p className="mt-1 text-sm text-white/70">Contact: {contact.contact_name}</p>}
+
+          <div className="mt-4 grid gap-2 text-sm text-white/70">
+            {contact.email && (
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-white/40" />
+                <button type="button" onClick={onEmail} className="break-all text-left hover:text-white" title="Open in Burton Pride email app">
+                  {contact.email}
+                </button>
+              </div>
+            )}
+
+            {contact.phone && (
+              <div className="flex items-center gap-2">
+                <Phone className="h-4 w-4 text-white/40" />
+                <a href={`tel:${contact.phone}`} className="hover:text-white">{contact.phone}</a>
+              </div>
+            )}
+
+            {contact.website && (
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-white/40" />
+                <a href={normaliseWebsite(contact.website)} target="_blank" rel="noreferrer" className="break-all hover:text-white">
+                  {contact.website}
+                </a>
+              </div>
+            )}
+
+            {contact.address && (
+              <div className="flex items-start gap-2">
+                <MapPin className="mt-0.5 h-4 w-4 text-white/40" />
+                <span>{contact.address}</span>
+              </div>
+            )}
+          </div>
+
+          {contact.selling && (
+            <div className="mt-4 rounded-2xl border border-yellow-400/20 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+              <strong>What they are selling:</strong> {contact.selling}
+            </div>
+          )}
+
+          {imageUrl ? (
+            <div className="mt-4 max-w-sm rounded-3xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-black text-white">Selling image</p>
+                <button type="button" onClick={onViewImage} className="rounded-xl border border-blue-400/25 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20">
+                  View
+                </button>
+              </div>
+              <img src={imageUrl} alt={`${contact.business_name} selling image`} className="h-40 w-full rounded-2xl object-cover" />
+            </div>
+          ) : (
+            <div className="mt-4 max-w-sm rounded-3xl border border-dashed border-white/10 bg-black/10 p-4 text-sm text-white/45">
+              No selling image saved yet.
+            </div>
+          )}
+
+          {contact.notes && (
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">{contact.notes}</div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 xl:max-w-[300px] xl:justify-end">
+          <button type="button" onClick={onViewImage} className="inline-flex items-center gap-2 rounded-xl border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20">
+            <Eye className="h-4 w-4" />
+            View image
+          </button>
+
+          <button type="button" onClick={onEmail} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20">
+            <Mail className="h-4 w-4" />
+            Email
+          </button>
+
+          <button type="button" onClick={onSendToChecklist} disabled={locked || actionLoading || Boolean(contact.sent_to_checklist)} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50">
+            <Send className="h-4 w-4" />
+            {actionLoading ? "Sending..." : contact.sent_to_checklist ? "Sent" : "Checklist"}
+          </button>
+
+          <button type="button" onClick={onEdit} disabled={locked} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">
+            <Edit className="h-4 w-4" />
+            Edit
+          </button>
+
+          <button type="button" onClick={onDelete} disabled={locked} className="inline-flex items-center gap-2 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50">
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   );
