@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getActiveBurtonPrideEvent } from "@/lib/event-hub/server";
+import { getActiveBurtonPrideEvent } from "@/lib/Event-Hub-App/server";
 
 export const runtime = "nodejs";
 

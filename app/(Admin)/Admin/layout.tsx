@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -75,6 +75,21 @@ const EMAIL_PREFIX = "/admin/email";
 const MONEY_PREFIX = "/admin/money";
 const MONEY_MANAGEMENT_PREFIX = "/admin/moneymanagement";
 
+type AuditRiskLevel = "low" | "medium" | "high" | "critical";
+
+type AuditReportInput = {
+  action: string;
+  area: string;
+  route?: string | null;
+  method?: string;
+  status?: string;
+  risk_level?: AuditRiskLevel;
+  target_type?: string | null;
+  target_id?: string | null;
+  target_label?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 function normalisePath(pathname: string | null | undefined) {
   const path = String(pathname || "")
     .trim()
@@ -109,6 +124,36 @@ function getLoginPath(pathname: string | null | undefined) {
   return `/Admin/Login?next=${encodeURIComponent(next)}`;
 }
 
+function getAuditArea(pathname: string | null | undefined) {
+  const path = normalisePath(pathname);
+
+  if (isAuthRoute(path)) return "auth";
+  if (isPathOrChild(path, EVENT_HUB_PREFIX)) return "event_hub";
+  if (isPathOrChild(path, EMAIL_PREFIX)) return "email";
+
+  if (
+    isPathOrChild(path, MONEY_PREFIX) ||
+    isPathOrChild(path, MONEY_MANAGEMENT_PREFIX) ||
+    isPathOrChild(path, "/admin/dashboard/money")
+  ) {
+    return "money";
+  }
+
+  if (isPathOrChild(path, "/admin/dashboard/users")) return "admin_users";
+  if (isPathOrChild(path, "/admin/dashboard/logs")) return "audit_logs";
+  if (isPathOrChild(path, "/admin/dashboard/donations")) return "donations";
+  if (isPathOrChild(path, "/admin/dashboard/raffle")) return "raffle";
+  if (isPathOrChild(path, "/admin/dashboard/settings/pageeditor")) {
+    return "site_pages";
+  }
+  if (isPathOrChild(path, "/admin/dashboard/pageeditor")) {
+    return "site_pages";
+  }
+  if (isPathOrChild(path, DASHBOARD_PREFIX)) return "dashboard";
+
+  return "admin_portal";
+}
+
 function getRequiredPermission(pathname: string | null | undefined) {
   const path = normalisePath(pathname);
 
@@ -116,10 +161,12 @@ function getRequiredPermission(pathname: string | null | undefined) {
   if (isAuthRoute(path)) return null;
 
   /**
-   * Burton Pride Event Hub is separate and should use its own layout/sidebar.
-   * Keep this Admin layout from controlling it.
+   * Event Hub keeps its own layout/sidebar,
+   * but it is still protected and reported by this Admin layout.
    */
-  if (isPathOrChild(path, EVENT_HUB_PREFIX)) return null;
+  if (isPathOrChild(path, EVENT_HUB_PREFIX)) {
+    return "event_hub:view";
+  }
 
   if (isPathOrChild(path, "/admin/dashboard/settings/pageeditor")) {
     return "site_pages:manage";
@@ -145,16 +192,10 @@ function getRequiredPermission(pathname: string | null | undefined) {
     return "raffle:view";
   }
 
-  /**
-   * Email Centre has its own sidebar/layout, but still needs permission protection.
-   */
   if (isPathOrChild(path, EMAIL_PREFIX)) {
     return "email:view";
   }
 
-  /**
-   * Money Management has its own sidebar/layout, but still needs permission protection.
-   */
   if (
     isPathOrChild(path, MONEY_PREFIX) ||
     isPathOrChild(path, MONEY_MANAGEMENT_PREFIX) ||
@@ -221,6 +262,22 @@ function hasPermission(
 ) {
   if (adminRole === "main_admin") return true;
   return permissions.includes(permission);
+}
+
+async function reportAdminAudit(input: AuditReportInput) {
+  try {
+    await fetch("/api/admin/audit-log/report", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+  } catch (error) {
+    console.warn("Audit report failed:", error);
+  }
 }
 
 function AdminStatusScreen({
@@ -357,6 +414,11 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const lastPageViewAuditRef = useRef("");
+  const lastPermissionDeniedAuditRef = useRef("");
+  const lastUnauthenticatedAuditRef = useRef("");
+  const lastAccessErrorAuditRef = useRef("");
+
   const {
     admin,
     adminEmail,
@@ -403,45 +465,178 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   }, [adminRole, safePermissions]);
 
   useEffect(() => {
-    if (isEventHubRoute) return;
-
     document.title = isDashboardRoute
       ? "Burton Pride Admin Portal"
       : isEmailRoute
         ? "Burton Pride Email Centre"
         : isMoneyRoute
           ? "Burton Pride Money Management"
-          : "Burton Pride Admin Portal";
+          : isEventHubRoute
+            ? "Burton Pride Event Hub"
+            : "Burton Pride Admin Portal";
   }, [isDashboardRoute, isEmailRoute, isMoneyRoute, isEventHubRoute]);
 
+  /**
+   * Report successful admin page views.
+   */
   useEffect(() => {
     if (isAuthPage) return;
-    if (isEventHubRoute) return;
-    if (loading) return;
-    if (status === "loading") return;
-
-    if (status === "unauthenticated") {
-      router.replace(getLoginPath(pathname));
-    }
-  }, [isAuthPage, isEventHubRoute, loading, pathname, router, status]);
-
-  useEffect(() => {
-    if (isAuthPage) return;
-    if (isEventHubRoute) return;
     if (loading) return;
     if (status !== "authenticated") return;
+    if (!admin) return;
+    if (!canAccessCurrentPage) return;
+
+    const route = pathname || "/Admin/Dashboard";
+    const auditKey = [
+      "page_view",
+      route,
+      adminEmail || "unknown",
+      requiredPermission || "none",
+    ].join("|");
+
+    if (lastPageViewAuditRef.current === auditKey) return;
+    lastPageViewAuditRef.current = auditKey;
+
+    void reportAdminAudit({
+      action: "page_view",
+      area: getAuditArea(route),
+      route,
+      method: "CLIENT",
+      status: "success",
+      risk_level: "low",
+      metadata: {
+        required_permission: requiredPermission,
+        admin_role: adminRole,
+        admin_email: adminEmail,
+        admin_name: adminName,
+        is_main_admin: isMainAdmin,
+      },
+    });
+  }, [
+    admin,
+    adminEmail,
+    adminName,
+    adminRole,
+    canAccessCurrentPage,
+    isAuthPage,
+    isMainAdmin,
+    loading,
+    pathname,
+    requiredPermission,
+    status,
+  ]);
+
+  /**
+   * Report unauthenticated attempts to open admin pages.
+   */
+  useEffect(() => {
+    if (isAuthPage) return;
+    if (loading) return;
+    if (status === "loading") return;
+    if (status !== "unauthenticated") return;
+
+    const route = pathname || "/Admin/Dashboard";
+    const auditKey = ["unauthenticated", route].join("|");
+
+    if (lastUnauthenticatedAuditRef.current === auditKey) return;
+    lastUnauthenticatedAuditRef.current = auditKey;
+
+    void reportAdminAudit({
+      action: "unauthenticated_admin_access",
+      area: getAuditArea(route),
+      route,
+      method: "CLIENT",
+      status: "blocked",
+      risk_level: "high",
+      metadata: {
+        reason: "admin_session_missing_or_expired",
+      },
+    });
+
+    router.replace(getLoginPath(pathname));
+  }, [isAuthPage, loading, pathname, router, status]);
+
+  /**
+   * Report admin permission loading errors.
+   */
+  useEffect(() => {
+    if (isAuthPage) return;
+    if (loading) return;
+    if (status !== "error") return;
+
+    const route = pathname || "/Admin/Dashboard";
+    const auditKey = ["access_error", route, error || "unknown"].join("|");
+
+    if (lastAccessErrorAuditRef.current === auditKey) return;
+    lastAccessErrorAuditRef.current = auditKey;
+
+    void reportAdminAudit({
+      action: "admin_access_check_failed",
+      area: getAuditArea(route),
+      route,
+      method: "CLIENT",
+      status: "error",
+      risk_level: "medium",
+      metadata: {
+        error: error || "Failed to load admin access.",
+      },
+    });
+  }, [error, isAuthPage, loading, pathname, status]);
+
+  /**
+   * Report permission denied and then redirect to the first allowed page.
+   */
+  useEffect(() => {
+    if (isAuthPage) return;
+    if (loading) return;
+    if (status !== "authenticated") return;
+    if (!admin) return;
     if (canAccessCurrentPage) return;
+
+    const route = pathname || "/Admin/Dashboard";
+    const auditKey = [
+      "permission_denied",
+      route,
+      adminEmail || "unknown",
+      requiredPermission || "none",
+    ].join("|");
+
+    if (lastPermissionDeniedAuditRef.current !== auditKey) {
+      lastPermissionDeniedAuditRef.current = auditKey;
+
+      void reportAdminAudit({
+        action: "permission_denied",
+        area: getAuditArea(route),
+        route,
+        method: "CLIENT",
+        status: "blocked",
+        risk_level: "medium",
+        metadata: {
+          required_permission: requiredPermission,
+          fallback_page: fallbackPage,
+          admin_role: adminRole,
+          admin_email: adminEmail,
+          admin_name: adminName,
+          is_main_admin: isMainAdmin,
+        },
+      });
+    }
 
     if (fallbackPage && normalisePath(pathname) !== normalisePath(fallbackPage)) {
       router.replace(fallbackPage);
     }
   }, [
+    admin,
+    adminEmail,
+    adminName,
+    adminRole,
     canAccessCurrentPage,
     fallbackPage,
     isAuthPage,
-    isEventHubRoute,
+    isMainAdmin,
     loading,
     pathname,
+    requiredPermission,
     router,
     status,
   ]);
@@ -455,13 +650,6 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
         {children}
       </div>
     );
-  }
-
-  /**
-   * Event Hub has its own layout/sidebar and is intentionally not controlled here.
-   */
-  if (isEventHubRoute) {
-    return <>{children}</>;
   }
 
   if (loading || status === "loading") {
@@ -515,10 +703,11 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   }
 
   /**
-   * Money and Email have their own app layouts/sidebars.
-   * This layout only protects them and provides AdminProvider.
+   * Money, Email and Event Hub have their own layouts/sidebars.
+   * This layout now protects them and reports audit logs,
+   * but does not force the dashboard sidebar onto them.
    */
-  if (isMoneyRoute || isEmailRoute) {
+  if (isMoneyRoute || isEmailRoute || isEventHubRoute) {
     return <>{children}</>;
   }
 
@@ -566,17 +755,6 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
 }
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const path = normalisePath(pathname);
-
-  /**
-   * Event Hub is fully separate.
-   * Do not wrap it here so it can keep its own layout/sidebar/title/routing.
-   */
-  if (isPathOrChild(path, EVENT_HUB_PREFIX)) {
-    return <>{children}</>;
-  }
-
   return (
     <AdminProvider>
       <AdminLayoutGate>{children}</AdminLayoutGate>
