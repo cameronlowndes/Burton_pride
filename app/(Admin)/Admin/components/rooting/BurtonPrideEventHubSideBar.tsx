@@ -3,24 +3,35 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ElementType,
   type ReactNode,
 } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Banknote,
   CalendarDays,
   ChevronRight,
   CreditCard,
+  ExternalLink,
   FileText,
+  Home,
   LayoutDashboard,
   Loader2,
+  Mail,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   PiggyBank,
   Receipt,
   RefreshCcw,
+  Search,
   Settings,
   Shield,
   Store,
@@ -33,10 +44,22 @@ import {
 type SidebarItem = {
   id: string;
   label: string;
-  href: string;
-  icon: string | null;
+  href?: string | null;
+  icon?: string | null;
   is_enabled: boolean;
   sort_order?: number | null;
+
+  /**
+   * Optional database fields supported by this upgraded component.
+   * These do not need to exist yet, but if you add them later the sidebar
+   * will automatically use them.
+   */
+  open_in_new_tab?: boolean | null;
+  is_coming_soon?: boolean | null;
+  coming_soon?: boolean | null;
+  disabled?: boolean | null;
+  disabled_reason?: string | null;
+  permission_key?: string | null;
 };
 
 type SidebarResponse = {
@@ -76,41 +99,172 @@ type SidebarErrorState = {
   fixes: string[];
 };
 
+type ItemStatus = {
+  disabled: boolean;
+  comingSoon: boolean;
+  reason: string;
+};
+
 const SIDEBAR_ENDPOINT = "/api/admin/burton-pride-event-hub/sidebar";
+const EVENT_HUB_HOME = "/Admin/BurtonPrideEventHub";
+const ADMIN_DASHBOARD = "/Admin/Dashboard";
+const MONEY_APP = "/Admin/MoneyManagement/TrackingMoney";
+const EMAIL_CENTRE = "/Admin/Email/Sending";
+const COLLAPSED_STORAGE_KEY = "burton_event_hub_sidebar_collapsed";
 
 function clsx(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
+function normalise(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function cleanPath(value: string | null | undefined) {
+  const trimmed = String(value || "").trim();
+
+  if (!trimmed) return "";
+
+  const withoutQuery = trimmed.split("?")[0]?.split("#")[0] || trimmed;
+  const cleaned = withoutQuery.replace(/\/+$/, "");
+
+  return (cleaned || "/").toLowerCase();
+}
+
+function isSafeInternalHref(value: string | null | undefined) {
+  const href = String(value || "").trim();
+
+  if (!href || href === "#") return false;
+  if (!href.startsWith("/")) return false;
+  if (href.startsWith("//")) return false;
+  if (href.includes("\\")) return false;
+
+  const lower = href.toLowerCase();
+
+  return lower === "/" || lower.startsWith("/admin");
+}
+
+function getSafeHref(value: string | null | undefined) {
+  const href = String(value || "").trim();
+  return isSafeInternalHref(href) ? href : "";
+}
+
+function getItemStatus(item: SidebarItem): ItemStatus {
+  const comingSoon = Boolean(
+    item.is_coming_soon ||
+      item.coming_soon ||
+      normalise(item.label).includes("coming soon")
+  );
+
+  const href = getSafeHref(item.href);
+  const disabled = Boolean(item.disabled || comingSoon || !href);
+  const reason =
+    item.disabled_reason ||
+    (comingSoon ? "Coming soon" : !href ? "Unavailable" : "");
+
+  return {
+    disabled,
+    comingSoon,
+    reason,
+  };
+}
+
 function getIcon(name: string | null | undefined): ElementType {
-  switch (name) {
-    case "LayoutDashboard":
+  const key = normalise(name);
+
+  switch (key) {
+    case "layoutdashboard":
+    case "dashboard":
+    case "home":
       return LayoutDashboard;
-    case "Receipt":
+
+    case "receipt":
+    case "transactions":
       return Receipt;
-    case "Wallet":
+
+    case "wallet":
+    case "cash":
       return Wallet;
-    case "CreditCard":
+
+    case "creditcard":
+    case "card":
+    case "payments":
       return CreditCard;
-    case "PiggyBank":
+
+    case "piggybank":
+    case "savings":
+    case "saving":
       return PiggyBank;
-    case "CalendarDays":
+
+    case "calendardays":
+    case "calendar":
+    case "event":
+    case "events":
       return CalendarDays;
-    case "Users":
+
+    case "users":
+    case "contacts":
+    case "volunteers":
       return Users;
-    case "Store":
+
+    case "store":
+    case "stalls":
+    case "vendors":
+    case "suppliers":
       return Store;
-    case "Ticket":
+
+    case "ticket":
+    case "raffle":
       return Ticket;
-    case "FileText":
+
+    case "filetext":
+    case "file":
+    case "reports":
+    case "documents":
       return FileText;
-    case "Settings":
+
+    case "settings":
       return Settings;
-    case "Shield":
+
+    case "shield":
+    case "security":
+    case "audit":
       return Shield;
+
+    case "mail":
+    case "email":
+      return Mail;
+
+    case "banknote":
+    case "money":
+    case "finance":
+      return Banknote;
+
     default:
       return LayoutDashboard;
   }
+}
+
+function getIconFromItem(item: SidebarItem): ElementType {
+  const directIcon = getIcon(item.icon);
+
+  if (item.icon) return directIcon;
+
+  const label = normalise(item.label);
+  const href = normalise(item.href);
+
+  if (label.includes("money") || href.includes("money")) return Banknote;
+  if (label.includes("email") || href.includes("email")) return Mail;
+  if (label.includes("contact")) return Users;
+  if (label.includes("stall") || label.includes("vendor")) return Store;
+  if (label.includes("ticket") || label.includes("raffle")) return Ticket;
+  if (label.includes("setting")) return Settings;
+  if (label.includes("report") || label.includes("export")) return FileText;
+  if (label.includes("security") || label.includes("audit")) return Shield;
+  if (label.includes("event") || label.includes("date")) return CalendarDays;
+  if (label.includes("dashboard") || label.includes("home")) return LayoutDashboard;
+
+  return LayoutDashboard;
 }
 
 function safeStringify(value: unknown) {
@@ -165,7 +319,7 @@ function getFixes(type: SidebarErrorType) {
     case "unauthorized":
       return [
         "Log out and log back into the Admin Portal.",
-        "Check your Supabase auth session cookies are being created correctly.",
+        "Check your Supabase auth/admin session cookies are being created correctly.",
         "Check the API route is reading the same admin session system as the rest of the Admin Portal.",
       ];
 
@@ -178,9 +332,9 @@ function getFixes(type: SidebarErrorType) {
 
     case "not_found":
       return [
-        "Create this API route: app/api/admin/burton-pride-event-hub/sidebar-items/route.ts",
+        "Create this API route: app/api/admin/burton-pride-event-hub/sidebar/route.ts",
         "Make sure the route exports GET.",
-        "Check the folder name exactly matches: burton-pride-event-hub/sidebar-items.",
+        "Check the folder name exactly matches: burton-pride-event-hub/sidebar.",
       ];
 
     case "server":
@@ -201,14 +355,14 @@ function getFixes(type: SidebarErrorType) {
     case "invalid_response":
       return [
         "The API must return either { ok: true, items: [...] } or { ok: true, data: [...] }.",
-        "Each menu item needs: id, label, href, icon, is_enabled and sort_order.",
+        "Each menu item should include: id, label, href, icon, is_enabled and sort_order.",
         "Check the database columns match what the sidebar expects.",
       ];
 
     case "api_error":
       return [
         "Read the API error message shown below.",
-        "Check the database query inside the sidebar-items route.",
+        "Check the database query inside the sidebar route.",
         "Check the logged-in admin has access to the Event Hub menu records.",
       ];
 
@@ -253,22 +407,71 @@ function buildError(params: {
   };
 }
 
+function isSidebarErrorState(value: unknown): value is SidebarErrorState {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "title" in value &&
+      "fixes" in value &&
+      "type" in value
+  );
+}
+
 function cleanSidebarItems(items: SidebarItem[]) {
   return items
     .filter((item) => item.is_enabled)
-    .filter((item) => item.label && item.href)
+    .filter((item) => String(item.label || "").trim())
     .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
 }
 
 function getActiveHref(pathname: string, items: SidebarItem[]) {
-  const exactMatch = items.find((item) => pathname === item.href);
-  if (exactMatch) return exactMatch.href;
+  const cleanCurrentPath = cleanPath(pathname);
 
-  const sortedMatches = items
-    .filter((item) => pathname.startsWith(`${item.href}/`))
-    .sort((a, b) => b.href.length - a.href.length);
+  const safeItems = items.filter((item) => getSafeHref(item.href));
+
+  const exactMatch = safeItems.find(
+    (item) => cleanPath(item.href) === cleanCurrentPath
+  );
+
+  if (exactMatch?.href) return exactMatch.href;
+
+  const sortedMatches = safeItems
+    .filter((item) => {
+      const itemPath = cleanPath(item.href);
+      return itemPath && cleanCurrentPath.startsWith(`${itemPath}/`);
+    })
+    .sort((a, b) => cleanPath(b.href).length - cleanPath(a.href).length);
 
   return sortedMatches[0]?.href || "";
+}
+
+function itemMatchesSearch(item: SidebarItem, query: string) {
+  if (!query) return true;
+
+  const haystack = [
+    item.label,
+    item.href,
+    item.icon,
+    item.disabled_reason,
+    item.permission_key,
+  ]
+    .map((value) => normalise(String(value || "")))
+    .join(" ");
+
+  return haystack.includes(query);
+}
+
+function filterItemsBySearch(items: SidebarItem[], query: string) {
+  const cleanedQuery = normalise(query);
+
+  if (!cleanedQuery) return items;
+
+  return items.filter((item) => itemMatchesSearch(item, cleanedQuery));
+}
+
+function getLoginRedirect(pathname: string) {
+  const next = pathname && pathname.startsWith("/Admin") ? pathname : EVENT_HUB_HOME;
+  return `/Admin/Login?next=${encodeURIComponent(next)}`;
 }
 
 export default function BurtonPrideEventHubSidebar({
@@ -278,34 +481,53 @@ export default function BurtonPrideEventHubSidebar({
 }) {
   const pathname = usePathname();
 
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<SidebarItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [itemsError, setItemsError] = useState<SidebarErrorState | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
   useEffect(() => {
     document.title = "Burton Pride Event Hub";
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    try {
+      const saved = window.localStorage.getItem(COLLAPSED_STORAGE_KEY);
+      setDesktopCollapsed(saved === "true");
+    } catch {
+      // Ignore localStorage issues.
+    }
+  }, []);
 
-    async function loadSidebarItems() {
-      const endpointWithCacheBust = `${SIDEBAR_ENDPOINT}?t=${Date.now()}`;
+  const loadSidebarItems = useCallback(
+    async (signal?: AbortSignal) => {
+      const endpointWithReload = `${SIDEBAR_ENDPOINT}?reload=${reloadKey}`;
 
       try {
         setLoadingItems(true);
         setItemsError(null);
 
-        const response = await fetch(endpointWithCacheBust, {
+        const response = await fetch(endpointWithReload, {
           method: "GET",
           cache: "no-store",
           credentials: "include",
+          signal,
           headers: {
             Accept: "application/json",
           },
         });
+
+        if (response.status === 401) {
+          window.location.replace(getLoginRedirect(pathname || EVENT_HUB_HOME));
+          return;
+        }
 
         const rawText = await response.text();
 
@@ -380,16 +602,16 @@ export default function BurtonPrideEventHubSidebar({
 
         const cleanedItems = cleanSidebarItems(databaseItems);
 
-        if (cancelled) return;
-
         setItems(cleanedItems);
-      } catch (error: any) {
-        if (cancelled) return;
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
 
         setItems([]);
 
-        if (error?.title && error?.fixes) {
-          setItemsError(error as SidebarErrorState);
+        if (isSidebarErrorState(error)) {
+          setItemsError(error);
           return;
         }
 
@@ -398,28 +620,30 @@ export default function BurtonPrideEventHubSidebar({
             type: "network",
             endpoint: SIDEBAR_ENDPOINT,
             message:
-              error?.message ||
-              "The browser could not complete the request to load the Event Hub menu.",
+              error instanceof Error
+                ? error.message
+                : "The browser could not complete the request to load the Event Hub menu.",
             technicalDetails: error,
-          }),
+          })
         );
       } finally {
-        if (!cancelled) {
-          setLoadingItems(false);
-        }
+        setLoadingItems(false);
       }
-    }
+    },
+    [pathname, reloadKey]
+  );
 
-    void loadSidebarItems();
+  useEffect(() => {
+    const controller = new AbortController();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
+    void loadSidebarItems(controller.signal);
+
+    return () => controller.abort();
+  }, [loadSidebarItems]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closeMobileMenu();
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -439,33 +663,70 @@ export default function BurtonPrideEventHubSidebar({
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
 
+    window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
     return () => {
       document.body.style.overflow = oldBodyOverflow;
       document.documentElement.style.overflow = oldHtmlOverflow;
     };
   }, [open]);
 
+  const visibleItems = useMemo(() => {
+    return filterItemsBySearch(items, searchQuery);
+  }, [items, searchQuery]);
+
   const activeHref = useMemo(() => {
     return getActiveHref(pathname, items);
   }, [pathname, items]);
 
   const currentTitle = useMemo(() => {
-    const current = items.find((item) => item.href === activeHref);
+    const current = items.find(
+      (item) => cleanPath(item.href) === cleanPath(activeHref)
+    );
+
     return current?.label || "Event Hub";
   }, [activeHref, items]);
 
-  const retryLoadingMenu = () => {
+  function retryLoadingMenu() {
     setReloadKey((value) => value + 1);
-  };
+  }
+
+  function openMobileMenu() {
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    setOpen(true);
+  }
+
+  function closeMobileMenu() {
+    setOpen(false);
+
+    window.setTimeout(() => {
+      previousFocusRef.current?.focus?.();
+      menuButtonRef.current?.focus?.();
+    }, 0);
+  }
+
+  function toggleDesktopCollapsed() {
+    setDesktopCollapsed((previous) => {
+      const next = !previous;
+
+      try {
+        window.localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
+      } catch {
+        // Ignore localStorage issues.
+      }
+
+      return next;
+    });
+  }
 
   return (
     <div className="min-h-dvh w-full overflow-x-hidden bg-[#07111f] text-white">
       <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 backdrop-blur-xl lg:hidden">
         <div className="flex w-full items-center justify-between px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-sm font-black text-white shadow-lg">
-              BP
-            </div>
+            <BrandMark />
 
             <div className="min-w-0 leading-tight">
               <div className="truncate text-lg font-black text-white">
@@ -478,9 +739,11 @@ export default function BurtonPrideEventHubSidebar({
           </div>
 
           <button
+            ref={menuButtonRef}
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={openMobileMenu}
             aria-label="Open Event Hub menu"
+            aria-haspopup="dialog"
             className="rounded-xl p-2 text-white transition hover:bg-white/10"
           >
             <Menu className="h-7 w-7" />
@@ -488,65 +751,89 @@ export default function BurtonPrideEventHubSidebar({
         </div>
       </header>
 
-      <aside className="fixed left-0 top-0 z-30 hidden h-dvh w-72 overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl lg:block">
-        <div className="absolute inset-0 bg-black/20" />
-        <div className="absolute -left-20 top-10 h-52 w-52 rounded-full bg-pink-300/25 blur-3xl" />
-        <div className="absolute -right-20 top-72 h-60 w-60 rounded-full bg-blue-300/25 blur-3xl" />
-        <div className="absolute bottom-0 left-0 right-0 h-44 bg-gradient-to-t from-black/35 to-transparent" />
+      <aside
+        className={clsx(
+          "fixed left-0 top-0 z-30 hidden h-dvh overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-[width] duration-300 lg:block",
+          desktopCollapsed ? "w-24" : "w-72"
+        )}
+        aria-label="Event Hub sidebar navigation"
+      >
+        <SidebarBackground />
 
         <DesktopSidebar
-          pathname={pathname}
           activeHref={activeHref}
-          items={items}
+          items={visibleItems}
           loadingItems={loadingItems}
           itemsError={itemsError}
           onRetry={retryLoadingMenu}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          collapsed={desktopCollapsed}
+          onToggleCollapsed={toggleDesktopCollapsed}
         />
       </aside>
 
-      <main className="min-h-dvh min-w-0 overflow-x-hidden lg:pl-72">
+      <main
+        className={clsx(
+          "min-h-dvh min-w-0 overflow-x-hidden transition-[padding] duration-300",
+          desktopCollapsed ? "lg:pl-24" : "lg:pl-72"
+        )}
+      >
         {children}
       </main>
 
       <div
         className={clsx(
           "fixed inset-0 z-50 lg:hidden",
-          open ? "pointer-events-auto" : "pointer-events-none",
+          open ? "pointer-events-auto" : "pointer-events-none"
         )}
       >
         <button
           type="button"
           aria-label="Close Event Hub menu overlay"
-          onClick={() => setOpen(false)}
+          onClick={closeMobileMenu}
           className={clsx(
             "absolute inset-0 bg-black/70 transition-opacity",
-            open ? "opacity-100" : "opacity-0",
+            open ? "opacity-100" : "opacity-0"
           )}
         />
 
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Event Hub navigation menu"
           className={clsx(
             "absolute right-0 top-0 flex h-dvh w-80 max-w-[86vw] flex-col overflow-hidden border-l border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-transform overscroll-contain",
-            open ? "translate-x-0" : "translate-x-full",
+            open ? "translate-x-0" : "translate-x-full"
           )}
         >
-          <div className="absolute inset-0 bg-black/25" />
-          <div className="absolute -left-20 top-16 h-52 w-52 rounded-full bg-pink-300/25 blur-3xl" />
-          <div className="absolute -right-20 bottom-20 h-56 w-56 rounded-full bg-blue-300/25 blur-3xl" />
+          <SidebarBackground />
 
           <div className="relative shrink-0 border-b border-white/10 p-4">
             <div className="flex items-center justify-between">
-              <div className="font-black text-white">Event Hub Menu</div>
+              <div>
+                <div className="font-black text-white">Event Hub Menu</div>
+                <div className="text-xs font-semibold text-white/60">
+                  {currentTitle}
+                </div>
+              </div>
 
               <button
+                ref={closeButtonRef}
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={closeMobileMenu}
                 aria-label="Close Event Hub menu"
                 className="rounded-xl p-2 text-white/80 transition hover:bg-white/10 hover:text-white"
               >
                 <X className="h-6 w-6" />
               </button>
             </div>
+
+            <SidebarSearch
+              value={searchQuery}
+              onChange={setSearchQuery}
+              className="mt-4"
+            />
           </div>
 
           <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [-webkit-overflow-scrolling:touch]">
@@ -556,27 +843,30 @@ export default function BurtonPrideEventHubSidebar({
               <SidebarError error={itemsError} onRetry={retryLoadingMenu} />
             )}
 
-            {!loadingItems && !itemsError && items.length === 0 && (
-              <SidebarEmpty endpoint={SIDEBAR_ENDPOINT} />
+            {!loadingItems && !itemsError && visibleItems.length === 0 && (
+              <SidebarEmpty
+                endpoint={SIDEBAR_ENDPOINT}
+                hasSearch={Boolean(searchQuery)}
+              />
             )}
 
             {!loadingItems &&
               !itemsError &&
-              items.map((item) => {
-                const Icon = getIcon(item.icon);
+              visibleItems.map((item) => {
+                const Icon = getIconFromItem(item);
 
                 return (
                   <MobileEventHubLink
                     key={item.id}
-                    href={item.href}
-                    label={item.label}
+                    item={item}
                     icon={Icon}
-                    pathname={pathname}
                     activeHref={activeHref}
-                    onNavigate={() => setOpen(false)}
+                    onNavigate={closeMobileMenu}
                   />
                 );
               })}
+
+            <UtilityLinks mobile />
 
             <div className="pb-8 pt-6 text-xs font-medium text-white/70">
               Burton Pride C.I.C
@@ -588,76 +878,212 @@ export default function BurtonPrideEventHubSidebar({
   );
 }
 
+function SidebarBackground() {
+  return (
+    <>
+      <div className="absolute inset-0 bg-black/20" />
+      <div className="absolute -left-20 top-10 h-52 w-52 rounded-full bg-pink-300/25 blur-3xl" />
+      <div className="absolute -right-20 top-72 h-60 w-60 rounded-full bg-blue-300/25 blur-3xl" />
+      <div className="absolute bottom-0 left-0 right-0 h-44 bg-gradient-to-t from-black/35 to-transparent" />
+    </>
+  );
+}
+
+function BrandMark() {
+  return (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-sm font-black text-white shadow-lg">
+      BP
+    </div>
+  );
+}
+
 function DesktopSidebar({
-  pathname,
   activeHref,
   items,
   loadingItems,
   itemsError,
   onRetry,
+  searchQuery,
+  setSearchQuery,
+  collapsed,
+  onToggleCollapsed,
 }: {
-  pathname: string;
   activeHref: string;
   items: SidebarItem[];
   loadingItems: boolean;
   itemsError: SidebarErrorState | null;
   onRetry: () => void;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <div className="relative z-10 flex h-dvh min-h-0 flex-col p-6">
+    <div
+      className={clsx(
+        "relative z-10 flex h-dvh min-h-0 flex-col",
+        collapsed ? "px-4 py-5" : "p-6"
+      )}
+    >
       <div className="shrink-0">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-white/20 bg-white/20 text-sm font-black text-white shadow-lg backdrop-blur">
-          BP
+        <div className="relative">
+          <div
+            className={clsx(
+              "mb-4 flex items-center justify-center rounded-3xl border border-white/20 bg-white/20 font-black text-white shadow-lg backdrop-blur",
+              collapsed ? "h-14 w-14 text-sm" : "h-14 w-14 text-sm"
+            )}
+          >
+            BP
+          </div>
+
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? "Expand Event Hub sidebar" : "Collapse Event Hub sidebar"}
+            title={collapsed ? "Expand Event Hub sidebar" : "Collapse Event Hub sidebar"}
+            className="absolute right-0 top-1 hidden h-10 w-10 items-center justify-center rounded-2xl border border-white/15 bg-white/15 text-white/85 shadow-lg backdrop-blur transition hover:bg-white/25 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/50 lg:inline-flex"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
         </div>
 
-        <div className="text-2xl font-black text-white drop-shadow">
-          Burton Pride Event Hub
-        </div>
+        {!collapsed ? (
+          <>
+            <div className="text-2xl font-black text-white drop-shadow">
+              Burton Pride Event Hub
+            </div>
 
-        <div className="text-sm font-medium text-white/75">
-          Manage the event in one place
-        </div>
+            <div className="text-sm font-medium text-white/75">
+              Manage the event in one place
+            </div>
+
+            <SidebarSearch
+              value={searchQuery}
+              onChange={setSearchQuery}
+              className="mt-5"
+            />
+          </>
+        ) : null}
       </div>
 
-      <nav className="mt-10 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-        {loadingItems && <SidebarLoading />}
+      <nav
+        className={clsx(
+          "min-h-0 flex-1 space-y-2 overflow-y-auto pr-1",
+          collapsed ? "mt-6 pr-0" : "mt-8"
+        )}
+        aria-label="Event Hub navigation"
+      >
+        {loadingItems && <SidebarLoading collapsed={collapsed} />}
 
         {!loadingItems && itemsError && (
-          <SidebarError error={itemsError} onRetry={onRetry} />
+          <SidebarError error={itemsError} onRetry={onRetry} collapsed={collapsed} />
         )}
 
         {!loadingItems && !itemsError && items.length === 0 && (
-          <SidebarEmpty endpoint={SIDEBAR_ENDPOINT} />
+          <SidebarEmpty
+            endpoint={SIDEBAR_ENDPOINT}
+            hasSearch={Boolean(searchQuery)}
+            collapsed={collapsed}
+          />
         )}
 
         {!loadingItems &&
           !itemsError &&
           items.map((item) => {
-            const Icon = getIcon(item.icon);
+            const Icon = getIconFromItem(item);
 
             return (
               <SideNavLink
                 key={item.id}
-                href={item.href}
-                label={item.label}
-                pathname={pathname}
+                item={item}
                 activeHref={activeHref}
                 icon={Icon}
+                collapsed={collapsed}
               />
             );
           })}
+
+        {!collapsed ? <UtilityLinks /> : null}
       </nav>
 
       <div className="mt-auto shrink-0 border-t border-white/15 pt-5">
-        <div className="text-xs font-medium text-white/70">
-          Burton Pride C.I.C
-        </div>
+        {collapsed ? (
+          <div
+            title="Burton Pride C.I.C"
+            className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-black text-white/70"
+          >
+            BP
+          </div>
+        ) : (
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-white/50">
+              Burton Pride
+            </div>
+            <div className="mt-1 text-xs font-medium text-white/70">
+              Burton Pride C.I.C
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function SidebarLoading() {
+function SidebarSearch({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <label className="sr-only" htmlFor="event-hub-sidebar-search">
+        Search Event Hub menu
+      </label>
+
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-white shadow-inner">
+        <Search className="h-4 w-4 shrink-0 text-white/45" />
+
+        <input
+          id="event-hub-sidebar-search"
+          type="search"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Search Event Hub tools..."
+          className="min-w-0 flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/35"
+        />
+
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            aria-label="Clear menu search"
+            className="rounded-lg p-1 text-white/45 hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SidebarLoading({ collapsed = false }: { collapsed?: boolean }) {
+  if (collapsed) {
+    return (
+      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10">
+        <Loader2 className="h-5 w-5 animate-spin text-white/80" />
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-sm font-bold text-white/80">
       <div className="flex items-center gap-3">
@@ -671,10 +1097,27 @@ function SidebarLoading() {
 function SidebarError({
   error,
   onRetry,
+  collapsed = false,
 }: {
   error: SidebarErrorState;
   onRetry: () => void;
+  collapsed?: boolean;
 }) {
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        title="Menu failed to load. Try again."
+        className="flex h-11 w-11 items-center justify-center rounded-2xl border border-red-300/25 bg-red-500/15 text-red-50"
+      >
+        <AlertTriangle className="h-5 w-5" />
+      </button>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-red-300/25 bg-red-500/15 p-4 text-sm text-white shadow-xl">
       <div className="flex gap-3">
@@ -694,18 +1137,20 @@ function SidebarError({
           )}
 
           {error.details && (
-            <div className="mt-3 rounded-xl border border-white/10 bg-white/10 p-3 text-xs leading-5 text-white/80">
-              <div className="font-black text-white">Details</div>
-              <div className="mt-1 whitespace-pre-wrap">{error.details}</div>
-            </div>
+            <details className="mt-3 rounded-xl border border-white/10 bg-white/10 p-3 text-xs leading-5 text-white/80">
+              <summary className="cursor-pointer font-black text-white">
+                Details
+              </summary>
+              <div className="mt-2 whitespace-pre-wrap">{error.details}</div>
+            </details>
           )}
 
-          <div className="mt-4">
-            <div className="text-xs font-black uppercase tracking-[0.12em] text-white/60">
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.12em] text-white/60">
               How to fix
-            </div>
+            </summary>
 
-            <ul className="mt-2 space-y-2 text-xs font-medium leading-5 text-white/80">
+            <ul className="mt-3 space-y-2 text-xs font-medium leading-5 text-white/80">
               {error.fixes.map((fix) => (
                 <li key={fix} className="flex gap-2">
                   <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
@@ -713,10 +1158,39 @@ function SidebarError({
                 </li>
               ))}
             </ul>
+          </details>
+
+          <div className="mt-4 grid gap-2">
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-purple-700 shadow-lg transition hover:bg-white/90"
+            >
+              <RefreshCcw className="h-4 w-4" />
+              Try loading menu again
+            </button>
+
+            <Link
+              href={EVENT_HUB_HOME}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white transition hover:bg-white/20"
+            >
+              <Home className="h-4 w-4" />
+              Go to Event Hub home
+            </Link>
+
+            <Link
+              href={ADMIN_DASHBOARD}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white transition hover:bg-white/20"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Admin Dashboard
+            </Link>
           </div>
 
-          <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-5 text-white/70">
-            <div className="font-black text-white">Technical information</div>
+          <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-5 text-white/70">
+            <summary className="cursor-pointer font-black text-white">
+              Basic information
+            </summary>
 
             <div className="mt-2 space-y-1">
               <div>
@@ -741,160 +1215,323 @@ function SidebarError({
                 {error.requestTime}
               </div>
             </div>
+          </details>
 
-            {error.technicalDetails && (
-              <details className="mt-3">
-                <summary className="cursor-pointer font-bold text-white/90">
-                  Show technical details
-                </summary>
-                <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[10px] text-white/70">
-                  {error.technicalDetails}
-                </pre>
-              </details>
-            )}
+          {isDevelopment && error.technicalDetails && (
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-5 text-white/70">
+              <summary className="cursor-pointer font-bold text-white/90">
+                Developer technical details
+              </summary>
+              <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[10px] text-white/70">
+                {error.technicalDetails}
+              </pre>
+            </details>
+          )}
 
-            {error.responsePreview && (
-              <details className="mt-3">
-                <summary className="cursor-pointer font-bold text-white/90">
-                  Show API response preview
-                </summary>
-                <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[10px] text-white/70">
-                  {error.responsePreview}
-                </pre>
-              </details>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-purple-700 shadow-lg transition hover:bg-white/90"
-          >
-            <RefreshCcw className="h-4 w-4" />
-            Try loading menu again
-          </button>
+          {isDevelopment && error.responsePreview && (
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] leading-5 text-white/70">
+              <summary className="cursor-pointer font-bold text-white/90">
+                Developer API response preview
+              </summary>
+              <pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[10px] text-white/70">
+                {error.responsePreview}
+              </pre>
+            </details>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function SidebarEmpty({ endpoint }: { endpoint: string }) {
+function SidebarEmpty({
+  endpoint,
+  hasSearch,
+  collapsed = false,
+}: {
+  endpoint: string;
+  hasSearch?: boolean;
+  collapsed?: boolean;
+}) {
+  if (collapsed) return null;
+
   return (
     <div className="rounded-2xl border border-yellow-200/20 bg-yellow-400/10 p-4 text-sm text-white">
-      <div className="font-black">No menu items found in the database</div>
+      <div className="font-black">
+        {hasSearch
+          ? "No matching menu items found"
+          : "No menu items found in the database"}
+      </div>
 
       <div className="mt-2 text-xs font-medium leading-5 text-white/75">
-        The sidebar API loaded successfully, but it returned an empty menu.
+        {hasSearch
+          ? "Try a different search term."
+          : "The sidebar API loaded successfully, but it returned an empty menu."}
       </div>
 
-      <div className="mt-3 rounded-xl bg-black/20 p-3 text-[11px] leading-5 text-white/70">
-        <div>
-          <span className="font-bold text-white/90">Endpoint:</span> {endpoint}
+      {!hasSearch ? (
+        <div className="mt-3 rounded-xl bg-black/20 p-3 text-[11px] leading-5 text-white/70">
+          <div>
+            <span className="font-bold text-white/90">Endpoint:</span>{" "}
+            {endpoint}
+          </div>
+
+          <div className="mt-2 font-bold text-white/90">Check these:</div>
+
+          <ul className="mt-1 space-y-1">
+            <li>• The database table has Event Hub sidebar records.</li>
+            <li>• The records have is_enabled set to true.</li>
+            <li>• Each record has a label.</li>
+            <li>• The API returns items or data as an array.</li>
+          </ul>
         </div>
-
-        <div className="mt-2 font-bold text-white/90">Check these:</div>
-
-        <ul className="mt-1 space-y-1">
-          <li>• The database table has Event Hub sidebar records.</li>
-          <li>• The records have is_enabled set to true.</li>
-          <li>• Each record has a label and href.</li>
-          <li>• The API returns items or data as an array.</li>
-        </ul>
-      </div>
+      ) : null}
     </div>
   );
 }
 
 function SideNavLink({
-  href,
-  label,
-  pathname,
+  item,
   activeHref,
   icon: Icon,
+  collapsed,
 }: {
-  href: string;
-  label: string;
-  pathname: string;
+  item: SidebarItem;
   activeHref: string;
   icon: ElementType;
+  collapsed: boolean;
 }) {
-  const active = activeHref === href;
+  const href = getSafeHref(item.href);
+  const active = cleanPath(activeHref) === cleanPath(href);
+  const status = getItemStatus(item);
+
+  if (status.disabled || !href) {
+    return (
+      <DisabledNavItem
+        item={item}
+        icon={Icon}
+        reason={status.reason || "Unavailable"}
+        collapsed={collapsed}
+      />
+    );
+  }
 
   return (
     <Link
       href={href}
+      target={item.open_in_new_tab ? "_blank" : undefined}
+      rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
+      aria-current={active ? "page" : undefined}
+      title={collapsed ? item.label : undefined}
       className={clsx(
         "group flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-black transition",
         active
           ? "bg-white text-purple-700 shadow-lg"
           : "bg-white/10 text-white hover:bg-white/20",
+        collapsed && "justify-center px-3"
       )}
     >
-      <span className="flex min-w-0 items-center gap-3">
+      <span
+        className={clsx(
+          "flex min-w-0 items-center gap-3",
+          collapsed && "justify-center"
+        )}
+      >
         <Icon
           className={clsx(
             "h-4 w-4 shrink-0 transition",
-            active ? "text-purple-700" : "text-white/80 group-hover:text-white",
+            active ? "text-purple-700" : "text-white/80 group-hover:text-white"
           )}
         />
-        <span className="truncate">{label}</span>
+
+        {!collapsed ? <span className="truncate">{item.label}</span> : null}
       </span>
 
-      <ChevronRight
-        className={clsx(
-          "h-4 w-4 shrink-0 transition",
-          active ? "text-purple-700" : "text-white/70 group-hover:text-white",
-        )}
-      />
+      {!collapsed ? (
+        item.open_in_new_tab ? (
+          <ExternalLink
+            className={clsx(
+              "h-4 w-4 shrink-0 transition",
+              active ? "text-purple-700" : "text-white/70 group-hover:text-white"
+            )}
+          />
+        ) : (
+          <ChevronRight
+            className={clsx(
+              "h-4 w-4 shrink-0 transition",
+              active ? "text-purple-700" : "text-white/70 group-hover:text-white"
+            )}
+          />
+        )
+      ) : null}
     </Link>
   );
 }
 
-function MobileEventHubLink({
-  href,
-  label,
+function DisabledNavItem({
+  item,
   icon: Icon,
-  pathname,
+  reason,
+  collapsed,
+}: {
+  item: SidebarItem;
+  icon: ElementType;
+  reason: string;
+  collapsed: boolean;
+}) {
+  return (
+    <div
+      aria-disabled="true"
+      title={collapsed ? `${item.label} - ${reason}` : undefined}
+      className={clsx(
+        "flex cursor-not-allowed items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white/45",
+        collapsed && "justify-center px-3"
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+
+      {!collapsed ? (
+        <>
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          <span className="shrink-0 rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
+            {reason}
+          </span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function MobileEventHubLink({
+  item,
+  icon: Icon,
   activeHref,
   onNavigate,
 }: {
-  href: string;
-  label: string;
+  item: SidebarItem;
   icon: ElementType;
-  pathname: string;
   activeHref: string;
   onNavigate: () => void;
 }) {
-  const active = activeHref === href;
+  const href = getSafeHref(item.href);
+  const active = cleanPath(activeHref) === cleanPath(href);
+  const status = getItemStatus(item);
+
+  if (status.disabled || !href) {
+    return (
+      <div
+        aria-disabled="true"
+        className="mb-2 flex cursor-not-allowed items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white/45"
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        <span className="shrink-0 rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
+          {status.reason || "Unavailable"}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <Link
       href={href}
       onClick={onNavigate}
+      target={item.open_in_new_tab ? "_blank" : undefined}
+      rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
+      aria-current={active ? "page" : undefined}
       className={clsx(
         "group mb-2 flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-black transition",
         active
           ? "bg-white text-purple-700 shadow-lg"
-          : "bg-white/10 text-white hover:bg-white/20",
+          : "bg-white/10 text-white hover:bg-white/20"
       )}
     >
       <span className="flex min-w-0 items-center gap-3">
         <Icon
           className={clsx(
             "h-4 w-4 shrink-0 transition",
-            active ? "text-purple-700" : "text-white/80 group-hover:text-white",
+            active ? "text-purple-700" : "text-white/80 group-hover:text-white"
           )}
         />
-        <span className="truncate">{label}</span>
+        <span className="truncate">{item.label}</span>
       </span>
 
-      <ChevronRight
-        className={clsx(
-          "h-4 w-4 shrink-0 transition",
-          active ? "text-purple-700" : "text-white/70 group-hover:text-white",
-        )}
-      />
+      {item.open_in_new_tab ? (
+        <ExternalLink
+          className={clsx(
+            "h-4 w-4 shrink-0 transition",
+            active ? "text-purple-700" : "text-white/70 group-hover:text-white"
+          )}
+        />
+      ) : (
+        <ChevronRight
+          className={clsx(
+            "h-4 w-4 shrink-0 transition",
+            active ? "text-purple-700" : "text-white/70 group-hover:text-white"
+          )}
+        />
+      )}
+    </Link>
+  );
+}
+
+function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
+  return (
+    <div
+      className={clsx(
+        "border-t border-white/15",
+        mobile ? "mt-5 pt-5" : "mt-6 pt-5"
+      )}
+    >
+      <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-white/45">
+        Other admin apps
+      </p>
+
+      <div className="grid gap-2">
+        <UtilityLink href={ADMIN_DASHBOARD} icon={Home}>
+          Back to Admin Portal
+        </UtilityLink>
+
+        <UtilityLink href={MONEY_APP} icon={Banknote} newTab>
+          Open Money Management
+        </UtilityLink>
+
+        <UtilityLink href={EMAIL_CENTRE} icon={Mail} newTab>
+          Open Email Centre
+        </UtilityLink>
+      </div>
+    </div>
+  );
+}
+
+function UtilityLink({
+  href,
+  icon: Icon,
+  newTab = false,
+  children,
+}: {
+  href: string;
+  icon: ElementType;
+  newTab?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      target={newTab ? "_blank" : undefined}
+      rel={newTab ? "noopener noreferrer" : undefined}
+      className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-black text-white transition hover:bg-white/10"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0 text-white/70" />
+        <span className="truncate">{children}</span>
+      </span>
+
+      {newTab ? (
+        <ExternalLink className="h-4 w-4 shrink-0 text-white/45" />
+      ) : (
+        <ChevronRight className="h-4 w-4 shrink-0 text-white/45" />
+      )}
     </Link>
   );
 }
