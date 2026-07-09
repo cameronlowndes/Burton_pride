@@ -26,48 +26,6 @@ import {
   Users,
 } from "lucide-react";
 
-/**
- * File location:
- * app/Admin/Login/page.tsx
- *
- * This is a full replacement login page with detailed security audit reporting.
- *
- * What it reports to admin_audit_logs:
- * - login page opened
- * - redirect target detected or rejected
- * - logged-out notice shown
- * - existing session check started
- * - existing session found and redirecting
- * - existing session not found
- * - existing session check failed
- * - email field focused/blurred
- * - password field focused/blurred
- * - password visibility toggled
- * - submit clicked
- * - validation failures
- * - login attempt started
- * - login failed client result
- * - login success client result
- * - network/connection failure
- * - local lockout started
- * - local lockout ended
- * - blocked submit during lockout
- * - user clicked back to public website
- * - page visibility hidden/visible
- * - page unload / session leaving login page
- *
- * What it NEVER reports:
- * - password value
- * - typed password length with enough detail to be dangerous
- * - every keystroke
- * - raw full login email in metadata
- *
- * Important:
- * Client-side audit helps show page behaviour, but it is not enough on its own.
- * The real login API should also write server-side audit rows for success/failure,
- * because a browser can block or tamper with client reporting.
- */
-
 type LoginResponse = {
   ok?: boolean;
   message?: string;
@@ -105,11 +63,35 @@ type ClientAuditState = {
   lastReported: Record<string, number>;
 };
 
-const LOGIN_API = "/api/admin/settings/login";
-const AUDIT_REPORT_API = "/api/admin/audit-log/report";
-const SESSION_CHECK_API = "/api/admin/me";
-const DEFAULT_REDIRECT = "/Admin/Dashboard";
+type RedirectCheckResult = {
+  safePath: string;
+  wasRejected: boolean;
+  reason: string;
+  originalLength: number;
+};
 
+type ValidationResult =
+  | {
+      ok: true;
+      reason: "valid";
+      risk: AuditRiskLevel;
+    }
+  | {
+      ok: false;
+      title: string;
+      message: string;
+      reason: string;
+      risk: AuditRiskLevel;
+    };
+
+const INTERNAL_ENDPOINTS = {
+  login: "/api/admin/settings/login",
+  report: "/api/admin/audit-log/report",
+  session: "/api/admin/me",
+} as const;
+
+const DEFAULT_REDIRECT = "/Admin/Dashboard";
+const LOGIN_ROUTE = "/Admin/Login";
 const MAX_EMAIL_LENGTH = 254;
 const MAX_PASSWORD_LENGTH = 128;
 const LOCAL_MAX_ATTEMPTS = 5;
@@ -117,34 +99,38 @@ const LOCAL_LOCKOUT_MS = 5 * 60 * 1000;
 
 const GENERIC_LOGIN_ERROR: LoginError = {
   title: "Sign in failed",
-  message: "We could not sign you in. Please check your details and try again.",
+  message: "The details entered could not be accepted. Please try again.",
+};
+
+const GENERIC_SERVICE_ERROR: LoginError = {
+  title: "Unable to continue",
+  message: "Something went wrong. Please wait a moment and try again.",
 };
 
 const TOO_MANY_ATTEMPTS_ERROR: LoginError = {
-  title: "Too many attempts",
-  message:
-    "There have been too many sign-in attempts. Please wait a few minutes before trying again.",
+  title: "Sign in temporarily paused",
+  message: "Please wait a few minutes before trying again.",
 };
 
 const LOGGED_OUT_MESSAGE: LoginError = {
-  title: "You have been logged out",
-  message: "Your admin session has ended. Sign in again when you are ready.",
+  title: "Signed out",
+  message: "Your secure session has ended.",
 };
 
-const communityPoints = [
+const restrictedAccessCards = [
   {
     title: "Approved access only",
-    text: "This portal is only for approved Burton Pride committee/admin users.",
+    text: "Only approved users should continue beyond this page.",
     icon: ShieldCheck,
   },
   {
-    title: "Protected admin tools",
-    text: "Money, email, contacts and Event Hub tools should only be used by authorised users.",
+    title: "Private area",
+    text: "Access is monitored to help protect this restricted space.",
     icon: Lock,
   },
   {
-    title: "Community led",
-    text: "Built by community, for the community.",
+    title: "Use safely",
+    text: "Sign out on shared devices and keep login details private.",
     icon: Users,
   },
 ];
@@ -158,11 +144,11 @@ function makeClientId() {
 }
 
 function getCurrentRoute() {
-  if (typeof window === "undefined") return "/Admin/Login";
-  return `${window.location.pathname}${window.location.search}`;
+  if (typeof window === "undefined") return LOGIN_ROUTE;
+  return window.location.pathname || LOGIN_ROUTE;
 }
 
-function getSafeRedirectFromSearch(search: string) {
+function getSafeRedirectFromSearch(search: string): RedirectCheckResult {
   const params = new URLSearchParams(search);
   const next = params.get("next");
 
@@ -176,6 +162,7 @@ function getSafeRedirectFromSearch(search: string) {
   }
 
   const trimmed = next.trim();
+  const lower = trimmed.toLowerCase();
 
   if (!trimmed.startsWith("/Admin")) {
     return {
@@ -204,7 +191,7 @@ function getSafeRedirectFromSearch(search: string) {
     };
   }
 
-  if (trimmed.toLowerCase().startsWith("/admin/login")) {
+  if (lower.startsWith("/admin/login")) {
     return {
       safePath: DEFAULT_REDIRECT,
       wasRejected: true,
@@ -213,7 +200,7 @@ function getSafeRedirectFromSearch(search: string) {
     };
   }
 
-  if (trimmed.toLowerCase().startsWith("/admin/logout")) {
+  if (lower.startsWith("/admin/logout")) {
     return {
       safePath: DEFAULT_REDIRECT,
       wasRejected: true,
@@ -249,21 +236,14 @@ function shouldSkipAutoSessionCheck(search: string) {
   );
 }
 
+function emailLooksValid(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function parseLoginError(status: number): LoginError {
   if (status === 429) return TOO_MANY_ATTEMPTS_ERROR;
-
-  if (status === 401 || status === 403) {
-    return GENERIC_LOGIN_ERROR;
-  }
-
-  if (status >= 500) {
-    return {
-      title: "Login service problem",
-      message:
-        "The admin login service had a problem. Please wait a moment and try again.",
-    };
-  }
-
+  if (status === 401 || status === 403) return GENERIC_LOGIN_ERROR;
+  if (status >= 500) return GENERIC_SERVICE_ERROR;
   return GENERIC_LOGIN_ERROR;
 }
 
@@ -275,56 +255,12 @@ async function readLoginJson(response: Response): Promise<LoginResponse | null> 
   }
 }
 
-function formatRemainingTime(ms: number) {
-  const seconds = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-
-  if (minutes <= 0) return `${remainingSeconds}s`;
-  return `${minutes}m ${remainingSeconds}s`;
-}
-
-function emailDomain(value: string) {
-  const email = value.trim().toLowerCase();
-  if (!email.includes("@")) return null;
-  return email.split("@").pop() || null;
-}
-
-function emailLooksValid(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function passwordLengthBucket(value: string) {
-  const length = value.length;
-
-  if (length === 0) return "empty";
-  if (length < 8) return "under_8";
-  if (length < 12) return "8_to_11";
-  if (length < 20) return "12_to_19";
-  if (length < 40) return "20_to_39";
-  return "40_plus";
-}
-
-function getBrowserContext() {
-  if (typeof window === "undefined") {
-    return {
-      viewport_width: null,
-      viewport_height: null,
-      language: null,
-      timezone: null,
-      online: null,
-      visibility_state: null,
-    };
-  }
-
-  return {
-    viewport_width: window.innerWidth,
-    viewport_height: window.innerHeight,
-    language: navigator.language || null,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-    online: navigator.onLine,
-    visibility_state: document.visibilityState,
-  };
+function getAuditStatusFromResponse(response: Response, json: LoginResponse | null) {
+  if (response.ok && json?.ok) return "success";
+  if (response.status === 429) return "rate_limited";
+  if (response.status === 401 || response.status === 403) return "rejected";
+  if (response.status >= 500) return "service_error";
+  return "failed";
 }
 
 function sanitiseAuditMetadata(metadata: Record<string, unknown> | undefined) {
@@ -339,14 +275,16 @@ function sanitiseAuditMetadata(metadata: Record<string, unknown> | undefined) {
       lowered.includes("secret") ||
       lowered.includes("cookie") ||
       lowered.includes("authorization") ||
-      lowered.includes("session_secret")
+      lowered.includes("session") ||
+      lowered.includes("email") ||
+      lowered.includes("api")
     ) {
       output[key] = "[redacted]";
       continue;
     }
 
-    if (typeof value === "string" && value.length > 1000) {
-      output[key] = `${value.slice(0, 1000)}…`;
+    if (typeof value === "string" && value.length > 250) {
+      output[key] = `${value.slice(0, 250)}…`;
       continue;
     }
 
@@ -356,13 +294,8 @@ function sanitiseAuditMetadata(metadata: Record<string, unknown> | undefined) {
   return output;
 }
 
-function getAuditStatusFromResponse(response: Response, json: LoginResponse | null) {
-  if (response.ok && json?.ok) return "success";
-  if (response.status === 429) return "rate_limited";
-  if (response.status === 401) return "invalid_credentials_or_unauthorised";
-  if (response.status === 403) return "forbidden_or_inactive";
-  if (response.status >= 500) return "server_error";
-  return "failed";
+function compactBoolean(value: boolean) {
+  return value ? "yes" : "no";
 }
 
 export default function LoginPage() {
@@ -395,7 +328,6 @@ export default function LoginPage() {
   const submitStartedAtRef = useRef<number | null>(null);
 
   const cleanEmail = useMemo(() => email.trim().toLowerCase(), [email]);
-
   const lockoutRemainingMs = lockedUntil ? lockedUntil - now : 0;
   const isLocallyLocked = Boolean(lockedUntil && lockoutRemainingMs > 0);
 
@@ -414,29 +346,27 @@ export default function LoginPage() {
 
       if (throttleKey) {
         const last = state.lastReported[throttleKey] || 0;
-        const throttleMs = event.throttleMs ?? 750;
+        const throttleMs = event.throttleMs ?? 1000;
 
-        if (createdAt - last < throttleMs) {
-          return;
-        }
-
+        if (createdAt - last < throttleMs) return;
         state.lastReported[throttleKey] = createdAt;
       }
 
       state.eventCounter += 1;
 
       const metadata = sanitiseAuditMetadata({
-        page_session_id: state.pageSessionId,
-        page_uptime_ms: createdAt - state.pageLoadTime,
-        client_event_number: state.eventCounter,
-        next_path: nextPath,
-        email_domain: cleanEmail ? emailDomain(cleanEmail) : null,
+        page_id: state.pageSessionId,
+        uptime_ms: createdAt - state.pageLoadTime,
+        event_number: state.eventCounter,
         email_present: Boolean(cleanEmail),
-        email_length: cleanEmail.length,
-        email_format_valid: cleanEmail ? emailLooksValid(cleanEmail) : null,
-        failed_attempts: failedAttempts,
-        local_lockout_active: isLocallyLocked,
-        ...getBrowserContext(),
+        email_valid: cleanEmail ? emailLooksValid(cleanEmail) : null,
+        failed_attempts_bucket:
+          failedAttempts <= 0
+            ? "none"
+            : failedAttempts < LOCAL_MAX_ATTEMPTS
+              ? "some"
+              : "limit",
+        locked: isLocallyLocked,
         ...event.metadata,
       });
 
@@ -454,7 +384,7 @@ export default function LoginPage() {
       };
 
       try {
-        await fetch(AUDIT_REPORT_API, {
+        await fetch(INTERNAL_ENDPOINTS.report, {
           method: "POST",
           cache: "no-store",
           credentials: "include",
@@ -464,15 +394,11 @@ export default function LoginPage() {
           },
           body: JSON.stringify(payload),
         });
-      } catch (auditError) {
-        /**
-         * Do not break login if audit reporting fails.
-         * Audit failures will show in browser console only.
-         */
-        console.warn("Admin login audit report failed:", auditError);
+      } catch {
+        // Login must not fail if client-side reporting is blocked.
       }
     },
-    [cleanEmail, failedAttempts, isLocallyLocked, nextPath],
+    [cleanEmail, failedAttempts, isLocallyLocked],
   );
 
   useEffect(() => {
@@ -488,56 +414,34 @@ export default function LoginPage() {
       status: "success",
       risk_level: "low",
       metadata: {
-        raw_search_present: Boolean(search),
-        next_path_status: redirectResult.wasRejected ? "rejected" : "accepted",
-        next_path_rejection_reason: redirectResult.reason,
-        next_path_length: redirectResult.originalLength,
-        skip_auto_session_check: didLogout,
+        redirect_status: redirectResult.wasRejected ? "rejected" : "accepted",
+        redirect_reason: redirectResult.reason,
+        logout_notice: didLogout,
       },
     });
 
     if (redirectResult.wasRejected) {
       void reportAudit({
-        action: "login_next_path_rejected",
+        action: "login_redirect_rejected",
         status: "blocked",
         risk_level: "medium",
         metadata: {
           reason: redirectResult.reason,
-          original_length: redirectResult.originalLength,
-          safe_path_used: redirectResult.safePath,
-        },
-      });
-    } else {
-      void reportAudit({
-        action: "login_next_path_detected",
-        status: "success",
-        risk_level: "low",
-        metadata: {
-          safe_path: redirectResult.safePath,
-          reason: redirectResult.reason,
+          path_length: redirectResult.originalLength,
         },
       });
     }
 
     if (didLogout) {
-      /**
-       * Important:
-       * Do NOT call /api/admin/logout from the login page.
-       * The logout button/API should already have cleared the old session.
-       * Calling logout again here can race against a new login.
-       */
       setNotice(LOGGED_OUT_MESSAGE);
 
       void reportAudit({
         action: "login_logout_notice_seen",
         status: "success",
         risk_level: "low",
-        metadata: {
-          reason: "logout_query_parameter_present",
-        },
       });
     }
-    // Intentionally run only once when the login page opens.
+    // Intentionally runs once on page load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -565,9 +469,6 @@ export default function LoginPage() {
         action: "login_local_lockout_ended",
         status: "success",
         risk_level: "medium",
-        metadata: {
-          reason: "local_lockout_time_elapsed",
-        },
       });
     }
   }, [lockedUntil, lockoutRemainingMs, reportAudit]);
@@ -580,12 +481,9 @@ export default function LoginPage() {
         setCheckingSession(false);
 
         void reportAudit({
-          action: "login_existing_session_not_found",
+          action: "login_existing_session_check_skipped",
           status: "skipped",
           risk_level: "low",
-          metadata: {
-            reason: "skip_auto_session_check_after_logout",
-          },
         });
 
         return;
@@ -598,9 +496,7 @@ export default function LoginPage() {
       });
 
       try {
-        const startedAt = Date.now();
-
-        const response = await fetch(SESSION_CHECK_API, {
+        const response = await fetch(INTERNAL_ENDPOINTS.session, {
           cache: "no-store",
           credentials: "include",
           headers: {
@@ -622,10 +518,6 @@ export default function LoginPage() {
               action: "login_existing_session_found",
               status: "redirecting",
               risk_level: "low",
-              metadata: {
-                duration_ms: Date.now() - startedAt,
-                redirect_to: nextPath,
-              },
             });
 
             window.location.replace(nextPath);
@@ -635,24 +527,14 @@ export default function LoginPage() {
 
         void reportAudit({
           action: "login_existing_session_not_found",
-          status: response.ok ? "no_session" : `http_${response.status}`,
+          status: response.ok ? "no_session" : "not_available",
           risk_level: response.status >= 500 ? "medium" : "low",
-          metadata: {
-            http_status: response.status,
-            duration_ms: Date.now() - startedAt,
-          },
         });
-      } catch (sessionCheckError) {
+      } catch {
         void reportAudit({
           action: "login_existing_session_check_failed",
           status: "connection_failed",
           risk_level: "medium",
-          metadata: {
-            error:
-              sessionCheckError instanceof Error
-                ? sessionCheckError.message
-                : "Unknown session check error",
-          },
         });
       } finally {
         if (!cancelled) setCheckingSession(false);
@@ -676,9 +558,6 @@ export default function LoginPage() {
       action: "login_page_ready",
       status: "ready",
       risk_level: "low",
-      metadata: {
-        checking_session_finished: true,
-      },
     });
   }, [checkingSession, reportAudit]);
 
@@ -686,15 +565,17 @@ export default function LoginPage() {
     function onVisibilityChange() {
       if (document.visibilityState === "hidden") {
         void reportAudit({
-          action: "admin_page_hidden",
+          action: "login_page_hidden",
           status: "hidden",
           risk_level: "low",
           throttleKey: "visibility_hidden",
           throttleMs: 5000,
         });
-      } else if (document.visibilityState === "visible") {
+      }
+
+      if (document.visibilityState === "visible") {
         void reportAudit({
-          action: "admin_page_visible",
+          action: "login_page_visible",
           status: "visible",
           risk_level: "low",
           throttleKey: "visibility_visible",
@@ -711,7 +592,7 @@ export default function LoginPage() {
         metadata: {
           had_error: Boolean(error),
           had_notice: Boolean(notice),
-          failed_attempts: failedAttempts,
+          attempts_state: failedAttempts > 0 ? "attempts_present" : "none",
         },
       });
     }
@@ -736,15 +617,13 @@ export default function LoginPage() {
       risk_level: "high",
       metadata: {
         reason,
-        lockout_ms: LOCAL_LOCKOUT_MS,
-        max_attempts: LOCAL_MAX_ATTEMPTS,
       },
     });
   }
 
   function registerFailedAttempt(status: number) {
     if (status === 429) {
-      startLocalLockout("server_rate_limited_429");
+      startLocalLockout("server_rate_limited");
       return;
     }
 
@@ -762,10 +641,6 @@ export default function LoginPage() {
           risk_level: "high",
           metadata: {
             reason: "local_failed_attempt_limit_reached",
-            previous_failed_attempts: previous,
-            next_failed_attempts: nextCount,
-            lockout_ms: LOCAL_LOCKOUT_MS,
-            max_attempts: LOCAL_MAX_ATTEMPTS,
           },
         });
       }
@@ -774,14 +649,14 @@ export default function LoginPage() {
     });
   }
 
-  function validateBeforeSubmit() {
+  function validateBeforeSubmit(): ValidationResult {
     if (isLocallyLocked) {
       return {
         ok: false,
         title: TOO_MANY_ATTEMPTS_ERROR.title,
         message: TOO_MANY_ATTEMPTS_ERROR.message,
         reason: "local_lockout_active",
-        risk: "high" as AuditRiskLevel,
+        risk: "high",
       };
     }
 
@@ -790,8 +665,13 @@ export default function LoginPage() {
         ok: false,
         title: "Missing details",
         message: "Please enter your email address and password.",
-        reason: !cleanEmail && !password ? "missing_email_and_password" : !cleanEmail ? "missing_email" : "missing_password",
-        risk: "medium" as AuditRiskLevel,
+        reason:
+          !cleanEmail && !password
+            ? "missing_email_and_password"
+            : !cleanEmail
+              ? "missing_email"
+              : "missing_password",
+        risk: "medium",
       };
     }
 
@@ -801,7 +681,7 @@ export default function LoginPage() {
         title: "Email address too long",
         message: "Please check the email address and try again.",
         reason: "email_too_long",
-        risk: "medium" as AuditRiskLevel,
+        risk: "medium",
       };
     }
 
@@ -811,7 +691,7 @@ export default function LoginPage() {
         title: "Email address looks wrong",
         message: "Please enter a valid email address and try again.",
         reason: "email_format_invalid",
-        risk: "medium" as AuditRiskLevel,
+        risk: "medium",
       };
     }
 
@@ -821,14 +701,14 @@ export default function LoginPage() {
         title: "Password too long",
         message: "Please check the password and try again.",
         reason: "password_too_long",
-        risk: "medium" as AuditRiskLevel,
+        risk: "medium",
       };
     }
 
     return {
       ok: true,
       reason: "valid",
-      risk: "low" as AuditRiskLevel,
+      risk: "low",
     };
   }
 
@@ -845,19 +725,18 @@ export default function LoginPage() {
       status: "started",
       risk_level: "low",
       metadata: {
-        password_length_bucket: passwordLengthBucket(password),
+        has_email: compactBoolean(Boolean(cleanEmail)),
+        has_password: compactBoolean(Boolean(password)),
       },
     });
 
     const validation = validateBeforeSubmit();
 
     if (!validation.ok) {
-      const errorToShow = {
+      setError({
         title: validation.title || GENERIC_LOGIN_ERROR.title,
         message: validation.message || GENERIC_LOGIN_ERROR.message,
-      };
-
-      setError(errorToShow);
+      });
 
       void reportAudit({
         action:
@@ -868,7 +747,6 @@ export default function LoginPage() {
         risk_level: validation.risk,
         metadata: {
           reason: validation.reason,
-          password_length_bucket: passwordLengthBucket(password),
         },
       });
 
@@ -882,22 +760,25 @@ export default function LoginPage() {
       action: "login_attempt_started",
       status: "started",
       risk_level: "medium",
-      target_type: "admin_login",
-      target_label: "Admin Portal Login",
+      target_type: "restricted_login",
+      target_label: "Restricted Login",
       metadata: {
-        email: cleanEmail,
-        password_length_bucket: passwordLengthBucket(password),
-        next_path: nextPath,
+        email_valid: emailLooksValid(cleanEmail),
       },
     });
 
     try {
-      const response = await fetch(LOGIN_API, {
+      const response = await fetch(INTERNAL_ENDPOINTS.login, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         cache: "no-store",
         credentials: "include",
-        body: JSON.stringify({ email: cleanEmail, password }),
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+        }),
       });
 
       const json = await readLoginJson(response);
@@ -907,23 +788,16 @@ export default function LoginPage() {
 
       if (!response.ok || !json?.ok) {
         registerFailedAttempt(response.status);
-
-        const parsedError = parseLoginError(response.status);
-        setError(parsedError);
+        setError(parseLoginError(response.status));
 
         void reportAudit({
           action: "login_attempt_failed_client",
           status: getAuditStatusFromResponse(response, json),
           risk_level: response.status === 429 ? "high" : "medium",
-          target_type: "admin_login",
-          target_label: "Admin Portal Login",
+          target_type: "restricted_login",
+          target_label: "Restricted Login",
           metadata: {
-            email: cleanEmail,
-            http_status: response.status,
-            api_error_code: json?.code || null,
-            api_message_present: Boolean(json?.message),
-            api_error_present: Boolean(json?.error),
-            failed_attempts_after_this: failedAttempts + 1,
+            result: "failed",
             duration_ms: durationMs,
           },
         });
@@ -940,46 +814,30 @@ export default function LoginPage() {
         action: "login_attempt_success_client",
         status: "success_redirecting",
         risk_level: "low",
-        target_type: "admin_login",
-        target_label: "Admin Portal Login",
+        target_type: "restricted_login",
+        target_label: "Restricted Login",
         metadata: {
-          email: cleanEmail,
-          http_status: response.status,
-          redirect_to: nextPath,
+          result: "success",
           duration_ms: durationMs,
         },
       });
 
-      /**
-       * Use a hard navigation after successful login.
-       * This reloads server/client state cleanly and avoids stale React state
-       * from the previous loggedOut=1 page.
-       */
       window.location.replace(nextPath);
-    } catch (loginError) {
+    } catch {
       const durationMs = submitStartedAtRef.current
         ? Date.now() - submitStartedAtRef.current
         : null;
 
-      setError({
-        title: "Connection problem",
-        message:
-          "We could not reach the admin login service. Please refresh the page and try again.",
-      });
+      setError(GENERIC_SERVICE_ERROR);
 
       void reportAudit({
         action: "login_attempt_connection_failed_client",
         status: "connection_failed",
         risk_level: "medium",
-        target_type: "admin_login",
-        target_label: "Admin Portal Login",
+        target_type: "restricted_login",
+        target_label: "Restricted Login",
         metadata: {
-          email: cleanEmail,
           duration_ms: durationMs,
-          error:
-            loginError instanceof Error
-              ? loginError.message
-              : "Unknown login connection error",
         },
       });
     } finally {
@@ -994,7 +852,7 @@ export default function LoginPage() {
       status: "focused",
       risk_level: "low",
       throttleKey: "email_focus",
-      throttleMs: 3000,
+      throttleMs: 5000,
     });
   }
 
@@ -1004,11 +862,9 @@ export default function LoginPage() {
       status: "blurred",
       risk_level: cleanEmail && !emailLooksValid(cleanEmail) ? "medium" : "low",
       throttleKey: "email_blur",
-      throttleMs: 1000,
+      throttleMs: 2500,
       metadata: {
-        email_present: Boolean(cleanEmail),
-        email_domain: cleanEmail ? emailDomain(cleanEmail) : null,
-        email_format_valid: cleanEmail ? emailLooksValid(cleanEmail) : null,
+        email_valid: cleanEmail ? emailLooksValid(cleanEmail) : null,
       },
     });
   }
@@ -1019,7 +875,7 @@ export default function LoginPage() {
       status: "focused",
       risk_level: "low",
       throttleKey: "password_focus",
-      throttleMs: 3000,
+      throttleMs: 5000,
     });
   }
 
@@ -1029,10 +885,7 @@ export default function LoginPage() {
       status: "blurred",
       risk_level: "low",
       throttleKey: "password_blur",
-      throttleMs: 1000,
-      metadata: {
-        password_length_bucket: passwordLengthBucket(password),
-      },
+      throttleMs: 2500,
     });
   }
 
@@ -1045,8 +898,7 @@ export default function LoginPage() {
       status: nextValue ? "shown" : "hidden",
       risk_level: "medium",
       metadata: {
-        password_now_visible: nextValue,
-        password_length_bucket: passwordLengthBucket(password),
+        visible: nextValue,
       },
     });
   }
@@ -1057,14 +909,14 @@ export default function LoginPage() {
       status: "leaving_login_page",
       risk_level: "low",
       metadata: {
-        destination: "/",
+        destination: "public_website",
       },
     });
   }
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#050816] px-4 py-8 text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(236,72,153,0.34),transparent_32%),radial-gradient(circle_at_82%_20%,rgba(59,130,246,0.3),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(236,72,153,0.28),transparent_32%),radial-gradient(circle_at_82%_20%,rgba(59,130,246,0.26),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]" />
       <div className="absolute left-1/2 top-1/2 h-[38rem] w-[38rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/10 blur-3xl" />
       <div className="absolute -left-20 bottom-10 h-72 w-72 rounded-full bg-pink-500/15 blur-3xl" />
       <div className="absolute -right-20 top-10 h-72 w-72 rounded-full bg-blue-500/15 blur-3xl" />
@@ -1072,31 +924,31 @@ export default function LoginPage() {
       <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center justify-center">
         <div className="grid w-full overflow-hidden rounded-[2rem] border border-white/15 bg-white/[0.08] shadow-[0_40px_140px_rgba(0,0,0,0.55)] backdrop-blur-2xl lg:grid-cols-[1fr_0.95fr] lg:rounded-[2.75rem]">
           <section className="relative hidden min-h-[700px] overflow-hidden p-10 xl:p-14 lg:block">
-            <div className="absolute inset-0 bg-gradient-to-br from-pink-500/25 via-purple-500/15 to-blue-500/20" />
-            <div className="absolute -left-28 -top-28 h-80 w-80 rounded-full bg-pink-400/30 blur-3xl" />
-            <div className="absolute -bottom-28 right-0 h-96 w-96 rounded-full bg-blue-400/25 blur-3xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-pink-500/22 via-purple-500/14 to-blue-500/20" />
+            <div className="absolute -left-28 -top-28 h-80 w-80 rounded-full bg-pink-400/28 blur-3xl" />
+            <div className="absolute -bottom-28 right-0 h-96 w-96 rounded-full bg-blue-400/24 blur-3xl" />
 
             <div className="relative z-10 flex h-full flex-col justify-between gap-12">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.24em] text-white/80">
                   <Sparkles className="h-4 w-4 text-pink-100" />
-                  Burton Pride Admin Portal
+                  Burton Pride Admin Portal App
                 </div>
 
                 <h1 className="mt-10 max-w-xl text-5xl font-black leading-[1.2] tracking-tight">
                   Secure access for
                   <span className="block bg-gradient-to-r from-pink-200 via-purple-100 to-blue-200 bg-clip-text text-transparent">
-                    approved admin users.
+                    approved users only.
                   </span>
                 </h1>
 
                 <p className="mt-8 max-w-lg text-lg leading-9 text-white/72">
-                  Sign in to manage Burton Pride admin tools, Event Hub,
-                  contacts, emails, money records and protected committee work.
+                  This is a restricted Burton Pride area. Continue only if you
+                  have been given permission to sign in.
                 </p>
 
                 <div className="mt-10 grid gap-5">
-                  {communityPoints.map((item) => {
+                  {restrictedAccessCards.map((item) => {
                     const Icon = item.icon;
 
                     return (
@@ -1125,11 +977,11 @@ export default function LoginPage() {
                   Security reminder
                 </p>
                 <p className="mt-3 text-2xl font-black text-white">
-                  Never share your admin login
+                  Keep access private
                 </p>
                 <p className="mt-2 text-sm leading-6 text-white/60">
-                  Always log out on shared devices. Suspicious access attempts
-                  should be reported to the main admin or committee team.
+                  Never share login details. Report anything suspicious to an
+                  authorised admin lead.
                 </p>
               </div>
             </div>
@@ -1144,7 +996,7 @@ export default function LoginPage() {
                   className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-white/55 transition hover:text-white"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Back to public website
+                  Back to website
                 </Link>
 
                 <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 shadow-lg">
@@ -1155,11 +1007,11 @@ export default function LoginPage() {
                   Burton Pride
                 </p>
 
-                <h2 className="text-3xl font-black">Admin Portal Login</h2>
+                <h2 className="text-3xl font-black">Secure Access Login</h2>
 
                 <p className="mt-3 text-sm leading-6 text-white/60">
-                  Sign in with your approved admin account. This area is for
-                  authorised Burton Pride users only.
+                  Use your approved account to continue. Access is restricted
+                  and monitored.
                 </p>
               </div>
 
@@ -1167,7 +1019,7 @@ export default function LoginPage() {
                 <div className="mb-6 rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4 text-sm text-sky-50">
                   <div className="flex items-center gap-3">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    <p className="font-bold">Checking current admin session...</p>
+                    <p className="font-bold">Checking secure access...</p>
                   </div>
                 </div>
               ) : null}
@@ -1277,8 +1129,7 @@ export default function LoginPage() {
                       <div>
                         <p className="font-black">Sign in temporarily paused</p>
                         <p className="mt-1 leading-6 text-amber-50/90">
-                          Please wait {formatRemainingTime(lockoutRemainingMs)}{" "}
-                          before trying again.
+                          Please wait a few minutes before trying again.
                         </p>
                       </div>
                     </div>
@@ -1303,13 +1154,6 @@ export default function LoginPage() {
                   </div>
                 ) : null}
 
-                {failedAttempts > 0 && !isLocallyLocked ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-xs leading-5 text-white/55">
-                    For security, repeated failed attempts may temporarily pause
-                    sign in on this device. Failed attempts on this page: {failedAttempts}.
-                  </div>
-                ) : null}
-
                 <button
                   type="submit"
                   disabled={loading || isLocallyLocked}
@@ -1323,11 +1167,11 @@ export default function LoginPage() {
                   ) : isLocallyLocked ? (
                     <>
                       <Timer className="h-4 w-4" />
-                      Try again soon
+                      Try again later
                     </>
                   ) : (
                     <>
-                      Sign in securely
+                      Continue securely
                       <ArrowRight className="h-4 w-4" />
                     </>
                   )}
@@ -1339,8 +1183,8 @@ export default function LoginPage() {
                   <div className="flex gap-3">
                     <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-pink-200" />
                     <p className="text-xs leading-5 text-white/55">
-                      Committee/admin users only. Access must be approved before
-                      this portal can be used.
+                      Approved users only. Access must be granted before this
+                      area can be used.
                     </p>
                   </div>
                 </div>
@@ -1349,16 +1193,15 @@ export default function LoginPage() {
                   <div className="flex gap-3">
                     <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-100" />
                     <p className="text-xs leading-5 text-amber-50/70">
-                      Need access or forgot your password? Contact the main admin
-                      or Burton Pride committee team. Do not share login details
-                      with anyone.
+                      Need help with access? Contact an authorised admin lead.
+                      Never share login details with anyone.
                     </p>
                   </div>
                 </div>
               </div>
 
               <p className="mt-8 text-center text-xs leading-5 text-white/35">
-                Burton Pride C.I.C Admin Portal · Secure access only
+                Burton Pride C.I.C · Restricted access
               </p>
             </div>
           </section>

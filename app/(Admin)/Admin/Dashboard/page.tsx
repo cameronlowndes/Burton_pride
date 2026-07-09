@@ -2178,7 +2178,6 @@ export default function DashboardPage() {
 
         <section className="grid min-w-0 gap-6 xl:grid-cols-3">
           <SecurityWatchCard data={securityWatch} />
-          <MoneyHealthCard data={moneyHealth} meetingMode={meetingMode} />
           <CommunicationHealthCard
             emailHealth={emailHealth}
             formsInbox={formsInbox}
@@ -3066,7 +3065,7 @@ function SecurityWatchCard({ data }: { data: DashboardSecurityWatch }) {
         Last activity: {data.lastAdminActivityAt ? formatRelativeTime(data.lastAdminActivityAt) : "not available"}
       </p>
       <SecureLink
-        href="/Admin/Dashboard/Logs"
+        href="/Admin/Dashboard/Settings/AdminAuditTracker"
         className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-black text-white/70 transition hover:bg-white/20 hover:text-white"
       >
         Open audit logs <ArrowRight className="h-4 w-4" />
@@ -3084,31 +3083,8 @@ function MiniStat({ title, value }: { title: string; value: string | number }) {
   );
 }
 
-function MoneyHealthCard({ data, meetingMode }: { data: DashboardMoneyHealth; meetingMode: boolean }) {
-  return (
-    <Card>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black">Money Health</h2>
-          <p className="mt-1 text-sm text-white/60">Finance checks needing attention.</p>
-        </div>
-        <Wallet className="h-6 w-6 text-white/40" />
-      </div>
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        <MiniStat title="Balance" value={meetingMode ? "Hidden" : formatCurrency(data.balance)} />
-        <MiniStat title="Missing receipts" value={data.missingReceipts} />
-        <MiniStat title="Unchecked" value={data.uncheckedTransactions} />
-        <MiniStat title="Refunds" value={data.pendingRefunds} />
-      </div>
-      <SecureLink
-        href="/Admin/MoneyManagement"
-        className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-black text-white/70 transition hover:bg-white/20 hover:text-white"
-      >
-        Open finance <ArrowRight className="h-4 w-4" />
-      </SecureLink>
-    </Card>
-  );
-}
+
+
 
 function CommunicationHealthCard({
   emailHealth,
