@@ -1,0 +1,161 @@
+import type { EventAuditRiskLevel } from "./types";
+
+export const EVENT_AUDIT_ACTION_LABELS: Record<string, string> = {
+  "auth.login_success": "Successful login",
+  "auth.login_failed": "Failed login",
+  "auth.logout": "Logout",
+  "auth.session_expired": "Expired session",
+  "auth.session_invalid": "Invalid session token",
+  "auth.access_denied": "Access denied",
+  "auth.permission_failed": "Permission check failed",
+  "auth.session_revoked": "Session revoked",
+  "auth.account_locked": "Account locked",
+  "auth.account_unlocked": "Account unlocked",
+  "auth.suspicious_activity": "Suspicious login or session activity",
+
+  "event.created": "Event created",
+  "event.updated": "Event updated",
+  "event.archived": "Event archived",
+  "event.restored": "Event restored",
+  "event.deleted": "Event deleted",
+  "event.current_changed": "Current event changed",
+  "event.date_changed": "Event date changed",
+  "event.location_changed": "Event location changed",
+  "event.status_changed": "Event status changed",
+  "event.locked": "Event locked",
+  "event.unlocked": "Event unlocked",
+  "event.settings_updated": "Event settings updated",
+
+  "contact.created": "Contact created",
+  "contact.updated": "Contact updated",
+  "contact.archived": "Contact archived",
+  "contact.restored": "Contact restored",
+  "contact.deleted": "Contact deleted",
+  "contact.organisation_linked": "Contact linked to organisation",
+  "contact.note_added": "Internal note added",
+  "contact.note_updated": "Internal note edited",
+  "contact.selling_image_uploaded": "Selling image uploaded",
+  "contact.selling_image_deleted": "Selling image deleted",
+  "organisation.created": "Organisation created",
+  "organisation.updated": "Organisation updated",
+
+  "application.submitted": "Application submitted",
+  "application.created": "Application created by admin",
+  "application.updated": "Application updated",
+  "application.approved": "Application approved",
+  "application.rejected": "Application rejected",
+  "application.information_requested": "More information requested",
+  "application.withdrawn": "Application withdrawn",
+  "application.archived": "Application archived",
+  "application.pitch_assigned": "Pitch allocated",
+  "application.pitch_changed": "Pitch changed",
+  "application.terms_accepted": "Terms accepted",
+  "application.exported": "Application exported",
+
+  "document.uploaded": "Document uploaded",
+  "document.viewed": "Document viewed",
+  "document.downloaded": "Document downloaded",
+  "document.metadata_updated": "Document metadata changed",
+  "document.approved": "Document approved",
+  "document.rejected": "Document rejected",
+  "document.replacement_requested": "Replacement requested",
+  "document.version_uploaded": "New document version uploaded",
+  "document.version_restored": "Previous document version restored",
+  "document.confidential_enabled": "Document marked confidential",
+  "document.archived": "Document archived",
+  "document.deleted": "Document moved to recycle bin",
+  "document.permanently_deleted": "Document permanently deleted",
+  "compliance.expiry_warning": "Expiry warning created",
+  "compliance.expired": "Document expired",
+  "compliance.event_date_failed": "Certificate did not cover event date",
+  "compliance.override": "Manual compliance override",
+
+  "checklist.created": "Checklist item created",
+  "checklist.completed": "Checklist item completed",
+  "checklist.reopened": "Checklist item reopened",
+  "checklist.updated": "Checklist item edited",
+  "checklist.deleted": "Checklist item deleted",
+  "checklist.evidence_added": "Checklist evidence attached",
+  "pitch.created": "Pitch created",
+  "pitch.assigned": "Pitch allocated",
+  "pitch.moved": "Pitch moved",
+  "pitch.resized": "Pitch resized",
+  "sitemap.published": "Site map published",
+  "sitemap.private_link_created": "Private site map link created",
+  "sitemap.exported": "Site map exported",
+
+  "email.draft_created": "Email draft created",
+  "email.sent": "Email sent",
+  "email.send_failed": "Email failed to send",
+  "email.bulk_sent": "Bulk email sent",
+  "email.template_updated": "Email template updated",
+
+  "payment.created": "Payment record created",
+  "payment.updated": "Payment record updated",
+  "payment.deleted": "Payment record deleted",
+  "refund.created": "Refund created",
+  "refund.updated": "Refund updated",
+  "fee.updated": "Fee updated",
+  "discount.applied": "Discount applied",
+  "sponsor.created": "Sponsor created",
+  "sponsor.updated": "Sponsor updated",
+
+  "admin.created": "Admin account created",
+  "admin.updated": "Admin account updated",
+  "admin.activated": "Admin account activated",
+  "admin.deactivated": "Admin account deactivated",
+  "admin.role_changed": "Admin role changed",
+  "admin.permission_added": "Admin permission added",
+  "admin.permission_removed": "Admin permission removed",
+
+  "export.created": "Audit export created",
+  "audit.alert_updated": "Security alert updated",
+  "audit.investigation_note_added": "Investigation note added",
+  "audit.saved_view_created": "Saved audit view created",
+  "audit.saved_view_deleted": "Saved audit view deleted",
+
+  "system.api_failed": "API request failed",
+  "system.database_failed": "Database action failed",
+  "system.storage_failed": "Storage action failed",
+  "system.job_completed": "Scheduled task completed",
+  "system.job_failed": "Scheduled task failed",
+};
+
+export const EVENT_AUDIT_DEFAULT_RISK: Record<string, EventAuditRiskLevel> = {
+  "auth.login_success": "low",
+  "auth.login_failed": "low",
+  "auth.access_denied": "medium",
+  "auth.permission_failed": "medium",
+  "auth.suspicious_activity": "high",
+  "contact.updated": "medium",
+  "application.approved": "medium",
+  "application.rejected": "medium",
+  "document.viewed": "low",
+  "document.downloaded": "low",
+  "document.permanently_deleted": "critical",
+  "pitch.moved": "medium",
+  "email.sent": "medium",
+  "email.bulk_sent": "high",
+  "payment.updated": "high",
+  "discount.applied": "high",
+  "admin.role_changed": "high",
+  "admin.permission_added": "high",
+  "admin.permission_removed": "high",
+  "export.created": "medium",
+  "system.database_failed": "medium",
+  "system.storage_failed": "medium",
+};
+
+export function actionLabel(action: string) {
+  if (EVENT_AUDIT_ACTION_LABELS[action]) return EVENT_AUDIT_ACTION_LABELS[action];
+
+  return action
+    .split(".")
+    .pop()!
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function defaultRisk(action: string): EventAuditRiskLevel {
+  return EVENT_AUDIT_DEFAULT_RISK[action] || "low";
+}
