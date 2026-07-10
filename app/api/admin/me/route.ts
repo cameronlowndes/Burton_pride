@@ -66,11 +66,11 @@ const ALL_PERMISSION_KEYS = [
   "audit_logs:view",
 ];
 
-function getString(value: unknown) {
+function getString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normaliseEmail(value: unknown) {
+function normaliseEmail(value: unknown): string {
   return getString(value).toLowerCase();
 }
 
@@ -90,13 +90,13 @@ function normaliseRole(value: unknown): AdminRole | null {
   return null;
 }
 
-function uniqueStrings(values: string[]) {
+function uniqueStrings(values: string[]): string[] {
   return Array.from(
     new Set(values.map((value) => value.trim()).filter(Boolean))
   );
 }
 
-function permissionValueIsAllowed(value: unknown) {
+function permissionValueIsAllowed(value: unknown): boolean {
   return (
     value === true ||
     value === "true" ||
@@ -138,7 +138,7 @@ function addDefaultPermissions(args: {
   role: AdminRole | null;
   isMainAdmin: boolean;
   permissions: string[];
-}) {
+}): string[] {
   const { role, isMainAdmin } = args;
 
   if (isMainAdmin || role === "main_admin") {
@@ -147,10 +147,6 @@ function addDefaultPermissions(args: {
 
   const next = [...args.permissions];
 
-  /**
-   * This keeps normal admins able to enter the dashboard if they have
-   * any admin access but their old permissions object missed this key.
-   */
   if (!next.includes("admin:dashboard:view")) {
     next.unshift("admin:dashboard:view");
   }
@@ -158,7 +154,7 @@ function addDefaultPermissions(args: {
   return uniqueStrings(next);
 }
 
-function isExpiredDate(value: unknown) {
+function isExpiredDate(value: unknown): boolean {
   const dateValue = getString(value);
 
   if (!dateValue) return false;
@@ -170,7 +166,7 @@ function isExpiredDate(value: unknown) {
   return timestamp <= Date.now();
 }
 
-function clearCookie(response: NextResponse, name: string) {
+function clearCookie(response: NextResponse, name: string): void {
   response.cookies.set({
     name,
     value: "",
@@ -178,18 +174,17 @@ function clearCookie(response: NextResponse, name: string) {
     maxAge: 0,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
+    httpOnly: true,
   });
 }
 
-function clearAdminCookies(response: NextResponse, cookieNames: string[] = []) {
-  const names = uniqueStrings([...ADMIN_COOKIE_NAMES, ...cookieNames]);
-
-  for (const name of names) {
+function clearAdminCookies(response: NextResponse): void {
+  for (const name of ADMIN_COOKIE_NAMES) {
     clearCookie(response, name);
   }
 }
 
-function noStoreHeaders() {
+function noStoreHeaders(): Record<string, string> {
   return {
     "Cache-Control": "no-store, no-cache, must-revalidate",
     Pragma: "no-cache",
@@ -201,27 +196,32 @@ function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
   options?: {
-    clearCookies?: boolean;
-    extraCookieNamesToClear?: string[];
+    clearAdminCookies?: boolean;
   }
-) {
+): NextResponse {
   const response = NextResponse.json(body, {
     status,
     headers: noStoreHeaders(),
   });
 
-  if (options?.clearCookies) {
-    clearAdminCookies(response, options.extraCookieNamesToClear);
+  /*
+   * Only clear Burton Pride custom admin cookies.
+   * Never clear sb-* or other Supabase authentication cookies here.
+   */
+  if (options?.clearAdminCookies) {
+    clearAdminCookies(response);
   }
 
   return response;
 }
 
-function safeErrorMessage(error: unknown) {
+function safeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected server error.";
 }
 
-function getStoredSessionTokens(admin: Record<string, unknown>) {
+function getStoredSessionTokens(
+  admin: Record<string, unknown>
+): string[] {
   return uniqueStrings([
     getString(admin.session_token),
     getString(admin.admin_session_token),
@@ -230,7 +230,7 @@ function getStoredSessionTokens(admin: Record<string, unknown>) {
   ]);
 }
 
-function getSessionExpiry(admin: Record<string, unknown>) {
+function getSessionExpiry(admin: Record<string, unknown>): unknown {
   return (
     admin.session_expires_at ??
     admin.admin_session_expires_at ??
@@ -266,58 +266,92 @@ async function getCookieStore() {
   return await cookies();
 }
 
-export async function GET() {
-  let extraCookieNamesToClear: string[] = [];
-
+export async function GET(): Promise<NextResponse> {
   try {
     const cookieStore = await getCookieStore();
 
-    extraCookieNamesToClear = cookieStore
-      .getAll()
-      .map((cookie) => cookie.name)
-      .filter((name) => {
-        return (
-          name.startsWith("sb-") ||
-          name.toLowerCase().includes("supabase") ||
-          name.toLowerCase().includes("auth-token")
-        );
-      });
+    const adminId = getString(
+      cookieStore.get(ADMIN_ID_COOKIE)?.value
+    );
 
-    const adminId = getString(cookieStore.get(ADMIN_ID_COOKIE)?.value);
     const adminEmailCookie = normaliseEmail(
       cookieStore.get(ADMIN_EMAIL_COOKIE)?.value
     );
-    const sessionToken = getString(cookieStore.get(SESSION_COOKIE)?.value);
 
-    if (!adminId || !adminEmailCookie || !sessionToken) {
+    const sessionToken = getString(
+      cookieStore.get(SESSION_COOKIE)?.value
+    );
+
+    console.log(`${ROUTE_NAME} cookie check`, {
+      hasAdminId: Boolean(adminId),
+      hasAdminEmail: Boolean(adminEmailCookie),
+      hasSessionToken: Boolean(sessionToken),
+    });
+
+    /*
+     * The custom session token is required.
+     * Do not clear cookies immediately here because the login response may
+     * still be completing when the frontend makes its first /api/admin/me call.
+     */
+    if (!sessionToken) {
       return jsonResponse(
         {
           ok: false,
           authenticated: false,
           error: "Unauthorized",
-          reason: "missing_custom_admin_session",
+          reason: "missing_admin_session_cookie",
           message:
-            "No active Burton Pride admin session was received by the admin API.",
+            "The Burton Pride admin session cookie was not received.",
           likelyFix:
-            "Sign out and sign back in using the Admin Portal login page.",
+            "Check that the login route sets burton_admin_session with path '/'.",
           route: ROUTE_NAME,
         },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
+        401
       );
     }
 
-    const { data: admin, error: adminError } = await supabaseAdmin
+    /*
+     * We need at least one identity cookie.
+     * The API can recover using email if the ID cookie is missing.
+     */
+    if (!adminId && !adminEmailCookie) {
+      return jsonResponse(
+        {
+          ok: false,
+          authenticated: false,
+          error: "Unauthorized",
+          reason: "missing_admin_identity_cookies",
+          message:
+            "The admin session exists, but no admin ID or email cookie was received.",
+          likelyFix:
+            "Check that the login route sets burton_admin_id or burton_admin_email with path '/'.",
+          route: ROUTE_NAME,
+        },
+        401
+      );
+    }
+
+    let adminQuery = supabaseAdmin
       .from("admin_users")
-      .select("*")
-      .eq("id", adminId)
-      .maybeSingle();
+      .select("*");
+
+    if (adminId) {
+      adminQuery = adminQuery.eq("id", adminId);
+    } else {
+      adminQuery = adminQuery.ilike(
+        "email",
+        adminEmailCookie
+      );
+    }
+
+    const { data: admin, error: adminError } =
+      await adminQuery.maybeSingle();
 
     if (adminError) {
-      console.error(`${ROUTE_NAME} database error:`, adminError);
+      console.error(
+        `${ROUTE_NAME} database error:`,
+        adminError
+      );
 
       return jsonResponse(
         {
@@ -325,7 +359,8 @@ export async function GET() {
           authenticated: false,
           error: adminError.message,
           reason: "admin_database_error",
-          message: "The admin API could not read the admin_users table.",
+          message:
+            "The admin API could not read the admin_users table.",
           route: ROUTE_NAME,
         },
         500
@@ -340,21 +375,23 @@ export async function GET() {
           error: "Admin account was not found",
           reason: "admin_record_missing",
           message:
-            "The admin session cookie exists, but no matching admin row was found.",
+            "The session cookie exists, but no matching admin row was found.",
           likelyFix:
-            "The session is stale. Sign in again using the Admin Portal login page.",
+            "Check that the login route stores the correct admin ID or email.",
           route: ROUTE_NAME,
         },
         401,
         {
-          clearCookies: true,
-          extraCookieNamesToClear,
+          clearAdminCookies: true,
         }
       );
     }
 
-    const adminRecord = admin as Record<string, unknown>;
-    const adminEmail = normaliseEmail(adminRecord.email);
+    const adminRecord =
+      admin as Record<string, unknown>;
+
+    const adminEmail =
+      normaliseEmail(adminRecord.email);
 
     if (adminRecord.is_active !== true) {
       return jsonResponse(
@@ -366,18 +403,23 @@ export async function GET() {
           message:
             "Your admin account exists, but it is not currently active.",
           likelyFix:
-            "Ask a main admin to check public.admin_users and make sure is_active is true.",
+            "Check public.admin_users and make sure is_active is true.",
           route: ROUTE_NAME,
         },
         403,
         {
-          clearCookies: true,
-          extraCookieNamesToClear,
+          clearAdminCookies: true,
         }
       );
     }
 
-    if (!adminEmail || adminEmail !== adminEmailCookie) {
+    /*
+     * Only compare the email when an email cookie was actually supplied.
+     */
+    if (
+      adminEmailCookie &&
+      (!adminEmail || adminEmail !== adminEmailCookie)
+    ) {
       return jsonResponse(
         {
           ok: false,
@@ -385,25 +427,24 @@ export async function GET() {
           error: "Admin session email mismatch",
           reason: "admin_cookie_email_mismatch",
           message:
-            "The admin session cookies do not match the active admin account.",
+            "The admin email cookie does not match the active admin account.",
           likelyFix:
-            "The session is stale. Sign out and sign back in.",
+            "Sign out, clear the custom Burton Pride admin cookies and sign in again.",
           route: ROUTE_NAME,
         },
         401,
         {
-          clearCookies: true,
-          extraCookieNamesToClear,
+          clearAdminCookies: true,
         }
       );
     }
 
-    /**
-     * If your admin_users table stores a session token, validate it.
-     * This keeps backwards compatibility: if no token column exists in the row,
-     * the old cookie session still works.
+    /*
+     * Validate a stored database session token only when the admin row
+     * actually contains one. This preserves compatibility with older rows.
      */
-    const storedSessionTokens = getStoredSessionTokens(adminRecord);
+    const storedSessionTokens =
+      getStoredSessionTokens(adminRecord);
 
     if (
       storedSessionTokens.length > 0 &&
@@ -416,14 +457,14 @@ export async function GET() {
           error: "Admin session has expired",
           reason: "admin_session_token_mismatch",
           message:
-            "The admin session token no longer matches the active admin account.",
-          likelyFix: "Sign in again using the Admin Portal login page.",
+            "The session cookie no longer matches the active database session.",
+          likelyFix:
+            "Sign out and sign back in to create a new session.",
           route: ROUTE_NAME,
         },
         401,
         {
-          clearCookies: true,
-          extraCookieNamesToClear,
+          clearAdminCookies: true,
         }
       );
     }
@@ -436,25 +477,30 @@ export async function GET() {
           error: "Admin session has expired",
           reason: "admin_session_expired",
           message: "Your admin session has expired.",
-          likelyFix: "Sign in again using the Admin Portal login page.",
+          likelyFix:
+            "Sign out and sign back in to create a new session.",
           route: ROUTE_NAME,
         },
         401,
         {
-          clearCookies: true,
-          extraCookieNamesToClear,
+          clearAdminCookies: true,
         }
       );
     }
 
-    const role = normaliseRole(adminRecord.role);
+    const role =
+      normaliseRole(adminRecord.role);
+
     const isMainAdmin =
-      adminRecord.is_main_admin === true || role === "main_admin";
+      adminRecord.is_main_admin === true ||
+      role === "main_admin";
 
     const permissions = addDefaultPermissions({
       role,
       isMainAdmin,
-      permissions: permissionsToKeys(adminRecord.permissions),
+      permissions: permissionsToKeys(
+        adminRecord.permissions
+      ),
     });
 
     const adminPayload = buildAdminPayload({
@@ -481,9 +527,10 @@ export async function GET() {
         authenticated: false,
         error: safeErrorMessage(error),
         reason: "unexpected_admin_api_error",
-        message: "The admin API crashed while checking the admin account.",
+        message:
+          "The admin API crashed while checking the admin account.",
         likelyFix:
-          "Check the cookies set by the login route and check public.admin_users.",
+          "Check the login cookies and the public.admin_users table.",
         route: ROUTE_NAME,
       },
       500
