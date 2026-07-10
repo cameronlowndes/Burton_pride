@@ -30,6 +30,29 @@ const allowedFinanceNoteStatuses = [
   "resolved",
 ];
 
+
+/**
+ * Private receipt/invoice storage.
+ *
+ * MONEY_INVOICES_BUCKET must contain the bucket ID, not merely its display
+ * label. The default keeps compatibility with the existing project.
+ */
+const MONEY_INVOICES_BUCKET =
+  process.env.MONEY_INVOICES_BUCKET?.trim() || "money-invoices";
+
+const MONEY_INVOICE_SIGNED_URL_SECONDS = 60 * 60;
+const MAX_MONEY_INVOICE_SIZE_BYTES = 10 * 1024 * 1024;
+
+const ALLOWED_MONEY_INVOICE_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+const PRIVATE_STORAGE_REFERENCE_PREFIX =
+  `storage://${MONEY_INVOICES_BUCKET}/`;
+
 function isStripeKeyLive() {
   return process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") === true;
 }
@@ -296,6 +319,168 @@ async function insertTransactionWithReference(
   };
 }
 
+function privateStorageReference(storagePath: string) {
+  return `${PRIVATE_STORAGE_REFERENCE_PREFIX}${storagePath}`;
+}
+
+function extractMoneyInvoiceStoragePath(value: unknown) {
+  const text = String(value || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (text.startsWith(PRIVATE_STORAGE_REFERENCE_PREFIX)) {
+    return text.slice(PRIVATE_STORAGE_REFERENCE_PREFIX.length);
+  }
+
+  /*
+   * Support old database rows that contain a Supabase public, signed or
+   * authenticated object URL. This allows older receipts to keep working
+   * after the bucket is changed to private.
+   */
+  try {
+    const url = new URL(text);
+
+    const possibleMarkers = [
+      `/storage/v1/object/public/${MONEY_INVOICES_BUCKET}/`,
+      `/storage/v1/object/sign/${MONEY_INVOICES_BUCKET}/`,
+      `/storage/v1/object/authenticated/${MONEY_INVOICES_BUCKET}/`,
+    ];
+
+    for (const marker of possibleMarkers) {
+      const markerIndex = url.pathname.indexOf(marker);
+
+      if (markerIndex >= 0) {
+        const encodedPath = url.pathname.slice(
+          markerIndex + marker.length
+        );
+
+        try {
+          return decodeURIComponent(encodedPath);
+        } catch {
+          return encodedPath;
+        }
+      }
+    }
+  } catch {
+    // It is not a URL. Continue and return an empty path.
+  }
+
+  return "";
+}
+
+async function requireMoneyInvoicesBucket() {
+  const {
+    data: bucket,
+    error,
+  } = await supabaseAdmin.storage.getBucket(
+    MONEY_INVOICES_BUCKET
+  );
+
+  if (error || !bucket) {
+    console.error(
+      "Money invoices bucket could not be found:",
+      {
+        bucketId:
+          MONEY_INVOICES_BUCKET,
+
+        message:
+          error?.message ||
+          "Bucket was not returned.",
+
+        supabaseProject:
+          process.env.NEXT_PUBLIC_SUPABASE_URL ||
+          process.env.SUPABASE_URL ||
+          "Not configured",
+      }
+    );
+
+    throw new Error(
+      `The Supabase Storage bucket "${MONEY_INVOICES_BUCKET}" was not found. ` +
+        "Check the bucket ID and make sure NEXT_PUBLIC_SUPABASE_URL and " +
+        "SUPABASE_SERVICE_ROLE_KEY belong to the same Supabase project."
+    );
+  }
+
+  if (bucket.public) {
+    console.warn(
+      `The "${MONEY_INVOICES_BUCKET}" bucket is public. ` +
+        "Money receipts and invoices should be stored in a private bucket."
+    );
+  }
+
+  return bucket;
+}
+
+async function createMoneyInvoiceSignedUrl(
+  storagePath: string
+) {
+  const {
+    data,
+    error,
+  } = await supabaseAdmin.storage
+    .from(MONEY_INVOICES_BUCKET)
+    .createSignedUrl(
+      storagePath,
+      MONEY_INVOICE_SIGNED_URL_SECONDS
+    );
+
+  if (error || !data?.signedUrl) {
+    console.error(
+      "Failed to create a signed money invoice URL:",
+      {
+        bucketId:
+          MONEY_INVOICES_BUCKET,
+
+        storagePath,
+
+        error:
+          error || null,
+      }
+    );
+
+    return null;
+  }
+
+  return data.signedUrl;
+}
+
+function validateMoneyInvoiceFile(file: File) {
+  if (!file || file.size <= 0) {
+    throw new Error(
+      "The selected receipt or invoice is empty."
+    );
+  }
+
+  if (
+    file.size >
+    MAX_MONEY_INVOICE_SIZE_BYTES
+  ) {
+    throw new Error(
+      `"${file.name}" is too large. ` +
+        "Receipts and invoices must be 10 MB or smaller."
+    );
+  }
+
+  const mimeType =
+    file.type ||
+    "application/octet-stream";
+
+  if (
+    !ALLOWED_MONEY_INVOICE_MIME_TYPES.has(
+      mimeType
+    )
+  ) {
+    throw new Error(
+      `"${file.name}" is not an allowed receipt file. ` +
+        "Please upload a PDF, JPG, PNG or WebP file."
+    );
+  }
+
+  return mimeType;
+}
+
 async function uploadTransactionAttachments({
   transactionId,
   files,
@@ -303,6 +488,8 @@ async function uploadTransactionAttachments({
   transactionId: string;
   files: File[];
 }) {
+  await requireMoneyInvoicesBucket();
+
   const uploadedAttachments: any[] = [];
 
   for (const file of files) {
@@ -310,74 +497,227 @@ async function uploadTransactionAttachments({
       continue;
     }
 
-    const fileExt =
-      file.name.split(".").pop() || "file";
+    const mimeType =
+      validateMoneyInvoiceFile(file);
 
-    const cleanName = safeFileName(file.name);
+    const cleanName =
+      safeFileName(file.name) ||
+      "receipt";
 
-    const fileName = `${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}-${cleanName || `attachment.${fileExt}`}`;
+    const fileName =
+      `${Date.now()}-${crypto.randomUUID()}-${cleanName}`;
 
-    const filePath =
+    const storagePath =
       `transactions/${transactionId}/${fileName}`;
 
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer =
+      await file.arrayBuffer();
 
-    const buffer = Buffer.from(arrayBuffer);
+    const buffer =
+      Buffer.from(arrayBuffer);
 
-    const { error: uploadError } =
-      await supabaseAdmin.storage
-        .from("money-invoices")
-        .upload(filePath, buffer, {
-          contentType:
-            file.type || "application/octet-stream",
+    const {
+      data: uploadData,
+      error: uploadError,
+    } = await supabaseAdmin.storage
+      .from(MONEY_INVOICES_BUCKET)
+      .upload(storagePath, buffer, {
+        contentType:
+          mimeType,
 
-          upsert: false,
-        });
+        cacheControl:
+          "3600",
+
+        upsert:
+          false,
+      });
 
     if (uploadError) {
-      throw uploadError;
+      console.error(
+        "Money receipt upload failed:",
+        {
+          bucketId:
+            MONEY_INVOICES_BUCKET,
+
+          storagePath,
+
+          originalFileName:
+            file.name,
+
+          mimeType,
+
+          fileSize:
+            file.size,
+
+          error:
+            uploadError,
+        }
+      );
+
+      throw new Error(
+        uploadError.message ||
+          `Failed to upload "${file.name}".`
+      );
     }
 
-    const { data: publicUrlData } =
-      supabaseAdmin.storage
-        .from("money-invoices")
-        .getPublicUrl(filePath);
+    const storedPath =
+      uploadData?.path ||
+      storagePath;
 
+    /*
+     * file_url stores a permanent private-storage reference, not an expiring
+     * signed URL. This works with the existing table and does not require a
+     * new storage_path database column.
+     */
     const attachmentInsert = {
-      transaction_id: transactionId,
+      transaction_id:
+        transactionId,
 
       file_name:
-        file.name || fileName,
+        file.name ||
+        fileName,
 
       file_url:
-        publicUrlData.publicUrl,
+        privateStorageReference(
+          storedPath
+        ),
 
       file_type:
-        file.type || null,
+        mimeType,
 
       file_size:
-        file.size || null,
+        file.size,
     };
 
     const {
       data: attachment,
       error: attachmentError,
     } = await supabaseAdmin
-      .from("money_transaction_attachments")
+      .from(
+        "money_transaction_attachments"
+      )
       .insert(attachmentInsert)
       .select("*")
       .single();
 
     if (attachmentError) {
-      throw attachmentError;
+      const {
+        error: cleanupError,
+      } = await supabaseAdmin.storage
+        .from(MONEY_INVOICES_BUCKET)
+        .remove([storedPath]);
+
+      if (cleanupError) {
+        console.error(
+          "Failed to remove an orphaned receipt upload:",
+          {
+            bucketId:
+              MONEY_INVOICES_BUCKET,
+
+            storedPath,
+
+            cleanupError,
+          }
+        );
+      }
+
+      throw new Error(
+        attachmentError.message ||
+          "The receipt uploaded, but its attachment record could not be created."
+      );
     }
 
-    uploadedAttachments.push(attachment);
+    const signedUrl =
+      await createMoneyInvoiceSignedUrl(
+        storedPath
+      );
+
+    uploadedAttachments.push({
+      ...attachment,
+
+      storage_path:
+        storedPath,
+
+      /*
+       * Keep the existing frontend contract. The browser receives a usable
+       * signed URL in file_url, while the database retains the permanent
+       * private-storage reference.
+       */
+      file_url:
+        signedUrl,
+
+      signed_url:
+        signedUrl,
+
+      signed_url_expires_in:
+        MONEY_INVOICE_SIGNED_URL_SECONDS,
+    });
   }
 
   return uploadedAttachments;
+}
+
+async function addSignedUrlToMoneyAttachment(
+  attachment: any
+) {
+  const storagePath =
+    String(
+      attachment?.storage_path ||
+      extractMoneyInvoiceStoragePath(
+        attachment?.file_url
+      )
+    ).trim();
+
+  if (!storagePath) {
+    /*
+     * Keep non-Supabase legacy links working. A legacy public URL remains
+     * usable, but new uploads never store a public URL.
+     */
+    return {
+      ...attachment,
+
+      storage_path:
+        null,
+
+      file_url:
+        attachment?.file_url ||
+        null,
+
+      signed_url:
+        null,
+
+      signed_url_expires_in:
+        null,
+    };
+  }
+
+  const signedUrl =
+    await createMoneyInvoiceSignedUrl(
+      storagePath
+    );
+
+  return {
+    ...attachment,
+
+    storage_path:
+      storagePath,
+
+    file_url:
+      signedUrl,
+
+    signed_url:
+      signedUrl,
+
+    signed_url_expires_in:
+      signedUrl
+        ? MONEY_INVOICE_SIGNED_URL_SECONDS
+        : null,
+
+    signed_url_error:
+      signedUrl
+        ? null
+        : "The private receipt link could not be generated.",
+  };
 }
 
 async function loadAttachmentsForTransactions(
@@ -387,12 +727,21 @@ async function loadAttachmentsForTransactions(
     return new Map<string, any[]>();
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("money_transaction_attachments")
+  const {
+    data,
+    error,
+  } = await supabaseAdmin
+    .from(
+      "money_transaction_attachments"
+    )
     .select("*")
-    .in("transaction_id", transactionIds)
+    .in(
+      "transaction_id",
+      transactionIds
+    )
     .order("created_at", {
-      ascending: true,
+      ascending:
+        true,
     });
 
   if (error) {
@@ -404,17 +753,61 @@ async function loadAttachmentsForTransactions(
     return new Map<string, any[]>();
   }
 
-  const map = new Map<string, any[]>();
+  const attachments =
+    data || [];
 
-  for (const attachment of data || []) {
+  if (attachments.length === 0) {
+    return new Map<string, any[]>();
+  }
+
+  /*
+   * Only check the bucket when at least one attachment needs a private signed
+   * URL. Legacy external/public links can still be returned without it.
+   */
+  const needsPrivateBucket =
+    attachments.some((attachment) =>
+      Boolean(
+        attachment?.storage_path ||
+        extractMoneyInvoiceStoragePath(
+          attachment?.file_url
+        )
+      )
+    );
+
+  if (needsPrivateBucket) {
+    await requireMoneyInvoicesBucket();
+  }
+
+  const signedAttachments =
+    await Promise.all(
+      attachments.map(
+        addSignedUrlToMoneyAttachment
+      )
+    );
+
+  const map =
+    new Map<string, any[]>();
+
+  for (
+    const attachment of signedAttachments
+  ) {
     const transactionId =
-      attachment.transaction_id;
+      String(
+        attachment.transaction_id ||
+        ""
+      ).trim();
+
+    if (!transactionId) {
+      continue;
+    }
 
     if (!map.has(transactionId)) {
       map.set(transactionId, []);
     }
 
-    map.get(transactionId)?.push(attachment);
+    map
+      .get(transactionId)
+      ?.push(attachment);
   }
 
   return map;
@@ -1416,23 +1809,14 @@ async function createTransactionFromPayload({
             invoiceFiles,
         });
 
-      if (
-        attachments[0]?.file_url
-      ) {
-        await supabaseAdmin
-          .from("money_transactions")
-          .update({
-            invoice_image_url:
-              attachments[0].file_url,
-          })
-          .eq(
-            "id",
-            data.id
-          );
-
-        data.invoice_image_url =
-          attachments[0].file_url;
-      }
+      /*
+       * Do not save an expiring signed URL in money_transactions.
+       * Attachments are loaded from money_transaction_attachments and receive
+       * a fresh signed URL each time GET is called.
+       */
+      data.invoice_image_url =
+        attachments[0]?.file_url ||
+        null;
     } catch (attachmentError: any) {
       return NextResponse.json(
         {
@@ -1580,12 +1964,20 @@ async function createTransactionFromPayload({
     });
   }
 
-  return NextResponse.json({
-    ok: true,
+  return NextResponse.json(
+    {
+      ok: true,
 
-    transaction:
-      transactionWithAttachments,
-  });
+      transaction:
+        transactionWithAttachments,
+    },
+    {
+      headers: {
+        "Cache-Control":
+          "no-store",
+      },
+    }
+  );
 }
 
 /**
