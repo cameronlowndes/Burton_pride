@@ -1,109 +1,58 @@
 'use client';
 
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useMemo, useState } from 'react';
-
-type QuickLink = {
-  label: string;
-  href: string;
-  description: string;
-  adminOnly?: boolean;
-  icon: string;
-};
-
-type HelpItem = {
-  title: string;
-  desc: string;
-  icon: string;
-};
-
-type FloatingOrb = {
-  id: number;
-  size: number;
-  top: string;
-  left: string;
-  duration: number;
-  delay: number;
-  opacity: number;
-};
-
-type SearchItem = {
-  title: string;
-  href: string;
-  category: 'public' | 'admin';
-};
+import { motion, useReducedMotion } from 'framer-motion';
+import {
+  ArrowLeft,
+  CalendarDays,
+  ChevronRight,
+  ExternalLink,
+  Home,
+  LayoutDashboard,
+  Mail,
+  SearchX,
+  Users,
+} from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 type AdminMeResponse = {
   ok?: boolean;
   admin?: unknown;
 };
 
-function clsx(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(' ');
-}
+type UsefulLink = {
+  title: string;
+  description: string;
+  href: string;
+  icon: typeof Home;
+};
 
-function buildSupportMailto(currentUrl: string) {
-  const subject = 'Missing page or feature request';
-  const body = [
-    'Hi Cameron,',
-    '',
-    'I found a missing page or feature on the website/admin portal.',
-    '',
-    `Page URL: ${currentUrl || 'Unknown'}`,
-    'What I expected:',
-    'What happened instead:',
-    'Feature request:',
-    '',
-    'Thanks.',
-  ].join('\n');
-
-  return `mailto:cameronlowndes@burtonpride.co.uk?subject=${encodeURIComponent(
-    subject
-  )}&body=${encodeURIComponent(body)}`;
-}
-
-function useClientLocation() {
-  const [currentUrl, setCurrentUrl] = useState('');
-  const [pathname, setPathname] = useState('');
-  const [referrer, setReferrer] = useState('');
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    setCurrentUrl(window.location.href);
-    setPathname(window.location.pathname || '');
-    setReferrer(document.referrer || '');
-  }, []);
-
-  return { currentUrl, pathname, referrer };
-}
-
-function useTimeGreeting() {
-  const [greeting, setGreeting] = useState('Hello');
-
-  useEffect(() => {
-    const updateGreeting = () => {
-      const hour = new Date().getHours();
-
-      if (hour < 12) {
-        setGreeting('Good morning');
-        return;
-      }
-
-      if (hour < 18) {
-        setGreeting('Good afternoon');
-        return;
-      }
-
-      setGreeting('Good evening');
-    };
-
-    updateGreeting();
-  }, []);
-
-  return greeting;
-}
+const usefulLinks: UsefulLink[] = [
+  {
+    title: 'Home',
+    description: 'Return to the Burton Pride website.',
+    href: '/',
+    icon: Home,
+  },
+  {
+    title: 'Events',
+    description: 'See upcoming events and activities.',
+    href: '/Events',
+    icon: CalendarDays,
+  },
+  {
+    title: 'Meet Us',
+    description: 'Learn more about the Burton Pride team.',
+    href: '/MeetUs',
+    icon: Users,
+  },
+  {
+    title: 'Contact Us',
+    description: 'Get help from the Burton Pride team.',
+    href: '/ContactUS',
+    icon: Mail,
+  },
+];
 
 function useAdminSession() {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -112,7 +61,7 @@ function useAdminSession() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadAdminSession() {
+    async function checkSession() {
       try {
         const response = await fetch('/api/admin/me', {
           method: 'GET',
@@ -130,7 +79,7 @@ function useAdminSession() {
         const data = (await response.json()) as AdminMeResponse;
         setIsSignedIn(Boolean(data?.ok && data?.admin));
       } catch (error) {
-        console.error('NotFound admin session check failed:', error);
+        console.error('404 admin session check failed:', error);
 
         if (!cancelled) {
           setIsSignedIn(false);
@@ -142,7 +91,7 @@ function useAdminSession() {
       }
     }
 
-    loadAdminSession();
+    checkSession();
 
     return () => {
       cancelled = true;
@@ -152,134 +101,59 @@ function useAdminSession() {
   return { isLoaded, isSignedIn };
 }
 
-function generateOrbs(): FloatingOrb[] {
-  return [
-    { id: 1, size: 280, top: '-4%', left: '-2%', duration: 12, delay: 0, opacity: 0.2 },
-    { id: 2, size: 220, top: '12%', left: '72%', duration: 11, delay: 0.6, opacity: 0.16 },
-    { id: 3, size: 180, top: '72%', left: '10%', duration: 10, delay: 1.2, opacity: 0.14 },
-    { id: 4, size: 360, top: '65%', left: '60%', duration: 14, delay: 0.4, opacity: 0.18 },
-    { id: 5, size: 130, top: '45%', left: '40%', duration: 9, delay: 1, opacity: 0.1 },
-  ];
+function useCurrentPage() {
+  const [currentUrl, setCurrentUrl] = useState('');
+  const [pathname, setPathname] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    setCurrentUrl(window.location.href);
+    setPathname(window.location.pathname || '/');
+  }, []);
+
+  return { currentUrl, pathname };
 }
 
-function getPublicQuickLinks(): QuickLink[] {
-  return [
-    { label: 'Return to Home', href: '/', description: 'Go back to the main website homepage.', icon: '🏠' },
-    { label: 'Contact Us', href: '/ContactUS', description: 'Open the public contact page for help.', icon: '📞' },
-    { label: 'Events', href: '/Events', description: 'Check current or upcoming event pages.', icon: '🎉' },
-    { label: 'Meet Us', href: '/MeetUs', description: 'View the committee and team profiles.', icon: '👥' },
-  ];
+function buildSupportMailto(currentUrl: string) {
+  const subject = 'Broken or missing Burton Pride page';
+  const body = [
+    'Hello Cameron,',
+    '',
+    'I found a page that is missing or not working.',
+    '',
+    `Page URL: ${currentUrl || 'Not available'}`,
+    '',
+    'What I was trying to find:',
+    '',
+    'What happened:',
+    '',
+    'Thank you.',
+  ].join('\n');
+
+  return `mailto:cameronlowndes@burtonpride.co.uk?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
 }
 
-function getAdminQuickLinks(): QuickLink[] {
-  return [
-    { label: 'Dashboard', href: '/Admin/Dashboard', description: 'Open the admin dashboard.', adminOnly: true, icon: '📊' },
-    { label: 'Email Centre', href: '/Admin/Email', description: 'Manage admin inboxes and outgoing email.', adminOnly: true, icon: '📧' },
-    { label: 'Countdowns', href: '/Admin/Countdown', description: 'Create and manage website countdowns.', adminOnly: true, icon: '⏳' },
-    { label: 'Website Pages', href: '/Admin/Pages', description: 'Enable, disable, and manage website pages.', adminOnly: true, icon: '🌐' },
-    { label: 'Committee Profiles', href: '/Admin/Committee', description: 'Edit Meet Us committee stories and details.', adminOnly: true, icon: '🧑‍💼' },
-    { label: 'Settings', href: '/Admin/Settings', description: 'Update account and portal settings.', adminOnly: true, icon: '⚙️' },
-  ];
-}
-
-function getHelpItems(isSignedIn: boolean): HelpItem[] {
-  const common: HelpItem[] = [
-    {
-      title: 'Go back to the previous page',
-      desc: 'Try returning to the last page you were on. This often fixes broken navigation journeys.',
-      icon: '↩️',
-    },
-    {
-      title: 'Use a trusted page link',
-      desc: 'Open a known page like the homepage, contact page, or dashboard and continue from there.',
-      icon: '🔗',
-    },
-    {
-      title: 'Report missing pages',
-      desc: 'If this page should exist, send the broken URL and details to Cameron for review.',
-      icon: '📨',
-    },
-  ];
-
-  if (isSignedIn) {
-    return [
-      {
-        title: 'Return to the admin dashboard',
-        desc: 'Signed-in admins can jump back into the admin portal and continue working from a stable page.',
-        icon: '🛡️',
-      },
-      ...common,
-      {
-        title: 'Check page controls',
-        desc: 'The page may have been disabled, moved, or unpublished from the website or admin portal.',
-        icon: '🧭',
-      },
-    ];
-  }
-
-  return common;
-}
-
-function getSearchItems(isSignedIn: boolean): SearchItem[] {
-  const items: SearchItem[] = [
-    { title: 'Home', href: '/', category: 'public' },
-    { title: 'Contact Us', href: '/ContactUS', category: 'public' },
-    { title: 'Events', href: '/Events', category: 'public' },
-    { title: 'Meet Us', href: '/MeetUs', category: 'public' },
-    { title: 'Sponsors', href: '/Sponsors', category: 'public' },
-  ];
-
-  if (isSignedIn) {
-    items.push(
-      { title: 'Admin Dashboard', href: '/Admin/Dashboard', category: 'admin' },
-      { title: 'Admin Email', href: '/Admin/Email', category: 'admin' },
-      { title: 'Admin Countdowns', href: '/Admin/Countdown', category: 'admin' },
-      { title: 'Admin Pages', href: '/Admin/Pages', category: 'admin' },
-      { title: 'Admin Committee', href: '/Admin/Committee', category: 'admin' },
-      { title: 'Admin Settings', href: '/Admin/Settings', category: 'admin' }
-    );
-  }
-
-  return items;
-}
-
-function SectionBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/80 backdrop-blur-md">
-      <span className="h-2 w-2 rounded-full bg-pink-300" />
-      {children}
-    </span>
-  );
-}
-
-function ActionButton({
+function PrimaryAction({
   href,
   onClick,
+  icon,
   children,
-  variant = 'primary',
 }: {
   href?: string;
   onClick?: () => void;
-  children: React.ReactNode;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'warning';
+  icon: ReactNode;
+  children: ReactNode;
 }) {
-  const baseClass =
-    'inline-flex items-center justify-center rounded-2xl px-6 py-3.5 text-sm font-bold shadow-lg transition-all duration-300 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-white/40';
-
-  const variantClass =
-    variant === 'primary'
-      ? 'bg-white text-[#5b21b6] hover:bg-white/95'
-      : variant === 'secondary'
-      ? 'bg-yellow-400 text-black hover:bg-yellow-300'
-      : variant === 'warning'
-      ? 'bg-rose-500 text-white hover:bg-rose-400'
-      : 'border border-white/20 bg-white/10 text-white hover:bg-white/15';
-
-  const className = clsx(baseClass, variantClass);
+  const className =
+    'inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-violet-950 shadow-[0_12px_30px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5 hover:bg-violet-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/35';
 
   if (href) {
     return (
       <Link href={href} className={className}>
+        {icon}
         {children}
       </Link>
     );
@@ -287,380 +161,75 @@ function ActionButton({
 
   return (
     <button type="button" onClick={onClick} className={className}>
+      {icon}
       {children}
     </button>
   );
 }
 
-function FloatingBackground() {
-  const orbs = useMemo(() => generateOrbs(), []);
-
-  return (
-    <>
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(236,72,153,0.35),transparent_30%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.32),transparent_28%),radial-gradient(circle_at_bottom,rgba(59,130,246,0.28),transparent_30%)]" />
-      {orbs.map((orb) => (
-        <motion.div
-          key={orb.id}
-          className="absolute rounded-full blur-3xl"
-          style={{
-            width: orb.size,
-            height: orb.size,
-            top: orb.top,
-            left: orb.left,
-            opacity: orb.opacity,
-            background:
-              orb.id % 3 === 0
-                ? 'rgba(59,130,246,0.9)'
-                : orb.id % 2 === 0
-                ? 'rgba(168,85,247,0.9)'
-                : 'rgba(236,72,153,0.9)',
-          }}
-          animate={{
-            x: [0, 18, -12, 0],
-            y: [0, -20, 14, 0],
-            scale: [1, 1.06, 0.96, 1],
-          }}
-          transition={{
-            duration: orb.duration,
-            delay: orb.delay,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-        />
-      ))}
-      <div className="absolute inset-0 bg-black/15" />
-    </>
-  );
-}
-
-function BrokenUrlCard({
-  currentUrl,
-  pathname,
-  referrer,
+function SecondaryAction({
+  href,
+  icon,
+  children,
 }: {
-  currentUrl: string;
-  pathname: string;
-  referrer: string;
+  href: string;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-black/15 p-5 shadow-inner">
-      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-        Current page
-      </p>
-      <p className="mt-2 text-lg font-semibold text-white">404 error details</p>
-
-      <div className="mt-4 space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/55">
-            Pathname
-          </p>
-          <p className="mt-2 break-all text-sm text-white/90">{pathname || 'Not available'}</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/55">
-            Full URL
-          </p>
-          <p className="mt-2 break-all text-sm text-white/90">{currentUrl || 'Not available'}</p>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/55">
-            Referred from
-          </p>
-          <p className="mt-2 break-all text-sm text-white/90">{referrer || 'No referrer found'}</p>
-        </div>
-      </div>
-    </div>
+    <Link
+      href={href}
+      className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:-translate-y-0.5 hover:border-white/35 hover:bg-white/15 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/25"
+    >
+      {icon}
+      {children}
+    </Link>
   );
 }
 
-function HelpCards({ items }: { items: HelpItem[] }) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {items.map((item, index) => (
-        <motion.div
-          key={`${item.title}-${index}`}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 * index }}
-          className="rounded-3xl border border-white/12 bg-white/8 p-4 backdrop-blur-sm"
-        >
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-lg">
-              {item.icon}
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">{item.title}</p>
-              <p className="mt-1 text-sm leading-6 text-white/72">{item.desc}</p>
-            </div>
-          </div>
-        </motion.div>
-      ))}
-    </div>
-  );
-}
-
-function QuickLinksPanel({ isSignedIn }: { isSignedIn: boolean }) {
-  const publicLinks = getPublicQuickLinks();
-  const adminLinks = getAdminQuickLinks();
-
-  return (
-    <div className="rounded-3xl border border-white/12 bg-white/8 p-5 backdrop-blur-sm">
-      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-        Quick navigation
-      </p>
-      <h3 className="mt-2 text-xl font-bold text-white">Useful links</h3>
-
-      <div className="mt-5 grid gap-3">
-        {publicLinks.map((item) => (
-          <Link
-            key={item.label}
-            href={item.href}
-            className="group rounded-2xl border border-white/10 bg-black/10 p-4 transition-all duration-300 hover:border-white/20 hover:bg-white/10"
-          >
-            <p className="font-semibold text-white">
-              {item.icon} {item.label}
-            </p>
-            <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
-          </Link>
-        ))}
-
-        {isSignedIn && (
-          <>
-            <div className="my-2 h-px bg-white/10" />
-            {adminLinks.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="group rounded-2xl border border-white/10 bg-black/10 p-4 transition-all duration-300 hover:border-white/20 hover:bg-white/10"
-              >
-                <p className="font-semibold text-white">
-                  {item.icon} {item.label}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-white/70">{item.description}</p>
-              </Link>
-            ))}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SearchPanel({ isSignedIn }: { isSignedIn: boolean }) {
-  const [query, setQuery] = useState('');
-  const items = useMemo(() => getSearchItems(isSignedIn), [isSignedIn]);
-
-  const filtered = useMemo(() => {
-    const normalised = query.trim().toLowerCase();
-
-    if (!normalised) return items;
-
-    return items.filter((item) => item.title.toLowerCase().includes(normalised));
-  }, [items, query]);
-
-  return (
-    <div className="rounded-3xl border border-white/12 bg-white/8 p-5 backdrop-blur-sm">
-      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-        Quick search
-      </p>
-      <h3 className="mt-2 text-xl font-bold text-white">Find a useful page</h3>
-
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={
-          isSignedIn
-            ? 'Search home, dashboard, countdowns, settings...'
-            : 'Search home, contact, events...'
-        }
-        className="mt-5 w-full rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/45 focus:border-white/30"
-      />
-
-      <div className="mt-4 space-y-3">
-        <AnimatePresence mode="popLayout">
-          {filtered.length > 0 ? (
-            filtered.map((item) => (
-              <motion.div
-                key={`${item.category}-${item.href}`}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-              >
-                <Link
-                  href={item.href}
-                  className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/10 px-4 py-3 transition-all duration-300 hover:border-white/20 hover:bg-white/10"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-white">{item.title}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-white/55">
-                      {item.category === 'admin' ? 'Admin page' : 'Public page'}
-                    </p>
-                  </div>
-                  <span className="text-white/60">→</span>
-                </Link>
-              </motion.div>
-            ))
-          ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="rounded-2xl border border-dashed border-white/15 bg-black/10 p-4 text-sm text-white/70"
-            >
-              No matching page found.
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-}
-
-function SupportPanel({
-  supportMailto,
-  dashboardHref,
-  isSignedIn,
-}: {
-  supportMailto: string;
-  dashboardHref: string;
-  isSignedIn: boolean;
-}) {
-  return (
-    <div className="rounded-[28px] border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-md sm:p-8">
-      <p className="text-2xl font-bold text-white">Still stuck?</p>
-      <p className="mt-1 text-sm text-white/75">
-        Report a missing page or suggest a feature.
-      </p>
-
-      <div className="mt-6 space-y-3">
-        <a
-          href={supportMailto}
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-white px-5 py-3.5 text-sm font-bold text-[#5b21b6] shadow-lg hover:bg-white/95"
-        >
-          📧 Email Cameron
-        </a>
-
-        <Link
-          href="/ContactUS"
-          className="inline-flex w-full items-center justify-center rounded-2xl bg-purple-900/70 px-5 py-3.5 text-sm font-bold text-white shadow-lg hover:bg-purple-900"
-        >
-          📞 Visit Contact Us Page
-        </Link>
-
-        {isSignedIn && (
-          <Link
-            href={dashboardHref}
-            className="inline-flex w-full items-center justify-center rounded-2xl border border-white/15 bg-yellow-400 px-5 py-3.5 text-sm font-bold text-black shadow-lg hover:bg-yellow-300"
-          >
-            Open Admin Dashboard
-          </Link>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatusStrip({
-  isLoaded,
-  isSignedIn,
-  greeting,
-}: {
-  isLoaded: boolean;
-  isSignedIn: boolean;
-  greeting: string;
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <div className="rounded-2xl border border-white/12 bg-white/8 p-4">
-        <p className="text-xs uppercase tracking-[0.16em] text-white/55">Session</p>
-        <p className="mt-2 text-sm font-semibold text-white">
-          {!isLoaded ? 'Checking login status...' : isSignedIn ? 'Signed in' : 'Guest visitor'}
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-white/12 bg-white/8 p-4">
-        <p className="text-xs uppercase tracking-[0.16em] text-white/55">Message</p>
-        <p className="mt-2 text-sm font-semibold text-white">{greeting}</p>
-      </div>
-
-      <div className="rounded-2xl border border-white/12 bg-white/8 p-4">
-        <p className="text-xs uppercase tracking-[0.16em] text-white/55">Page status</p>
-        <p className="mt-2 text-sm font-semibold text-white">Not found / unavailable</p>
-      </div>
-    </div>
-  );
-}
-
-function AdminInsightPanel({
-  isLoaded,
-  isSignedIn,
-}: {
-  isLoaded: boolean;
-  isSignedIn: boolean;
-}) {
-  const isAdminView = isLoaded && isSignedIn;
+function UsefulLinkCard({ item, index }: { item: UsefulLink; index: number }) {
+  const Icon = item.icon;
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 18 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: 0.32, duration: 0.55 }}
-      className="rounded-3xl border border-white/10 bg-white/8 p-5 backdrop-blur-sm"
+      initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: reduceMotion ? 0 : 0.32 + index * 0.07 }}
     >
-      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white/60">
-        {isAdminView ? 'Admin note' : 'Helpful note'}
-      </p>
-      <h3 className="mt-2 text-xl font-bold text-white">Why this page may be missing</h3>
+      <Link
+        href={item.href}
+        className="group flex h-full items-center gap-4 rounded-3xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-sm transition duration-300 hover:-translate-y-1 hover:border-white/25 hover:bg-white/[0.12] focus:outline-none focus-visible:ring-4 focus-visible:ring-white/20"
+      >
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white shadow-inner transition group-hover:bg-white/15">
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </span>
 
-      <div className="mt-5 rounded-2xl border border-white/10 bg-black/10 p-4">
-        <p className="text-sm font-semibold text-white">Possible reasons</p>
-        <div className="mt-3 space-y-2 text-sm leading-6 text-white/72">
-          <p>• The page URL was typed incorrectly</p>
-          <p>• The page was moved to a new route</p>
-          <p>• The page is disabled from website controls</p>
-          <p>• The page is still in draft mode</p>
-          <p>• The page was deleted or renamed</p>
-          <p>• The admin portal route has changed</p>
-        </div>
-      </div>
+        <span className="min-w-0 flex-1">
+          <span className="block font-bold text-white">{item.title}</span>
+          <span className="mt-1 block text-sm leading-5 text-white/65">
+            {item.description}
+          </span>
+        </span>
 
-      {isAdminView && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/10 p-4">
-          <p className="text-sm font-semibold text-white">Suggested admin next steps</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Link href="/Admin/Dashboard" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
-              📊 Back to Dashboard
-            </Link>
-            <Link href="/Admin/Pages" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
-              🌐 Check Page Controls
-            </Link>
-            <Link href="/Admin/Settings" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
-              ⚙️ Review Settings
-            </Link>
-            <Link href="/Admin/Countdown" className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white hover:bg-white/10">
-              ⏳ Manage Countdowns
-            </Link>
-          </div>
-        </div>
-      )}
+        <ChevronRight
+          className="h-5 w-5 shrink-0 text-white/45 transition group-hover:translate-x-1 group-hover:text-white"
+          aria-hidden="true"
+        />
+      </Link>
     </motion.div>
   );
 }
 
 export default function NotFound() {
+  const reduceMotion = useReducedMotion();
   const { isLoaded, isSignedIn } = useAdminSession();
-  const greeting = useTimeGreeting();
-  const { currentUrl, pathname, referrer } = useClientLocation();
+  const { currentUrl, pathname } = useCurrentPage();
 
-  const dashboardHref = '/Admin/Dashboard';
-  const homeHref = '/';
-
-  const supportMailto = useMemo(() => {
-    return buildSupportMailto(currentUrl);
-  }, [currentUrl]);
-
-  const helpItems = useMemo(() => getHelpItems(isSignedIn), [isSignedIn]);
+  const supportMailto = useMemo(
+    () => buildSupportMailto(currentUrl),
+    [currentUrl]
+  );
 
   const handleGoBack = () => {
     if (typeof window === 'undefined') return;
@@ -670,94 +239,207 @@ export default function NotFound() {
       return;
     }
 
-    window.location.href = isSignedIn ? dashboardHref : homeHref;
+    window.location.assign(isSignedIn ? '/Admin/Dashboard' : '/');
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#140a2d] px-4 py-10 text-white">
-      <FloatingBackground />
+    <main className="relative min-h-screen overflow-hidden bg-[#110820] text-white">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(236,72,153,0.25),transparent_28%),radial-gradient(circle_at_88%_18%,rgba(139,92,246,0.24),transparent_30%),radial-gradient(circle_at_50%_100%,rgba(37,99,235,0.2),transparent_34%)]"
+      />
+
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(255,255,255,0.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.7)_1px,transparent_1px)] [background-size:44px_44px]"
+      />
 
       <motion.div
-        initial={{ opacity: 0, y: 24, scale: 0.985 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
-        className="relative z-10 w-full max-w-7xl"
-      >
-        <div className="overflow-hidden rounded-[34px] border border-white/15 bg-white/8 shadow-[0_25px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-          <div className="grid min-h-[820px] grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]">
-            <div className="flex flex-col justify-center px-6 py-12 sm:px-10 lg:px-14">
-              <SectionBadge>Burton Pride • Page Not Found</SectionBadge>
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-24 top-28 h-72 w-72 rounded-full bg-fuchsia-500/15 blur-3xl"
+        animate={
+          reduceMotion
+            ? undefined
+            : {
+                x: [0, 28, 0],
+                y: [0, -18, 0],
+                scale: [1, 1.08, 1],
+              }
+        }
+        transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+      />
 
-              <motion.h1
-                className="mt-6 text-7xl font-black leading-none tracking-tight sm:text-8xl xl:text-9xl"
-                animate={{ scale: [1, 1.03, 1] }}
-                transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+      <motion.div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-28 bottom-16 h-96 w-96 rounded-full bg-violet-500/15 blur-3xl"
+        animate={
+          reduceMotion
+            ? undefined
+            : {
+                x: [0, -24, 0],
+                y: [0, 20, 0],
+                scale: [1, 0.94, 1],
+              }
+        }
+        transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-6 sm:px-8 lg:px-10">
+        <header className="flex items-center justify-between">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-3 rounded-full focus:outline-none focus-visible:ring-4 focus-visible:ring-white/20"
+            aria-label="Return to Burton Pride home"
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-sm font-black text-violet-950 shadow-lg">
+              BP
+            </span>
+            <span>
+              <span className="block text-sm font-extrabold tracking-wide text-white">
+                Burton Pride
+              </span>
+              <span className="block text-xs text-white/55">
+                Created by the community
+              </span>
+            </span>
+          </Link>
+
+          {isLoaded && isSignedIn && (
+            <Link
+              href="/Admin/Dashboard"
+              className="hidden items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15 focus:outline-none focus-visible:ring-4 focus-visible:ring-white/20 sm:inline-flex"
+            >
+              <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
+              Admin Dashboard
+            </Link>
+          )}
+        </header>
+
+        <section className="flex flex-1 items-center py-12 sm:py-16 lg:py-20">
+          <div className="grid w-full items-center gap-12 lg:grid-cols-[1.08fr_0.92fr] lg:gap-16">
+            <motion.div
+              initial={reduceMotion ? false : { opacity: 0, x: -24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.55, ease: 'easeOut' }}
+              className="max-w-3xl"
+            >
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white/70 backdrop-blur">
+                <span className="h-2 w-2 rounded-full bg-pink-400" />
+                Page not found
+              </div>
+
+              <p
+                className="mt-7 bg-gradient-to-r from-pink-400 via-fuchsia-300 to-violet-300 bg-clip-text text-[clamp(6.5rem,22vw,12rem)] font-black leading-[0.78] tracking-[-0.08em] text-transparent"
+                aria-hidden="true"
               >
                 404
-              </motion.h1>
+              </p>
 
-              <h2 className="mt-4 text-3xl font-bold sm:text-4xl xl:text-5xl">
-                Lost in the Rainbow?
-              </h2>
+              <h1 className="mt-7 text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
+                This page has wandered off.
+              </h1>
 
-              <p className="mt-5 max-w-3xl text-base leading-7 text-white/84 sm:text-lg">
-                The page you are looking for does not exist, may have been moved, disabled,
-                unpublished, or is currently unavailable.
-                {isLoaded && isSignedIn
-                  ? ' You are signed in, so you can return to the admin dashboard, go back to your previous page, or review likely admin causes below.'
-                  : ' You can return to the homepage, go back to your previous page, or contact the team for help.'}
+              <p className="mt-5 max-w-2xl text-base leading-7 text-white/70 sm:text-lg sm:leading-8">
+                The link may be out of date, the page may have moved, or the address may
+                have been entered incorrectly. Use one of the options below to get back
+                on track.
               </p>
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                <ActionButton onClick={handleGoBack} variant="primary">
-                  ← Go Back
-                </ActionButton>
+                <PrimaryAction
+                  onClick={handleGoBack}
+                  icon={<ArrowLeft className="h-4 w-4" aria-hidden="true" />}
+                >
+                  Go back
+                </PrimaryAction>
 
-                {isLoaded && isSignedIn ? (
-                  <ActionButton href={dashboardHref} variant="secondary">
-                    Go to Dashboard
-                  </ActionButton>
-                ) : (
-                  <ActionButton href={homeHref} variant="secondary">
-                    🌈 Return to Home
-                  </ActionButton>
+                <SecondaryAction
+                  href="/"
+                  icon={<Home className="h-4 w-4" aria-hidden="true" />}
+                >
+                  Return home
+                </SecondaryAction>
+
+                {isLoaded && isSignedIn && (
+                  <SecondaryAction
+                    href="/Admin/Dashboard"
+                    icon={<LayoutDashboard className="h-4 w-4" aria-hidden="true" />}
+                  >
+                    Dashboard
+                  </SecondaryAction>
                 )}
-
-                <ActionButton href={supportMailto} variant="ghost">
-                  📧 Email Cameron
-                </ActionButton>
               </div>
 
-              <div className="mt-8">
-                <StatusStrip isLoaded={isLoaded} isSignedIn={isSignedIn} greeting={greeting} />
+              <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 text-sm text-white/60">
+                <a
+                  href={supportMailto}
+                  className="inline-flex items-center gap-2 font-semibold text-white/75 transition hover:text-white"
+                >
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  Report this broken page
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+
+                {pathname && (
+                  <span className="max-w-full truncate rounded-full border border-white/10 bg-black/15 px-3 py-1.5 font-mono text-xs text-white/45">
+                    {pathname}
+                  </span>
+                )}
               </div>
+            </motion.div>
 
-              <div className="mt-8">
-                <HelpCards items={helpItems} />
+            <motion.div
+              initial={reduceMotion ? false : { opacity: 0, scale: 0.94, y: 18 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: reduceMotion ? 0 : 0.12, ease: 'easeOut' }}
+              className="relative mx-auto w-full max-w-xl"
+            >
+              <div className="absolute -inset-4 rounded-[2.25rem] bg-gradient-to-br from-pink-500/25 via-violet-500/15 to-blue-500/20 blur-2xl" />
+
+              <div className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-white/[0.08] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.4)] backdrop-blur-xl sm:p-8">
+                <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,#f87171_0%,#facc15_20%,#4ade80_40%,#38bdf8_60%,#818cf8_80%,#c084fc_100%)]" />
+
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/50">
+                      Try somewhere useful
+                    </p>
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      Where would you like to go?
+                    </h2>
+                  </div>
+
+                  <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-pink-200 shadow-inner">
+                    <SearchX className="h-7 w-7" aria-hidden="true" />
+                  </span>
+                </div>
+
+                <div className="mt-7 grid gap-3">
+                  {usefulLinks.map((item, index) => (
+                    <UsefulLinkCard key={item.href} item={item} index={index} />
+                  ))}
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-white/10 bg-black/10 px-4 py-3 text-sm leading-6 text-white/55">
+                  Still cannot find what you need? Visit the contact page and the Burton
+                  Pride team will help point you in the right direction.
+                </div>
               </div>
-
-              <div className="mt-8 grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-                <QuickLinksPanel isSignedIn={isSignedIn} />
-                <SearchPanel isSignedIn={isSignedIn} />
-              </div>
-            </div>
-
-            <div className="relative border-t border-white/10 bg-black/10 px-6 py-10 lg:border-l lg:border-t-0 lg:px-10">
-              <div className="mx-auto flex h-full w-full max-w-2xl flex-col justify-center gap-5">
-                <SupportPanel
-                  supportMailto={supportMailto}
-                  dashboardHref={dashboardHref}
-                  isSignedIn={isSignedIn}
-                />
-
-                <BrokenUrlCard currentUrl={currentUrl} pathname={pathname} referrer={referrer} />
-
-                <AdminInsightPanel isLoaded={isLoaded} isSignedIn={isSignedIn} />
-              </div>
-            </div>
+            </motion.div>
           </div>
-        </div>
-      </motion.div>
+        </section>
+
+        <footer className="flex flex-col gap-2 border-t border-white/10 py-5 text-xs text-white/45 sm:flex-row sm:items-center sm:justify-between">
+          <p>Burton Pride C.I.C. • United as One</p>
+          <p aria-live="polite">
+            {isLoaded
+              ? isSignedIn
+                ? 'Admin session recognised'
+                : 'Public website'
+              : 'Checking session…'}
+          </p>
+        </footer>
+      </div>
     </main>
   );
 }

@@ -4,7 +4,7 @@ import {
   eventAuditApiError,
   noStoreJson,
   requireEventAuditPermission,
-} from "@/lib/admin/event-audit";
+} from "@/lib/event-hub-app/event-audit/index";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

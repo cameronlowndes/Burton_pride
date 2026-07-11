@@ -9,7 +9,7 @@ import {
   parseEventAuditFilters,
   requireEventAuditPermission,
   resolveAuditEventScope,
-} from "@/lib/Event-Hub-App/event-audit";
+} from "@/lib/event-hub-app/event-audit/index";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

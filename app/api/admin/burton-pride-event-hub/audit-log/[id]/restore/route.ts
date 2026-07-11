@@ -106,7 +106,7 @@ export async function POST(request: Request, { params }: Context) {
       if (current.error) throw current.error;
       before = current.data;
 
-      if (!before.is_archived && before.status !== "archived") {
+      if (!before || (!before.is_archived && before.status !== "archived")) {
         return noStoreJson(
           { ok: false, error: "This event is not currently archived." },
           409,
