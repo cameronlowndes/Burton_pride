@@ -37,13 +37,13 @@ const usefulLinks: UsefulLink[] = [
   {
     title: 'Events',
     description: 'See upcoming events and activities.',
-    href: '/Events',
+    href: '/events',
     icon: CalendarDays,
   },
   {
     title: 'Meet Us',
     description: 'Learn more about the Burton Pride team.',
-    href: '/MeetUs',
+    href: '/MeetUS',
     icon: Users,
   },
   {
@@ -335,8 +335,8 @@ export default function NotFound() {
                 404
               </p>
 
-              <h1 className="mt-7 text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-                This page has wandered off.
+              <h1 className="mt-7 text-center text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
+                Lost in the Rainbow
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-7 text-white/70 sm:text-lg sm:leading-8">

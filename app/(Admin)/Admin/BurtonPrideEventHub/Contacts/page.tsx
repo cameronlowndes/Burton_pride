@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Ban,
   Building2,
   CheckCircle2,
+  CircleMinus,
   Download,
   Edit,
   Eye,
@@ -18,10 +20,13 @@ import {
   Save,
   Search,
   Send,
+  ThumbsUp,
   Trash2,
   X,
 } from "lucide-react";
 import { useBurtonPrideEvent } from "../../components/event-hub/BurtonPrideEventProvider";
+
+type ContactRating = "good" | "ok" | "do_not_invite";
 
 type Contact = {
   id: string;
@@ -34,6 +39,7 @@ type Contact = {
   website: string | null;
   address: string | null;
   service_type: string | null;
+  working_rating?: ContactRating | null;
   selling: string | null;
   selling_image_url: string | null;
   selling_image_path?: string | null;
@@ -79,6 +85,7 @@ type FormState = {
   website: string;
   address: string;
   service_type: string;
+  working_rating: ContactRating | "";
   selling: string;
   selling_image_url: string;
   selling_image_path: string;
@@ -99,6 +106,7 @@ const emptyForm: FormState = {
   website: "",
   address: "",
   service_type: "",
+  working_rating: "",
   selling: "",
   selling_image_url: "",
   selling_image_path: "",
@@ -129,6 +137,41 @@ const activeFilters = [
   { value: "", label: "All contacts" },
   { value: "active", label: "Active only" },
   { value: "inactive", label: "Inactive only" },
+];
+
+const ratingOptions: Array<{
+  value: ContactRating | "";
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "",
+    label: "Not rated yet",
+    description: "No working relationship rating has been recorded.",
+  },
+  {
+    value: "good",
+    label: "Good to work with",
+    description: "Reliable, professional, and suitable to invite again.",
+  },
+  {
+    value: "ok",
+    label: "Okay",
+    description: "Generally acceptable, but review notes before inviting again.",
+  },
+  {
+    value: "do_not_invite",
+    label: "Do not invite",
+    description: "Do not invite or send this contact to a future event checklist.",
+  },
+];
+
+const ratingFilters = [
+  { value: "", label: "All ratings" },
+  { value: "good", label: "Good to work with" },
+  { value: "ok", label: "Okay" },
+  { value: "do_not_invite", label: "Do not invite" },
+  { value: "unrated", label: "Not rated yet" },
 ];
 
 const dataFilters = [
@@ -168,6 +211,17 @@ function csvEscape(value: unknown) {
   return text;
 }
 
+function getRatingLabel(value?: ContactRating | null) {
+  return (
+    ratingOptions.find((option) => option.value === (value || ""))?.label ||
+    "Not rated yet"
+  );
+}
+
+function isDoNotInvite(contact: Pick<Contact, "working_rating">) {
+  return contact.working_rating === "do_not_invite";
+}
+
 export default function EventHubContactsPage() {
   const {
     currentEvent,
@@ -191,6 +245,7 @@ export default function EventHubContactsPage() {
   const [search, setSearch] = useState("");
   const [serviceTypeFilter, setServiceTypeFilter] = useState("");
   const [activeFilter, setActiveFilter] = useState("");
+  const [ratingFilter, setRatingFilter] = useState("");
   const [dataFilter, setDataFilter] = useState("");
   const [notice, setNotice] = useState<NoticeMessage | null>(null);
 
@@ -471,6 +526,15 @@ export default function EventHubContactsPage() {
     const missingSelling = contacts.filter((contact) => isSeller(contact) && !clean(contact.selling)).length;
     const missingImage = contacts.filter((contact) => isSeller(contact) && !getContactImageUrl(contact)).length;
     const notSentToChecklist = contacts.filter((contact) => !contact.sent_to_checklist).length;
+    const goodToWorkWith = contacts.filter(
+      (contact) => contact.working_rating === "good",
+    ).length;
+    const okayToWorkWith = contacts.filter(
+      (contact) => contact.working_rating === "ok",
+    ).length;
+    const doNotInvite = contacts.filter(
+      (contact) => contact.working_rating === "do_not_invite",
+    ).length;
 
     return {
       total,
@@ -480,6 +544,9 @@ export default function EventHubContactsPage() {
       missingSelling,
       missingImage,
       notSentToChecklist,
+      goodToWorkWith,
+      okayToWorkWith,
+      doNotInvite,
     };
   }, [contacts, localImageUrls, editingId, form.selling_image_url, formLocalImageUrl]);
 
@@ -515,6 +582,11 @@ export default function EventHubContactsPage() {
         (activeFilter === "active" && contact.is_active) ||
         (activeFilter === "inactive" && !contact.is_active);
 
+      const matchesRating =
+        !ratingFilter ||
+        (ratingFilter === "unrated" && !contact.working_rating) ||
+        contact.working_rating === ratingFilter;
+
       const matchesData =
         !dataFilter ||
         (dataFilter === "missing_email" && !clean(contact.email)) ||
@@ -534,12 +606,27 @@ export default function EventHubContactsPage() {
         clean(contact.website).toLowerCase().includes(q) ||
         clean(contact.address).toLowerCase().includes(q) ||
         serviceType.includes(q) ||
+        getRatingLabel(contact.working_rating).toLowerCase().includes(q) ||
         clean(contact.selling).toLowerCase().includes(q) ||
         clean(contact.notes).toLowerCase().includes(q);
 
-      return matchesServiceType && matchesActive && matchesData && matchesSearch;
+      return (
+        matchesServiceType &&
+        matchesActive &&
+        matchesRating &&
+        matchesData &&
+        matchesSearch
+      );
     });
-  }, [contacts, search, serviceTypeFilter, activeFilter, dataFilter, localImageUrls]);
+  }, [
+    contacts,
+    search,
+    serviceTypeFilter,
+    activeFilter,
+    ratingFilter,
+    dataFilter,
+    localImageUrls,
+  ]);
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -661,6 +748,17 @@ export default function EventHubContactsPage() {
   }
 
   function openEmailAppForContact(contact: Contact) {
+    if (isDoNotInvite(contact)) {
+      setNotice({
+        type: "error",
+        title: "Contact marked Do not invite",
+        message: `${contact.business_name} is marked as Do not invite.`,
+        details:
+          "Review the contact notes and change the working rating before preparing a new event invitation.",
+      });
+      return;
+    }
+
     const email = clean(contact.email);
 
     if (!email) {
@@ -699,6 +797,7 @@ export default function EventHubContactsPage() {
       website: contact.website || "",
       address: contact.address || "",
       service_type: contact.service_type || "",
+      working_rating: contact.working_rating || "",
       selling: contact.selling || "",
       selling_image_url: contact.selling_image_url || "",
       selling_image_path: contact.selling_image_path || "",
@@ -874,6 +973,7 @@ export default function EventHubContactsPage() {
       website: normaliseWebsite(form.website) || null,
       address: clean(form.address) || null,
       service_type: clean(form.service_type) || null,
+      working_rating: form.working_rating || null,
       selling: clean(form.selling) || null,
       selling_image_url: clean(form.selling_image_url) || null,
       selling_image_path: clean(form.selling_image_path) || null,
@@ -993,6 +1093,14 @@ export default function EventHubContactsPage() {
   async function sendToChecklist(contact: Contact) {
     try {
       requireEditableEvent();
+
+      if (isDoNotInvite(contact)) {
+        throw createLocalError(
+          "Send contact to checklist",
+          `${contact.business_name} is marked as Do not invite.`,
+          "Change the working rating before adding this contact to an event checklist.",
+        );
+      }
       setActionId(contact.id);
       setNotice(null);
 
@@ -1093,6 +1201,7 @@ export default function EventHubContactsPage() {
       "website",
       "address",
       "service_type",
+      "working_rating",
       "selling",
       "selling_image_url",
       "is_active",
@@ -1108,6 +1217,7 @@ export default function EventHubContactsPage() {
       contact.website || "",
       contact.address || "",
       contact.service_type || "",
+      getRatingLabel(contact.working_rating),
       contact.selling || "",
       contact.selling_image_url || "",
       contact.is_active ? "yes" : "no",
@@ -1130,7 +1240,7 @@ export default function EventHubContactsPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(236,72,153,0.22),_transparent_32%),linear-gradient(180deg,#12091f_0%,#24113a_48%,#111827_100%)] text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6 md:px-6">
+      <div className="w-full px-3 py-6 sm:px-4 lg:px-6 xl:px-8">
         <div className="mb-6 rounded-[32px] border border-white/10 bg-white/10 p-6 shadow-2xl backdrop-blur-xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -1266,17 +1376,20 @@ export default function EventHubContactsPage() {
           </div>
         )}
 
-        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Total contacts" value={stats.total} />
           <StatCard label="Active" value={stats.active} good />
           <StatCard label="Food vendors" value={stats.foodVendors} />
+          <StatCard label="Good to work with" value={stats.goodToWorkWith} good />
+          <StatCard label="Okay" value={stats.okayToWorkWith} />
+          <StatCard label="Do not invite" value={stats.doNotInvite} danger={stats.doNotInvite > 0} />
           <StatCard label="Missing email" value={stats.missingEmail} warning={stats.missingEmail > 0} />
           <StatCard label="Missing selling info" value={stats.missingSelling} warning={stats.missingSelling > 0} />
           <StatCard label="Missing image" value={stats.missingImage} warning={stats.missingImage > 0} />
           <StatCard label="Not sent to checklist" value={stats.notSentToChecklist} warning={stats.notSentToChecklist > 0} />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[430px_minmax(0,1fr)]">
+        <div className="grid w-full gap-6 xl:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]">
           <div className="rounded-[32px] border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
             <h2 className="mb-4 text-xl font-bold">
               {editingId ? "Edit business contact" : "Add business contact"}
@@ -1309,6 +1422,48 @@ export default function EventHubContactsPage() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <label className="mb-2 block text-sm font-semibold text-white/75">
+                  Working relationship rating
+                </label>
+                <select
+                  value={form.working_rating}
+                  onChange={(e) =>
+                    updateForm(
+                      "working_rating",
+                      e.target.value as ContactRating | "",
+                    )
+                  }
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none"
+                >
+                  {ratingOptions.map((option) => (
+                    <option
+                      key={option.value || "unrated"}
+                      value={option.value}
+                      className="bg-[#1f1030]"
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <p className="mt-2 text-xs leading-5 text-white/50">
+                  {
+                    ratingOptions.find(
+                      (option) => option.value === form.working_rating,
+                    )?.description
+                  }
+                </p>
+
+                {form.working_rating === "do_not_invite" && (
+                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-400/25 bg-red-500/10 p-3 text-xs font-semibold leading-5 text-red-100">
+                    <Ban className="mt-0.5 h-4 w-4 shrink-0" />
+                    Invitation emails and checklist actions will be blocked until
+                    this rating is changed.
+                  </div>
+                )}
               </div>
 
               <textarea
@@ -1426,7 +1581,7 @@ export default function EventHubContactsPage() {
                 </p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
                   <input
@@ -1447,6 +1602,12 @@ export default function EventHubContactsPage() {
                 <select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none">
                   {activeFilters.map((filter) => (
                     <option key={filter.value} value={filter.value} className="bg-[#1f1030]">{filter.label}</option>
+                  ))}
+                </select>
+
+                <select value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value)} className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm outline-none">
+                  {ratingFilters.map((filter) => (
+                    <option key={filter.value || "all"} value={filter.value} className="bg-[#1f1030]">{filter.label}</option>
                   ))}
                 </select>
 
@@ -1569,12 +1730,26 @@ export default function EventHubContactsPage() {
   );
 }
 
-function StatCard({ label, value, warning = false, good = false }: { label: string; value: number; warning?: boolean; good?: boolean }) {
-  const colour = good
-    ? "border-emerald-400/20 bg-emerald-500/10"
-    : warning
-      ? "border-amber-400/20 bg-amber-500/10"
-      : "border-white/10 bg-white/10";
+function StatCard({
+  label,
+  value,
+  warning = false,
+  good = false,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  warning?: boolean;
+  good?: boolean;
+  danger?: boolean;
+}) {
+  const colour = danger
+    ? "border-red-400/25 bg-red-500/10"
+    : good
+      ? "border-emerald-400/20 bg-emerald-500/10"
+      : warning
+        ? "border-amber-400/20 bg-amber-500/10"
+        : "border-white/10 bg-white/10";
 
   return (
     <div className={`rounded-3xl border p-5 ${colour}`}>
@@ -1616,6 +1791,41 @@ function MiniStatus({ good, label }: { good: boolean; label: string }) {
   );
 }
 
+function RatingBadge({ rating }: { rating?: ContactRating | null }) {
+  if (rating === "good") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-100">
+        <ThumbsUp className="h-3.5 w-3.5" />
+        Good to work with
+      </span>
+    );
+  }
+
+  if (rating === "ok") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-sky-400/25 bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-100">
+        <CircleMinus className="h-3.5 w-3.5" />
+        Okay
+      </span>
+    );
+  }
+
+  if (rating === "do_not_invite") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-red-400/30 bg-red-500/15 px-3 py-1 text-xs font-black text-red-100">
+        <Ban className="h-3.5 w-3.5" />
+        Do not invite
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/50">
+      Not rated
+    </span>
+  );
+}
+
 function ContactCard({
   contact,
   imageUrl,
@@ -1650,11 +1860,25 @@ function ContactCard({
               </span>
             )}
 
+            <RatingBadge rating={contact.working_rating} />
             {contact.is_active ? <MiniStatus good label="Active" /> : <MiniStatus good={false} label="Inactive" />}
             {contact.sent_to_checklist ? <MiniStatus good label="Checklist" /> : <MiniStatus good={false} label="Not checklist" />}
           </div>
 
           {contact.contact_name && <p className="mt-1 text-sm text-white/70">Contact: {contact.contact_name}</p>}
+
+          {isDoNotInvite(contact) && (
+            <div className="mt-4 flex items-start gap-3 rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
+              <Ban className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <p className="font-black">Do not invite this contact</p>
+                <p className="mt-1 text-xs leading-5 text-red-50/75">
+                  Review the saved notes before changing this rating. Invitation
+                  email and checklist actions are blocked.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 grid gap-2 text-sm text-white/70">
             {contact.email && (
@@ -1723,14 +1947,45 @@ function ContactCard({
             View image
           </button>
 
-          <button type="button" onClick={onEmail} className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20">
+          <button
+            type="button"
+            onClick={onEmail}
+            disabled={isDoNotInvite(contact)}
+            title={
+              isDoNotInvite(contact)
+                ? "This contact is marked Do not invite"
+                : "Prepare an invitation email"
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
             <Mail className="h-4 w-4" />
             Email
           </button>
 
-          <button type="button" onClick={onSendToChecklist} disabled={locked || actionLoading || Boolean(contact.sent_to_checklist)} className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50">
+          <button
+            type="button"
+            onClick={onSendToChecklist}
+            disabled={
+              locked ||
+              actionLoading ||
+              Boolean(contact.sent_to_checklist) ||
+              isDoNotInvite(contact)
+            }
+            title={
+              isDoNotInvite(contact)
+                ? "This contact is marked Do not invite"
+                : "Send to checklist"
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-bold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
             <Send className="h-4 w-4" />
-            {actionLoading ? "Sending..." : contact.sent_to_checklist ? "Sent" : "Checklist"}
+            {actionLoading
+              ? "Sending..."
+              : isDoNotInvite(contact)
+                ? "Blocked"
+                : contact.sent_to_checklist
+                  ? "Sent"
+                  : "Checklist"}
           </button>
 
           <button type="button" onClick={onEdit} disabled={locked} className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">

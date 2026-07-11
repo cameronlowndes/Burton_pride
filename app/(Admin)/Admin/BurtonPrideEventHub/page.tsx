@@ -519,8 +519,8 @@ export default async function BurtonPrideEventHubHomePage() {
   const permissionCount = getPermissionCount(admin);
 
   return (
-    <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(236,72,153,0.14),_transparent_32%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-7xl">
+    <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.18),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(236,72,153,0.14),_transparent_32%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-2 py-4 text-white sm:px-3 sm:py-6 lg:px-4 lg:py-8 xl:px-5">
+      <div className="w-full">
         <header className="mb-6 rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-2xl backdrop-blur-xl sm:p-7">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
@@ -581,7 +581,7 @@ export default async function BurtonPrideEventHubHomePage() {
         {!admin ? (
           <LoggedOutPanel />
         ) : (
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+          <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] 2xl:grid-cols-[minmax(0,1fr)_440px]">
             <section className="grid gap-6">
               <AdminPanel
                 email={userName}
@@ -615,7 +615,7 @@ export default async function BurtonPrideEventHubHomePage() {
 
 function LoggedOutPanel() {
   return (
-    <section className="mx-auto flex min-h-[58vh] max-w-4xl items-center justify-center">
+    <section className="flex min-h-[58vh] w-full items-center justify-center">
       <div className="w-full rounded-[2rem] border border-amber-300/20 bg-amber-500/10 p-7 text-center shadow-2xl backdrop-blur-xl sm:p-10">
         <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-amber-500/15 text-amber-100 ring-1 ring-amber-300/20">
           <Lock className="h-8 w-8" />

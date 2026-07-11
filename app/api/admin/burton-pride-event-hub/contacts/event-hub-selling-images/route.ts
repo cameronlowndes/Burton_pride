@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { createEventAuditLog } from "@/lib/event-hub-app/event-audit";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,14 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const AUDIT_ACTION = "business_contact.selling_image_uploaded";
 const AUDIT_AREA = "contacts";
 
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
 type UploadResponse = {
   ok: boolean;
   error?: string;
@@ -22,32 +31,13 @@ type UploadResponse = {
   audit_logged?: boolean;
 };
 
-type AdminUserRow = {
-  id: string;
-  email: string | null;
-  role: string | null;
-  is_active: boolean | null;
-};
-
-type AuditActor = Parameters<
-  typeof createEventAuditLog
->[0]["actor"];
-
-type AdminCheckResult =
-  | {
-      ok: true;
-      actor: AuditActor;
-    }
-  | {
-      ok: false;
-      error: string;
-      details: string;
-    };
+type AuditActor = Parameters<typeof createEventAuditLog>[0]["actor"];
 
 type UploadAuditContext = {
   actor: AuditActor;
   request: NextRequest;
   eventId?: string | null;
+  eventYear?: number | null;
   contactId?: string | null;
   businessName?: string | null;
   fileName?: string | null;
@@ -56,10 +46,7 @@ type UploadAuditContext = {
   fileSize?: number | null;
 };
 
-function jsonResponse(
-  body: UploadResponse,
-  status = 200,
-) {
+function jsonResponse(body: UploadResponse, status = 200) {
   return NextResponse.json(body, {
     status,
     headers: {
@@ -76,8 +63,18 @@ function clean(value: unknown): string {
 }
 
 function nullableText(value: unknown): string | null {
-  const text = clean(value);
-  return text.length > 0 ? text : null;
+  const valueText = clean(value);
+  return valueText ? valueText : null;
+}
+
+function toEventYear(value: unknown): number | null {
+  const year = Number(value);
+
+  if (!Number.isInteger(year) || year < 2024 || year > 2100) {
+    return null;
+  }
+
+  return year;
 }
 
 function getImageExtension(mimeType: string): string {
@@ -118,125 +115,114 @@ function safeErrorMessage(error: unknown): string {
   return "Unknown image-upload error.";
 }
 
-function createAuditActor(
-  admin: AdminUserRow,
-): AuditActor {
-  /*
-   * Your audit actor currently uses id, email, role and name.
-   * The name falls back to the administrator's email because the
-   * existing admin_users query does not require a name column.
-   */
+function createAuditActor(admin: unknown): AuditActor {
+  const row = admin as {
+    id?: unknown;
+    email?: unknown;
+    role?: unknown;
+    name?: unknown;
+    full_name?: unknown;
+  };
+
+  const email = clean(row.email);
+
   return {
-    id: clean(admin.id),
-    email: clean(admin.email),
-    role: clean(admin.role) || "admin",
-    name: clean(admin.email) || "Administrator",
+    id: clean(row.id),
+    email,
+    role: clean(row.role) || "admin",
+    name:
+      clean(row.name) ||
+      clean(row.full_name) ||
+      email ||
+      "Administrator",
   } as AuditActor;
 }
 
-async function findActiveAdminById(
-  adminId: string,
-): Promise<AdminUserRow | null> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("id,email,role,is_active")
-    .eq("id", adminId)
-    .eq("is_active", true)
-    .maybeSingle();
+async function checkCurrentAdmin(): Promise<
+  | { ok: true; actor: AuditActor }
+  | { ok: false; error: string; details: string }
+> {
+  try {
+    /*
+     * Use the same central admin resolver as the rest of Event Hub.
+     * This avoids incorrectly treating burton_admin_id as a specific
+     * admin_users primary-key format.
+     */
+    const admin = await getCurrentAdmin();
 
-  if (error) {
+    if (!admin) {
+      return {
+        ok: false,
+        error: "You must be logged in to upload images.",
+        details:
+          "No active Burton Pride administrator session was found. Sign out, sign back in and try again.",
+      };
+    }
+
+    const isActive =
+      (admin as { is_active?: unknown }).is_active;
+
+    if (isActive === false) {
+      return {
+        ok: false,
+        error: "Your administrator account is inactive.",
+        details:
+          "Ask a main administrator to reactivate your Event Hub account.",
+      };
+    }
+
+    return {
+      ok: true,
+      actor: createAuditActor(admin),
+    };
+  } catch (error) {
     console.error(
-      "Selling-image admin lookup by ID failed:",
+      "Selling-image current-admin check failed:",
       error,
     );
 
-    return null;
-  }
-
-  return data as AdminUserRow | null;
-}
-
-async function findActiveAdminByEmail(
-  adminEmail: string,
-): Promise<AdminUserRow | null> {
-  const { data, error } = await supabaseAdmin
-    .from("admin_users")
-    .select("id,email,role,is_active")
-    .ilike("email", adminEmail)
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      "Selling-image admin lookup by email failed:",
-      error,
-    );
-
-    return null;
-  }
-
-  return data as AdminUserRow | null;
-}
-
-async function checkAdminCookie(
-  request: NextRequest,
-): Promise<AdminCheckResult> {
-  /*
-   * Never JSON.parse these cookie values.
-   *
-   * They are plain cookie strings and may contain values that are not
-   * valid JSON.
-   */
-  const adminId =
-    request.cookies.get("burton_admin_id")?.value || "";
-
-  const adminEmail =
-    request.cookies.get("burton_admin_email")?.value || "";
-
-  const adminSession =
-    request.cookies.get("burton_admin_session")?.value ||
-    "";
-
-  if (!adminSession && !adminId && !adminEmail) {
     return {
       ok: false,
-      error: "You must be logged in to upload images.",
-      details:
-        "No Burton admin login cookies were found. Sign out, sign back in and try again.",
+      error: "Your administrator session could not be checked.",
+      details: safeErrorMessage(error),
+    };
+  }
+}
+
+async function checkSellingImagesBucket() {
+  const { data, error } =
+    await supabaseAdmin.storage.getBucket(BUCKET_NAME);
+
+  if (error) {
+    return {
+      ok: false as const,
+      error:
+        "The selling-images bucket could not be loaded.",
+      details: error.message,
     };
   }
 
-  if (adminId) {
-    const admin = await findActiveAdminById(adminId);
-
-    if (admin) {
-      return {
-        ok: true,
-        actor: createAuditActor(admin),
-      };
-    }
+  if (!data) {
+    return {
+      ok: false as const,
+      error:
+        `The Supabase Storage bucket "${BUCKET_NAME}" does not exist.`,
+      details:
+        "Create a public bucket called event-hub-selling-images in Supabase Storage.",
+    };
   }
 
-  if (adminEmail) {
-    const admin = await findActiveAdminByEmail(
-      adminEmail,
-    );
-
-    if (admin) {
-      return {
-        ok: true,
-        actor: createAuditActor(admin),
-      };
-    }
+  if (!data.public) {
+    return {
+      ok: false as const,
+      error:
+        `The Supabase Storage bucket "${BUCKET_NAME}" is private.`,
+      details:
+        "Open Supabase Storage, select event-hub-selling-images, open its settings and enable Public bucket.",
+    };
   }
 
-  return {
-    ok: false,
-    error:
-      "You do not have permission to upload images.",
-    details:
-      "The app found admin cookies but could not match them to an active admin_users account. Check burton_admin_id, burton_admin_email and admin_users.is_active.",
-  };
+  return { ok: true as const };
 }
 
 async function writeAuditSafely(
@@ -247,8 +233,7 @@ async function writeAuditSafely(
     return true;
   } catch (error) {
     /*
-     * A temporary audit failure should not leave a successfully
-     * uploaded image unusable.
+     * An audit failure must not make a successful upload unusable.
      */
     console.error(
       "Selling-image audit log write failed:",
@@ -266,27 +251,21 @@ function createAuditMetadata(
   return {
     source: "event_hub_selling_images_api",
     bucket: BUCKET_NAME,
-
+    event_year: context.eventYear ?? null,
     contact_id:
       nullableText(context.contactId) || null,
-
     business_name:
       nullableText(context.businessName) || null,
-
     original_file_name:
       nullableText(context.fileName) || null,
-
     storage_path:
       nullableText(context.filePath) || null,
-
     mime_type:
       nullableText(context.mimeType) || null,
-
     size_bytes:
       typeof context.fileSize === "number"
         ? context.fileSize
         : null,
-
     ...extra,
   };
 }
@@ -300,17 +279,14 @@ async function auditRejectedUpload(
     actor: context.actor,
     eventId:
       nullableText(context.eventId) || null,
-
     action: AUDIT_ACTION,
-    actionLabel:
-      "Selling image upload rejected",
-
+    actionLabel: "Selling image upload rejected",
     area: AUDIT_AREA,
     status: "blocked",
     riskLevel: "medium",
-
     record: {
-      type: "event_business_contact_selling_image",
+      type:
+        "event_business_contact_selling_image",
       id:
         nullableText(context.contactId) ||
         nullableText(context.filePath) ||
@@ -320,14 +296,11 @@ async function auditRejectedUpload(
         nullableText(context.fileName) ||
         "Selling image upload",
     },
-
     reason,
-
     metadata: createAuditMetadata(context, {
       rejected: true,
       rejection_reason: reason,
     }),
-
     request: context.request,
     responseStatus,
   });
@@ -342,17 +315,14 @@ async function auditFailedUpload(
     actor: context.actor,
     eventId:
       nullableText(context.eventId) || null,
-
     action: AUDIT_ACTION,
-    actionLabel:
-      "Selling image upload failed",
-
+    actionLabel: "Selling image upload failed",
     area: AUDIT_AREA,
     status: "failed",
     riskLevel: "medium",
-
     record: {
-      type: "event_business_contact_selling_image",
+      type:
+        "event_business_contact_selling_image",
       id:
         nullableText(context.contactId) ||
         nullableText(context.filePath) ||
@@ -362,12 +332,10 @@ async function auditFailedUpload(
         nullableText(context.fileName) ||
         "Selling image upload",
     },
-
     metadata: createAuditMetadata(context, {
       upload_failed: true,
       error_message: safeErrorMessage(error),
     }),
-
     request: context.request,
     responseStatus,
   });
@@ -380,16 +348,14 @@ async function auditSuccessfulUpload(
     actor: context.actor,
     eventId:
       nullableText(context.eventId) || null,
-
     action: AUDIT_ACTION,
     actionLabel: "Selling image uploaded",
-
     area: AUDIT_AREA,
     status: "success",
     riskLevel: "low",
-
     record: {
-      type: "event_business_contact_selling_image",
+      type:
+        "event_business_contact_selling_image",
       id:
         nullableText(context.filePath) ||
         nullableText(context.contactId) ||
@@ -399,13 +365,7 @@ async function auditSuccessfulUpload(
         nullableText(context.fileName) ||
         "Selling image",
     },
-
     before: null,
-
-    /*
-     * The full public URL is deliberately not copied into the audit
-     * snapshot. The storage path is enough to identify the file.
-     */
     after: {
       bucket: BUCKET_NAME,
       path: nullableText(context.filePath),
@@ -414,22 +374,19 @@ async function auditSuccessfulUpload(
       contact_id:
         nullableText(context.contactId) || null,
     },
-
     metadata: createAuditMetadata(context, {
       upload_completed: true,
     }),
-
     request: context.request,
     responseStatus: 201,
   });
 }
 
-export async function POST(
-  request: NextRequest,
-) {
+export async function POST(request: NextRequest) {
   let actor: AuditActor | null = null;
 
   let eventId: string | null = null;
+  let eventYear: number | null = null;
   let contactId: string | null = null;
   let businessName: string | null = null;
 
@@ -439,8 +396,7 @@ export async function POST(
   let fileSize: number | null = null;
 
   try {
-    const adminCheck =
-      await checkAdminCookie(request);
+    const adminCheck = await checkCurrentAdmin();
 
     if (!adminCheck.ok) {
       return jsonResponse(
@@ -454,6 +410,29 @@ export async function POST(
     }
 
     actor = adminCheck.actor;
+
+    const bucketCheck =
+      await checkSellingImagesBucket();
+
+    if (!bucketCheck.ok) {
+      await auditFailedUpload(
+        {
+          actor,
+          request,
+        },
+        new Error(bucketCheck.details),
+        500,
+      );
+
+      return jsonResponse(
+        {
+          ok: false,
+          error: bucketCheck.error,
+          details: bucketCheck.details,
+        },
+        500,
+      );
+    }
 
     let formData: FormData;
 
@@ -485,14 +464,12 @@ export async function POST(
       );
     }
 
-    /*
-     * These fields are optional. Existing frontend code that only
-     * sends the file will continue to work.
-     *
-     * Sending these values gives the audit record better context.
-     */
     eventId = nullableText(
       formData.get("event_id"),
+    );
+
+    eventYear = toEventYear(
+      formData.get("event_year"),
     );
 
     contactId = nullableText(
@@ -514,6 +491,7 @@ export async function POST(
           actor,
           request,
           eventId,
+          eventYear,
           contactId,
           businessName,
         },
@@ -542,6 +520,7 @@ export async function POST(
       actor,
       request,
       eventId,
+      eventYear,
       contactId,
       businessName,
       fileName,
@@ -550,15 +529,7 @@ export async function POST(
       fileSize,
     };
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/jpg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
       const reason =
         `Unsupported file type: ${
           file.type || "unknown"
@@ -616,7 +587,7 @@ export async function POST(
       await auditRejectedUpload(
         auditContext,
         reason,
-        400,
+        413,
       );
 
       return jsonResponse(
@@ -626,7 +597,7 @@ export async function POST(
             "Image must be smaller than 5MB.",
           details: reason,
         },
-        400,
+        413,
       );
     }
 
@@ -638,8 +609,11 @@ export async function POST(
         file.name.replace(/\.[^/.]+$/, ""),
       );
 
+    const storageYear =
+      eventYear || new Date().getFullYear();
+
     filePath =
-      `contacts/${new Date().getFullYear()}/` +
+      `contacts/${storageYear}/` +
       `${safeOriginalName || "selling-image"}-` +
       `${randomUUID()}.${fileExtension}`;
 
@@ -682,11 +656,10 @@ export async function POST(
         .from(BUCKET_NAME)
         .getPublicUrl(filePath);
 
-    if (!publicUrlData?.publicUrl) {
-      /*
-       * Remove the uploaded object if the response cannot provide the
-       * required URL. This avoids leaving an unused file behind.
-       */
+    const publicUrl =
+      clean(publicUrlData?.publicUrl);
+
+    if (!publicUrl) {
       const { error: cleanupError } =
         await supabaseAdmin.storage
           .from(BUCKET_NAME)
@@ -699,13 +672,13 @@ export async function POST(
         );
       }
 
-      const error = new Error(
+      const publicUrlError = new Error(
         "Supabase did not return a public URL after the image was uploaded.",
       );
 
       await auditFailedUpload(
         auditContext,
-        error,
+        publicUrlError,
         500,
       );
 
@@ -715,11 +688,18 @@ export async function POST(
           error:
             "Image uploaded, but no public URL was returned.",
           details:
-            "Check that the bucket exists and is configured as a public bucket.",
+            "Check that event-hub-selling-images exists and is configured as a public bucket.",
         },
         500,
       );
     }
+
+    /*
+     * Do not perform a server-side HEAD request against the public URL.
+     * Some storage/CDN configurations reject HEAD even though the image
+     * loads correctly in a browser. That previously caused valid uploads
+     * to be deleted and reported as failed.
+     */
 
     const auditLogged =
       await auditSuccessfulUpload(
@@ -729,7 +709,7 @@ export async function POST(
     return jsonResponse(
       {
         ok: true,
-        url: publicUrlData.publicUrl,
+        url: publicUrl,
         path: filePath,
         audit_logged: auditLogged,
       },
@@ -742,6 +722,7 @@ export async function POST(
           actor,
           request,
           eventId,
+          eventYear,
           contactId,
           businessName,
           fileName,
