@@ -141,9 +141,12 @@ export default function HomeClient() {
                 </h2>
 
                 <p className="mx-auto mb-7 max-w-3xl text-base font-semibold leading-8 text-white/95 sm:text-xl">
-                  Every donation helps us fund event safety, accessibility,
-                  entertainment, community support, toilets, first aid and the
-                  future of Burton Pride.
+                       Help us keep Burton Pride free for everyone. As a grassroots Pride, 
+                created by the community for the community, 
+                every donation helps us provide local support, 
+                celebrate community art, share Pride resources and keep our events safe and welcoming. 
+                Every contribution makes a real difference.
+
                 </p>
 
                 <div className="mx-auto mb-8 grid max-w-4xl gap-4 sm:grid-cols-4">
@@ -193,7 +196,7 @@ export default function HomeClient() {
                     href="/DonateToUs"
                     className="rounded-full bg-yellow-300 px-10 py-4 text-xl font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform hover:scale-110 hover:bg-white"
                   >
-                    💖 Donate Now
+                    💖 Please Consider Donating
                   </Link>
 
                   <Link
