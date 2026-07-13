@@ -58,18 +58,29 @@ type CommunityArtwork = {
   image_urls?: string[] | null;
   images?: ArtworkImage[];
   featured: boolean;
+  show_artist_name?: boolean | null;
+  show_pronouns?: boolean | null;
+  show_story?: boolean | null;
+  show_image_descriptions?: boolean | null;
   approved_at: string | null;
   created_at: string;
 };
 
 type FormState = {
   artistName: string;
+  publicArtistName: string;
   pronouns: string;
   email: string;
   artworkTitle: string;
   story: string;
+  showArtistName: boolean;
+  showPronouns: boolean;
+  showStory: boolean;
+  showImageDescriptions: boolean;
   publicConsent: boolean;
   rightsConfirmed: boolean;
+  noAiConfirmed: boolean;
+  termsAccepted: boolean;
   website: string;
 };
 
@@ -82,12 +93,19 @@ type UploadArtwork = {
 
 const initialForm: FormState = {
   artistName: "",
+  publicArtistName: "",
   pronouns: "",
   email: "",
   artworkTitle: "",
   story: "",
+  showArtistName: true,
+  showPronouns: true,
+  showStory: true,
+  showImageDescriptions: true,
   publicConsent: false,
   rightsConfirmed: false,
+  noAiConfirmed: false,
+  termsAccepted: false,
   website: "",
 };
 
@@ -342,9 +360,15 @@ function validateSubmissionForm(
   const issues: string[] = [];
 
   if (!form.artistName.trim()) {
-    issues.push("Enter your name or artist name.");
+    issues.push("Enter your full name for Burton Pride to contact you.");
   } else if (form.artistName.trim().length > 100) {
-    issues.push("Your name or artist name must be 100 characters or fewer.");
+    issues.push("Your full name must be 100 characters or fewer.");
+  }
+
+  if (form.showArtistName && !form.publicArtistName.trim()) {
+    issues.push("Enter the artist name you want visitors to see, or turn off ‘Show my artist name’.");
+  } else if (form.publicArtistName.trim().length > 100) {
+    issues.push("Your public artist name must be 100 characters or fewer.");
   }
 
   if (!form.pronouns.trim()) {
@@ -421,8 +445,16 @@ function validateSubmissionForm(
     issues.push("Confirm that you created the artwork or have permission to share it.");
   }
 
+  if (!form.noAiConfirmed) {
+    issues.push("Confirm that the submitted artwork is not fully or mainly AI-generated.");
+  }
+
+  if (!form.termsAccepted) {
+    issues.push("Read and accept the Burton Pride Community Art Terms and Conditions.");
+  }
+
   if (!form.publicConsent) {
-    issues.push("Give Burton Pride permission to display the submitted information.");
+    issues.push("Give Burton Pride permission to review and display the information you have chosen to make public.");
   }
 
   if (form.website.trim()) {
@@ -457,6 +489,18 @@ function FieldLabel({
       {required ? <span className="ml-1 text-fuchsia-700">*</span> : null}
     </span>
   );
+}
+
+function isPublicChoiceEnabled(value: boolean | null | undefined) {
+  // Existing records created before public visibility controls were added
+  // continue to display unless an artist has explicitly chosen "do not show".
+  return value !== false;
+}
+
+function getPublicArtistName(artwork: CommunityArtwork) {
+  return isPublicChoiceEnabled(artwork.show_artist_name)
+    ? artwork.artist_name
+    : "Anonymous artist";
 }
 
 function normaliseArtworkImages(artwork: CommunityArtwork): ArtworkImage[] {
@@ -626,9 +670,15 @@ export default function HomeClient() {
     return artworks.filter((artwork) =>
       [
         artwork.artwork_title,
-        artwork.artist_name,
-        artwork.pronouns,
-        artwork.story,
+        isPublicChoiceEnabled(artwork.show_artist_name)
+          ? artwork.artist_name
+          : "",
+        isPublicChoiceEnabled(artwork.show_pronouns)
+          ? artwork.pronouns
+          : "",
+        isPublicChoiceEnabled(artwork.show_story)
+          ? artwork.story
+          : "",
       ].some((value) => value.toLowerCase().includes(query)),
     );
   }, [artworks, search]);
@@ -788,13 +838,29 @@ export default function HomeClient() {
 
     try {
       const body = new FormData();
-      body.append("artistName", form.artistName.trim());
+      body.append("contactName", form.artistName.trim());
+      body.append(
+        "artistName",
+        form.showArtistName
+          ? form.publicArtistName.trim()
+          : "Anonymous artist",
+      );
+      body.append("publicArtistName", form.publicArtistName.trim());
       body.append("pronouns", form.pronouns.trim());
       body.append("email", form.email.trim());
       body.append("artworkTitle", form.artworkTitle.trim());
       body.append("story", form.story.trim());
+      body.append("showArtistName", String(form.showArtistName));
+      body.append("showPronouns", String(form.showPronouns));
+      body.append("showStory", String(form.showStory));
+      body.append(
+        "showImageDescriptions",
+        String(form.showImageDescriptions),
+      );
       body.append("publicConsent", String(form.publicConsent));
       body.append("rightsConfirmed", String(form.rightsConfirmed));
+      body.append("noAiConfirmed", String(form.noAiConfirmed));
+      body.append("termsAccepted", String(form.termsAccepted));
       body.append("website", form.website);
       body.append(
         "imageAltTexts",
@@ -1048,7 +1114,7 @@ export default function HomeClient() {
                         type="button"
                         onClick={() => openArtwork(artwork)}
                         className="block w-full text-left"
-                        aria-label={`View ${artwork.artwork_title} by ${artwork.artist_name}`}
+                        aria-label={`View ${artwork.artwork_title} by ${getPublicArtistName(artwork)}`}
                       >
                         <div className="relative aspect-square overflow-hidden rounded-2xl bg-black/20 shadow-[0_14px_36px_rgba(15,23,42,0.24)] ring-1 ring-white/20 transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_20px_46px_rgba(15,23,42,0.34)]">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1064,8 +1130,11 @@ export default function HomeClient() {
                               {artwork.artwork_title}
                             </h3>
                             <p className="mt-1 line-clamp-1 text-xs font-bold text-white/85 sm:text-sm">
-                              {artwork.artist_name}
-                              {artwork.pronouns ? ` • ${artwork.pronouns}` : ""}
+                              {getPublicArtistName(artwork)}
+                              {isPublicChoiceEnabled(artwork.show_pronouns) &&
+                              artwork.pronouns
+                                ? ` • ${artwork.pronouns}`
+                                : ""}
                             </p>
                           </div>
 
@@ -1358,8 +1427,9 @@ export default function HomeClient() {
                   </h2>
 
                   <p className="mt-3 text-lg font-black text-fuchsia-700">
-                    {selectedArtwork.artist_name}
-                    {selectedArtwork.pronouns ? (
+                    {getPublicArtistName(selectedArtwork)}
+                    {isPublicChoiceEnabled(selectedArtwork.show_pronouns) &&
+                    selectedArtwork.pronouns ? (
                       <span className="font-semibold text-slate-500">
                         {" "}• {selectedArtwork.pronouns}
                       </span>
@@ -1373,20 +1443,26 @@ export default function HomeClient() {
                     this collection
                   </div>
 
-                  <div className="mt-7 border-l-4 border-fuchsia-600 pl-5">
-                    <p className="whitespace-pre-wrap leading-8 text-slate-700">
-                      {selectedArtwork.story}
-                    </p>
-                  </div>
+                  {isPublicChoiceEnabled(selectedArtwork.show_story) ? (
+                    <div className="mt-7 border-l-4 border-fuchsia-600 pl-5">
+                      <p className="whitespace-pre-wrap leading-8 text-slate-700">
+                        {selectedArtwork.story}
+                      </p>
+                    </div>
+                  ) : null}
 
-                  <div className="mt-7 rounded-2xl bg-slate-100 p-4">
-                    <p className="text-xs font-black uppercase tracking-wide text-slate-500">
-                      Description for artwork {activeSlide + 1}
-                    </p>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                      {selectedImages[activeSlide].alt_text}
-                    </p>
-                  </div>
+                  {isPublicChoiceEnabled(
+                    selectedArtwork.show_image_descriptions,
+                  ) ? (
+                    <div className="mt-7 rounded-2xl bg-slate-100 p-4">
+                      <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                        Description for artwork {activeSlide + 1}
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-slate-700">
+                        {selectedImages[activeSlide].alt_text}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </motion.div>
@@ -1636,7 +1712,7 @@ export default function HomeClient() {
                       <div>
                         <div className="grid gap-5 sm:grid-cols-2">
                           <label className="block">
-                            <FieldLabel required>Your name or artist name</FieldLabel>
+                            <FieldLabel required>Your full name</FieldLabel>
                             <input
                               required
                               maxLength={100}
@@ -1645,11 +1721,33 @@ export default function HomeClient() {
                               onChange={(event) =>
                                 updateForm("artistName", event.target.value)
                               }
-                              placeholder="Name shown on the website"
+                              placeholder="Only visible to the Burton Pride team"
                               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
+                            <span className="mt-2 block text-xs font-semibold text-slate-500">
+                              This is kept private and used only to manage your submission.
+                            </span>
                           </label>
 
+                          <label className="block">
+                            <FieldLabel required={form.showArtistName}>Artist name shown publicly</FieldLabel>
+                            <input
+                              required={form.showArtistName}
+                              maxLength={100}
+                              value={form.publicArtistName}
+                              onChange={(event) =>
+                                updateForm("publicArtistName", event.target.value)
+                              }
+                              placeholder="For example: Cameron Art Studio"
+                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                            />
+                            <span className="mt-2 block text-xs font-semibold text-slate-500">
+                              This can be your chosen name, creative name or organisation name.
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="mt-5 grid gap-5 sm:grid-cols-2">
                           <label className="block">
                             <FieldLabel required>Pronouns</FieldLabel>
                             <input
@@ -1663,9 +1761,8 @@ export default function HomeClient() {
                               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                           </label>
-                        </div>
 
-                        <label className="mt-5 block">
+                          <label className="block">
                           <FieldLabel required>Email address</FieldLabel>
                           <input
                             required
@@ -1679,7 +1776,8 @@ export default function HomeClient() {
                             placeholder="Only visible to the Burton Pride team"
                             className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                           />
-                        </label>
+                          </label>
+                        </div>
 
                         <label className="mt-5 block">
                           <FieldLabel required>Collection title</FieldLabel>
@@ -1719,6 +1817,83 @@ export default function HomeClient() {
                           />
                         </label>
 
+                        <div className="mt-5 rounded-3xl border border-fuchsia-200 bg-fuchsia-50 p-5">
+                          <div className="flex items-start gap-3">
+                            <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-fuchsia-700" />
+                            <div>
+                              <h3 className="text-lg font-black text-slate-950">
+                                Choose what visitors can see
+                              </h3>
+                              <p className="mt-1 text-sm leading-relaxed text-slate-700">
+                                Burton Pride needs your contact details to review
+                                the submission, but you control which personal
+                                details are shown publicly. Your email address is
+                                never displayed.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                            {[
+                              {
+                                key: "showArtistName" as const,
+                                title: "Show my artist name",
+                                description: form.showArtistName
+                                  ? `Visitors will see “${form.publicArtistName.trim() || "your chosen artist name"}”.`
+                                  : "Visitors will see “Anonymous artist”.",
+                              },
+                              {
+                                key: "showPronouns" as const,
+                                title: "Show my pronouns",
+                                description:
+                                  "Your pronouns will appear beside your artist name.",
+                              },
+                              {
+                                key: "showStory" as const,
+                                title: "Show my story",
+                                description:
+                                  "Visitors can read what the artwork means to you.",
+                              },
+                              {
+                                key: "showImageDescriptions" as const,
+                                title: "Show image descriptions",
+                                description:
+                                  "Descriptions will be visible below each artwork and still used for accessibility.",
+                              },
+                            ].map((choice) => (
+                              <label
+                                key={choice.key}
+                                className="flex cursor-pointer gap-3 rounded-2xl border border-fuchsia-200 bg-white p-4 transition hover:border-fuchsia-400"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={form[choice.key]}
+                                  onChange={(event) =>
+                                    updateForm(choice.key, event.target.checked)
+                                  }
+                                  className="mt-1 h-5 w-5 shrink-0 accent-fuchsia-700"
+                                />
+                                <span>
+                                  <span className="block text-sm font-black text-slate-900">
+                                    {choice.title}
+                                  </span>
+                                  <span className="mt-1 block text-xs leading-relaxed text-slate-600">
+                                    {choice.description}
+                                  </span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+
+                          <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-xs font-semibold leading-relaxed text-slate-600">
+                            Image descriptions are always collected so Burton
+                            Pride can make the gallery accessible. Choosing not
+                            to show them only hides the visible description box;
+                            the description may still be used as alternative text
+                            for screen readers.
+                          </p>
+                        </div>
+
                         <label className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden">
                           Website
                           <input
@@ -1733,6 +1908,10 @@ export default function HomeClient() {
                         </label>
 
                         <div className="mt-5 space-y-4 rounded-2xl bg-slate-100 p-5">
+                          <h3 className="text-lg font-black text-slate-950">
+                            Artist declaration and permission
+                          </h3>
+
                           <label className="flex cursor-pointer gap-3">
                             <input
                               required
@@ -1748,8 +1927,31 @@ export default function HomeClient() {
                             />
                             <span className="text-sm leading-relaxed text-slate-700">
                               I confirm that I created every submitted artwork
-                              or have permission from the copyright owner to
-                              submit and publish it.
+                              or have clear permission from the copyright owner
+                              to submit it. I understand that I keep ownership
+                              and copyright of my original artwork.
+                            </span>
+                          </label>
+
+                          <label className="flex cursor-pointer gap-3">
+                            <input
+                              required
+                              type="checkbox"
+                              checked={form.noAiConfirmed}
+                              onChange={(event) =>
+                                updateForm(
+                                  "noAiConfirmed",
+                                  event.target.checked,
+                                )
+                              }
+                              className="mt-1 h-5 w-5 shrink-0 accent-fuchsia-700"
+                            />
+                            <span className="text-sm leading-relaxed text-slate-700">
+                              I confirm that the submitted artwork was created
+                              by a person and is not fully or mainly generated
+                              using artificial intelligence. I understand that
+                              Burton Pride may ask for reasonable evidence of my
+                              creative process if concerns are raised.
                             </span>
                           </label>
 
@@ -1767,11 +1969,39 @@ export default function HomeClient() {
                               className="mt-1 h-5 w-5 shrink-0 accent-fuchsia-700"
                             />
                             <span className="text-sm leading-relaxed text-slate-700">
-                              I give Burton Pride C.I.C. permission to display
-                              the artwork, title, submitted name, pronouns and
-                              story on its website and community channels. I
-                              understand the team may contact me before
-                              publishing.
+                              I give Burton Pride C.I.C. limited, non-exclusive
+                              and revocable permission to review and display my
+                              artwork, its title and only the information I have
+                              chosen to show publicly. My email address will
+                              remain private.
+                            </span>
+                          </label>
+
+                          <label className="flex cursor-pointer gap-3">
+                            <input
+                              required
+                              type="checkbox"
+                              checked={form.termsAccepted}
+                              onChange={(event) =>
+                                updateForm(
+                                  "termsAccepted",
+                                  event.target.checked,
+                                )
+                              }
+                              className="mt-1 h-5 w-5 shrink-0 accent-fuchsia-700"
+                            />
+                            <span className="text-sm leading-relaxed text-slate-700">
+                              I have read and agree to the{" "}
+                              <Link
+                                href="/CommunityArt/TermsAndConditions"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-black text-fuchsia-700 underline decoration-2 underline-offset-2 hover:text-fuchsia-900"
+                              >
+                                Burton Pride Community Art Terms and Conditions
+                              </Link>
+                              . I understand that I can ask Burton Pride to
+                              remove my artwork in line with those terms.
                             </span>
                           </label>
                         </div>
