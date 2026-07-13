@@ -216,13 +216,12 @@ function getStatusChecks(status: number) {
     ];
   }
 
-  return [
-    "Review the highlighted form information.",
-    "Try the request again.",
-  ];
+  return ["Review the highlighted form information.", "Try the request again."];
 }
 
-async function readApiPayload(response: Response): Promise<ApiErrorPayload | null> {
+async function readApiPayload(
+  response: Response,
+): Promise<ApiErrorPayload | null> {
   const contentType = response.headers.get("content-type") || "";
 
   try {
@@ -295,7 +294,11 @@ function buildApiErrorMessage({
 
   const fieldErrors = formatFieldErrors(payload?.fieldErrors);
   if (fieldErrors.length > 0) {
-    lines.push("", "Fields to correct:", ...fieldErrors.map((item) => `• ${item}`));
+    lines.push(
+      "",
+      "Fields to correct:",
+      ...fieldErrors.map((item) => `• ${item}`),
+    );
   }
 
   lines.push(
@@ -304,7 +307,9 @@ function buildApiErrorMessage({
     getStatusExplanation(response.status),
     "",
     "What to check:",
-    ...getStatusChecks(response.status).map((item, index) => `${index + 1}. ${item}`),
+    ...getStatusChecks(response.status).map(
+      (item, index) => `${index + 1}. ${item}`,
+    ),
   );
 
   return lines.join("\n");
@@ -366,7 +371,9 @@ function validateSubmissionForm(
   }
 
   if (form.showArtistName && !form.publicArtistName.trim()) {
-    issues.push("Enter the artist name you want visitors to see, or turn off ‘Show my artist name’.");
+    issues.push(
+      "Enter the artist name you want visitors to see, or turn off ‘Show my artist name’.",
+    );
   } else if (form.publicArtistName.trim().length > 100) {
     issues.push("Your public artist name must be 100 characters or fewer.");
   }
@@ -387,7 +394,9 @@ function validateSubmissionForm(
   if (!form.artworkTitle.trim()) {
     issues.push("Enter an artwork or collection title.");
   } else if (form.artworkTitle.trim().length > 120) {
-    issues.push("The artwork or collection title must be 120 characters or fewer.");
+    issues.push(
+      "The artwork or collection title must be 120 characters or fewer.",
+    );
   }
 
   if (form.story.trim().length < 20) {
@@ -442,23 +451,33 @@ function validateSubmissionForm(
   }
 
   if (!form.rightsConfirmed) {
-    issues.push("Confirm that you created the artwork or have permission to share it.");
+    issues.push(
+      "Confirm that you created the artwork or have permission to share it.",
+    );
   }
 
   if (!form.noAiConfirmed) {
-    issues.push("Confirm that the submitted artwork is not fully or mainly AI-generated.");
+    issues.push(
+      "Confirm that the submitted artwork is not fully or mainly AI-generated.",
+    );
   }
 
   if (!form.termsAccepted) {
-    issues.push("Read and accept the Burton Pride Community Art Terms and Conditions.");
+    issues.push(
+      "Read and accept the Burton Pride Community Art Terms and Conditions.",
+    );
   }
 
   if (!form.publicConsent) {
-    issues.push("Give Burton Pride permission to review and display the information you have chosen to make public.");
+    issues.push(
+      "Give Burton Pride permission to review and display the information you have chosen to make public.",
+    );
   }
 
   if (form.website.trim()) {
-    issues.push("The anti-spam check was triggered. Clear the hidden website field and try again.");
+    issues.push(
+      "The anti-spam check was triggered. Clear the hidden website field and try again.",
+    );
   }
 
   return issues;
@@ -593,13 +612,10 @@ export default function HomeClient() {
       }
 
       const artworkPayload = result as
-        | (ApiErrorPayload & { artworks?: CommunityArtwork[] })
-        | null;
+        (ApiErrorPayload & { artworks?: CommunityArtwork[] }) | null;
 
       setArtworks(
-        Array.isArray(artworkPayload?.artworks)
-          ? artworkPayload.artworks
-          : [],
+        Array.isArray(artworkPayload?.artworks) ? artworkPayload.artworks : [],
       );
     } catch (error) {
       setGalleryError(
@@ -673,12 +689,8 @@ export default function HomeClient() {
         isPublicChoiceEnabled(artwork.show_artist_name)
           ? artwork.artist_name
           : "",
-        isPublicChoiceEnabled(artwork.show_pronouns)
-          ? artwork.pronouns
-          : "",
-        isPublicChoiceEnabled(artwork.show_story)
-          ? artwork.story
-          : "",
+        isPublicChoiceEnabled(artwork.show_pronouns) ? artwork.pronouns : "",
+        isPublicChoiceEnabled(artwork.show_story) ? artwork.story : "",
       ].some((value) => value.toLowerCase().includes(query)),
     );
   }, [artworks, search]);
@@ -716,7 +728,9 @@ export default function HomeClient() {
     if (selectedImages.length <= 1) return;
 
     setActiveSlide((current) => {
-      return (current + direction + selectedImages.length) % selectedImages.length;
+      return (
+        (current + direction + selectedImages.length) % selectedImages.length
+      );
     });
   }
 
@@ -763,10 +777,15 @@ export default function HomeClient() {
       (total, item) => total + item.file.size,
       0,
     );
-    const incomingTotal = incoming.reduce((total, file) => total + file.size, 0);
+    const incomingTotal = incoming.reduce(
+      (total, file) => total + file.size,
+      0,
+    );
 
     if (currentTotal + incomingTotal > MAX_TOTAL_IMAGE_SIZE) {
-      setFormError("The total size of all artwork images must be 40MB or less.");
+      setFormError(
+        "The total size of all artwork images must be 40MB or less.",
+      );
       return;
     }
 
@@ -841,9 +860,7 @@ export default function HomeClient() {
       body.append("contactName", form.artistName.trim());
       body.append(
         "artistName",
-        form.showArtistName
-          ? form.publicArtistName.trim()
-          : "Anonymous artist",
+        form.showArtistName ? form.publicArtistName.trim() : "Anonymous artist",
       );
       body.append("publicArtistName", form.publicArtistName.trim());
       body.append("pronouns", form.pronouns.trim());
@@ -853,10 +870,7 @@ export default function HomeClient() {
       body.append("showArtistName", String(form.showArtistName));
       body.append("showPronouns", String(form.showPronouns));
       body.append("showStory", String(form.showStory));
-      body.append(
-        "showImageDescriptions",
-        String(form.showImageDescriptions),
-      );
+      body.append("showImageDescriptions", String(form.showImageDescriptions));
       body.append("publicConsent", String(form.publicConsent));
       body.append("rightsConfirmed", String(form.rightsConfirmed));
       body.append("noAiConfirmed", String(form.noAiConfirmed));
@@ -985,6 +999,14 @@ export default function HomeClient() {
                   <UploadCloud className="h-5 w-5" aria-hidden="true" />
                   Submit up to {MAX_IMAGES} pieces
                 </button>
+
+                <Link
+                  href="/CommunityArt/TermsAndConditions"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-black/15 px-6 py-3 font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-white/15"
+                >
+                  <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+                  Read the art terms
+                </Link>
               </div>
             </div>
 
@@ -1013,7 +1035,10 @@ export default function HomeClient() {
         >
           <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 id="gallery-heading" className="text-2xl font-black sm:text-3xl">
+              <h2
+                id="gallery-heading"
+                className="text-2xl font-black sm:text-3xl"
+              >
                 Artwork from our community
               </h2>
               <p className="mt-1 text-sm font-medium text-white/80 sm:text-base">
@@ -1139,8 +1164,12 @@ export default function HomeClient() {
                           </div>
 
                           <div className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-black/65 px-3 py-1.5 text-xs font-black text-white shadow-lg backdrop-blur-md">
-                            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                            {images.length} {images.length === 1 ? "piece" : "pieces"}
+                            <ImageIcon
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {images.length}{" "}
+                            {images.length === 1 ? "piece" : "pieces"}
                           </div>
 
                           <div className="absolute left-3 top-3 flex flex-col gap-2">
@@ -1163,7 +1192,6 @@ export default function HomeClient() {
             </>
           )}
         </section>
-
 
         {/* DONATION SECTION */}
         <motion.section
@@ -1188,12 +1216,11 @@ export default function HomeClient() {
               </h2>
 
               <p className="mx-auto mb-7 max-w-3xl text-base font-semibold leading-8 text-white/95 sm:text-xl">
-                Help us keep Burton Pride free for everyone. As a grassroots Pride, 
-                created by the community for the community, 
-                every donation helps us provide local support, 
-                celebrate community art, share Pride resources and keep our events safe and welcoming. 
-                Every contribution makes a real difference.
-
+                Help us keep Burton Pride free for everyone. As a grassroots
+                Pride, created by the community for the community, every
+                donation helps us provide local support, celebrate community
+                art, share Pride resources and keep our events safe and
+                welcoming. Every contribution makes a real difference.
               </p>
 
               <div className="mx-auto mb-8 grid max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -1272,14 +1299,24 @@ export default function HomeClient() {
             Visitors can view the full collection as one slideshow and read the
             story behind it.
           </p>
-          <button
-            type="button"
-            onClick={openSubmitDialog}
-            className="mt-5 inline-flex items-center gap-2 rounded-full bg-yellow-300 px-6 py-3 font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
-          >
-            <UploadCloud className="h-5 w-5" aria-hidden="true" />
-            Submit your collection
-          </button>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={openSubmitDialog}
+              className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-6 py-3 font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
+            >
+              <UploadCloud className="h-5 w-5" aria-hidden="true" />
+              Submit your collection
+            </button>
+
+            <Link
+              href="/CommunityArt/TermsAndConditions"
+              className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-6 py-3 font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-white/20"
+            >
+              <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+              Community Art Terms
+            </Link>
+          </div>
         </section>
       </div>
 
@@ -1431,7 +1468,8 @@ export default function HomeClient() {
                     {isPublicChoiceEnabled(selectedArtwork.show_pronouns) &&
                     selectedArtwork.pronouns ? (
                       <span className="font-semibold text-slate-500">
-                        {" "}• {selectedArtwork.pronouns}
+                        {" "}
+                        • {selectedArtwork.pronouns}
                       </span>
                     ) : null}
                   </p>
@@ -1531,9 +1569,9 @@ export default function HomeClient() {
                       </h3>
                       <p className="mx-auto mt-3 max-w-xl leading-relaxed text-emerald-800">
                         Thank you. Your submission containing {submittedCount}{" "}
-                        {submittedCount === 1 ? "artwork" : "artworks"} has
-                        been sent to the Burton Pride admin portal for review.
-                        It will only appear in the gallery after approval.
+                        {submittedCount === 1 ? "artwork" : "artworks"} has been
+                        sent to the Burton Pride admin portal for review. It
+                        will only appear in the gallery after approval.
                       </p>
                       <div className="mt-6 flex flex-wrap justify-center gap-3">
                         <button
@@ -1554,7 +1592,11 @@ export default function HomeClient() {
                     </div>
                   </div>
                 ) : (
-                  <form onSubmit={handleSubmit} className="p-6 sm:p-9" noValidate>
+                  <form
+                    onSubmit={handleSubmit}
+                    className="p-6 sm:p-9"
+                    noValidate
+                  >
                     {formError ? (
                       <div
                         role="alert"
@@ -1564,7 +1606,9 @@ export default function HomeClient() {
                         <div className="flex items-start gap-3">
                           <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-700" />
                           <div className="min-w-0">
-                            <h3 className="font-black">We could not complete your submission</h3>
+                            <h3 className="font-black">
+                              We could not complete your submission
+                            </h3>
                             <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-sm font-semibold leading-6 text-red-900">
                               {formError}
                             </pre>
@@ -1576,7 +1620,9 @@ export default function HomeClient() {
                     <div className="grid gap-7 lg:grid-cols-[0.92fr_1.08fr]">
                       <div>
                         <div className="rounded-3xl bg-slate-100 p-5">
-                          <h3 className="text-xl font-black">Before you submit</h3>
+                          <h3 className="text-xl font-black">
+                            Before you submit
+                          </h3>
                           <div className="mt-4 space-y-4 text-sm leading-relaxed text-slate-700">
                             <div className="flex gap-3">
                               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-fuchsia-700" />
@@ -1669,7 +1715,9 @@ export default function HomeClient() {
                                         </div>
                                         <button
                                           type="button"
-                                          onClick={() => removeUploadImage(item.id)}
+                                          onClick={() =>
+                                            removeUploadImage(item.id)
+                                          }
                                           className="rounded-full bg-red-50 p-2 text-red-700 transition hover:bg-red-100"
                                           aria-label={`Remove ${item.file.name}`}
                                         >
@@ -1725,24 +1773,31 @@ export default function HomeClient() {
                               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                             <span className="mt-2 block text-xs font-semibold text-slate-500">
-                              This is kept private and used only to manage your submission.
+                              This is kept private and used only to manage your
+                              submission.
                             </span>
                           </label>
 
                           <label className="block">
-                            <FieldLabel required={form.showArtistName}>Artist name shown publicly</FieldLabel>
+                            <FieldLabel required={form.showArtistName}>
+                              Artist name shown publicly
+                            </FieldLabel>
                             <input
                               required={form.showArtistName}
                               maxLength={100}
                               value={form.publicArtistName}
                               onChange={(event) =>
-                                updateForm("publicArtistName", event.target.value)
+                                updateForm(
+                                  "publicArtistName",
+                                  event.target.value,
+                                )
                               }
                               placeholder="For example: Cameron Art Studio"
                               className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                             <span className="mt-2 block text-xs font-semibold text-slate-500">
-                              This can be your chosen name, creative name or organisation name.
+                              This can be your chosen name, creative name or
+                              organisation name.
                             </span>
                           </label>
                         </div>
@@ -1763,19 +1818,19 @@ export default function HomeClient() {
                           </label>
 
                           <label className="block">
-                          <FieldLabel required>Email address</FieldLabel>
-                          <input
-                            required
-                            type="email"
-                            maxLength={200}
-                            autoComplete="email"
-                            value={form.email}
-                            onChange={(event) =>
-                              updateForm("email", event.target.value)
-                            }
-                            placeholder="Only visible to the Burton Pride team"
-                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
-                          />
+                            <FieldLabel required>Email address</FieldLabel>
+                            <input
+                              required
+                              type="email"
+                              maxLength={200}
+                              autoComplete="email"
+                              value={form.email}
+                              onChange={(event) =>
+                                updateForm("email", event.target.value)
+                              }
+                              placeholder="Only visible to the Burton Pride team"
+                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                            />
                           </label>
                         </div>
 
@@ -1825,10 +1880,10 @@ export default function HomeClient() {
                                 Choose what visitors can see
                               </h3>
                               <p className="mt-1 text-sm leading-relaxed text-slate-700">
-                                Burton Pride needs your contact details to review
-                                the submission, but you control which personal
-                                details are shown publicly. Your email address is
-                                never displayed.
+                                Burton Pride needs your contact details to
+                                review the submission, but you control which
+                                personal details are shown publicly. Your email
+                                address is never displayed.
                               </p>
                             </div>
                           </div>
@@ -1889,8 +1944,8 @@ export default function HomeClient() {
                             Image descriptions are always collected so Burton
                             Pride can make the gallery accessible. Choosing not
                             to show them only hides the visible description box;
-                            the description may still be used as alternative text
-                            for screen readers.
+                            the description may still be used as alternative
+                            text for screen readers.
                           </p>
                         </div>
 
@@ -2015,13 +2070,18 @@ export default function HomeClient() {
                             <>
                               <Loader2 className="h-5 w-5 animate-spin" />
                               Uploading {uploadImages.length}{" "}
-                              {uploadImages.length === 1 ? "artwork" : "artworks"}…
+                              {uploadImages.length === 1
+                                ? "artwork"
+                                : "artworks"}
+                              …
                             </>
                           ) : (
                             <>
                               <UploadCloud className="h-5 w-5" />
                               Submit {uploadImages.length || "your"}{" "}
-                              {uploadImages.length === 1 ? "artwork" : "artworks"}{" "}
+                              {uploadImages.length === 1
+                                ? "artwork"
+                                : "artworks"}{" "}
                               for review
                             </>
                           )}

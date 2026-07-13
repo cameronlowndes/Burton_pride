@@ -3,170 +3,240 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ClipboardCheck,
   Copyright,
+  Download,
   Eye,
   FileCheck2,
   Heart,
   ImageIcon,
   LockKeyhole,
+  Mail,
+  RefreshCw,
   Scale,
   ShieldCheck,
   Sparkles,
   UserRound,
+  Users,
 } from "lucide-react";
 
-const sections = [
+type TermsSection = {
+  title: string;
+  icon: typeof ShieldCheck;
+  content: string[];
+};
+
+const sections: TermsSection[] = [
   {
-    title: "1. A human-created art space",
-    icon: Sparkles,
-    content: [
-      "The Burton Pride Community Art Gallery is an LGBTQIA+ creative space, created by the community, for the community.",
-      "It exists to celebrate artwork created by real people and to give artists a respectful place to share their creativity, experiences and stories.",
-      "Fully or mainly AI-generated artwork is not accepted. Digital artwork, photography, graphic design and artwork created using software are welcome when the main creative work has been completed by the artist.",
-    ],
-  },
-  {
-    title: "2. The artist keeps ownership",
+    title: "1. Artists Keep Full Ownership",
     icon: Copyright,
     content: [
-      "The artist keeps full ownership and copyright of their original artwork at all times.",
-      "Submitting artwork does not transfer ownership to Burton Pride C.I.C.",
-      "Burton Pride will not sell, license or commercially exploit an artist’s work without separate, clear permission from the artist.",
+      "Artists keep full ownership and copyright of their original artwork at all times.",
+      "Submitting artwork to Burton Pride does not transfer ownership or copyright to Burton Pride.",
+      "Burton Pride will not sell, license, alter, claim ownership of or commercially exploit an artist’s work without separate, clear and informed permission from the artist.",
     ],
   },
   {
-    title: "3. Permission given to Burton Pride",
+    title: "2. Limited Permission to Display Artwork",
     icon: FileCheck2,
     content: [
-      "By submitting artwork, the artist gives Burton Pride a limited, non-exclusive and revocable permission to display the artwork on the Community Art Gallery and, where the artist has agreed, on official Burton Pride community channels.",
-      "The artist may continue to use, display, sell, publish or license their artwork elsewhere.",
-      "This permission can be withdrawn by contacting Burton Pride and asking for the artwork to be removed.",
+      "By submitting artwork, the artist gives Burton Pride a limited, non-exclusive and revocable permission to display the artwork on the Burton Pride Community Art page, share it through official Burton Pride social media channels and use it to promote the Community Art project.",
+      "This permission is limited to Burton Pride’s community, charitable, educational and promotional activities.",
+      "The artist remains free to publish, display, sell, license or share their artwork elsewhere.",
     ],
   },
   {
-    title: "4. The artist chooses what is public",
+    title: "3. Artist Choice, Approval and Consent",
     icon: Eye,
     content: [
-      "The artist controls which personal details are shown publicly.",
-      "The artist may choose whether visitors can see their artist name, pronouns, story and visible image-description section.",
-      "Private contact details, including the artist’s email address and private contact name, are never shown publicly.",
-      "When an artist chooses not to show their artist name, the gallery may display “Anonymous artist”.",
+      "Artists may choose whether their real name, artist name or no name is displayed.",
+      "Artists may choose whether a website, portfolio or social media account is linked.",
+      "Artists may approve the wording of their biography, story or artwork description before publication.",
+      "Burton Pride will not publish private contact information or other personal details without clear permission.",
+      "Where practical, artists may also choose whether their artwork can be shared beyond the Community Art page on Burton Pride’s social media channels.",
     ],
   },
   {
-    title: "5. Image descriptions and accessibility",
-    icon: ImageIcon,
+    title: "4. Human-Created Artwork Only",
+    icon: Sparkles,
     content: [
-      "An image description is required for every uploaded artwork image so the gallery can remain accessible.",
-      "Image descriptions may still be used as accessibility text even when the artist chooses not to show the separate visible description box.",
-      "Descriptions should explain what can be seen in the artwork using clear and respectful language.",
+      "The Community Art page exists to showcase artwork created by people. Fully or mainly AI-generated images, artwork or designs are not accepted.",
+      "Digital art, photography, graphic design and artwork made using creative software are welcome when the artist has made the main creative decisions and the final work is substantially their own.",
+      "Artwork will not be rejected only because it is digital, polished or created using professional software.",
     ],
   },
   {
-    title: "6. Human-created and no-AI declaration",
+    title: "5. Fair Review of Suspected AI-Generated Work",
     icon: UserRound,
     content: [
-      "The artist must confirm that the submitted artwork was created by a person and is not fully or mainly generated using artificial intelligence.",
-      "If Burton Pride has reasonable concerns that artwork may be AI-generated, the submission may be placed under review.",
-      "The artist may be asked for reasonable evidence such as sketches, progress photographs, digital layers, project files or a short explanation of their creative process.",
-      "Evidence supplied for a review will not be published without permission.",
+      "If Burton Pride has reasonable concerns that a submission may be AI-generated, the artwork may be placed under review before publication or temporarily hidden while the concern is considered.",
+      "The artist must be given a fair opportunity to explain their creative process before a final decision is made.",
+      "Burton Pride may request reasonable evidence such as sketches, drafts, progress photographs, screenshots showing layers, original project files, time-lapse recordings or a written explanation of the creative process.",
+      "Artists will not be required to provide more personal information than is reasonably necessary. Evidence supplied for review will not be published or shared without permission.",
     ],
   },
   {
-    title: "7. Right to challenge a decision",
+    title: "6. Right to Challenge a Decision",
     icon: Scale,
     content: [
-      "An artist may challenge a decision if they believe their artwork has been incorrectly identified as AI-generated or unfairly declined.",
-      "The artist may provide more information or evidence and request another review.",
-      "Burton Pride will review the information fairly and explain the final decision clearly and respectfully.",
+      "An artist may challenge a decision where they believe their artwork has been incorrectly identified as AI-generated, unfairly declined or removed without proper consideration.",
+      "The artist may provide further evidence or information and ask for the submission to be reviewed again.",
+      "Where reasonably possible, a second review should be completed by another member of the Burton Pride team.",
+      "Burton Pride will communicate the final decision clearly and respectfully.",
     ],
   },
   {
-    title: "8. Copyright and permission",
-    icon: ShieldCheck,
+    title: "7. No Significant Alterations Without Permission",
+    icon: ImageIcon,
     content: [
-      "The artist must confirm that the artwork is their own original creation or that they have clear permission from the copyright owner to submit and publish it.",
-      "The artist must have permission to use any photographs, logos, characters or other protected material included in the artwork.",
-      "Burton Pride may temporarily hide or remove artwork where a genuine copyright, ownership, privacy or safety concern is raised.",
+      "Burton Pride will not crop, recolour, edit, add text to, remove a watermark from or otherwise significantly alter artwork without the artist’s permission.",
+      "Minor technical changes may be made only where needed to display the artwork correctly, such as resizing or converting the file format without changing the creative content.",
+      "Burton Pride may correct spelling or formatting in an accompanying description, but should not change the meaning of the artist’s words without consent.",
     ],
   },
   {
-    title: "9. Images of other people",
+    title: "8. Artist Credit and Anonymity",
     icon: UserRound,
     content: [
-      "Where artwork contains an identifiable person, the artist must have appropriate permission to submit and publish that image.",
-      "Extra care must be taken where the artwork includes children, vulnerable adults, private situations or sensitive personal information.",
-      "Where a child or young person is clearly identifiable, permission must be provided by a parent or legal guardian.",
+      "Burton Pride will credit the artist using the name or artist name chosen by the artist.",
+      "Artists may remain anonymous or use a pseudonym.",
+      "Burton Pride will make reasonable efforts to keep the artist’s credit attached whenever the artwork is shared through official Burton Pride channels.",
     ],
   },
   {
-    title: "10. Respectful and inclusive content",
-    icon: Heart,
+    title: "9. Protection From Unauthorised Use",
+    icon: ShieldCheck,
     content: [
-      "The Community Art Gallery is intended to be welcoming, inclusive and respectful.",
-      "Artwork must not promote racism, homophobia, biphobia, transphobia, ableism, sexism, hate speech, harassment, targeted abuse or violence against a person or community.",
-      "Artwork may explore difficult, emotional, political or sensitive subjects, including identity, discrimination, mental health and lived experience.",
-      "Sensitive artwork should not be declined simply because it discusses serious issues. Burton Pride may use a content notice where appropriate.",
+      "Artwork displayed on the Community Art page remains protected by the artist’s copyright.",
+      "Visitors and third parties must not copy, sell, reproduce, edit, remove watermarks from or use artwork without the artist’s permission.",
+      "Where requested and reasonably possible, Burton Pride may add an artist credit, copyright notice or watermark.",
+      "Where Burton Pride becomes aware of unauthorised use, it may remove links, report misuse or support the artist in raising the issue with the relevant platform.",
+      "Burton Pride cannot guarantee that a member of the public will not take a screenshot, download or repost publicly displayed artwork, but reasonable steps will be taken to discourage misuse.",
     ],
   },
   {
-    title: "11. No changes without permission",
-    icon: FileCheck2,
+    title: "10. Removal and Withdrawal Rights",
+    icon: RefreshCw,
     content: [
-      "Burton Pride will not make major changes to an artist’s artwork without permission.",
-      "Minor technical adjustments may be made where needed to display an image correctly.",
-      "Burton Pride may correct spelling or formatting in a submitted description, but should not change the meaning of the artist’s words without permission.",
+      "Artists may withdraw permission and ask Burton Pride to remove their artwork at any time.",
+      "Burton Pride will make reasonable efforts to remove the artwork from the Community Art page, future promotional materials and official social media posts that remain under Burton Pride’s control.",
+      "Burton Pride may not be able to remove copies already downloaded, printed, archived, shared or reposted by third parties.",
+      "Requesting removal does not affect the artist’s ownership or copyright.",
     ],
   },
   {
-    title: "12. Artist credit",
+    title: "11. Artist Safety and Privacy",
+    icon: LockKeyhole,
+    content: [
+      "Burton Pride will not publish an artist’s home address, personal telephone number, private email address, legal name where another name has been chosen, precise location or sensitive personal information without explicit permission.",
+      "Artists should avoid placing private information directly inside artwork unless they are comfortable with that information being publicly visible.",
+      "Artists may ask Burton Pride to correct, update or remove personal information connected to their submission.",
+    ],
+  },
+  {
+    title: "12. Children and Young Artists",
+    icon: Users,
+    content: [
+      "Artwork submitted by a person under the age of 18 must have permission from a parent or legal guardian.",
+      "Burton Pride will take extra care when publishing the name, image, story or personal information of a child or young person.",
+      "A young artist may be credited by first name, artist name or anonymously, depending on the permission provided.",
+    ],
+  },
+  {
+    title: "13. Photographs and Images of Other People",
+    icon: Users,
+    content: [
+      "Where artwork includes an identifiable person, the artist must confirm that they have appropriate permission to submit and publish the image.",
+      "Extra care is required where artwork includes children, vulnerable adults, private or sensitive situations, personal medical information or identity information.",
+      "Burton Pride may ask for confirmation of consent before publication.",
+    ],
+  },
+  {
+    title: "14. Originality, Copyright and Third-Party Material",
     icon: Copyright,
     content: [
-      "Where the artist chooses to be named, Burton Pride will credit the artist using the name or artist name they supplied.",
-      "An artist may use a chosen name, artist name, pseudonym or remain anonymous.",
-      "Burton Pride will make reasonable efforts to keep artist credit attached to artwork shared through official channels.",
+      "The artist must confirm that the artwork is their own original creation or that they have permission to use any third-party material included within it.",
+      "Artists must not knowingly submit work that unlawfully copies another person’s artwork, photography, writing, logo, design, character or other protected material.",
+      "Where a genuine copyright or ownership complaint is received, Burton Pride may temporarily hide the artwork while the concern is reviewed.",
+      "Where appropriate, the artist will be told about the concern and given a reasonable opportunity to respond before a final decision is made.",
     ],
   },
   {
-    title: "13. Removal and withdrawal",
-    icon: LockKeyhole,
+    title: "15. Respectful and Inclusive Content",
+    icon: Heart,
     content: [
-      "The artist may ask Burton Pride to remove their artwork at any time.",
-      "Burton Pride will make reasonable efforts to remove it from the Community Art Gallery, future promotional material and official social media posts under Burton Pride’s control.",
-      "Burton Pride may not be able to remove copies already downloaded, archived, printed, shared or reposted by other people.",
+      "The Community Art page is an LGBTQIA+ creative space created by the community, for the community.",
+      "Artwork must not promote racism, homophobia, biphobia, transphobia, ableism, sexism, harassment, hate speech, targeted abuse or violence against a person or community.",
+      "Artwork may explore difficult, emotional, political or sensitive subjects, including identity, discrimination, mental health and lived experience.",
+      "Sensitive artwork should not be rejected simply because it addresses serious issues. Burton Pride may use a clear content notice where appropriate.",
     ],
   },
   {
-    title: "14. Privacy and personal information",
-    icon: LockKeyhole,
-    content: [
-      "Personal information is used only to manage the submission, contact the artist and publish information the artist has agreed to share.",
-      "Personal information will not be sold to advertisers.",
-      "Artists may ask for their personal information to be corrected, updated or removed, subject to any legal duties that apply.",
-    ],
-  },
-  {
-    title: "15. Review and publication",
+    title: "16. Submission and Publication Decisions",
     icon: CheckCircle2,
     content: [
       "Submitting artwork does not guarantee publication.",
-      "Every submission is reviewed before appearing publicly.",
-      "Artwork may be declined where it breaks these terms, creates a serious privacy or safety concern, infringes another person’s rights or falls outside the purpose of the Community Art Gallery.",
-      "Artwork should not be declined because of the artist’s identity, disability, background, artistic skill, chosen medium or level of professional experience.",
+      "A submission may be declined where it breaks these terms, creates a serious privacy or safety concern, infringes another person’s rights, contains unlawful or harmful content or falls outside the purpose of the Community Art page.",
+      "Decisions should be made fairly, consistently and respectfully.",
+      "Burton Pride will not decline artwork because of the artist’s LGBTQIA+ identity, disability, ethnicity, faith, background, artistic skill, chosen medium or level of professional experience.",
     ],
   },
   {
-    title: "16. Changes to these terms",
+    title: "17. Complaints About Artwork",
+    icon: AlertTriangle,
+    content: [
+      "If a complaint is made about an artist or their work, Burton Pride will not automatically remove the submission without review unless urgent action is needed for safety or legal reasons.",
+      "Where appropriate, the artist will be informed of the concern and given an opportunity to respond.",
+      "Artwork may be temporarily hidden where there is an urgent safety, privacy or legal concern.",
+      "Complaints will be handled as confidentially as reasonably possible.",
+    ],
+  },
+  {
+    title: "18. Data Protection",
+    icon: LockKeyhole,
+    content: [
+      "Personal information provided with a submission will be used only to manage the Community Art page, contact the artist and publish information the artist has approved.",
+      "Personal information will not be sold or provided to advertisers.",
+      "Burton Pride will keep personal information only for as long as it is reasonably needed for the purpose it was collected, subject to any legal obligations.",
+      "Artists may request access to, correction of or deletion of their personal information, subject to applicable data-protection law and Burton Pride’s privacy procedures.",
+    ],
+  },
+  {
+    title: "19. Changes to These Terms",
+    icon: RefreshCw,
+    content: [
+      "Burton Pride may update these terms to improve artist protection, respond to legal or technological changes or improve the Community Art page.",
+      "Changes will not transfer ownership from artists or give Burton Pride wider rights over artwork already submitted without further permission.",
+      "The latest version of these terms will be published on the Burton Pride website.",
+    ],
+  },
+  {
+    title: "20. Agreement",
     icon: FileCheck2,
     content: [
-      "Burton Pride may update these terms to improve artist protection, respond to changes in technology or improve the Community Art Gallery.",
-      "Updated terms will not remove ownership from artists or give Burton Pride wider rights over artwork already submitted without further permission.",
-      "The latest version will always be published on this page.",
+      "By submitting artwork, the artist confirms that they have read and understood these terms and that they have the right to submit the work.",
+      "The artist keeps full ownership of their artwork and gives Burton Pride only the limited permissions clearly described in this document.",
+      "Burton Pride is committed to treating every artist with dignity, fairness and respect.",
     ],
   },
 ];
+
+const checklist = [
+  { area: "Ownership", confirmation: "I created this artwork, or I have permission to use every part of it." },
+  { area: "AI use", confirmation: "The artwork is not fully or mainly generated by artificial intelligence." },
+  { area: "Consent", confirmation: "I have permission from identifiable people shown in the artwork." },
+  { area: "Credit", confirmation: "I have chosen how I would like to be credited, including the option to remain anonymous." },
+  { area: "Sharing", confirmation: "I understand where Burton Pride may display and share the artwork." },
+  { area: "Privacy", confirmation: "I have not included private information that I do not want to be made public." },
+  { area: "Removal", confirmation: "I understand that I can ask Burton Pride to remove my artwork from channels under its control." },
+  { area: "Terms", confirmation: "I have read and agree to these Artist Protection Terms and Conditions." },
+];
+
+const TERMS_DOWNLOAD_URL =
+  "/Document/Burton_Pride_Community_Art_Terms_and_Conditions.pdf";
 
 export default function CommunityArtTermsContent() {
   return (
@@ -186,33 +256,95 @@ export default function CommunityArtTermsContent() {
               href="/CommunityArt"
               className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white hover:text-purple-800"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Back to Community Art
             </Link>
 
             <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-yellow-300 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-purple-950">
-              <ShieldCheck className="h-4 w-4" />
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
               Artist protection
             </div>
 
             <h1 className="mt-5 text-4xl font-black tracking-tight sm:text-6xl">
-              Community Art Terms and Conditions
+              Burton Pride Community Art
             </h1>
+            <h2 className="mt-2 text-2xl font-black text-yellow-300 sm:text-4xl">
+              Artist Protection Terms and Conditions
+            </h2>
 
             <p className="mt-5 max-w-3xl text-lg font-semibold leading-8 text-white/90">
-              An LGBTQIA+ creative space, created by the community, for the
-              community. These terms explain how Burton Pride protects artists,
-              respects ownership and manages artwork submitted to the Community
-              Art Gallery.
+              An LGBTQIA+ creative space created by the community, for the community.
             </p>
           </div>
         </motion.header>
 
-        <section className="mt-7 rounded-3xl border border-yellow-300/40 bg-yellow-300/10 p-5 shadow-lg backdrop-blur-md sm:p-6">
-          <h2 className="text-2xl font-black">Before submitting artwork</h2>
-          <p className="mt-3 leading-7 text-white/90">
-            Artists must read these terms and confirm that they understand and
-            accept them before a submission can be approved.
+        <section className="mt-7 rounded-3xl border border-emerald-300/40 bg-emerald-500/15 p-6 shadow-lg backdrop-blur-md sm:p-8">
+          <div className="flex items-start gap-4">
+            <ShieldCheck className="mt-1 h-9 w-9 shrink-0 text-emerald-300" aria-hidden="true" />
+            <div>
+              <h2 className="text-2xl font-black sm:text-3xl">Our commitment to artists</h2>
+              <p className="mt-3 leading-7 text-white/90">
+                Artists keep ownership and copyright of their work. Burton Pride only receives the limited permission needed to display and promote approved submissions. Artists may request removal, choose how they are credited and challenge decisions fairly.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section
+          className="mt-7 overflow-hidden rounded-3xl border border-yellow-300/50 bg-yellow-300/10 shadow-lg backdrop-blur-md"
+          aria-labelledby="download-terms-heading"
+        >
+          <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-purple-950">
+                <FileCheck2 className="h-4 w-4" aria-hidden="true" />
+                Official document
+              </div>
+
+              <h2
+                id="download-terms-heading"
+                className="mt-4 text-3xl font-black sm:text-4xl"
+              >
+                Download these terms
+              </h2>
+
+              <p className="mt-3 max-w-3xl leading-7 text-white/90">
+                These Artist Protection Terms and Conditions are available to
+                download as an official PDF copy. The downloaded document is
+                provided for reading, reference and record keeping.
+              </p>
+
+              <div className="mt-4 rounded-2xl border border-amber-300/45 bg-amber-300/10 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle
+                    className="mt-0.5 h-6 w-6 shrink-0 text-amber-300"
+                    aria-hidden="true"
+                  />
+                  <p className="text-sm font-bold leading-6 text-white/90">
+                    This is an official read-only copy. It must not be edited,
+                    changed, shortened, rewritten or presented as an amended
+                    Burton Pride policy. The official version is the version
+                    published by Burton Pride C.I.C.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <a
+              href={TERMS_DOWNLOAD_URL}
+              download="Burton_Pride_Community_Art_Terms_and_Conditions.pdf"
+              className="inline-flex w-full items-center justify-center gap-3 rounded-full bg-yellow-300 px-7 py-4 text-lg font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white lg:w-auto"
+              aria-label="Download the official Burton Pride Community Art Artist Protection Terms and Conditions PDF"
+            >
+              <Download className="h-6 w-6" aria-hidden="true" />
+              Download official PDF
+            </a>
+          </div>
+        </section>
+
+        <section className="mt-7 rounded-3xl border border-white/20 bg-black/20 p-6 shadow-lg backdrop-blur-md sm:p-8">
+          <p className="leading-8 text-white/90">
+            Welcome to the Burton Pride Community Art page. This page celebrates original artwork made by real people and provides a respectful, inclusive and safer place for LGBTQIA+ artists, community members and allies to share creativity, experiences and stories. Burton Pride is committed to protecting artists, respecting their ownership and using artwork only within the permissions clearly given by the artist.
           </p>
         </section>
 
@@ -223,12 +355,12 @@ export default function CommunityArtTermsContent() {
               initial={{ opacity: 0, y: 18 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-70px" }}
-              transition={{ duration: 0.4, delay: Math.min(index * 0.02, 0.16) }}
+              transition={{ duration: 0.4, delay: Math.min(index * 0.015, 0.15) }}
               className="rounded-3xl border border-white/20 bg-black/20 p-5 shadow-lg backdrop-blur-md sm:p-7"
             >
               <div className="flex items-start gap-4">
                 <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-yellow-300 text-purple-950 shadow-md">
-                  <Icon className="h-6 w-6" />
+                  <Icon className="h-6 w-6" aria-hidden="true" />
                 </div>
 
                 <div className="min-w-0">
@@ -246,14 +378,82 @@ export default function CommunityArtTermsContent() {
           ))}
         </div>
 
+        <section className="mt-8 overflow-hidden rounded-3xl border border-white/20 bg-black/20 shadow-lg backdrop-blur-md">
+          <div className="border-b border-white/15 bg-white/10 p-6 sm:p-8">
+            <div className="flex items-start gap-4">
+              <ClipboardCheck className="mt-1 h-9 w-9 shrink-0 text-yellow-300" aria-hidden="true" />
+              <div>
+                <h2 className="text-3xl font-black">Artist Submission Checklist</h2>
+                <p className="mt-2 text-white/80">
+                  Before submitting artwork, the artist should confirm each of the following points.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="divide-y divide-white/10">
+            {checklist.map((item) => (
+              <div key={item.area} className="grid gap-3 p-5 sm:grid-cols-[42px_150px_1fr] sm:items-start sm:p-6">
+                <div className="grid h-8 w-8 place-items-center rounded-lg border-2 border-white/50 text-sm font-black" aria-hidden="true">
+                  ✓
+                </div>
+                <p className="font-black text-yellow-300">{item.area}</p>
+                <p className="leading-7 text-white/85">{item.confirmation}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-blue-300/35 bg-blue-500/10 p-6 shadow-lg backdrop-blur-md sm:p-8">
+          <div className="flex items-start gap-4">
+            <Mail className="mt-1 h-9 w-9 shrink-0 text-blue-200" aria-hidden="true" />
+            <div>
+              <h2 className="text-3xl font-black">Contact and Removal Requests</h2>
+              <p className="mt-3 leading-7 text-white/90">
+                Artists may contact Burton Pride to ask a question, challenge a decision, update their details or request removal of their artwork. Contact details should be published alongside this document on the Burton Pride website or submission form.
+              </p>
+              <a
+                href="mailto:Info@burtonpride.co.uk?subject=Community%20Art%20Enquiry"
+                className="mt-5 inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 font-black text-blue-800 transition hover:bg-blue-50"
+              >
+                <Mail className="h-5 w-5" aria-hidden="true" />
+                Email Burton Pride
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-white/20 bg-black/20 p-6 shadow-lg backdrop-blur-md sm:p-8">
+          <dl className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl bg-white/10 p-4">
+              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Document owner</dt>
+              <dd className="mt-2 font-black">Burton Pride C.I.C.</dd>
+            </div>
+            <div className="rounded-2xl bg-white/10 p-4">
+              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Version</dt>
+              <dd className="mt-2 font-black">1.0</dd>
+            </div>
+            <div className="rounded-2xl bg-white/10 p-4">
+              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Last reviewed</dt>
+              <dd className="mt-2 font-black">July 2026</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="mt-7 rounded-3xl border border-amber-300/40 bg-amber-300/10 p-5 shadow-lg backdrop-blur-md sm:p-6">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-1 h-6 w-6 shrink-0 text-amber-300" aria-hidden="true" />
+            <p className="leading-7 text-white/90">
+              <strong>Important:</strong> This document is a practical community policy and is not a substitute for independent legal advice. Burton Pride should ensure its privacy notice, consent process and submission form remain consistent with these terms.
+            </p>
+          </div>
+        </section>
+
         <section className="mt-7 rounded-3xl border border-emerald-300/40 bg-emerald-500/15 p-6 text-center shadow-lg backdrop-blur-md sm:p-8">
-          <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-300" />
+          <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-300" aria-hidden="true" />
           <h2 className="mt-4 text-3xl font-black">Agreement</h2>
           <p className="mx-auto mt-3 max-w-3xl leading-7 text-white/90">
-            By submitting artwork, the artist confirms that they have read,
-            understood and accepted these terms. The artist keeps ownership of
-            their artwork and only gives Burton Pride the limited permissions
-            clearly described above.
+            By submitting artwork, the artist confirms that they have read and understood these terms and that they have the right to submit the work. The artist keeps full ownership of their artwork and gives Burton Pride only the limited permissions clearly described in this document.
           </p>
 
           <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -261,7 +461,7 @@ export default function CommunityArtTermsContent() {
               href="/CommunityArt?submit=1"
               className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-6 py-3 font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
             >
-              <ImageIcon className="h-5 w-5" />
+              <ImageIcon className="h-5 w-5" aria-hidden="true" />
               Submit artwork
             </Link>
 
@@ -269,9 +469,18 @@ export default function CommunityArtTermsContent() {
               href="/CommunityArt"
               className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-6 py-3 font-black text-white transition hover:bg-white hover:text-purple-800"
             >
-              <Heart className="h-5 w-5" />
+              <Heart className="h-5 w-5" aria-hidden="true" />
               View the gallery
             </Link>
+
+            <a
+              href={TERMS_DOWNLOAD_URL}
+              download="Burton_Pride_Community_Art_Terms_and_Conditions.pdf"
+              className="inline-flex items-center gap-2 rounded-full border border-yellow-300/60 bg-yellow-300/10 px-6 py-3 font-black text-yellow-200 transition hover:bg-yellow-300 hover:text-purple-950"
+            >
+              <Download className="h-5 w-5" aria-hidden="true" />
+              Download terms
+            </a>
           </div>
         </section>
       </div>
