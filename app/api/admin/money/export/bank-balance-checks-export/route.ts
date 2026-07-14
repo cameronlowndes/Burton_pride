@@ -496,12 +496,14 @@ export async function GET(req: Request) {
 
     const workbook = new ExcelJS.Workbook();
 
+    /*
+     * Use only ExcelJS metadata fields supported by the installed typings.
+     * Do not add workbook.subject, workbook.title or workbook.company.
+     */
     workbook.creator = "Burton Pride C.I.C";
+    workbook.lastModifiedBy = "Burton Pride C.I.C";
     workbook.created = new Date();
     workbook.modified = new Date();
-    workbook.subject = "Bank balance checks report";
-    workbook.title = "Burton Pride Bank Balance Checks";
-    workbook.company = "Burton Pride C.I.C";
 
     const summarySheet = workbook.addWorksheet("Bank Check Summary", {
       views: [{ state: "frozen", ySplit: 5 }],
