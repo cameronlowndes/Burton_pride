@@ -651,7 +651,6 @@ export default function VolunteerAdminPage() {
         ]),
       });
 
-      worksheet.getCell("A1").note = "Volunteer applications export";
       worksheet.getRow(1).font = {
         bold: true,
         color: { argb: "FFFFFFFF" },
