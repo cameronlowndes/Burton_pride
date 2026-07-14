@@ -295,10 +295,12 @@ export async function GET(request: Request) {
   const now = new Date();
   const fundingName = cleanText(fundingRecord.sponsor_name) || "Funding Record";
 
+  /*
+   * Keep workbook metadata limited to fields supported by the
+   * installed ExcelJS type definitions.
+   */
   workbook.creator = "Burton Pride C.I.C";
-  workbook.company = "Burton Pride C.I.C";
-  workbook.subject = "Grant and funding report";
-  workbook.title = `${fundingName} Funding Report ${year}`;
+  workbook.lastModifiedBy = "Burton Pride C.I.C";
   workbook.created = now;
   workbook.modified = now;
 
