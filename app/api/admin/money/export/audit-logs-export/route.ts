@@ -870,12 +870,14 @@ export async function GET(req: Request) {
 
     const workbook = new ExcelJS.Workbook();
 
+    /*
+     * Keep workbook metadata limited to fields supported by the
+     * installed ExcelJS type definitions.
+     */
     workbook.creator = "Burton Pride C.I.C";
+    workbook.lastModifiedBy = "Burton Pride C.I.C";
     workbook.created = now;
     workbook.modified = now;
-    workbook.subject = "Money audit logs";
-    workbook.title = "Burton Pride Money Audit Logs";
-    workbook.company = "Burton Pride C.I.C";
 
     const summaryRows = makeSummaryRows(logs);
     const latestLogs = [...logs]
