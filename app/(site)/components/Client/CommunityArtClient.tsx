@@ -1323,7 +1323,7 @@ export default function HomeClient() {
       <AnimatePresence>
         {selectedArtwork && selectedImages.length > 0 ? (
           <motion.div
-            className="fixed inset-0 z-[200] grid place-items-center overflow-y-auto bg-slate-950/85 p-3 backdrop-blur-md sm:p-5"
+            className="fixed inset-0 z-[99999] overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-950/95 p-0 backdrop-blur-lg sm:p-4 lg:p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="artwork-dialog-title"
@@ -1336,174 +1336,222 @@ export default function HomeClient() {
               }
             }}
           >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 18 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.97, y: 12 }}
-              transition={{ duration: 0.22 }}
-              className="relative my-6 w-full max-w-6xl overflow-hidden rounded-3xl bg-white text-slate-950 shadow-2xl"
-            >
-              <button
-                type="button"
-                onClick={() => setSelectedArtwork(null)}
-                className="absolute right-4 top-4 z-30 rounded-full bg-black/65 p-3 text-white shadow-lg backdrop-blur-md transition hover:bg-fuchsia-600"
-                aria-label="Close artwork"
+            <div className="grid min-h-full place-items-center">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.98, y: 12 }}
+                transition={{ duration: 0.24 }}
+                className="relative flex min-h-[100svh] min-w-0 w-full max-w-full flex-col overflow-x-hidden bg-white text-slate-950 shadow-[0_30px_100px_rgba(0,0,0,0.55)] sm:my-5 sm:min-h-0 sm:max-h-[94vh] sm:max-w-[1500px] sm:rounded-[2rem] sm:border sm:border-white/15"
               >
-                <X className="h-5 w-5" aria-hidden="true" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedArtwork(null)}
+                  className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[100000] grid h-11 w-11 place-items-center rounded-full border border-white/25 bg-slate-950/90 text-white shadow-xl backdrop-blur-md transition hover:scale-105 hover:bg-fuchsia-600 sm:absolute sm:right-5 sm:top-5 sm:h-12 sm:w-12"
+                  aria-label="Close artwork"
+                >
+                  <X className="h-5 w-5" aria-hidden="true" />
+                </button>
 
-              <div className="grid lg:grid-cols-[1.3fr_0.7fr]">
-                <div className="bg-slate-950 p-3 sm:p-5">
-                  <div className="relative grid min-h-[320px] place-items-center overflow-hidden rounded-2xl bg-black sm:min-h-[520px]">
-                    <AnimatePresence mode="wait">
-                      <motion.img
-                        key={`${selectedArtwork.id}-${activeSlide}`}
-                        src={selectedImages[activeSlide].url}
-                        alt={selectedImages[activeSlide].alt_text}
-                        initial={{ opacity: 0, scale: 0.985 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 1.015 }}
-                        transition={{ duration: 0.22 }}
-                        className="max-h-[72vh] w-full object-contain"
-                      />
-                    </AnimatePresence>
+                <div className="grid min-w-0 flex-1 overflow-x-hidden lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
+                  <div className="flex min-w-0 flex-col overflow-x-hidden bg-[radial-gradient(circle_at_top,#1e1b4b_0%,#080817_42%,#020617_100%)] px-2 pb-3 pt-14 sm:p-5 lg:min-h-0 lg:p-6">
+                    <div className="relative grid h-[min(52svh,460px)] min-h-[260px] min-w-0 max-w-full place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black/45 sm:h-auto sm:min-h-[480px] sm:flex-1 lg:min-h-0">
+                      <AnimatePresence mode="wait">
+                        <motion.img
+                          key={`${selectedArtwork.id}-${activeSlide}`}
+                          src={selectedImages[activeSlide].url}
+                          alt={selectedImages[activeSlide].alt_text}
+                          initial={{ opacity: 0, scale: 0.985 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 1.015 }}
+                          transition={{ duration: 0.24 }}
+                          className="block h-full max-h-[min(52svh,460px)] min-w-0 max-w-full object-contain sm:max-h-[68vh]"
+                        />
+                      </AnimatePresence>
 
-                    {selectedImages.length > 1 ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => changeSlide(-1)}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white shadow-lg backdrop-blur-md transition hover:bg-white hover:text-slate-950"
-                          aria-label="Previous artwork"
-                        >
-                          <ChevronLeft className="h-6 w-6" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => changeSlide(1)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white shadow-lg backdrop-blur-md transition hover:bg-white hover:text-slate-950"
-                          aria-label="Next artwork"
-                        >
-                          <ChevronRight className="h-6 w-6" />
-                        </button>
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/35 to-transparent" />
 
-                        <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-3 py-2 text-sm font-black text-white backdrop-blur-md">
+                      {selectedImages.length > 1 ? (
+                        <>
                           <button
                             type="button"
-                            onClick={() =>
-                              setSlideshowPlaying((current) => !current)
-                            }
-                            className="rounded-full p-1 transition hover:bg-white/20"
-                            aria-label={
-                              slideshowPlaying
-                                ? "Pause automatic slideshow"
-                                : "Play automatic slideshow"
-                            }
+                            onClick={() => changeSlide(-1)}
+                            className="absolute left-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-black/60 text-white shadow-xl backdrop-blur-md transition hover:scale-105 hover:bg-white hover:text-slate-950 sm:left-4 sm:h-12 sm:w-12"
+                            aria-label="Previous artwork"
                           >
-                            {slideshowPlaying ? (
-                              <Pause className="h-4 w-4" />
-                            ) : (
-                              <Play className="h-4 w-4" />
-                            )}
+                            <ChevronLeft className="h-6 w-6" />
                           </button>
-                          <span>
-                            {activeSlide + 1} / {selectedImages.length}
-                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => changeSlide(1)}
+                            className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-black/60 text-white shadow-xl backdrop-blur-md transition hover:scale-105 hover:bg-white hover:text-slate-950 sm:right-4 sm:h-12 sm:w-12"
+                            aria-label="Next artwork"
+                          >
+                            <ChevronRight className="h-6 w-6" />
+                          </button>
+
+                          <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/75 px-3 py-2 text-sm font-black text-white shadow-xl backdrop-blur-md sm:bottom-4">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSlideshowPlaying((current) => !current)
+                              }
+                              className="rounded-full p-1.5 transition hover:bg-white/20"
+                              aria-label={
+                                slideshowPlaying
+                                  ? "Pause automatic slideshow"
+                                  : "Play automatic slideshow"
+                              }
+                            >
+                              {slideshowPlaying ? (
+                                <Pause className="h-4 w-4" />
+                              ) : (
+                                <Play className="h-4 w-4" />
+                              )}
+                            </button>
+                            <span className="min-w-12 text-center">
+                              {activeSlide + 1} / {selectedImages.length}
+                            </span>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+
+                    {selectedImages.length > 1 ? (
+                      <div className="mt-3 flex min-w-0 max-w-full snap-x snap-mandatory gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-2xl border border-white/10 bg-white/5 p-2 pb-3 [scrollbar-width:thin] sm:mt-4 sm:gap-3 sm:p-3">
+                        {selectedImages.map((image, index) => (
+                          <button
+                            key={`${image.url}-${index}`}
+                            type="button"
+                            onClick={() => {
+                              setActiveSlide(index);
+                              setSlideshowPlaying(false);
+                            }}
+                            className={`group relative h-16 w-16 shrink-0 snap-start overflow-hidden rounded-xl border-2 transition sm:h-20 sm:w-20 lg:h-24 lg:w-24 ${
+                              activeSlide === index
+                                ? "border-yellow-300 shadow-[0_0_0_3px_rgba(253,224,71,0.2)]"
+                                : "border-white/15 opacity-75 hover:border-white/60 hover:opacity-100"
+                            }`}
+                            aria-label={`View artwork ${index + 1}`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={image.url}
+                              alt=""
+                              className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                            />
+                            <span className="absolute bottom-1 right-1 grid h-6 w-6 place-items-center rounded-full bg-black/75 text-[11px] font-black text-white shadow-md">
+                              {index + 1}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <aside className="min-w-0 max-w-full overflow-x-hidden border-t border-slate-200 bg-white lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
+                    <div className="relative min-w-0 max-w-full overflow-hidden bg-gradient-to-br from-fuchsia-50 via-white to-indigo-50 px-5 pb-6 pt-6 sm:px-8 sm:pb-8 sm:pt-9 lg:px-9 lg:pr-16">
+                      <div className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full bg-fuchsia-200/45 blur-3xl" />
+                      <div className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full bg-indigo-200/45 blur-3xl" />
+
+                      <div className="relative">
+                        <div className="flex flex-wrap gap-2">
+                          {selectedArtwork.featured ? (
+                            <p className="inline-flex items-center gap-1.5 rounded-full bg-yellow-300 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-purple-950 shadow-sm">
+                              <Sparkles
+                                className="h-3.5 w-3.5"
+                                aria-hidden="true"
+                              />
+                              Featured artwork
+                            </p>
+                          ) : null}
+
+                          <p className="inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1.5 text-xs font-black text-slate-700 shadow-sm ring-1 ring-slate-200">
+                            <ImageIcon className="h-3.5 w-3.5" />
+                            {selectedImages.length}{" "}
+                            {selectedImages.length === 1 ? "piece" : "pieces"}
+                          </p>
                         </div>
-                      </>
-                    ) : null}
-                  </div>
 
-                  {selectedImages.length > 1 ? (
-                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                      {selectedImages.map((image, index) => (
-                        <button
-                          key={`${image.url}-${index}`}
-                          type="button"
-                          onClick={() => {
-                            setActiveSlide(index);
-                            setSlideshowPlaying(false);
-                          }}
-                          className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-xl ring-2 transition sm:h-24 sm:w-24 ${
-                            activeSlide === index
-                              ? "ring-yellow-300"
-                              : "ring-white/20 hover:ring-white/70"
-                          }`}
-                          aria-label={`View artwork ${index + 1}`}
+                        <h2
+                          id="artwork-dialog-title"
+                          className="mt-5 max-w-full whitespace-normal break-words text-[clamp(2.25rem,9vw,3.75rem)] font-black leading-[1.02] tracking-tight text-slate-950 [overflow-wrap:anywhere] sm:text-5xl lg:text-[3.35rem]"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={image.url}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                          <span className="absolute bottom-1 right-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-xs font-black text-white">
-                            {index + 1}
-                          </span>
-                        </button>
-                      ))}
+                          {getPublicArtistName(selectedArtwork)}
+                        </h2>
+
+                        <p className="mt-4 max-w-full whitespace-normal break-words text-xl font-black leading-tight text-fuchsia-700 [overflow-wrap:anywhere] sm:text-2xl">
+                          {selectedArtwork.artwork_title}
+                        </p>
+
+                        {isPublicChoiceEnabled(
+                          selectedArtwork.show_pronouns,
+                        ) && selectedArtwork.pronouns ? (
+                          <p className="mt-2 max-w-full whitespace-normal break-words text-base font-bold text-slate-500 [overflow-wrap:anywhere] sm:text-lg">
+                            {selectedArtwork.pronouns}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : null}
+
+                    <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden px-5 py-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-8 lg:px-9">
+                      {isPublicChoiceEnabled(selectedArtwork.show_story) &&
+                      selectedArtwork.story.trim() ? (
+                        <section aria-labelledby="artwork-story-heading">
+                          <div className="flex items-center gap-3">
+                            <span className="h-7 w-1.5 rounded-full bg-gradient-to-b from-fuchsia-500 to-purple-700" />
+                            <h3
+                              id="artwork-story-heading"
+                              className="text-sm font-black uppercase tracking-[0.14em] text-slate-500"
+                            >
+                              The story behind the art
+                            </h3>
+                          </div>
+                          <p className="mt-4 max-w-full whitespace-pre-wrap break-words text-base leading-8 text-slate-700 [overflow-wrap:anywhere]">
+                            {selectedArtwork.story}
+                          </p>
+                        </section>
+                      ) : null}
+
+                      {isPublicChoiceEnabled(
+                        selectedArtwork.show_image_descriptions,
+                      ) && selectedImages[activeSlide].alt_text.trim() ? (
+                        <section className="rounded-2xl border border-indigo-100 bg-indigo-50/80 p-5 shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100">
+                              <ImageIcon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-black uppercase tracking-[0.12em] text-indigo-700">
+                                Image description
+                              </p>
+                              <p className="mt-1 text-xs font-bold text-slate-500">
+                                Artwork {activeSlide + 1} of{" "}
+                                {selectedImages.length}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="mt-4 max-w-full whitespace-pre-wrap break-words text-sm leading-7 text-slate-700 [overflow-wrap:anywhere]">
+                            {selectedImages[activeSlide].alt_text}
+                          </p>
+                        </section>
+                      ) : null}
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                        <p className="font-black text-slate-900">
+                          Viewing artwork {activeSlide + 1}
+                        </p>
+                        <p className="mt-1 leading-relaxed">
+                          Use the arrows or thumbnails to explore the full
+                          collection.
+                        </p>
+                      </div>
+                    </div>
+                  </aside>
                 </div>
-
-                <div className="max-h-[88vh] overflow-y-auto p-6 sm:p-9">
-                  <div className="flex flex-wrap gap-2">
-                    {selectedArtwork.featured ? (
-                      <p className="inline-flex items-center gap-1 rounded-full bg-yellow-300 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-purple-950">
-                        <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                        Featured artwork
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <h2
-                    id="artwork-dialog-title"
-                    className="mt-4 text-3xl font-black leading-tight sm:text-5xl"
-                  >
-                    {selectedArtwork.artwork_title}
-                  </h2>
-
-                  <p className="mt-3 text-lg font-black text-fuchsia-700">
-                    {getPublicArtistName(selectedArtwork)}
-                    {isPublicChoiceEnabled(selectedArtwork.show_pronouns) &&
-                    selectedArtwork.pronouns ? (
-                      <span className="font-semibold text-slate-500">
-                        {" "}
-                        • {selectedArtwork.pronouns}
-                      </span>
-                    ) : null}
-                  </p>
-
-                  <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-black text-slate-700">
-                    <ImageIcon className="h-4 w-4" />
-                    {selectedImages.length}{" "}
-                    {selectedImages.length === 1 ? "artwork" : "artworks"} in
-                    this collection
-                  </div>
-
-                  {isPublicChoiceEnabled(selectedArtwork.show_story) ? (
-                    <div className="mt-7 border-l-4 border-fuchsia-600 pl-5">
-                      <p className="whitespace-pre-wrap leading-8 text-slate-700">
-                        {selectedArtwork.story}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {isPublicChoiceEnabled(
-                    selectedArtwork.show_image_descriptions,
-                  ) ? (
-                    <div className="mt-7 rounded-2xl bg-slate-100 p-4">
-                      <p className="text-xs font-black uppercase tracking-wide text-slate-500">
-                        Description for artwork {activeSlide + 1}
-                      </p>
-                      <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                        {selectedImages[activeSlide].alt_text}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </motion.div>
+              </motion.div>
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>

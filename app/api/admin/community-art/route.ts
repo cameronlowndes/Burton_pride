@@ -203,26 +203,13 @@ async function uploadArtworkImages(images: File[]) {
 }
 
 function validateUploadedImages(images: File[], altTexts: string[]) {
+  // Images are optional. A submission can be created without uploading artwork.
   if (images.length === 0) {
-    return "Choose at least one artwork image.";
+    return null;
   }
 
   if (images.length > MAX_IMAGES) {
     return `A maximum of ${MAX_IMAGES} artwork images can be uploaded.`;
-  }
-
-  if (altTexts.length !== images.length) {
-    return "Add one image description for every artwork image.";
-  }
-
-  const invalidDescription = altTexts.findIndex(
-    (description) => description.trim().length < 10,
-  );
-
-  if (invalidDescription !== -1) {
-    return `Add a useful image description for artwork image ${
-      invalidDescription + 1
-    }.`;
   }
 
   const invalidType = images.find(
@@ -246,6 +233,12 @@ function validateUploadedImages(images: File[], altTexts: string[]) {
 
   if (totalSize > MAX_TOTAL_IMAGE_SIZE) {
     return "The combined artwork image size must be 40MB or less.";
+  }
+
+  // Accessibility descriptions are optional. Blank descriptions are allowed.
+  // When descriptions are supplied, keep the array aligned with the images.
+  if (altTexts.length > images.length) {
+    return "There are more image descriptions than uploaded artwork images.";
   }
 
   return null;
@@ -523,11 +516,11 @@ export async function POST(request: NextRequest) {
       email,
       artwork_title: artworkTitle,
       story,
-      alt_text: altTexts[0],
+      alt_text: altTexts[0] || null,
       alt_texts: altTexts,
-      image_url: uploaded.imageUrls[0],
+      image_url: uploaded.imageUrls[0] || null,
       image_urls: uploaded.imageUrls,
-      image_path: uploaded.uploadedPaths[0],
+      image_path: uploaded.uploadedPaths[0] || null,
       image_paths: uploaded.uploadedPaths,
 
       status: requestedStatus,
@@ -551,7 +544,6 @@ export async function POST(request: NextRequest) {
         termsAccepted ? now : null,
 
       admin_notes: adminNotes || null,
-      created_by_admin: adminIdentifier,
       updated_at: now,
 
       reviewed_at:
@@ -784,17 +776,12 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    if (
-      altTexts.length !== imageUrls.length ||
-      altTexts.some(
-        (description) =>
-          description.trim().length < 10,
-      )
-    ) {
+    // Image descriptions are optional. Only reject impossible extra entries.
+    if (altTexts.length > imageUrls.length) {
       return NextResponse.json(
         {
           error:
-            "Every artwork image must have an image description of at least 10 characters.",
+            "There are more image descriptions than artwork images.",
         },
         { status: 400 },
       );

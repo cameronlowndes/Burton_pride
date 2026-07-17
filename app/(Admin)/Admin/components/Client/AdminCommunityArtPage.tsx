@@ -393,8 +393,11 @@ export default function AdminCommunityArtPage() {
   const [featured, setFeatured] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [addArtworkOpen, setAddArtworkOpen] = useState(false);
-  const [addArtwork, setAddArtwork] = useState<AdminAddArtworkState>(emptyAdminArtwork);
-  const [addArtworkImages, setAddArtworkImages] = useState<AdminArtworkImage[]>([]);
+  const [addArtwork, setAddArtwork] =
+    useState<AdminAddArtworkState>(emptyAdminArtwork);
+  const [addArtworkImages, setAddArtworkImages] = useState<AdminArtworkImage[]>(
+    [],
+  );
   const [editSubmission, setEditSubmission] =
     useState<EditSubmissionState | null>(null);
 
@@ -420,7 +423,8 @@ export default function AdminCommunityArtPage() {
       }
 
       const result = payload as
-        (ApiErrorPayload & { submissions?: Submission[] }) | null;
+        | (ApiErrorPayload & { submissions?: Submission[] })
+        | null;
 
       setSubmissions(
         Array.isArray(result?.submissions) ? result.submissions : [],
@@ -674,9 +678,16 @@ export default function AdminCommunityArtPage() {
       setError("Admin artwork can contain a maximum of 8 images.");
       return;
     }
-    const invalid = incoming.find((file) => !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type));
+    const invalid = incoming.find(
+      (file) =>
+        !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
+          file.type,
+        ),
+    );
     if (invalid) {
-      setError(`Unsupported image: ${invalid.name}. Use JPG, PNG, WEBP or GIF.`);
+      setError(
+        `Unsupported image: ${invalid.name}. Use JPG, PNG, WEBP or GIF.`,
+      );
       return;
     }
     const large = incoming.find((file) => file.size > 8 * 1024 * 1024);
@@ -687,7 +698,10 @@ export default function AdminCommunityArtPage() {
     setAddArtworkImages((current) => [
       ...current,
       ...incoming.map((file) => ({
-        id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`,
         file,
         previewUrl: URL.createObjectURL(file),
         altText: "",
@@ -704,17 +718,27 @@ export default function AdminCommunityArtPage() {
   }
 
   async function createAdminArtwork() {
-    const declarationsComplete = addArtwork.noAiConfirmed && addArtwork.rightsConfirmed && addArtwork.publicConsent && addArtwork.termsAccepted;
-    if (!addArtwork.contactName.trim() || !addArtwork.artistName.trim() || !addArtwork.email.trim() || !addArtwork.artworkTitle.trim() || addArtwork.story.trim().length < 20) {
-      setError("Complete the contact name, artist name, email, title and artist story before adding the artwork.");
-      return;
-    }
-    if (addArtworkImages.length === 0 || addArtworkImages.some((image) => image.altText.trim().length < 10)) {
-      setError("Add at least one image and an accessibility description of at least 10 characters for every image.");
+    const declarationsComplete =
+      addArtwork.noAiConfirmed &&
+      addArtwork.rightsConfirmed &&
+      addArtwork.publicConsent &&
+      addArtwork.termsAccepted;
+    if (
+      !addArtwork.contactName.trim() ||
+      !addArtwork.artistName.trim() ||
+      !addArtwork.email.trim() ||
+      !addArtwork.artworkTitle.trim() ||
+      addArtwork.story.trim().length < 20
+    ) {
+      setError(
+        "Complete the contact name, artist name, email, title and artist story before adding the artwork.",
+      );
       return;
     }
     if (!declarationsComplete) {
-      setError("All four artist declarations must be confirmed before an admin can add this submission.");
+      setError(
+        "All four artist declarations must be confirmed before an admin can add this submission.",
+      );
       return;
     }
     setBusyId("admin-add-artwork");
@@ -731,22 +755,43 @@ export default function AdminCommunityArtPage() {
       body.append("showArtistName", String(addArtwork.showArtistName));
       body.append("showPronouns", String(addArtwork.showPronouns));
       body.append("showStory", String(addArtwork.showStory));
-      body.append("showImageDescriptions", String(addArtwork.showImageDescriptions));
+      body.append(
+        "showImageDescriptions",
+        String(addArtwork.showImageDescriptions),
+      );
       body.append("noAiConfirmed", String(addArtwork.noAiConfirmed));
       body.append("rightsConfirmed", String(addArtwork.rightsConfirmed));
       body.append("publicConsent", String(addArtwork.publicConsent));
       body.append("termsAccepted", String(addArtwork.termsAccepted));
       body.append("status", addArtwork.status);
       body.append("featured", String(addArtwork.featured));
-      body.append("imageAltTexts", JSON.stringify(addArtworkImages.map((image) => image.altText.trim())));
+      body.append(
+        "imageAltTexts",
+        JSON.stringify(addArtworkImages.map((image) => image.altText.trim())),
+      );
       addArtworkImages.forEach((image) => body.append("images", image.file));
-      const response = await fetch("/api/admin/community-art", { method: "POST", body });
+      const response = await fetch("/api/admin/community-art", {
+        method: "POST",
+        body,
+      });
       const payload = await readPayload(response);
-      if (!response.ok) throw new Error(buildApiError(response, payload, "Add Community Art from admin portal"));
+      if (!response.ok)
+        throw new Error(
+          buildApiError(
+            response,
+            payload,
+            "Add Community Art from admin portal",
+          ),
+        );
       closeAddArtwork();
       await loadSubmissions();
     } catch (caughtError) {
-      setError(caughtError instanceof Error && caughtError.message.startsWith("Action:") ? caughtError.message : unexpectedError(caughtError, "Add Community Art from admin portal"));
+      setError(
+        caughtError instanceof Error &&
+          caughtError.message.startsWith("Action:")
+          ? caughtError.message
+          : unexpectedError(caughtError, "Add Community Art from admin portal"),
+      );
     } finally {
       setBusyId("");
     }
@@ -1773,9 +1818,9 @@ export default function AdminCommunityArtPage() {
                     Edit submitted artwork
                   </h2>
                   <p className="mt-2 max-w-3xl text-white/85">
-                    Correct submission details, public display choices and image
-                    descriptions. Only change an artist declaration after
-                    receiving clear written confirmation.
+                    Correct submission details, public display choices and
+                    optional image descriptions. Only change an artist
+                    declaration after receiving clear written confirmation.
                   </p>
                 </div>
 
@@ -1994,7 +2039,8 @@ export default function AdminCommunityArtPage() {
                     <div className="rounded-2xl border border-slate-200 p-5">
                       <h3 className="font-black">Image descriptions</h3>
                       <p className="mt-1 text-sm text-slate-600">
-                        Keep descriptions accurate and useful for accessibility.
+                        Descriptions are optional. When supplied, keep them
+                        accurate and useful for accessibility.
                       </p>
 
                       <div className="mt-4 space-y-4">
@@ -2073,48 +2119,321 @@ export default function AdminCommunityArtPage() {
         {addArtworkOpen ? (
           <motion.div
             className="fixed inset-0 z-[315] overflow-y-auto bg-slate-950/85 p-3 backdrop-blur-md sm:p-6"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            role="dialog" aria-modal="true" aria-labelledby="admin-add-artwork-title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-add-artwork-title"
           >
             <div className="grid min-h-full place-items-center">
-              <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10 }} className="relative my-6 w-full max-w-6xl overflow-hidden rounded-3xl bg-white text-slate-950 shadow-2xl">
-                <button type="button" onClick={closeAddArtwork} disabled={Boolean(busyId)} className="absolute right-4 top-4 z-20 rounded-full bg-black/60 p-3 text-white hover:bg-fuchsia-700 disabled:opacity-50"><X className="h-5 w-5" /></button>
+              <motion.div
+                initial={{ opacity: 0, y: 20, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="relative my-6 w-full max-w-6xl overflow-hidden rounded-3xl bg-white text-slate-950 shadow-2xl"
+              >
+                <button
+                  type="button"
+                  onClick={closeAddArtwork}
+                  disabled={Boolean(busyId)}
+                  className="absolute right-4 top-4 z-20 rounded-full bg-black/60 p-3 text-white hover:bg-fuchsia-700 disabled:opacity-50"
+                >
+                  <X className="h-5 w-5" />
+                </button>
                 <div className="bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 p-7 text-white sm:p-9">
-                  <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide"><ShieldCheck className="h-4 w-4" /> Admin entry</p>
-                  <h2 id="admin-add-artwork-title" className="mt-4 pr-12 text-3xl font-black sm:text-5xl">Add artwork in the admin portal</h2>
-                  <p className="mt-3 max-w-3xl text-white/85">Only add artwork after the artist has confirmed every declaration and permission. Admins can save it for review or publish it immediately.</p>
+                  <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide">
+                    <ShieldCheck className="h-4 w-4" /> Admin entry
+                  </p>
+                  <h2
+                    id="admin-add-artwork-title"
+                    className="mt-4 pr-12 text-3xl font-black sm:text-5xl"
+                  >
+                    Add artwork in the admin portal
+                  </h2>
+                  <p className="mt-3 max-w-3xl text-white/85">
+                    Only add artwork after the artist has confirmed every
+                    declaration and permission. Admins can save it for review or
+                    publish it immediately.
+                  </p>
                 </div>
                 <div className="grid gap-7 p-6 lg:grid-cols-2 sm:p-9">
                   <div className="space-y-5">
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="block"><span className="mb-2 block text-sm font-black">Private contact name *</span><input value={addArtwork.contactName} onChange={(e)=>updateAddArtwork("contactName",e.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
-                      <label className="block"><span className="mb-2 block text-sm font-black">Public artist name *</span><input value={addArtwork.artistName} onChange={(e)=>updateAddArtwork("artistName",e.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
-                      <label className="block"><span className="mb-2 block text-sm font-black">Pronouns</span><input value={addArtwork.pronouns} onChange={(e)=>updateAddArtwork("pronouns",e.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
-                      <label className="block"><span className="mb-2 block text-sm font-black">Email *</span><input type="email" value={addArtwork.email} onChange={(e)=>updateAddArtwork("email",e.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-black">
+                          Private contact name *
+                        </span>
+                        <input
+                          value={addArtwork.contactName}
+                          onChange={(e) =>
+                            updateAddArtwork("contactName", e.target.value)
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-black">
+                          Public artist name *
+                        </span>
+                        <input
+                          value={addArtwork.artistName}
+                          onChange={(e) =>
+                            updateAddArtwork("artistName", e.target.value)
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-black">
+                          Pronouns
+                        </span>
+                        <input
+                          value={addArtwork.pronouns}
+                          onChange={(e) =>
+                            updateAddArtwork("pronouns", e.target.value)
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-black">
+                          Email *
+                        </span>
+                        <input
+                          type="email"
+                          value={addArtwork.email}
+                          onChange={(e) =>
+                            updateAddArtwork("email", e.target.value)
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        />
+                      </label>
                     </div>
-                    <label className="block"><span className="mb-2 block text-sm font-black">Artwork or collection title *</span><input value={addArtwork.artworkTitle} onChange={(e)=>updateAddArtwork("artworkTitle",e.target.value)} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
-                    <label className="block"><span className="mb-2 block text-sm font-black">Artist story *</span><textarea rows={6} value={addArtwork.story} onChange={(e)=>updateAddArtwork("story",e.target.value.slice(0,2000))} className="w-full rounded-2xl border border-slate-300 px-4 py-3" /></label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-black">
+                        Artwork or collection title *
+                      </span>
+                      <input
+                        value={addArtwork.artworkTitle}
+                        onChange={(e) =>
+                          updateAddArtwork("artworkTitle", e.target.value)
+                        }
+                        className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-black">
+                        Artist story *
+                      </span>
+                      <textarea
+                        rows={6}
+                        value={addArtwork.story}
+                        onChange={(e) =>
+                          updateAddArtwork(
+                            "story",
+                            e.target.value.slice(0, 2000),
+                          )
+                        }
+                        className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                      />
+                    </label>
                     <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 p-5">
                       <h3 className="font-black">What visitors can see</h3>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        {[["showArtistName","Artist name"],["showPronouns","Pronouns"],["showStory","Artist story"],["showImageDescriptions","Image descriptions"]].map(([key,label])=><label key={key} className="flex gap-3 rounded-xl bg-white p-3"><input type="checkbox" checked={Boolean(addArtwork[key as keyof AdminAddArtworkState])} onChange={(e)=>updateAddArtwork(key as keyof AdminAddArtworkState,e.target.checked as never)} className="mt-1 h-5 w-5 accent-fuchsia-700"/><span className="font-bold">Show {label}</span></label>)}
+                        {[
+                          ["showArtistName", "Artist name"],
+                          ["showPronouns", "Pronouns"],
+                          ["showStory", "Artist story"],
+                          ["showImageDescriptions", "Image descriptions"],
+                        ].map(([key, label]) => (
+                          <label
+                            key={key}
+                            className="flex gap-3 rounded-xl bg-white p-3"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(
+                                addArtwork[key as keyof AdminAddArtworkState],
+                              )}
+                              onChange={(e) =>
+                                updateAddArtwork(
+                                  key as keyof AdminAddArtworkState,
+                                  e.target.checked as never,
+                                )
+                              }
+                              className="mt-1 h-5 w-5 accent-fuchsia-700"
+                            />
+                            <span className="font-bold">Show {label}</span>
+                          </label>
+                        ))}
                       </div>
                     </div>
                   </div>
                   <div className="space-y-5">
                     <label className="block cursor-pointer rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50 p-7 text-center hover:border-fuchsia-500">
-                      <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={(e)=>{addAdminArtworkFiles(e.target.files);e.currentTarget.value="";}} />
-                      <UploadCloud className="mx-auto h-11 w-11 text-fuchsia-700"/><p className="mt-3 font-black">Add artwork images</p><p className="mt-1 text-sm text-slate-500">Up to 8 images, 8MB each</p>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="sr-only"
+                        onChange={(e) => {
+                          addAdminArtworkFiles(e.target.files);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <UploadCloud className="mx-auto h-11 w-11 text-fuchsia-700" />
+                      <p className="mt-3 font-black">
+                        Add artwork images (optional)
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        You can add up to 8 images, 8MB each, or save the
+                        submission without images.
+                      </p>
                     </label>
-                    <div className="space-y-3">{addArtworkImages.map((image,index)=><div key={image.id} className="grid grid-cols-[90px_1fr_auto] gap-3 rounded-2xl border border-slate-200 p-3"><img src={image.previewUrl} alt="" className="h-24 w-24 rounded-xl object-cover"/><label className="block"><span className="text-xs font-black">Image {index+1} description *</span><textarea rows={3} value={image.altText} onChange={(e)=>setAddArtworkImages((current)=>current.map((item)=>item.id===image.id?{...item,altText:e.target.value.slice(0,300)}:item))} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"/></label><button type="button" onClick={()=>{URL.revokeObjectURL(image.previewUrl);setAddArtworkImages((current)=>current.filter((item)=>item.id!==image.id));}} className="self-start rounded-full bg-red-50 p-2 text-red-700"><Trash2 className="h-4 w-4"/></button></div>)}</div>
+                    <div className="space-y-3">
+                      {addArtworkImages.map((image, index) => (
+                        <div
+                          key={image.id}
+                          className="grid grid-cols-[90px_1fr_auto] gap-3 rounded-2xl border border-slate-200 p-3"
+                        >
+                          <img
+                            src={image.previewUrl}
+                            alt=""
+                            className="h-24 w-24 rounded-xl object-cover"
+                          />
+                          <label className="block">
+                            <span className="text-xs font-black">
+                              Image {index + 1} description (optional)
+                            </span>
+                            <textarea
+                              rows={3}
+                              value={image.altText}
+                              onChange={(e) =>
+                                setAddArtworkImages((current) =>
+                                  current.map((item) =>
+                                    item.id === image.id
+                                      ? {
+                                          ...item,
+                                          altText: e.target.value.slice(0, 300),
+                                        }
+                                      : item,
+                                  ),
+                                )
+                              }
+                              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              URL.revokeObjectURL(image.previewUrl);
+                              setAddArtworkImages((current) =>
+                                current.filter((item) => item.id !== image.id),
+                              );
+                            }}
+                            className="self-start rounded-full bg-red-50 p-2 text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                     <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
-                      <h3 className="font-black text-amber-950">Artist declarations and permission</h3><p className="mt-1 text-sm text-amber-900">Tick these only when the artist has personally agreed or you have written evidence.</p>
+                      <h3 className="font-black text-amber-950">
+                        Artist declarations and permission
+                      </h3>
+                      <p className="mt-1 text-sm text-amber-900">
+                        Tick these only when the artist has personally agreed or
+                        you have written evidence.
+                      </p>
                       <div className="mt-4 space-y-3">
-                        {[["noAiConfirmed","Artwork is human-created and not fully or mainly AI-generated"],["rightsConfirmed","Artist owns the work or has permission to submit it"],["publicConsent","Artist gives Burton Pride permission to publish the selected information"],["termsAccepted","Artist has read and accepted the Community Art Terms and Conditions"]].map(([key,label])=><label key={key} className="flex gap-3 rounded-xl bg-white p-3"><input type="checkbox" checked={Boolean(addArtwork[key as keyof AdminAddArtworkState])} onChange={(e)=>updateAddArtwork(key as keyof AdminAddArtworkState,e.target.checked as never)} className="mt-1 h-5 w-5 accent-emerald-700"/><span className="text-sm font-semibold">{label}</span></label>)}
+                        {[
+                          [
+                            "noAiConfirmed",
+                            "Artwork is human-created and not fully or mainly AI-generated",
+                          ],
+                          [
+                            "rightsConfirmed",
+                            "Artist owns the work or has permission to submit it",
+                          ],
+                          [
+                            "publicConsent",
+                            "Artist gives Burton Pride permission to publish the selected information",
+                          ],
+                          [
+                            "termsAccepted",
+                            "Artist has read and accepted the Community Art Terms and Conditions",
+                          ],
+                        ].map(([key, label]) => (
+                          <label
+                            key={key}
+                            className="flex gap-3 rounded-xl bg-white p-3"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(
+                                addArtwork[key as keyof AdminAddArtworkState],
+                              )}
+                              onChange={(e) =>
+                                updateAddArtwork(
+                                  key as keyof AdminAddArtworkState,
+                                  e.target.checked as never,
+                                )
+                              }
+                              className="mt-1 h-5 w-5 accent-emerald-700"
+                            />
+                            <span className="text-sm font-semibold">
+                              {label}
+                            </span>
+                          </label>
+                        ))}
                       </div>
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2"><label><span className="mb-2 block text-sm font-black">Save as</span><select value={addArtwork.status} onChange={(e)=>updateAddArtwork("status",e.target.value as "pending"|"approved")} className="w-full rounded-2xl border border-slate-300 px-4 py-3"><option value="pending">Pending review</option><option value="approved">Approved and public</option></select></label><label className="flex items-center gap-3 rounded-2xl bg-yellow-50 p-4"><input type="checkbox" checked={addArtwork.featured} onChange={(e)=>updateAddArtwork("featured",e.target.checked)} className="h-5 w-5 accent-purple-700"/><span className="font-black">Feature artwork</span></label></div>
-                    <button type="button" onClick={()=>void createAdminArtwork()} disabled={Boolean(busyId)} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 px-6 py-4 text-lg font-black text-white disabled:opacity-60">{busyId==="admin-add-artwork"?<Loader2 className="h-5 w-5 animate-spin"/>:<PlusCircle className="h-5 w-5"/>} Add artwork</button>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label>
+                        <span className="mb-2 block text-sm font-black">
+                          Save as
+                        </span>
+                        <select
+                          value={addArtwork.status}
+                          onChange={(e) =>
+                            updateAddArtwork(
+                              "status",
+                              e.target.value as "pending" | "approved",
+                            )
+                          }
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-3"
+                        >
+                          <option value="pending">Pending review</option>
+                          <option value="approved">Approved and public</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-3 rounded-2xl bg-yellow-50 p-4">
+                        <input
+                          type="checkbox"
+                          checked={addArtwork.featured}
+                          onChange={(e) =>
+                            updateAddArtwork("featured", e.target.checked)
+                          }
+                          className="h-5 w-5 accent-purple-700"
+                        />
+                        <span className="font-black">Feature artwork</span>
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void createAdminArtwork()}
+                      disabled={Boolean(busyId)}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 px-6 py-4 text-lg font-black text-white disabled:opacity-60"
+                    >
+                      {busyId === "admin-add-artwork" ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <PlusCircle className="h-5 w-5" />
+                      )}{" "}
+                      Add artwork
+                    </button>
                   </div>
                 </div>
               </motion.div>
