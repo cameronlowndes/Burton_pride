@@ -1198,7 +1198,7 @@ export default function MoneyCsvImport() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           {!easyMode && (
             <Link
-              href="/admin/money/import-history"
+              href="/Admin/MoneyManagement/TrackingMoney/ImportHistory"
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15"
             >
               <FileClock className="h-4 w-4" />

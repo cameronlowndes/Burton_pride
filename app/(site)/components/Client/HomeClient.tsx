@@ -141,9 +141,11 @@ export default function HomeClient() {
                 </h2>
 
                 <p className="mx-auto mb-7 max-w-3xl text-base font-semibold leading-8 text-white/95 sm:text-xl">
-                  Every donation helps us fund event safety, accessibility,
-                  entertainment, community support, toilets, first aid and the
-                  future of Burton Pride.
+                  Help us keep Burton Pride free for everyone. As a grassroots
+                  Pride, created by the community for the community, every
+                  donation helps us provide local support, celebrate community
+                  art, share Pride resources and keep our events safe and
+                  welcoming. Every contribution makes a real difference.
                 </p>
 
                 <div className="mx-auto mb-8 grid max-w-4xl gap-4 sm:grid-cols-4">
@@ -193,7 +195,7 @@ export default function HomeClient() {
                     href="/DonateToUs"
                     className="rounded-full bg-yellow-300 px-10 py-4 text-xl font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform hover:scale-110 hover:bg-white"
                   >
-                    💖 Donate Now
+                    💖 Please Consider Donating
                   </Link>
 
                   <Link
@@ -219,6 +221,90 @@ export default function HomeClient() {
           >
             <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md sm:p-6">
               <EventCard />
+            </div>
+          </motion.section>
+
+          {/* COMMUNITY ART */}
+          <motion.section
+            variants={fadeUp}
+            transition={{ delay: 0.17, duration: 0.6 }}
+          >
+            <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-br from-fuchsia-600 via-purple-600 to-blue-600 p-1 shadow-2xl shadow-purple-500/30">
+              <div className="relative overflow-hidden rounded-[22px] bg-purple-950/80 px-6 py-9 backdrop-blur-md sm:px-10 sm:py-12">
+                <div className="pointer-events-none absolute -left-16 -top-16 h-52 w-52 rounded-full bg-pink-400/30 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-20 -right-16 h-64 w-64 rounded-full bg-blue-400/30 blur-3xl" />
+
+                <div className="relative grid gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:items-center">
+                  <div>
+                    <p className="mb-4 inline-flex rounded-full bg-yellow-300 px-5 py-2 text-sm font-black uppercase tracking-wide text-purple-950 shadow-xl">
+                      Created by our community
+                    </p>
+
+                    <h2 className="text-4xl font-black leading-tight text-white drop-shadow-lg sm:text-6xl">
+                      🎨 Burton Pride Community Art
+                    </h2>
+
+                    <p className="mt-5 max-w-3xl text-base font-medium leading-relaxed text-white/95 sm:text-xl">
+                      Our Community Art page is a welcoming space for local
+                      LGBTQIA+ people, allies and community members to share
+                      their creativity, stories and experiences through art.
+                    </p>
+
+                    <p className="mt-4 max-w-3xl text-base leading-relaxed text-white/85 sm:text-lg">
+                      Explore artwork created by the community, discover the
+                      meaning behind each piece and help us celebrate the many
+                      voices that make Burton unique. Artists can also find out
+                      how to submit their own work for review and display.
+                    </p>
+
+                    <div className="mt-7 flex flex-wrap gap-4">
+                      <Link
+                        href="/CommunityArt"
+                        className="rounded-full bg-yellow-300 px-8 py-4 text-lg font-black text-purple-950 shadow-2xl shadow-yellow-300/30 transition-transform hover:scale-105 hover:bg-white"
+                      >
+                        View Community Art
+                      </Link>
+
+                      
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl">🖼️</p>
+                      <h3 className="mt-3 text-xl font-black text-white">
+                        Share Creativity
+                      </h3>
+                      <p className="mt-2 text-sm leading-relaxed text-white/80">
+                        Give local artists and community members a place to be
+                        seen and celebrated.
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl">💬</p>
+                      <h3 className="mt-3 text-xl font-black text-white">
+                        Tell Our Stories
+                      </h3>
+                      <p className="mt-2 text-sm leading-relaxed text-white/80">
+                        Use art to share experiences, identity, Pride and hope
+                        in your own way.
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                      <p className="text-3xl">🌈</p>
+                      <h3 className="mt-3 text-xl font-black text-white">
+                        Build Community
+                      </h3>
+                      <p className="mt-2 text-sm leading-relaxed text-white/80">
+                        Connect people through creativity, inclusion and shared
+                        community pride.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </motion.section>
 
@@ -389,9 +475,9 @@ export default function HomeClient() {
               </h2>
 
               <p className="mb-6 max-w-3xl text-base leading-relaxed text-white/90 sm:text-xl">
-                Your feedback helps us improve future Burton Pride events.
-                Every idea, comment or suggestion helps us make Pride better for
-                the whole community.
+                Your feedback helps us improve future Burton Pride events. Every
+                idea, comment or suggestion helps us make Pride better for the
+                whole community.
               </p>
 
               <Link

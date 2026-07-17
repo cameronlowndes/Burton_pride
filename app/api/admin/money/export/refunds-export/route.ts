@@ -302,8 +302,14 @@ function applyWorksheetDefaults(
   };
 
   worksheet.headerFooter = {
+    differentFirst: false,
+    differentOddEven: false,
     oddHeader: "&L&B Burton Pride C.I.C&RRefund Tracker Export",
     oddFooter: "&LGenerated from Burton Pride Admin Portal&CPage &P of &N&RConfidential",
+    evenHeader: "&L&B Burton Pride C.I.C&RRefund Tracker Export",
+    evenFooter: "&LGenerated from Burton Pride Admin Portal&CPage &P of &N&RConfidential",
+    firstHeader: "&L&B Burton Pride C.I.C&RRefund Tracker Export",
+    firstFooter: "&LGenerated from Burton Pride Admin Portal&CPage &P of &N&RConfidential",
   };
 }
 
@@ -972,15 +978,13 @@ export async function GET(request: Request) {
     const summary = buildSummary(refunds);
 
     const workbook = new ExcelJS.Workbook();
+
+    /*
+     * Keep workbook metadata limited to fields supported by the
+     * installed ExcelJS type definitions.
+     */
     workbook.creator = "Burton Pride C.I.C";
     workbook.lastModifiedBy = actorName;
-    workbook.company = "Burton Pride C.I.C";
-    workbook.subject = `Refund Tracker Export - ${year}`;
-    workbook.title = `Burton Pride Refund Tracker Export - ${year}`;
-    workbook.description =
-      "Separate refund tracker export containing a summary, active refunds and deleted refunds.";
-    workbook.keywords =
-      "Burton Pride, refunds, money tracker, accounts, export";
     workbook.created = new Date();
     workbook.modified = new Date();
 

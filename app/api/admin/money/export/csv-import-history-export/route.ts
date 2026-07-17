@@ -562,12 +562,14 @@ export async function GET(req: Request) {
 
     const workbook = new ExcelJS.Workbook();
 
+    /*
+     * Keep workbook metadata limited to fields supported by the
+     * installed ExcelJS type definitions.
+     */
     workbook.creator = "Burton Pride C.I.C";
+    workbook.lastModifiedBy = "Burton Pride C.I.C";
     workbook.created = new Date();
     workbook.modified = new Date();
-    workbook.subject = "CSV import history report";
-    workbook.title = "Burton Pride CSV Import History";
-    workbook.company = "Burton Pride C.I.C";
 
     const summarySheet = workbook.addWorksheet("CSV Import Summary", {
       views: [{ state: "frozen", ySplit: 5 }],

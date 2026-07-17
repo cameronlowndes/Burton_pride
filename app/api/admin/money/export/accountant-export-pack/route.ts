@@ -487,13 +487,14 @@ async function savePackLog({
 function createWorkbook(title: string) {
   const workbook = new ExcelJS.Workbook();
 
+  /*
+   * Only use metadata fields supported by the installed ExcelJS typings.
+   * Do not use workbook.company or workbook.properties.title.
+   */
   workbook.creator = "Burton Pride C.I.C Money Tracker";
   workbook.lastModifiedBy = "Burton Pride C.I.C Money Tracker";
   workbook.created = new Date();
   workbook.modified = new Date();
-  workbook.company = "Burton Pride C.I.C";
-  workbook.title = title;
-  workbook.subject = title;
 
   return workbook;
 }
@@ -633,23 +634,37 @@ function freezeAndFilter(sheet: ExcelJS.Worksheet, headerRowNumber = 3) {
 }
 
 function autoWidth(sheet: ExcelJS.Worksheet) {
-  sheet.columns.forEach((column) => {
+  /*
+   * ExcelJS Column typings in some versions do not expose a `number`
+   * property. Use the array index to resolve the worksheet column instead.
+   */
+  sheet.columns.forEach((_column, columnIndex) => {
+    const columnNumber = columnIndex + 1;
+    const column = sheet.getColumn(columnNumber);
     let maxLength = 12;
 
-    column.eachCell?.({ includeEmpty: true }, (cell) => {
-      const value = cell.value;
-
+    sheet.eachRow({ includeEmpty: true }, (row) => {
+      const value = row.getCell(columnNumber).value;
       let text = "";
 
       if (value === null || value === undefined) {
         text = "";
+      } else if (value instanceof Date) {
+        text = value.toISOString();
       } else if (typeof value === "object") {
-        text = JSON.stringify(value);
+        try {
+          text = JSON.stringify(value);
+        } catch {
+          text = String(value);
+        }
       } else {
         text = String(value);
       }
 
-      maxLength = Math.max(maxLength, Math.min(text.length + 2, 55));
+      maxLength = Math.max(
+        maxLength,
+        Math.min(text.length + 2, 55)
+      );
     });
 
     column.width = Math.max(14, maxLength);

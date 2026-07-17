@@ -71,8 +71,8 @@ export default function JoinUsContent() {
         {
           title: "Support with a Donation",
           text: "Your donations go directly towards organizing our events, community initiatives, and making Burton Pride an unforgettable experience.",
-          link: "https://www.gofundme.com/f/raising-funds-for-burton-pride",
-          button: "💖 Donate Now",
+          link: "/DonateToUs",
+          button: "💖 Please donate to us",
           external: true,
         },
         {

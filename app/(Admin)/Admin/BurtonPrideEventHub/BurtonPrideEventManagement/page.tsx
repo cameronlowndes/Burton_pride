@@ -737,7 +737,7 @@ export default function BurtonPrideEventManagementPage() {
 
   return (
     <div className="min-h-full bg-[radial-gradient(circle_at_top,_rgba(236,72,153,0.18),_transparent_32%),linear-gradient(180deg,#12091f_0%,#24113a_48%,#111827_100%)] p-4 text-white md:p-6">
-      <div className="mx-auto max-w-7xl">
+      <div className="w-full">
         <div className="mb-6 rounded-[32px] border border-white/10 bg-white/10 p-6 shadow-2xl backdrop-blur-xl">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -781,7 +781,7 @@ export default function BurtonPrideEventManagementPage() {
           <ActiveEventBanner event={currentEvent || activeEventInList} />
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[430px_minmax(0,1fr)]">
+        <div className="grid w-full gap-6 xl:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]">
           <form
             onSubmit={(event) => {
               event.preventDefault();

@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, CalendarDays, Lock } from "lucide-react";
-import { useEventHub } from "@/lib/Event-Hub-App/EventHubProvider";
+import { useEventHub } from "@/lib/event-hub-app/EventHubProvider";
 
 export default function EventHubShell({ children }: { children: React.ReactNode }) {
   const { currentEvent, loadingEvent, eventError, isEventLocked } = useEventHub();
