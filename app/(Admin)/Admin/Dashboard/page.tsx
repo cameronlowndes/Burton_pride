@@ -68,7 +68,6 @@ type DashboardResponse = {
   commandCentre?: DashboardCommandCentre;
   actionItems?: DashboardActionItem[];
   securityWatch?: DashboardSecurityWatch;
-  moneyHealth?: DashboardMoneyHealth;
   recentActivity?: RecentActivityItem[];
   announcements?: AdminAnnouncement[];
   emailHealth?: EmailHealth;
@@ -1542,13 +1541,12 @@ export default function DashboardPage() {
 
       const nextCommandCentre = json.commandCentre || fallbackCommandCentre(nextStats);
       const nextSecurityWatch = json.securityWatch || fallbackSecurityWatch();
-      const nextMoneyHealth = json.moneyHealth || fallbackMoneyHealth();
       const nextFormsInbox = json.formsInbox || fallbackFormsInbox(nextStats);
       const nextSponsorHealth = json.sponsorHealth || fallbackSponsorHealth();
 
       setCommandCentre(nextCommandCentre);
       setSecurityWatch(nextSecurityWatch);
-      setMoneyHealth(nextMoneyHealth);
+
       setRecentActivity(Array.isArray(json.recentActivity) ? json.recentActivity.slice(0, 8) : []);
       setAnnouncements(Array.isArray(json.announcements) ? json.announcements.slice(0, 5) : []);
       setEmailHealth(json.emailHealth || fallbackEmailHealth());

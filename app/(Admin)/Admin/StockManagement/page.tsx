@@ -3,6 +3,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
+
+import { useStockManagement } from "../components/stock-management/StockManagementProvider";
 import {
   AlertTriangle,
   ArrowRight,
@@ -13,19 +15,16 @@ import {
   FileSpreadsheet,
   History,
   LayoutDashboard,
-  Lock,
+  LoaderCircle,
   LogOut,
   Package,
-  PackageCheck,
   PackageMinus,
   PackageOpen,
   PackagePlus,
   RefreshCcw,
-  Search,
   Settings,
   ShieldCheck,
   ShoppingCart,
-  Store,
   Tags,
   Truck,
   User,
@@ -44,8 +43,8 @@ const ROUTES = {
   reports: "/Admin/StockManagement/Reports",
   auditLog: "/Admin/StockManagement/AuditLog",
   settings: "/Admin/StockManagement/Settings",
-  adminUsers: "/Admin/Users",
-  logout: "/Admin/Logout",
+  adminUsers: "/Admin/Dashboard/Settings/Users",
+  logout: "/Admin/Login?loggedOut=1&t=1784394346848",
   login: "/Admin/Login",
 } as const;
 
@@ -264,8 +263,12 @@ function getCards(): DashboardCard[] {
 }
 
 export default function StockControlHomePage() {
+  const { admin, loadingAdmin } = useStockManagement();
   const alerts = getStockAlerts(stockSummary);
   const cards = getCards();
+
+  const welcomeName =
+    !loadingAdmin && admin?.name ? `, ${admin.name.split(" ")[0]}` : "";
 
   return (
     <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.20),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(168,85,247,0.16),_transparent_32%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-2 py-4 text-white sm:px-3 sm:py-6 lg:px-4 lg:py-8 xl:px-5">
@@ -279,7 +282,7 @@ export default function StockControlHomePage() {
               </div>
 
               <h1 className="text-3xl font-black tracking-tight sm:text-5xl">
-                Welcome to Stock Control
+                Welcome to Stock Control{welcomeName}
               </h1>
 
               <p className="mt-4 max-w-3xl text-sm leading-6 text-white/65 sm:text-base">
@@ -335,12 +338,23 @@ export default function StockControlHomePage() {
 }
 
 function AdminPanel() {
+  const { admin, loadingAdmin, adminError, refreshAdmin } =
+    useStockManagement();
+
+  const roleLabel = admin?.role
+    ? admin.role.replaceAll("_", " ")
+    : "Administrator";
+
   return (
     <section className="rounded-[2rem] border border-blue-300/20 bg-blue-500/10 p-5 shadow-2xl backdrop-blur-xl">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 items-center gap-4">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl bg-blue-500/15 text-blue-100 ring-1 ring-blue-300/20">
-            <User className="h-7 w-7" />
+            {loadingAdmin ? (
+              <LoaderCircle className="h-7 w-7 animate-spin" />
+            ) : (
+              <User className="h-7 w-7" />
+            )}
           </div>
 
           <div className="min-w-0">
@@ -348,15 +362,42 @@ function AdminPanel() {
               Stock Control access
             </p>
 
-            <p className="mt-1 text-base font-black text-white">
-              Burton Pride administrator
+            <p className="mt-1 truncate text-base font-black text-white">
+              {loadingAdmin
+                ? "Loading administrator..."
+                : admin?.name || "Administrator not identified"}
             </p>
+
+            {!loadingAdmin && admin?.email ? (
+              <p className="mt-1 truncate text-sm text-blue-100/65">
+                {admin.email}
+              </p>
+            ) : null}
+
+            {adminError ? (
+              <div className="mt-3 rounded-2xl border border-red-300/20 bg-red-500/10 p-3">
+                <p className="text-sm font-bold text-red-100">{adminError}</p>
+
+                <button
+                  type="button"
+                  onClick={() => void refreshAdmin()}
+                  className="mt-2 inline-flex items-center gap-2 text-xs font-black text-red-100 underline decoration-red-200/40 underline-offset-4"
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  Try loading the admin again
+                </button>
+              </div>
+            ) : null}
 
             <div className="mt-2 flex flex-wrap gap-2">
               <StatusPill
-                type="success"
+                type={adminError ? "danger" : "success"}
                 icon={ShieldCheck}
-                label="Secure admin session"
+                label={
+                  adminError
+                    ? "Admin session unavailable"
+                    : "Secure admin session"
+                }
               />
 
               <StatusPill
@@ -364,17 +405,27 @@ function AdminPanel() {
                 icon={CheckCircle2}
                 label="Stock tools enabled"
               />
+
+              {!loadingAdmin && admin ? (
+                <StatusPill
+                  type="info"
+                  icon={User}
+                  label={roleLabel}
+                />
+              ) : null}
             </div>
           </div>
         </div>
 
-        <Link
-          href={ROUTES.adminUsers}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20"
-        >
-          Manage admins
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+        {admin?.isMainAdmin ? (
+          <Link
+            href={ROUTES.adminUsers}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/20"
+          >
+            Manage admins
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        ) : null}
       </div>
     </section>
   );

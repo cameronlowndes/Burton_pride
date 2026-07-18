@@ -16,15 +16,21 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  KeyRound,
   Lock,
   Loader2,
   Mail,
   ShieldAlert,
+  RotateCcw,
+  Send,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Timer,
   Users,
 } from "lucide-react";
+
+type TwoFactorMethod = "email" | "totp";
 
 type LoginResponse = {
   ok?: boolean;
@@ -34,6 +40,20 @@ type LoginResponse = {
   status?: number;
   admin?: unknown;
   user?: unknown;
+  requiresTwoFactor?: boolean;
+  challengeId?: string;
+  methods?: TwoFactorMethod[];
+  preferredMethod?: TwoFactorMethod;
+  maskedEmail?: string;
+  expiresInSeconds?: number;
+};
+
+type VerifyTwoFactorResponse = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  code?: string;
+  attemptsRemaining?: number;
 };
 
 type LoginError = {
@@ -86,6 +106,8 @@ type ValidationResult =
 
 const INTERNAL_ENDPOINTS = {
   login: "/api/admin/settings/login",
+  verifyTwoFactor: "/api/admin/settings/login/two-factor/verify",
+  resendTwoFactor: "/api/admin/settings/login/two-factor/resend",
   report: "/api/admin/audit-log/report",
   session: "/api/admin/me",
 } as const;
@@ -94,6 +116,7 @@ const DEFAULT_REDIRECT = "/Admin/Dashboard";
 const LOGIN_ROUTE = "/Admin/Login";
 const MAX_EMAIL_LENGTH = 254;
 const MAX_PASSWORD_LENGTH = 128;
+const TWO_FACTOR_CODE_LENGTH = 6;
 const LOCAL_MAX_ATTEMPTS = 5;
 const LOCAL_LOCKOUT_MS = 5 * 60 * 1000;
 
@@ -305,6 +328,20 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const [loginStep, setLoginStep] = useState<"password" | "two-factor">(
+    "password",
+  );
+  const [challengeId, setChallengeId] = useState("");
+  const [twoFactorMethods, setTwoFactorMethods] = useState<TwoFactorMethod[]>([]);
+  const [selectedMethod, setSelectedMethod] =
+    useState<TwoFactorMethod>("email");
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [maskedEmail, setMaskedEmail] = useState("");
+  const [twoFactorExpiresAt, setTwoFactorExpiresAt] = useState<number | null>(
+    null,
+  );
+  const [resendingCode, setResendingCode] = useState(false);
+
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -330,6 +367,12 @@ export default function LoginPage() {
   const cleanEmail = useMemo(() => email.trim().toLowerCase(), [email]);
   const lockoutRemainingMs = lockedUntil ? lockedUntil - now : 0;
   const isLocallyLocked = Boolean(lockedUntil && lockoutRemainingMs > 0);
+  const twoFactorRemainingMs = twoFactorExpiresAt
+    ? Math.max(0, twoFactorExpiresAt - now)
+    : 0;
+  const twoFactorExpired = Boolean(
+    twoFactorExpiresAt && twoFactorRemainingMs <= 0,
+  );
 
   const reportAudit = useCallback(
     async (
@@ -446,14 +489,14 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (!isLocallyLocked) return;
+    if (!isLocallyLocked && !twoFactorExpiresAt) return;
 
     const timer = window.setInterval(() => {
       setNow(Date.now());
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isLocallyLocked]);
+  }, [isLocallyLocked, twoFactorExpiresAt]);
 
   useEffect(() => {
     if (!lockedUntil || lockoutRemainingMs > 0) return;
@@ -778,6 +821,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           email: cleanEmail,
           password,
+          next: nextPath,
         }),
       });
 
@@ -807,22 +851,89 @@ export default function LoginPage() {
 
       setFailedAttempts(0);
       setLockedUntil(null);
+
+      if (!json.requiresTwoFactor) {
+        setPassword("");
+        setError({
+          title: "Two-step verification is required",
+          message:
+            "This administrator account cannot continue until two-step verification has been enabled. Contact a main administrator.",
+        });
+
+        void reportAudit({
+          action: "login_blocked_without_two_factor",
+          status: "blocked",
+          risk_level: "high",
+          target_type: "restricted_login",
+          target_label: "Restricted Login",
+          metadata: {
+            reason: "two_factor_required_for_all_admins",
+            duration_ms: durationMs,
+          },
+        });
+
+        return;
+      }
+
+      const methods =
+        Array.isArray(json.methods) && json.methods.length > 0
+          ? json.methods
+          : [];
+
+      const returnedChallengeId = String(json.challengeId || "").trim();
+
+      if (methods.length === 0 || !returnedChallengeId) {
+        setPassword("");
+        setError({
+          title: "Two-step verification is not configured",
+          message:
+            "No valid verification method was returned for this account. Contact a main administrator.",
+        });
+
+        void reportAudit({
+          action: "login_two_factor_configuration_missing",
+          status: "blocked",
+          risk_level: "high",
+          target_type: "restricted_login",
+          target_label: "Restricted Login",
+          metadata: {
+            has_challenge: Boolean(returnedChallengeId),
+            method_count: methods.length,
+          },
+        });
+
+        return;
+      }
+
+      const preferred =
+        json.preferredMethod && methods.includes(json.preferredMethod)
+          ? json.preferredMethod
+          : methods[0];
+
+      setChallengeId(returnedChallengeId);
+      setTwoFactorMethods(methods);
+      setSelectedMethod(preferred);
+      setMaskedEmail(String(json.maskedEmail || ""));
+      setTwoFactorCode("");
+      setTwoFactorExpiresAt(
+        Date.now() + Math.max(60, json.expiresInSeconds || 600) * 1000,
+      );
+      setLoginStep("two-factor");
       setPassword("");
-      setSkipAutoSessionCheck(false);
 
       void reportAudit({
-        action: "login_attempt_success_client",
-        status: "success_redirecting",
-        risk_level: "low",
+        action: "login_two_factor_required",
+        status: "challenge_created",
+        risk_level: "medium",
         target_type: "restricted_login",
         target_label: "Restricted Login",
         metadata: {
-          result: "success",
-          duration_ms: durationMs,
+          methods,
+          preferred_method: preferred,
         },
       });
 
-      window.location.replace(nextPath);
+      return;
     } catch {
       const durationMs = submitStartedAtRef.current
         ? Date.now() - submitStartedAtRef.current
@@ -844,6 +955,253 @@ export default function LoginPage() {
       setLoading(false);
       submitStartedAtRef.current = null;
     }
+  }
+
+  async function handleTwoFactorVerify(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (loading) return;
+
+    const cleanCode = twoFactorCode.replace(/\D/g, "").slice(
+      0,
+      TWO_FACTOR_CODE_LENGTH,
+    );
+
+    setError(null);
+    setNotice(null);
+
+    if (!challengeId) {
+      setError({
+        title: "Security check expired",
+        message: "Please return to the password step and sign in again.",
+      });
+      return;
+    }
+
+    if (twoFactorExpired) {
+      setError({
+        title: "Code expired",
+        message:
+          selectedMethod === "email"
+            ? "Send a new email code or return to sign in."
+            : "Enter the newest code from your authenticator app.",
+      });
+      return;
+    }
+
+    if (cleanCode.length !== TWO_FACTOR_CODE_LENGTH) {
+      setError({
+        title: "Enter the full security code",
+        message: "The security code must contain 6 numbers.",
+      });
+      return;
+    }
+
+    setLoading(true);
+
+    void reportAudit({
+      action: "login_two_factor_verify_started",
+      status: "started",
+      risk_level: "medium",
+      metadata: {
+        method: selectedMethod,
+      },
+    });
+
+    try {
+      const response = await fetch(INTERNAL_ENDPOINTS.verifyTwoFactor, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          challengeId,
+          method: selectedMethod,
+          code: cleanCode,
+        }),
+      });
+
+      const json = (await response.json().catch(() => null)) as
+        | VerifyTwoFactorResponse
+        | null;
+
+      if (!response.ok || !json?.ok) {
+        setTwoFactorCode("");
+
+        if (response.status === 410) {
+          setTwoFactorExpiresAt(Date.now());
+          setError({
+            title: "Security code expired",
+            message:
+              selectedMethod === "email"
+                ? "Send a new email code and try again."
+                : "Enter the newest code from your authenticator app.",
+          });
+        } else if (response.status === 429) {
+          setError(TOO_MANY_ATTEMPTS_ERROR);
+        } else {
+          setError({
+            title: "Code not accepted",
+            message:
+              typeof json?.attemptsRemaining === "number"
+                ? `Check the code and try again. ${json.attemptsRemaining} attempt${
+                    json.attemptsRemaining === 1 ? "" : "s"
+                  } remaining.`
+                : "Check the code and try again.",
+          });
+        }
+
+        void reportAudit({
+          action: "login_two_factor_verify_failed",
+          status:
+            response.status === 429
+              ? "rate_limited"
+              : response.status === 410
+                ? "expired"
+                : "rejected",
+          risk_level: response.status === 429 ? "high" : "medium",
+          metadata: {
+            method: selectedMethod,
+          },
+        });
+
+        return;
+      }
+
+      setSkipAutoSessionCheck(false);
+      setTwoFactorCode("");
+
+      void reportAudit({
+        action: "login_two_factor_verify_success",
+        status: "success_redirecting",
+        risk_level: "low",
+        metadata: {
+          method: selectedMethod,
+        },
+      });
+
+      window.location.replace(nextPath);
+    } catch {
+      setError(GENERIC_SERVICE_ERROR);
+
+      void reportAudit({
+        action: "login_two_factor_verify_connection_failed",
+        status: "connection_failed",
+        risk_level: "medium",
+        metadata: {
+          method: selectedMethod,
+        },
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resendEmailCode() {
+    if (
+      loading ||
+      resendingCode ||
+      selectedMethod !== "email" ||
+      !challengeId
+    ) {
+      return;
+    }
+
+    setResendingCode(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const response = await fetch(INTERNAL_ENDPOINTS.resendTwoFactor, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          challengeId,
+          method: "email",
+        }),
+      });
+
+      const json = (await response.json().catch(() => null)) as
+        | LoginResponse
+        | null;
+
+      if (!response.ok || !json?.ok) {
+        setError(
+          response.status === 429
+            ? TOO_MANY_ATTEMPTS_ERROR
+            : {
+                title: "Code could not be sent",
+                message: "Please wait a moment and try again.",
+              },
+        );
+        return;
+      }
+
+      if (json.challengeId) {
+        setChallengeId(json.challengeId);
+      }
+
+      setMaskedEmail(String(json.maskedEmail || maskedEmail));
+      setTwoFactorCode("");
+      setTwoFactorExpiresAt(
+        Date.now() + Math.max(60, json.expiresInSeconds || 600) * 1000,
+      );
+      setNotice({
+        title: "New code sent",
+        message: `A new security code was sent${
+          json.maskedEmail || maskedEmail
+            ? ` to ${json.maskedEmail || maskedEmail}`
+            : " to your approved email address"
+        }.`,
+      });
+
+      void reportAudit({
+        action: "login_two_factor_email_resent",
+        status: "sent",
+        risk_level: "medium",
+      });
+    } catch {
+      setError(GENERIC_SERVICE_ERROR);
+    } finally {
+      setResendingCode(false);
+    }
+  }
+
+  function selectTwoFactorMethod(method: TwoFactorMethod) {
+    if (!twoFactorMethods.includes(method)) return;
+
+    setSelectedMethod(method);
+    setTwoFactorCode("");
+    setError(null);
+    setNotice(null);
+
+    void reportAudit({
+      action: "login_two_factor_method_selected",
+      status: "selected",
+      risk_level: "low",
+      metadata: {
+        method,
+      },
+    });
+  }
+
+  function returnToPasswordStep() {
+    setLoginStep("password");
+    setChallengeId("");
+    setTwoFactorMethods([]);
+    setTwoFactorCode("");
+    setMaskedEmail("");
+    setTwoFactorExpiresAt(null);
+    setError(null);
+    setNotice(null);
   }
 
   function handleEmailFocus() {
@@ -1007,12 +1365,34 @@ export default function LoginPage() {
                   Burton Pride
                 </p>
 
-                <h2 className="text-3xl font-black">Secure Access Login</h2>
+                <h2 className="text-3xl font-black">
+                  {loginStep === "password"
+                    ? "Secure Access Login"
+                    : "Confirm it is you"}
+                </h2>
 
                 <p className="mt-3 text-sm leading-6 text-white/60">
-                  Use your approved account to continue. Access is restricted
-                  and monitored.
+                  {loginStep === "password"
+                    ? "Use your approved account to continue. Every administrator must complete two-step verification."
+                    : "Complete the required second security step before the admin portal opens."}
                 </p>
+
+                {loginStep === "password" ? (
+                  <div className="mt-5 rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4">
+                    <div className="flex gap-3">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-100" />
+                      <div>
+                        <p className="text-sm font-black text-white">
+                          Two-step verification is required
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-white/55">
+                          After your password is accepted, you must enter a code
+                          from your email or authenticator app.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {checkingSession ? (
@@ -1042,141 +1422,325 @@ export default function LoginPage() {
                 </div>
               ) : null}
 
-              <form onSubmit={handleLogin} className="space-y-6" noValidate>
-                <div>
-                  <label
-                    htmlFor="admin-email"
-                    className="mb-3 block text-sm font-bold text-white/85"
-                  >
-                    Email address
-                  </label>
+              {loginStep === "password" ? (
+                <form onSubmit={handleLogin} className="space-y-6" noValidate>
+                  <div>
+                    <label
+                      htmlFor="admin-email"
+                      className="mb-3 block text-sm font-bold text-white/85"
+                    >
+                      Email address
+                    </label>
 
-                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 transition focus-within:border-pink-300/60 focus-within:bg-white/[0.1]">
-                    <Mail className="h-4 w-4 shrink-0 text-white/45" />
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 transition focus-within:border-pink-300/60 focus-within:bg-white/[0.1]">
+                      <Mail className="h-4 w-4 shrink-0 text-white/45" />
 
-                    <input
-                      id="admin-email"
-                      type="email"
-                      inputMode="email"
-                      required
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      autoComplete="email"
-                      maxLength={MAX_EMAIL_LENGTH}
-                      value={email}
-                      onFocus={handleEmailFocus}
-                      onBlur={handleEmailBlur}
-                      onChange={(event) => setEmail(event.target.value)}
-                      disabled={loading || isLocallyLocked}
-                      className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60"
-                      placeholder="Enter email address"
-                    />
+                      <input
+                        id="admin-email"
+                        type="email"
+                        inputMode="email"
+                        required
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        autoComplete="email"
+                        maxLength={MAX_EMAIL_LENGTH}
+                        value={email}
+                        onFocus={handleEmailFocus}
+                        onBlur={handleEmailBlur}
+                        onChange={(event) => setEmail(event.target.value)}
+                        disabled={loading || isLocallyLocked}
+                        className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60"
+                        placeholder="Enter email address"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <label
-                    htmlFor="admin-password"
-                    className="mb-3 block text-sm font-bold text-white/85"
+                  <div>
+                    <label
+                      htmlFor="admin-password"
+                      className="mb-3 block text-sm font-bold text-white/85"
+                    >
+                      Password
+                    </label>
+
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 transition focus-within:border-pink-300/60 focus-within:bg-white/[0.1]">
+                      <Lock className="h-4 w-4 shrink-0 text-white/45" />
+
+                      <input
+                        id="admin-password"
+                        type={showPassword ? "text" : "password"}
+                        required
+                        autoComplete="current-password"
+                        maxLength={MAX_PASSWORD_LENGTH}
+                        value={password}
+                        onFocus={handlePasswordFocus}
+                        onBlur={handlePasswordBlur}
+                        onChange={(event) => setPassword(event.target.value)}
+                        disabled={loading || isLocallyLocked}
+                        className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60"
+                        placeholder="Enter password"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={togglePasswordVisibility}
+                        disabled={loading || isLocallyLocked}
+                        className="rounded-xl p-1 text-white/55 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={
+                          showPassword ? "Hide password" : "Show password"
+                        }
+                        title={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isLocallyLocked ? (
+                    <div
+                      role="alert"
+                      aria-live="polite"
+                      className="rounded-2xl border border-amber-400/25 bg-amber-500/12 p-4 text-sm text-amber-50"
+                    >
+                      <div className="flex gap-3">
+                        <Timer className="mt-0.5 h-5 w-5 shrink-0" />
+                        <div>
+                          <p className="font-black">
+                            Sign in temporarily paused
+                          </p>
+                          <p className="mt-1 leading-6 text-amber-50/90">
+                            Please wait a few minutes before trying again.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {error && !isLocallyLocked ? (
+                    <LoginErrorPanel error={error} />
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={loading || isLocallyLocked}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-5 py-4 text-sm font-black text-white shadow-lg transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
                   >
-                    Password
-                  </label>
+                    {loading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Checking details...
+                      </>
+                    ) : isLocallyLocked ? (
+                      <>
+                        <Timer className="h-4 w-4" />
+                        Try again later
+                      </>
+                    ) : (
+                      <>
+                        Continue securely
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <form
+                  onSubmit={handleTwoFactorVerify}
+                  className="space-y-6"
+                  noValidate
+                >
+                  <div className="rounded-3xl border border-blue-300/20 bg-blue-500/10 p-5">
+                    <div className="flex gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
+                        <ShieldCheck className="h-5 w-5" />
+                      </div>
 
-                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 transition focus-within:border-pink-300/60 focus-within:bg-white/[0.1]">
-                    <Lock className="h-4 w-4 shrink-0 text-white/45" />
+                      <div>
+                        <p className="font-black text-white">
+                          Two-step verification
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-white/60">
+                          Your password was accepted. Complete one more security
+                          check to open the admin portal.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
 
-                    <input
-                      id="admin-password"
-                      type={showPassword ? "text" : "password"}
-                      required
-                      autoComplete="current-password"
-                      maxLength={MAX_PASSWORD_LENGTH}
-                      value={password}
-                      onFocus={handlePasswordFocus}
-                      onBlur={handlePasswordBlur}
-                      onChange={(event) => setPassword(event.target.value)}
-                      disabled={loading || isLocallyLocked}
-                      className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60"
-                      placeholder="Enter password"
-                    />
+                  {twoFactorMethods.length > 1 ? (
+                    <div>
+                      <p className="mb-3 text-sm font-bold text-white/85">
+                        Choose how to verify
+                      </p>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {twoFactorMethods.includes("email") ? (
+                          <button
+                            type="button"
+                            onClick={() => selectTwoFactorMethod("email")}
+                            className={`rounded-2xl border p-4 text-left transition ${
+                              selectedMethod === "email"
+                                ? "border-pink-300/50 bg-pink-500/15"
+                                : "border-white/10 bg-white/[0.05] hover:bg-white/[0.09]"
+                            }`}
+                          >
+                            <Mail className="h-5 w-5 text-pink-100" />
+                            <p className="mt-3 font-black">Email code</p>
+                            <p className="mt-1 text-xs leading-5 text-white/50">
+                              Send a six-digit code to your approved email.
+                            </p>
+                          </button>
+                        ) : null}
+
+                        {twoFactorMethods.includes("totp") ? (
+                          <button
+                            type="button"
+                            onClick={() => selectTwoFactorMethod("totp")}
+                            className={`rounded-2xl border p-4 text-left transition ${
+                              selectedMethod === "totp"
+                                ? "border-blue-300/50 bg-blue-500/15"
+                                : "border-white/10 bg-white/[0.05] hover:bg-white/[0.09]"
+                            }`}
+                          >
+                            <Smartphone className="h-5 w-5 text-blue-100" />
+                            <p className="mt-3 font-black">
+                              Authenticator app
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-white/50">
+                              Use Google Authenticator or another TOTP app.
+                            </p>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label
+                      htmlFor="admin-two-factor-code"
+                      className="mb-3 block text-sm font-bold text-white/85"
+                    >
+                      {selectedMethod === "email"
+                        ? "Email security code"
+                        : "Authenticator code"}
+                    </label>
+
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-4 transition focus-within:border-pink-300/60 focus-within:bg-white/[0.1]">
+                      {selectedMethod === "email" ? (
+                        <KeyRound className="h-4 w-4 shrink-0 text-white/45" />
+                      ) : (
+                        <Smartphone className="h-4 w-4 shrink-0 text-white/45" />
+                      )}
+
+                      <input
+                        id="admin-two-factor-code"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        required
+                        autoFocus
+                        autoComplete="one-time-code"
+                        maxLength={TWO_FACTOR_CODE_LENGTH}
+                        value={twoFactorCode}
+                        onChange={(event) =>
+                          setTwoFactorCode(
+                            event.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, TWO_FACTOR_CODE_LENGTH),
+                          )
+                        }
+                        disabled={loading}
+                        className="w-full bg-transparent text-center font-mono text-2xl font-black tracking-[0.45em] text-white outline-none placeholder:text-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        placeholder="000000"
+                        aria-describedby="two-factor-help"
+                      />
+                    </div>
+
+                    <p
+                      id="two-factor-help"
+                      className="mt-3 text-xs leading-5 text-white/50"
+                    >
+                      {selectedMethod === "email"
+                        ? `Enter the code sent${
+                            maskedEmail ? ` to ${maskedEmail}` : " by email"
+                          }.`
+                        : "Open your authenticator app and enter the current six-digit code."}
+                    </p>
+
+                    {twoFactorExpiresAt ? (
+                      <p className="mt-2 text-xs font-bold text-white/45">
+                        {twoFactorExpired
+                          ? "This challenge has expired."
+                          : `Challenge expires in ${Math.max(
+                              1,
+                              Math.ceil(twoFactorRemainingMs / 60000),
+                            )} minute${
+                              Math.ceil(twoFactorRemainingMs / 60000) === 1
+                                ? ""
+                                : "s"
+                            }.`}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {error ? <LoginErrorPanel error={error} /> : null}
+
+                  <button
+                    type="submit"
+                    disabled={
+                      loading ||
+                      twoFactorCode.length !== TWO_FACTOR_CODE_LENGTH ||
+                      twoFactorExpired
+                    }
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-5 py-4 text-sm font-black text-white shadow-lg transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        Verify and continue
+                        <ShieldCheck className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    {selectedMethod === "email" ? (
+                      <button
+                        type="button"
+                        onClick={() => void resendEmailCode()}
+                        disabled={resendingCode || loading}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {resendingCode ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Send a new code
+                      </button>
+                    ) : null}
 
                     <button
                       type="button"
-                      onClick={togglePasswordVisibility}
-                      disabled={loading || isLocallyLocked}
-                      className="rounded-xl p-1 text-white/55 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
-                      title={showPassword ? "Hide password" : "Show password"}
+                      onClick={returnToPasswordStep}
+                      disabled={loading || resendingCode}
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
+                      <RotateCcw className="h-4 w-4" />
+                      Start again
                     </button>
                   </div>
-                </div>
-
-                {isLocallyLocked ? (
-                  <div
-                    role="alert"
-                    aria-live="polite"
-                    className="rounded-2xl border border-amber-400/25 bg-amber-500/12 p-4 text-sm text-amber-50"
-                  >
-                    <div className="flex gap-3">
-                      <Timer className="mt-0.5 h-5 w-5 shrink-0" />
-                      <div>
-                        <p className="font-black">Sign in temporarily paused</p>
-                        <p className="mt-1 leading-6 text-amber-50/90">
-                          Please wait a few minutes before trying again.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {error && !isLocallyLocked ? (
-                  <div
-                    role="alert"
-                    aria-live="polite"
-                    className="rounded-2xl border border-red-400/25 bg-red-500/12 p-4 text-sm text-red-50"
-                  >
-                    <div className="flex gap-3">
-                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-                      <div>
-                        <p className="font-black">{error.title}</p>
-                        <p className="mt-1 leading-6 text-red-50/90">
-                          {error.message}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <button
-                  type="submit"
-                  disabled={loading || isLocallyLocked}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-5 py-4 text-sm font-black text-white shadow-lg transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Signing in...
-                    </>
-                  ) : isLocallyLocked ? (
-                    <>
-                      <Timer className="h-4 w-4" />
-                      Try again later
-                    </>
-                  ) : (
-                    <>
-                      Continue securely
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
-                </button>
-              </form>
+                </form>
+              )}
 
               <div className="mt-8 grid gap-4">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
@@ -1210,3 +1774,22 @@ export default function LoginPage() {
     </main>
   );
 }
+
+function LoginErrorPanel({ error }: { error: LoginError }) {
+  return (
+    <div
+      role="alert"
+      aria-live="polite"
+      className="rounded-2xl border border-red-400/25 bg-red-500/12 p-4 text-sm text-red-50"
+    >
+      <div className="flex gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        <div>
+          <p className="font-black">{error.title}</p>
+          <p className="mt-1 leading-6 text-red-50/90">{error.message}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
