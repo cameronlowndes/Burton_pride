@@ -35,12 +35,14 @@ import {
   Store,
   Wallet,
   X,
+  Boxes,
   type LucideIcon,
 } from "lucide-react";
 
 const MONEY_SIDEBAR_API = "/api/admin/money-sidebar";
 const MONEY_ROOT = "/Admin/MoneyManagement";
 const ADMIN_DASHBOARD = "/Admin/Dashboard";
+const StockManagement = "/Admin/StockManagement";
 const EVENT_HUB = "/Admin/BurtonPrideEventHub";
 const EMAIL_CENTRE = "/Admin/Email/Sending";
 const COLLAPSED_STORAGE_KEY = "burton_money_sidebar_collapsed";
@@ -1534,6 +1536,10 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
 
         <UtilityLink href={EMAIL_CENTRE} icon={Mail} newTab>
           Open Email Centre
+        </UtilityLink>
+
+         <UtilityLink href={StockManagement} icon={Boxes}>
+          Stock Management
         </UtilityLink>
       </div>
     </div>

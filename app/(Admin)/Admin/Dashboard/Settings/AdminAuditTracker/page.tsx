@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
+  AlertCircle,
   AlertTriangle,
+  BadgeCheck,
+  BellRing,
+  BookOpenCheck,
   CalendarDays,
   CheckCircle2,
   Clipboard,
@@ -18,14 +22,17 @@ import {
   Globe2,
   Info,
   Layers3,
+  ListFilter,
   Loader2,
   Lock,
   Monitor,
+  Radio,
   RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
   ShieldX,
+  SlidersHorizontal,
   Sparkles,
   UserRound,
   X,
@@ -110,6 +117,7 @@ type SortKey =
   | "status";
 
 type SortDirection = "asc" | "desc";
+type ReviewMode = "all" | "security" | "stock_control" | "failed" | "my_activity";
 
 const DEFAULT_LIMIT = "150";
 const AUTO_REFRESH_MS = 30000;
@@ -120,6 +128,7 @@ const fallbackAreas = [
   "money",
   "email",
   "event_hub",
+  "stock_control",
   "contacts",
   "admin_users",
   "audit_logs",
@@ -160,6 +169,7 @@ const areaLabels: Record<string, string> = {
   money: "Money",
   email: "Email",
   event_hub: "Event Hub",
+  stock_control: "Stock Control",
   contacts: "Contacts",
   admin_users: "Admin Users",
   audit_logs: "Audit Logs",
@@ -321,11 +331,54 @@ function getStatusClassName(status: unknown) {
 }
 
 function getActionLabel(action: unknown) {
-  return titleCase(action);
+  const key = lower(action);
+
+  const labels: Record<string, string> = {
+    stock_control_opened: "Opened Stock Control",
+    stock_control_heartbeat: "Using Stock Control",
+    stock_control_closed: "Closed Stock Control",
+    stock_control_page_view: "Viewed Stock Control Page",
+    stock_item_created: "Created Stock Item",
+    stock_item_updated: "Updated Stock Item",
+    stock_item_deleted: "Deleted Stock Item",
+    stock_quantity_adjusted: "Adjusted Stock Quantity",
+    stock_movement_recorded: "Recorded Stock Movement",
+    stock_order_created: "Created Purchase Order",
+    stock_order_updated: "Updated Purchase Order",
+    stock_delivery_received: "Received Stock Delivery",
+    stock_report_exported: "Exported Stock Report",
+  };
+
+  return labels[key] || titleCase(action);
 }
 
 function getAdminLabel(log: AuditLog) {
   return log.admin_name || log.admin_email || "Unknown admin";
+}
+
+function getAuditActivitySummary(log: AuditLog) {
+  const action = lower(log.action);
+  const admin = getAdminLabel(log);
+
+  if (action === "stock_control_opened") {
+    return `${admin} opened Stock Control`;
+  }
+
+  if (action === "stock_control_heartbeat") {
+    return `${admin} is using Stock Control`;
+  }
+
+  if (action === "stock_control_closed") {
+    return `${admin} left Stock Control`;
+  }
+
+  const metadataMessage = normalise(log.metadata?.message);
+
+  if (metadataMessage) {
+    return metadataMessage;
+  }
+
+  return getActionLabel(log.action);
 }
 
 function getIpLabel(ip: string | null) {
@@ -376,6 +429,22 @@ function getSecurityMeaning(log: AuditLog) {
     return "The system blocked this action for security reasons.";
   }
 
+  if (action === "stock_control_opened") {
+    return `${getAdminLabel(log)} opened the Stock Control app.`;
+  }
+
+  if (action === "stock_control_heartbeat") {
+    return `${getAdminLabel(log)} is actively using the Stock Control app.`;
+  }
+
+  if (action === "stock_control_closed") {
+    return `${getAdminLabel(log)} closed or left the Stock Control app.`;
+  }
+
+  if (action.startsWith("stock_")) {
+    return `Stock Control activity completed by ${getAdminLabel(log)}.`;
+  }
+
   if (status === "error") {
     return "The system hit an error while processing this action.";
   }
@@ -395,7 +464,25 @@ function makeDownload(filename: string, content: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
-function downloadCsv(logs: AuditLog[]) {
+function redactAuditLog(log: AuditLog): AuditLog {
+  return {
+    ...log,
+    ip_address: log.ip_address ? "REDACTED" : null,
+    user_agent: log.user_agent ? "REDACTED" : null,
+    metadata: log.metadata
+      ? {
+          ...log.metadata,
+          client_ip:
+            "client_ip" in log.metadata ? "REDACTED" : undefined,
+          user_agent:
+            "user_agent" in log.metadata ? "REDACTED" : undefined,
+        }
+      : null,
+  };
+}
+
+function downloadCsv(logs: AuditLog[], redactSensitive = false) {
+  const exportLogs = redactSensitive ? logs.map(redactAuditLog) : logs;
   const headers: Array<keyof AuditLog | "metadata_json"> = [
     "created_at",
     "admin_email",
@@ -415,7 +502,7 @@ function downloadCsv(logs: AuditLog[]) {
     "metadata_json",
   ];
 
-  const rows = logs.map((log) =>
+  const rows = exportLogs.map((log) =>
     headers
       .map((key) => {
         if (key === "metadata_json") return toCsvValue(stringifyDetails(log.metadata));
@@ -432,12 +519,15 @@ function downloadCsv(logs: AuditLog[]) {
   );
 }
 
-function downloadJson(logs: AuditLog[]) {
+function downloadJson(logs: AuditLog[], redactSensitive = false) {
+  const exportLogs = redactSensitive ? logs.map(redactAuditLog) : logs;
+
   const json = JSON.stringify(
     {
       exported_at: new Date().toISOString(),
-      count: logs.length,
-      logs,
+      count: exportLogs.length,
+      sensitive_fields_redacted: redactSensitive,
+      logs: exportLogs,
     },
     null,
     2,
@@ -745,7 +835,7 @@ function LogDetailDrawer({
               </div>
 
               <h2 className="mt-4 text-2xl font-black">
-                {getActionLabel(log.action)}
+                {getAuditActivitySummary(log)}
               </h2>
 
               <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
@@ -907,6 +997,8 @@ export default function AdminAuditLogsPage() {
   const [toDate, setToDate] = useState("");
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [reviewMode, setReviewMode] = useState<ReviewMode>("all");
+  const [redactSensitiveExports, setRedactSensitiveExports] = useState(true);
 
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -986,6 +1078,7 @@ export default function AdminAuditLogsPage() {
                 limit,
                 risk: risk || null,
                 area: area || null,
+                review_mode: reviewMode,
               },
             },
           });
@@ -1084,6 +1177,50 @@ export default function AdminAuditLogsPage() {
 
     const filtered = logs.filter((log) => {
       const createdAt = new Date(log.created_at).getTime();
+      const logArea = lower(log.area);
+      const logAction = lower(log.action);
+      const logStatus = lower(log.status);
+      const logRisk = getRisk(log.risk_level);
+
+      if (
+        reviewMode === "security" &&
+        !(
+          logRisk === "high" ||
+          logRisk === "critical" ||
+          logStatus === "blocked" ||
+          logStatus === "failed" ||
+          logStatus === "error" ||
+          logAction.includes("permission_denied") ||
+          logAction.includes("login") ||
+          logAction.includes("lockout")
+        )
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "stock_control" &&
+        !(
+          logArea === "stock_control" ||
+          logAction.startsWith("stock_")
+        )
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "failed" &&
+        !["failed", "blocked", "error"].includes(logStatus)
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "my_activity" &&
+        !Boolean(log.admin_email || log.admin_name)
+      ) {
+        return false;
+      }
 
       if (query) {
         const haystack = [
@@ -1134,7 +1271,18 @@ export default function AdminAuditLogsPage() {
     });
 
     return sorted;
-  }, [adminRole, fromDate, logs, method, search, sortDirection, sortKey, status, toDate]);
+  }, [
+    adminRole,
+    fromDate,
+    logs,
+    method,
+    reviewMode,
+    search,
+    sortDirection,
+    sortKey,
+    status,
+    toDate,
+  ]);
 
   const stats = useMemo(() => {
     const source = visibleLogs;
@@ -1145,6 +1293,21 @@ export default function AdminAuditLogsPage() {
       return itemStatus === "failed" || itemStatus === "blocked" || itemStatus === "error";
     }).length;
     const authEvents = source.filter((log) => lower(log.area) === "auth").length;
+    const stockControlEvents = source.filter(
+      (log) =>
+        lower(log.area) === "stock_control" ||
+        lower(log.action).startsWith("stock_"),
+    ).length;
+    const stockControlAdmins = new Set(
+      source
+        .filter(
+          (log) =>
+            lower(log.area) === "stock_control" ||
+            lower(log.action).startsWith("stock_"),
+        )
+        .map((log) => lower(log.admin_email || log.admin_name))
+        .filter(Boolean),
+    ).size;
     const uniqueAdmins = new Set(source.map((log) => lower(log.admin_email)).filter(Boolean)).size;
     const uniqueIps = new Set(source.map((log) => lower(log.ip_address)).filter(Boolean)).size;
 
@@ -1153,6 +1316,32 @@ export default function AdminAuditLogsPage() {
       return riskLevel === "critical" || riskLevel === "high";
     });
 
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    const activeStockAdmins = new Set(
+      source
+        .filter((log) => {
+          const action = lower(log.action);
+          const createdAt = new Date(log.created_at).getTime();
+
+          return (
+            (action === "stock_control_opened" ||
+              action === "stock_control_heartbeat") &&
+            Number.isFinite(createdAt) &&
+            createdAt >= fiveMinutesAgo
+          );
+        })
+        .map((log) => lower(log.admin_email || log.admin_name))
+        .filter(Boolean),
+    ).size;
+
+    const securityScore = Math.max(
+      0,
+      100 -
+        critical * 25 -
+        high * 10 -
+        failedOrBlocked * 3,
+    );
+
     return {
       total: source.length,
       critical,
@@ -1160,6 +1349,10 @@ export default function AdminAuditLogsPage() {
       criticalHigh: critical + high,
       failedOrBlocked,
       authEvents,
+      stockControlEvents,
+      stockControlAdmins,
+      activeStockAdmins,
+      securityScore,
       uniqueAdmins,
       uniqueIps,
       latestCriticalOrHigh,
@@ -1167,7 +1360,16 @@ export default function AdminAuditLogsPage() {
   }, [visibleLogs]);
 
   const hasFilters = Boolean(
-    search || risk || area || status || method || adminRole || fromDate || toDate || limit !== DEFAULT_LIMIT,
+    search ||
+      risk ||
+      area ||
+      status ||
+      method ||
+      adminRole ||
+      fromDate ||
+      toDate ||
+      limit !== DEFAULT_LIMIT ||
+      reviewMode !== "all",
   );
 
   function clearFilters() {
@@ -1180,6 +1382,7 @@ export default function AdminAuditLogsPage() {
     setFromDate("");
     setToDate("");
     setLimit(DEFAULT_LIMIT);
+    setReviewMode("all");
 
     void reportAuditEvent({
       action: "audit_logs_filters_cleared",
@@ -1239,7 +1442,7 @@ export default function AdminAuditLogsPage() {
   }
 
   function handleCsvExport() {
-    downloadCsv(visibleLogs);
+    downloadCsv(visibleLogs, redactSensitiveExports);
     addToast({ tone: "success", message: `CSV exported with ${visibleLogs.length} logs.` });
 
     void reportAuditEvent({
@@ -1249,12 +1452,13 @@ export default function AdminAuditLogsPage() {
       metadata: {
         exported_count: visibleLogs.length,
         filters_active: hasFilters,
+        sensitive_fields_redacted: redactSensitiveExports,
       },
     });
   }
 
   function handleJsonExport() {
-    downloadJson(visibleLogs);
+    downloadJson(visibleLogs, redactSensitiveExports);
     addToast({ tone: "success", message: `JSON exported with ${visibleLogs.length} logs.` });
 
     void reportAuditEvent({
@@ -1264,6 +1468,7 @@ export default function AdminAuditLogsPage() {
       metadata: {
         exported_count: visibleLogs.length,
         filters_active: hasFilters,
+        sensitive_fields_redacted: redactSensitiveExports,
       },
     });
   }
@@ -1402,9 +1607,9 @@ export default function AdminAuditLogsPage() {
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
                 Review login attempts, lockouts, permission denials, page views,
-                exports and sensitive admin actions across the Burton Pride Admin
-                Portal. Use this page for incident review, compliance checks and
-                committee-level security monitoring.
+                Stock Control usage, exports and sensitive admin actions across
+                Burton Pride admin apps. The Stock Control records show which
+                administrator opened or used the app.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -1469,7 +1674,7 @@ export default function AdminAuditLogsPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
         <StatCard
           title="Visible logs"
           value={stats.total}
@@ -1492,6 +1697,35 @@ export default function AdminAuditLogsPage() {
           tone={stats.failedOrBlocked > 0 ? "amber" : "green"}
         />
         <StatCard
+          title="Stock Control use"
+          value={stats.stockControlEvents}
+          helper={`${stats.stockControlAdmins} admin${
+            stats.stockControlAdmins === 1 ? "" : "s"
+          } used Stock Control in the visible records.`}
+          icon={Database}
+          tone="blue"
+        />
+        <StatCard
+          title="Security health"
+          value={`${stats.securityScore}%`}
+          helper="Calculated from visible critical, high-risk, blocked and failed activity."
+          icon={BadgeCheck}
+          tone={
+            stats.securityScore >= 90
+              ? "green"
+              : stats.securityScore >= 70
+                ? "amber"
+                : "red"
+          }
+        />
+        <StatCard
+          title="Stock admins online"
+          value={stats.activeStockAdmins}
+          helper="Admins with a Stock Control open or heartbeat event in the last five minutes."
+          icon={Radio}
+          tone={stats.activeStockAdmins > 0 ? "green" : "default"}
+        />
+        <StatCard
           title="Unique admins / IPs"
           value={`${stats.uniqueAdmins} / ${stats.uniqueIps}`}
           helper={`${stats.authEvents} authentication-related records are visible.`}
@@ -1504,7 +1738,7 @@ export default function AdminAuditLogsPage() {
         <div className="mb-6 rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-xl backdrop-blur-xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex gap-3">
-              <ShieldAlert className="mt-1 h-6 w-6 shrink-0 text-amber-100" />
+              <BellRing className="mt-1 h-6 w-6 shrink-0 text-amber-100" />
               <div>
                 <p className="font-black text-amber-50">Security attention needed</p>
                 <p className="mt-1 text-sm leading-6 text-amber-50/75">
@@ -1525,6 +1759,46 @@ export default function AdminAuditLogsPage() {
       ) : null}
 
       <section className="mb-6 rounded-[2rem] border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+        <div className="mb-5 rounded-3xl border border-white/10 bg-black/20 p-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-white/55">
+                <BookOpenCheck className="h-4 w-4" />
+                Review workspace
+              </div>
+              <p className="mt-2 text-sm leading-6 text-white/55">
+                Switch between all activity, security incidents, Stock Control,
+                unsuccessful actions and administrator-focused review.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["all", "All activity"],
+                ["security", "Security review"],
+                ["stock_control", "Stock Control"],
+                ["failed", "Failed / blocked"],
+                ["my_activity", "Admin activity"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setReviewMode(value as ReviewMode)}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black transition",
+                    reviewMode === value
+                      ? "bg-white text-purple-700"
+                      : "bg-white/10 text-white hover:bg-white/20",
+                  ].join(" ")}
+                >
+                  <ListFilter className="h-4 w-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-white/55">
@@ -1568,6 +1842,21 @@ export default function AdminAuditLogsPage() {
             >
               <Copy className="h-4 w-4" />
               Copy IDs
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRedactSensitiveExports((value) => !value)}
+              className={[
+                "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black",
+                redactSensitiveExports
+                  ? "bg-sky-400 text-sky-950"
+                  : "bg-white/10 text-white hover:bg-white/20",
+              ].join(" ")}
+              title="When enabled, exported IP addresses and user-agent details are redacted."
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Safe exports {redactSensitiveExports ? "on" : "off"}
             </button>
 
             <button
@@ -1722,6 +2011,9 @@ export default function AdminAuditLogsPage() {
 
         {hasFilters ? (
           <div className="mt-4 flex flex-wrap gap-2">
+            {reviewMode !== "all" ? (
+              <Pill>Review: {titleCase(reviewMode)}</Pill>
+            ) : null}
             {search ? <Pill>Search active</Pill> : null}
             {risk ? <RiskPill risk={getRisk(risk)} /> : null}
             {area ? <Pill>{getAreaLabel(area)}</Pill> : null}
@@ -1887,7 +2179,9 @@ export default function AdminAuditLogsPage() {
                       </td>
 
                       <td className="px-5 py-5">
-                        <div className="max-w-[220px] font-black leading-5 text-white">{getActionLabel(log.action)}</div>
+                        <div className="max-w-[220px] font-black leading-5 text-white">
+                          {getAuditActivitySummary(log)}
+                        </div>
                         <div className="mt-1 max-w-xs text-xs leading-5 text-white/45">
                           {getSecurityMeaning(log)}
                         </div>
@@ -1947,9 +2241,9 @@ export default function AdminAuditLogsPage() {
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-white/50" />
           <p>
             Security note: exports and detailed log views are themselves reported
-            back into the audit system. Do not share exported audit files outside
-            authorised Burton Pride committee/admin processes because they can
-            contain IP addresses, route names, user agents and security metadata.
+            back into the audit system. Safe exports are enabled by default and
+            redact IP addresses and browser details. Only disable redaction when
+            an authorised security investigation genuinely requires those fields.
           </p>
         </div>
       </div>

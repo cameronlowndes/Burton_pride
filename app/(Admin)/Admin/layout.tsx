@@ -74,6 +74,7 @@ const DASHBOARD_PREFIX = "/admin/dashboard";
 const EMAIL_PREFIX = "/admin/email";
 const MONEY_PREFIX = "/admin/money";
 const MONEY_MANAGEMENT_PREFIX = "/admin/moneymanagement";
+const STOCK_MANAGEMENT_PREFIX = "/admin/stockmanagement";
 
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -755,6 +756,22 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
 }
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const path = normalisePath(pathname);
+
+  /**
+   * Stock Management is a fully separate admin app.
+   *
+   * Nothing in this main Admin layout controls routes under:
+   * /Admin/StockManagement
+   *
+   * Stock Management must use its own layout.tsx for its sidebar,
+   * authentication, permissions, audit logging, page title and styling.
+   */
+  if (isPathOrChild(path, STOCK_MANAGEMENT_PREFIX)) {
+    return <>{children}</>;
+  }
+
   return (
     <AdminProvider>
       <AdminLayoutGate>{children}</AdminLayoutGate>
