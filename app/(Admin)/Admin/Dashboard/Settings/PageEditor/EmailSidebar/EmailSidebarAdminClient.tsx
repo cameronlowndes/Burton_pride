@@ -1,6 +1,44 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ElementType,
+} from "react";
+
+import {
+  Archive,
+  AtSign,
+  Bell,
+  BookOpen,
+  Contact,
+  FileClock,
+  FileText,
+  History,
+  Inbox,
+  KeyRound,
+  ListChecks,
+  LockKeyhole,
+  Mail,
+  MailCheck,
+  MailOpen,
+  MessageSquare,
+  Paperclip,
+  PenSquare,
+  RefreshCw,
+  Search,
+  Send,
+  Settings,
+  ShieldCheck,
+  Signature,
+  Sparkles,
+  Star,
+  Tags,
+  TestTube2,
+  Trash2,
+  Users,
+} from "lucide-react";
 
 type Notice =
   | { type: "success"; message: string }
@@ -44,15 +82,276 @@ const defaultForm: FormState = {
   is_enabled: true,
 };
 
-const iconOptions = [
-  "Mail",
-  "Send",
-  "FileText",
-  "History",
-  "TestTube2",
-  "Settings",
-  "PenSquare",
-];
+const iconMap: Record<string, ElementType> = {
+  Archive,
+  AtSign,
+  Bell,
+  BookOpen,
+  Contact,
+  FileClock,
+  FileText,
+  History,
+  Inbox,
+  KeyRound,
+  ListChecks,
+  LockKeyhole,
+  Mail,
+  MailCheck,
+  MailOpen,
+  MessageSquare,
+  Paperclip,
+  PenSquare,
+  RefreshCw,
+  Search,
+  Send,
+  Settings,
+  ShieldCheck,
+  Signature,
+  Sparkles,
+  Star,
+  Tags,
+  TestTube2,
+  Trash2,
+  Users,
+};
+
+function inferEmailIconName(labelValue: string, hrefValue = "") {
+  const label = String(labelValue || "").trim().toLowerCase();
+  const href = String(hrefValue || "").trim().toLowerCase();
+  const value = `${label} ${href}`;
+
+  /*
+    Check specific page names before generic email words. Most email routes
+    contain /Admin/Email, so checking "email" first would give everything Mail.
+  */
+  if (
+    label.includes("compose") ||
+    label.includes("new email") ||
+    label.includes("write email") ||
+    label.includes("create email") ||
+    href.includes("/compose") ||
+    href.includes("/sending")
+  ) {
+    return "PenSquare";
+  }
+
+  if (
+    label.includes("sent") ||
+    label.includes("send history") ||
+    href.includes("/sent")
+  ) {
+    return "Send";
+  }
+
+  if (
+    label.includes("inbox") ||
+    label.includes("received") ||
+    href.includes("/inbox")
+  ) {
+    return "Inbox";
+  }
+
+  if (
+    label.includes("draft") ||
+    label.includes("drafts") ||
+    href.includes("/draft")
+  ) {
+    return "FileText";
+  }
+
+  if (
+    label.includes("template") ||
+    label.includes("templates") ||
+    href.includes("/template")
+  ) {
+    return "BookOpen";
+  }
+
+  if (
+    label.includes("schedule") ||
+    label.includes("scheduled") ||
+    label.includes("queue") ||
+    href.includes("/schedule") ||
+    href.includes("/queue")
+  ) {
+    return "FileClock";
+  }
+
+  if (
+    label.includes("history") ||
+    label.includes("activity") ||
+    label.includes("log") ||
+    href.includes("/history")
+  ) {
+    return "History";
+  }
+
+  if (
+    label.includes("test email") ||
+    label.includes("email test") ||
+    label.includes("testing") ||
+    href.includes("/test")
+  ) {
+    return "TestTube2";
+  }
+
+  if (
+    label.includes("signature") ||
+    label.includes("signatures") ||
+    href.includes("/signature")
+  ) {
+    return "Signature";
+  }
+
+  if (
+    label.includes("attachment") ||
+    label.includes("attachments") ||
+    href.includes("/attachment")
+  ) {
+    return "Paperclip";
+  }
+
+  if (
+    label.includes("contact") ||
+    label.includes("address book") ||
+    href.includes("/contact")
+  ) {
+    return "Contact";
+  }
+
+  if (
+    label.includes("recipient") ||
+    label.includes("mailing list") ||
+    label.includes("subscribers") ||
+    href.includes("/recipients")
+  ) {
+    return "Users";
+  }
+
+  if (
+    label.includes("category") ||
+    label.includes("label") ||
+    label.includes("tag") ||
+    href.includes("/tag")
+  ) {
+    return "Tags";
+  }
+
+  if (
+    label.includes("spam") ||
+    label.includes("blocked") ||
+    label.includes("security") ||
+    href.includes("/spam") ||
+    href.includes("/blocked")
+  ) {
+    return "ShieldCheck";
+  }
+
+  if (
+    label.includes("password") ||
+    label.includes("api key") ||
+    label.includes("credentials")
+  ) {
+    return "KeyRound";
+  }
+
+  if (
+    label.includes("permission") ||
+    label.includes("access")
+  ) {
+    return "LockKeyhole";
+  }
+
+  if (
+    label.includes("notification") ||
+    label.includes("alerts")
+  ) {
+    return "Bell";
+  }
+
+  if (
+    label.includes("starred") ||
+    label.includes("favourite") ||
+    label.includes("favorite")
+  ) {
+    return "Star";
+  }
+
+  if (
+    label.includes("archive") ||
+    href.includes("/archive")
+  ) {
+    return "Archive";
+  }
+
+  if (
+    label.includes("trash") ||
+    label.includes("deleted") ||
+    href.includes("/trash")
+  ) {
+    return "Trash2";
+  }
+
+  if (
+    label.includes("read email") ||
+    label.includes("opened") ||
+    href.includes("/read")
+  ) {
+    return "MailOpen";
+  }
+
+  if (
+    label.includes("delivered") ||
+    label.includes("delivery status") ||
+    href.includes("/delivery")
+  ) {
+    return "MailCheck";
+  }
+
+  if (
+    label.includes("message") ||
+    label.includes("conversation") ||
+    label.includes("thread")
+  ) {
+    return "MessageSquare";
+  }
+
+  if (
+    label.includes("automation") ||
+    label.includes("smart") ||
+    label.includes("ai")
+  ) {
+    return "Sparkles";
+  }
+
+  if (
+    label.includes("checklist") ||
+    label.includes("tasks")
+  ) {
+    return "ListChecks";
+  }
+
+  if (
+    label.includes("email address") ||
+    label.includes("sender address")
+  ) {
+    return "AtSign";
+  }
+
+  if (
+    label.includes("setting") ||
+    label.includes("configuration") ||
+    href.includes("/settings")
+  ) {
+    return "Settings";
+  }
+
+  return value.includes("mail") || value.includes("email") ? "Mail" : "Mail";
+}
+
+function getIcon(name: string | null | undefined): ElementType {
+  return iconMap[String(name || "")] || Mail;
+}
 
 async function readJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
@@ -119,7 +418,15 @@ export default function EmailSidebarAdminClient() {
         (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
       );
 
-      setItems(sorted);
+      setItems(
+        sorted.map((item) => ({
+          ...item,
+          icon:
+            item.icon && iconMap[item.icon]
+              ? item.icon
+              : inferEmailIconName(item.label, item.href),
+        }))
+      );
     } catch (error) {
       setNotice({
         type: "error",
@@ -168,7 +475,10 @@ export default function EmailSidebarAdminClient() {
     setForm({
       label: item.label,
       href: item.href || "",
-      icon: item.icon || "Mail",
+      icon:
+        item.icon && iconMap[item.icon]
+          ? item.icon
+          : inferEmailIconName(item.label, item.href),
       sort_order: Number(item.sort_order || 0),
       is_enabled: Boolean(item.is_enabled),
     });
@@ -185,7 +495,7 @@ export default function EmailSidebarAdminClient() {
       const payload = {
         label: form.label.trim(),
         href: normaliseHref(form.href),
-        icon: form.icon,
+        icon: inferEmailIconName(form.label, form.href),
         sort_order: Number(form.sort_order) || 0,
         is_enabled: form.is_enabled,
       };
@@ -302,7 +612,7 @@ export default function EmailSidebarAdminClient() {
           body: JSON.stringify({
             label: item.label,
             href: item.href,
-            icon: item.icon,
+            icon: inferEmailIconName(item.label, item.href),
             sort_order: Number(item.sort_order || 0),
             is_enabled: !item.is_enabled,
           }),
@@ -334,7 +644,7 @@ export default function EmailSidebarAdminClient() {
         body: JSON.stringify({
           label: `${item.label} Copy`,
           href: item.href,
-          icon: item.icon,
+          icon: inferEmailIconName(`${item.label} Copy`, item.href),
           sort_order: Number(item.sort_order || 0) + 1,
           is_enabled: item.is_enabled,
         }),
@@ -390,7 +700,7 @@ export default function EmailSidebarAdminClient() {
               body: JSON.stringify({
                 label: x.label,
                 href: x.href,
-                icon: x.icon,
+                icon: inferEmailIconName(x.label, x.href),
                 sort_order: i,
                 is_enabled: x.is_enabled,
               }),
@@ -426,6 +736,8 @@ export default function EmailSidebarAdminClient() {
   const editorTitle =
     editorMode === "edit" ? "Edit email sidebar item" : "Create email link";
 
+  const SelectedIcon = getIcon(form.icon);
+
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
@@ -433,7 +745,7 @@ export default function EmailSidebarAdminClient() {
           Email Sidebar Editor
         </h1>
         <p className="mt-2 text-sm text-white/70">
-          Manage the admin email sidebar links online.
+          Manage the admin email sidebar links. Icons are selected automatically from each page name and URL.
         </p>
       </div>
 
@@ -475,9 +787,15 @@ export default function EmailSidebarAdminClient() {
                 </label>
                 <input
                   value={form.label}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, label: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const label = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      label,
+                      icon: inferEmailIconName(label, prev.href),
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder="e.g. Email Settings"
                   required
@@ -490,9 +808,15 @@ export default function EmailSidebarAdminClient() {
                 </label>
                 <input
                   value={form.href}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, href: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const href = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      href,
+                      icon: inferEmailIconName(prev.label, href),
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder="/Admin/Email/Example"
                   required
@@ -501,21 +825,26 @@ export default function EmailSidebarAdminClient() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
-                  Icon
+                  Automatic icon
                 </label>
-                <select
-                  value={form.icon}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, icon: e.target.value }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                >
-                  {iconOptions.map((icon) => (
-                    <option key={icon} value={icon} className="bg-[#11111f] text-white">
-                      {icon}
-                    </option>
-                  ))}
-                </select>
+
+                <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
+                    <SelectedIcon className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">
+                      {form.icon}
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-white/50">
+                      The icon is selected automatically from the page label and
+                      URL. Compose uses PenSquare, Sent uses Send, Inbox uses
+                      Inbox and Settings uses Settings.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -584,8 +913,9 @@ export default function EmailSidebarAdminClient() {
               <button
                 type="button"
                 onClick={loadItems}
-                className="rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
               >
+                <RefreshCw className="h-4 w-4" />
                 Refresh
               </button>
             </div>
@@ -717,14 +1047,24 @@ function ItemRow({
   onToggle: () => void;
   onDuplicate: () => void;
 }) {
+  const iconName =
+    item.icon && iconMap[item.icon]
+      ? item.icon
+      : inferEmailIconName(item.label, item.href);
+  const Icon = getIcon(iconName);
+
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white">
+            <Icon className="h-4 w-4" />
+          </div>
+
           <div className="text-sm font-bold text-white">{item.label}</div>
 
           <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
-            {item.icon}
+            {iconName}
           </span>
 
           {item.is_enabled ? (

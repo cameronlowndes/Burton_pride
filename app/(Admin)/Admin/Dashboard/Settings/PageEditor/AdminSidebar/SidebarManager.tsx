@@ -1,6 +1,50 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ElementType,
+} from "react";
+
+import {
+  AlertTriangle,
+  Banknote,
+  BarChart3,
+  Boxes,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  CreditCard,
+  FileSpreadsheet,
+  FileText,
+  GalleryHorizontalEnd,
+  Gift,
+  Globe2,
+  HeartHandshake,
+  Home,
+  LayoutDashboard,
+  KeyRound,
+  LockKeyhole,
+  LogIn,
+  Logs,
+  Palette,
+  PanelTopOpen,
+  Mail,
+  Package,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  ShoppingCart,
+  Store,
+  Tags,
+  Ticket,
+  Truck,
+  Vote,
+  UserCog,
+  Users,
+  Wallet,
+} from "lucide-react";
 import type { AdminSidebarItem, AdminSidebarResponse } from "@/types/admin-sidebar";
 
 type Notice =
@@ -10,9 +54,15 @@ type Notice =
 
 type EditorMode = "top-link" | "group" | "child-link" | "edit";
 
+type SidebarManagerItem = AdminSidebarItem & {
+  icon?: string | null;
+  icon_key?: string | null;
+};
+
 type FormState = {
   label: string;
   href: string;
+  icon: string;
   item_type: "link" | "group";
   parent_id: string;
   sort_order: number;
@@ -23,6 +73,7 @@ type FormState = {
 const defaultForm: FormState = {
   label: "",
   href: "",
+  icon: "LayoutDashboard",
   item_type: "link",
   parent_id: "",
   sort_order: 0,
@@ -30,10 +81,235 @@ const defaultForm: FormState = {
   open_in_new_tab: false,
 };
 
+
+const iconMap: Record<string, ElementType> = {
+  AlertTriangle,
+  Banknote,
+  BarChart3,
+  Boxes,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  CreditCard,
+  FileSpreadsheet,
+  FileText,
+  GalleryHorizontalEnd,
+  Gift,
+  Globe2,
+  HeartHandshake,
+  Home,
+  LayoutDashboard,
+  KeyRound,
+  LockKeyhole,
+  LogIn,
+  Logs,
+  Palette,
+  PanelTopOpen,
+  Mail,
+  Package,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  ShoppingCart,
+  Store,
+  Tags,
+  Ticket,
+  Truck,
+  Vote,
+  UserCog,
+  Users,
+  Wallet,
+};
+
+function inferIconName(labelValue: string, hrefValue = "") {
+  /*
+    The label is checked first. This prevents a generic path such as
+    /Admin/Dashboard/... from forcing every item to use LayoutDashboard.
+  */
+  const label = String(labelValue || "").trim().toLowerCase();
+  const href = String(hrefValue || "").trim().toLowerCase();
+
+  const rules: Array<{ keywords: string[]; icon: string }> = [
+    {
+      keywords: [
+        "delete all password",
+        "delete password",
+        "deletepassword",
+        "password page",
+        "password settings",
+        "change password",
+        "reset password",
+        "forgot password",
+        "password",
+      ],
+      icon: "KeyRound",
+    },
+    {
+      keywords: ["login", "log in", "sign in", "signin", "authentication"],
+      icon: "LogIn",
+    },
+    {
+      keywords: ["security", "access control", "locked", "protected"],
+      icon: "LockKeyhole",
+    },
+    {
+      keywords: ["window showcase", "showcase", "gallery"],
+      icon: "GalleryHorizontalEnd",
+    },
+    {
+      keywords: ["window votes", "votes", "voting", "vote"],
+      icon: "Vote",
+    },
+    {
+      keywords: ["community art", "artwork", "artist", "art page", "art"],
+      icon: "Palette",
+    },
+    {
+      keywords: ["event hub", "burton pride event"],
+      icon: "CalendarDays",
+    },
+    {
+      keywords: ["event", "events", "calendar", "schedule"],
+      icon: "CalendarDays",
+    },
+    {
+      keywords: ["money management", "money", "finance", "account", "budget"],
+      icon: "Banknote",
+    },
+    {
+      keywords: ["email", "emails", "mail", "inbox"],
+      icon: "Mail",
+    },
+    {
+      keywords: ["form", "forms", "application", "applications"],
+      icon: "ClipboardList",
+    },
+    {
+      keywords: ["donation", "donations", "gift"],
+      icon: "Gift",
+    },
+    {
+      keywords: ["raffle", "ticket", "tickets"],
+      icon: "Ticket",
+    },
+    {
+      keywords: ["stock control", "stock", "inventory", "products", "items"],
+      icon: "Boxes",
+    },
+    {
+      keywords: ["supplier", "suppliers", "delivery", "shipping"],
+      icon: "Truck",
+    },
+    {
+      keywords: ["purchase order", "orders", "ordering"],
+      icon: "ShoppingCart",
+    },
+    {
+      keywords: ["payment", "payments", "card"],
+      icon: "CreditCard",
+    },
+    {
+      keywords: ["receipt", "receipts", "invoice", "invoices"],
+      icon: "Receipt",
+    },
+    {
+      keywords: ["user", "users", "admin users", "permissions"],
+      icon: "UserCog",
+    },
+    {
+      keywords: ["volunteer", "volunteers", "team", "staff"],
+      icon: "Users",
+    },
+    {
+      keywords: ["sponsor", "sponsors", "partnership"],
+      icon: "HeartHandshake",
+    },
+    {
+      keywords: ["audit", "audit log", "activity log", "logs", "history"],
+      icon: "Logs",
+    },
+    {
+      keywords: ["report", "reports", "analytics", "export", "exports"],
+      icon: "BarChart3",
+    },
+    {
+      keywords: ["setting", "settings", "configuration"],
+      icon: "Settings",
+    },
+    {
+      keywords: ["website", "site", "page editor", "navbar", "sidebar"],
+      icon: "Globe2",
+    },
+    {
+      keywords: ["document", "documents", "file", "files"],
+      icon: "FileText",
+    },
+    {
+      keywords: ["business", "organisation", "organization", "building"],
+      icon: "Building2",
+    },
+    {
+      keywords: ["shop", "store"],
+      icon: "Store",
+    },
+    {
+      keywords: ["category", "categories", "tag", "tags"],
+      icon: "Tags",
+    },
+    {
+      keywords: ["warning", "alert", "alerts"],
+      icon: "AlertTriangle",
+    },
+    {
+      keywords: ["dashboard", "home", "overview", "summary"],
+      icon: "LayoutDashboard",
+    },
+  ];
+
+  // First choose from the visible name of the item.
+  for (const rule of rules) {
+    if (rule.keywords.some((keyword) => label.includes(keyword))) {
+      return rule.icon;
+    }
+  }
+
+  // Then use only meaningful URL sections, ignoring generic admin folders.
+  const meaningfulHref = href
+    .split(/[/?#_-]+/)
+    .filter(
+      (part) =>
+        part &&
+        !["admin", "dashboard", "settings", "page", "pages"].includes(part),
+    )
+    .join(" ");
+
+  for (const rule of rules) {
+    if (rule.keywords.some((keyword) => meaningfulHref.includes(keyword))) {
+      return rule.icon;
+    }
+  }
+
+  return "Package";
+}
+
+function getSavedIconName(item: AdminSidebarItem) {
+  /*
+    Icons are intentionally automatic. Recalculate from the current label and
+    URL so old generic values such as LayoutDashboard do not override a more
+    suitable icon like KeyRound for password pages.
+  */
+  return inferIconName(item.label, item.href || "");
+}
+
+function getIcon(name: string | null | undefined): ElementType {
+  return iconMap[String(name || "")] || Package;
+}
+
 export default function SidebarManager() {
-  const [items, setItems] = useState<AdminSidebarItem[]>([]);
+  const [items, setItems] = useState<SidebarManagerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [updatingAllIcons, setUpdatingAllIcons] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
   const [editorMode, setEditorMode] = useState<EditorMode>("top-link");
@@ -65,7 +341,12 @@ export default function SidebarManager() {
         return 0;
       });
 
-      setItems(sorted);
+      setItems(
+        sorted.map((item) => ({
+          ...item,
+          icon: getSavedIconName(item),
+        }))
+      );
     } catch (error) {
       setNotice({
         type: "error",
@@ -175,6 +456,7 @@ export default function SidebarManager() {
     setForm({
       label: item.label,
       href: item.href || "",
+      icon: getSavedIconName(item),
       item_type: item.item_type,
       parent_id: item.parent_id || "",
       sort_order: item.sort_order,
@@ -192,6 +474,7 @@ export default function SidebarManager() {
     try {
       const payload = {
         ...form,
+        icon: inferIconName(form.label, form.href),
         href: form.href.trim() || null,
         parent_id: form.parent_id || null,
         sort_order: Number(form.sort_order) || 0,
@@ -302,6 +585,7 @@ export default function SidebarManager() {
         body: JSON.stringify({
           label: item.label,
           href: item.href,
+          icon: getSavedIconName(item),
           item_type: item.item_type,
           parent_id: item.parent_id,
           sort_order: item.sort_order,
@@ -333,6 +617,7 @@ export default function SidebarManager() {
         body: JSON.stringify({
           label: `${item.label} Copy`,
           href: item.href,
+          icon: inferIconName(`${item.label} Copy`, item.href || ""),
           item_type: item.item_type,
           parent_id: item.parent_id,
           sort_order: item.sort_order + 1,
@@ -358,6 +643,69 @@ export default function SidebarManager() {
         type: "error",
         message: error instanceof Error ? error.message : "Failed to duplicate item",
       });
+    }
+  }
+
+  async function updateAllAutomaticIcons() {
+    if (updatingAllIcons || items.length === 0) return;
+
+    setUpdatingAllIcons(true);
+    setNotice(null);
+
+    try {
+      const results = await Promise.allSettled(
+        items.map(async (item) => {
+          const icon = inferIconName(item.label, item.href || "");
+
+          const response = await fetch(`/api/admin/sidebar/${item.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              label: item.label,
+              href: item.href,
+              icon,
+              item_type: item.item_type,
+              parent_id: item.parent_id,
+              sort_order: item.sort_order,
+              is_enabled: item.is_enabled,
+              open_in_new_tab: item.open_in_new_tab,
+            }),
+          });
+
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok || !data.ok) {
+            throw new Error(
+              data.error || `Failed to update icon for ${item.label}`,
+            );
+          }
+        }),
+      );
+
+      const failed = results.filter((result) => result.status === "rejected");
+
+      if (failed.length > 0) {
+        throw new Error(
+          `${failed.length} sidebar icon${failed.length === 1 ? "" : "s"} could not be updated.`,
+        );
+      }
+
+      setNotice({
+        type: "success",
+        message: `Updated automatic icons for all ${items.length} sidebar items.`,
+      });
+
+      await loadItems();
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to update all automatic icons.",
+      });
+    } finally {
+      setUpdatingAllIcons(false);
     }
   }
 
@@ -415,12 +763,14 @@ export default function SidebarManager() {
   const selectedParentGroup =
     form.parent_id && groups.find((g) => g.id === form.parent_id);
 
+  const SelectedIcon = getIcon(form.icon);
+
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
       <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
         <h1 className="text-2xl font-extrabold text-white">Admin Sidebar Editor</h1>
         <p className="mt-2 text-sm text-white/70">
-          Easier sidebar builder for top-level links, dropdown groups, and child links.
+          Build top-level links, dropdown groups and child links. Icons are selected automatically from each item name.
         </p>
       </div>
 
@@ -457,6 +807,17 @@ export default function SidebarManager() {
               >
                 + Create dropdown group
               </button>
+
+              <button
+                type="button"
+                onClick={() => void updateAllAutomaticIcons()}
+                disabled={updatingAllIcons || loading || items.length === 0}
+                className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-left text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {updatingAllIcons
+                  ? "Updating every icon..."
+                  : "Update all automatic icons"}
+              </button>
             </div>
           </div>
 
@@ -476,7 +837,15 @@ export default function SidebarManager() {
                 </label>
                 <input
                   value={form.label}
-                  onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
+                  onChange={(e) => {
+                    const label = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      label,
+                      icon: inferIconName(label, prev.href),
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder="e.g. Events"
                   required
@@ -489,7 +858,15 @@ export default function SidebarManager() {
                 </label>
                 <input
                   value={form.href}
-                  onChange={(e) => setForm((prev) => ({ ...prev, href: e.target.value }))}
+                  onChange={(e) => {
+                    const href = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      href,
+                      icon: inferIconName(prev.label, href),
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder={
                     form.item_type === "group"
@@ -497,6 +874,27 @@ export default function SidebarManager() {
                       : "/Admin/Dashboard/Events"
                   }
                 />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-white/80">
+                  Automatic icon
+                </label>
+
+                <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
+                    <SelectedIcon className="h-5 w-5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">{form.icon}</p>
+                    <p className="mt-1 text-xs leading-5 text-white/50">
+                      The icon is selected automatically from the item name and
+                      URL. Password pages use KeyRound, login pages use LogIn,
+                      and security pages use LockKeyhole.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {editorMode === "edit" && (
@@ -848,11 +1246,22 @@ function ItemRow({
   onDuplicate: () => void;
   isChild?: boolean;
 }) {
+  const iconName = getSavedIconName(item);
+  const Icon = getIcon(iconName);
+
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white">
+            <Icon className="h-4 w-4" />
+          </div>
+
           <div className="text-sm font-bold text-white">{item.label}</div>
+
+          <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+            {iconName}
+          </span>
 
           <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
             {item.item_type}

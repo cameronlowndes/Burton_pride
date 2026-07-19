@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ElementType,
+} from "react";
 import {
   AlertTriangle,
   Banknote,
@@ -86,80 +91,280 @@ const defaultForm: FormState = {
   is_enabled: true,
 };
 
-const iconOptions = [
-  "LayoutDashboard",
-  "Receipt",
-  "Wallet",
-  "CreditCard",
-  "PiggyBank",
-  "Banknote",
-  "Coins",
-  "HandCoins",
-  "Landmark",
-  "BarChart3",
-  "FileText",
-  "ClipboardList",
-  "ShieldCheck",
-  "Logs",
-  "Settings",
-  "CalendarDays",
-  "Users",
-  "Gift",
-  "Trophy",
-  "Building2",
-  "Store",
-  "Tags",
-] as const;
+const iconMap: Record<string, ElementType> = {
+  LayoutDashboard,
+  Receipt,
+  Wallet,
+  CreditCard,
+  PiggyBank,
+  Banknote,
+  Coins,
+  HandCoins,
+  Landmark,
+  BarChart3,
+  FileText,
+  ClipboardList,
+  ShieldCheck,
+  Logs,
+  Settings,
+  CalendarDays,
+  Users,
+  Gift,
+  Trophy,
+  Building2,
+  Store,
+  Tags,
+};
 
-function getIcon(name: string) {
-  switch (name) {
-    case "LayoutDashboard":
-      return LayoutDashboard;
-    case "Receipt":
-      return Receipt;
-    case "Wallet":
-      return Wallet;
-    case "CreditCard":
-      return CreditCard;
-    case "PiggyBank":
-      return PiggyBank;
-    case "Banknote":
-      return Banknote;
-    case "Coins":
-      return Coins;
-    case "HandCoins":
-      return HandCoins;
-    case "Landmark":
-      return Landmark;
-    case "BarChart3":
-      return BarChart3;
-    case "FileText":
-      return FileText;
-    case "ClipboardList":
-      return ClipboardList;
-    case "ShieldCheck":
-      return ShieldCheck;
-    case "Logs":
-      return Logs;
-    case "Settings":
-      return Settings;
-    case "CalendarDays":
-      return CalendarDays;
-    case "Users":
-      return Users;
-    case "Gift":
-      return Gift;
-    case "Trophy":
-      return Trophy;
-    case "Building2":
-      return Building2;
-    case "Store":
-      return Store;
-    case "Tags":
-      return Tags;
-    default:
-      return Wallet;
+const allMoneyIconNames = Object.keys(iconMap);
+
+function getMoneyIconCandidates(labelValue: string, hrefValue = "") {
+  const label = String(labelValue || "").trim().toLowerCase();
+  const href = String(hrefValue || "").trim().toLowerCase();
+  const value = `${label} ${href}`;
+
+  const preferred: string[] = [];
+
+  function add(...icons: string[]) {
+    for (const icon of icons) {
+      if (iconMap[icon] && !preferred.includes(icon)) {
+        preferred.push(icon);
+      }
+    }
   }
+
+  /*
+    Add the strongest semantic matches first. Extra icons are included after
+    the preferred choice so another suitable unused icon can be selected when
+    the best icon is already used by a different sidebar page.
+  */
+  if (
+    label.includes("audit") ||
+    label.includes("activity log") ||
+    label.includes("logs") ||
+    href.includes("/auditlogs") ||
+    href.includes("/audit")
+  ) {
+    add("Logs", "ShieldCheck", "ClipboardList", "FileText");
+  }
+
+  if (
+    label.includes("tracking money") ||
+    label.includes("transactions") ||
+    label.includes("transaction") ||
+    href.includes("/trackingmoney")
+  ) {
+    add("Banknote", "Coins", "Wallet", "Receipt");
+  }
+
+  if (
+    label.includes("bank reconciliation") ||
+    label.includes("reconciliation") ||
+    label.includes("bank account") ||
+    label.includes("bank balance")
+  ) {
+    add("Landmark", "CreditCard", "Banknote", "ClipboardList");
+  }
+
+  if (
+    label.includes("budget") ||
+    label.includes("budget planning") ||
+    label.includes("spending plan")
+  ) {
+    add("Wallet", "BarChart3", "ClipboardList", "Coins");
+  }
+
+  if (
+    label.includes("saving target") ||
+    label.includes("savings") ||
+    label.includes("saving")
+  ) {
+    add("PiggyBank", "Coins", "Wallet", "Trophy");
+  }
+
+  if (
+    label.includes("refund") ||
+    label.includes("refunds") ||
+    label.includes("money back")
+  ) {
+    add("HandCoins", "Receipt", "CreditCard", "Banknote");
+  }
+
+  if (
+    label.includes("supplier") ||
+    label.includes("suppliers") ||
+    label.includes("business contact")
+  ) {
+    add("Building2", "Store", "Users", "ClipboardList");
+  }
+
+  if (
+    label.includes("sponsor") ||
+    label.includes("sponsors") ||
+    label.includes("sponsorship")
+  ) {
+    add("Gift", "Trophy", "Users", "Building2");
+  }
+
+  if (
+    label.includes("cash tin") ||
+    label.includes("cash") ||
+    label.includes("banknote")
+  ) {
+    add("Banknote", "Coins", "Wallet", "PiggyBank");
+  }
+
+  if (
+    label.includes("personal funds") ||
+    label.includes("personal money") ||
+    label.includes("personal payment")
+  ) {
+    add("Coins", "HandCoins", "Wallet", "Banknote");
+  }
+
+  if (
+    label.includes("payment") ||
+    label.includes("card payment") ||
+    label.includes("stripe")
+  ) {
+    add("CreditCard", "Receipt", "Banknote", "Wallet");
+  }
+
+  if (
+    label.includes("receipt") ||
+    label.includes("invoice") ||
+    label.includes("expense")
+  ) {
+    add("Receipt", "FileText", "CreditCard", "ClipboardList");
+  }
+
+  if (
+    label.includes("report") ||
+    label.includes("analytics") ||
+    label.includes("summary") ||
+    label.includes("dashboard report")
+  ) {
+    add("BarChart3", "FileText", "ClipboardList", "Trophy");
+  }
+
+  if (
+    label.includes("export") ||
+    label.includes("spreadsheet") ||
+    label.includes("document") ||
+    label.includes("file")
+  ) {
+    add("FileText", "ClipboardList", "BarChart3", "Receipt");
+  }
+
+  if (
+    label.includes("checklist") ||
+    label.includes("approval") ||
+    label.includes("review")
+  ) {
+    add("ClipboardList", "ShieldCheck", "FileText", "Users");
+  }
+
+  if (
+    label.includes("security") ||
+    label.includes("permission") ||
+    label.includes("protected")
+  ) {
+    add("ShieldCheck", "Logs", "Settings", "Users");
+  }
+
+  if (
+    label.includes("setting") ||
+    label.includes("configuration") ||
+    href.includes("/settings")
+  ) {
+    add("Settings", "ShieldCheck", "Tags", "ClipboardList");
+  }
+
+  if (
+    label.includes("calendar") ||
+    label.includes("month") ||
+    label.includes("year lock") ||
+    label.includes("financial year")
+  ) {
+    add("CalendarDays", "ClipboardList", "Landmark", "BarChart3");
+  }
+
+  if (
+    label.includes("user") ||
+    label.includes("admin") ||
+    label.includes("team")
+  ) {
+    add("Users", "ShieldCheck", "Building2", "Settings");
+  }
+
+  if (
+    label.includes("award") ||
+    label.includes("trophy")
+  ) {
+    add("Trophy", "Gift", "BarChart3", "PiggyBank");
+  }
+
+  if (
+    label.includes("shop") ||
+    label.includes("store")
+  ) {
+    add("Store", "Building2", "Tags", "Receipt");
+  }
+
+  if (
+    label.includes("category") ||
+    label.includes("tag")
+  ) {
+    add("Tags", "Store", "FileText", "ClipboardList");
+  }
+
+  if (
+    label === "home" ||
+    label.includes("dashboard") ||
+    href === "/admin/moneymanagement"
+  ) {
+    add("LayoutDashboard", "Wallet", "BarChart3", "Landmark");
+  }
+
+  if (value.includes("money") || value.includes("finance")) {
+    add("Wallet", "Banknote", "Coins", "Landmark");
+  }
+
+  add(...allMoneyIconNames);
+
+  return preferred;
+}
+
+function getUsedIconNames(
+  items: MoneySidebarItem[],
+  excludeItemId?: string | null,
+) {
+  return new Set(
+    items
+      .filter((item) => item.id !== excludeItemId)
+      .map((item) => String(item.icon || "").trim())
+      .filter((icon) => Boolean(iconMap[icon])),
+  );
+}
+
+function selectUniqueMoneyIcon(
+  label: string,
+  href: string,
+  items: MoneySidebarItem[],
+  excludeItemId?: string | null,
+) {
+  const usedIcons = getUsedIconNames(items, excludeItemId);
+  const candidates = getMoneyIconCandidates(label, href);
+
+  return candidates.find((icon) => !usedIcons.has(icon)) || "";
+}
+
+function inferMoneyIconName(labelValue: string, hrefValue = "") {
+  return getMoneyIconCandidates(labelValue, hrefValue)[0] || "Wallet";
+}
+
+function getIcon(name: string | null | undefined): ElementType {
+  return iconMap[String(name || "")] || Wallet;
 }
 
 function clsx(...values: Array<string | false | null | undefined>) {
@@ -249,7 +454,15 @@ export default function MoneySidebarAdminClient() {
         (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
       );
 
-      setItems(sorted);
+      setItems(
+        sorted.map((item) => ({
+          ...item,
+          icon:
+            item.icon && iconMap[item.icon]
+              ? item.icon
+              : inferMoneyIconName(item.label, item.href),
+        }))
+      );
     } catch (error: any) {
       setNotice({
         type: "error",
@@ -276,7 +489,10 @@ export default function MoneySidebarAdminClient() {
   function resetEditor() {
     setEditorMode("create");
     setEditingId(null);
-    setForm(defaultForm);
+    setForm({
+      ...defaultForm,
+      icon: selectUniqueMoneyIcon("", "", items) || "",
+    });
   }
 
   function startCreate() {
@@ -284,6 +500,7 @@ export default function MoneySidebarAdminClient() {
     setEditingId(null);
     setForm({
       ...defaultForm,
+      icon: selectUniqueMoneyIcon("", "", items) || "",
       sort_order: items.length,
     });
     setNotice(null);
@@ -296,7 +513,8 @@ export default function MoneySidebarAdminClient() {
     setForm({
       label: "Home",
       href: MONEY_MANAGEMENT_ROOT,
-      icon: "LayoutDashboard",
+      icon:
+        selectUniqueMoneyIcon("Home", MONEY_MANAGEMENT_ROOT, items) || "",
       sort_order: items.length,
       is_enabled: true,
     });
@@ -310,7 +528,7 @@ export default function MoneySidebarAdminClient() {
     setForm({
       label: "Tracking Money",
       href: TRACKING_MONEY_ROOT,
-      icon: "Banknote",
+      icon: selectUniqueMoneyIcon("Tracking Money", TRACKING_MONEY_ROOT, items) || "",
       sort_order: items.length,
       is_enabled: true,
     });
@@ -324,7 +542,7 @@ export default function MoneySidebarAdminClient() {
     setForm({
       label: "Audit Logs",
       href: AUDIT_LOGS_ROUTE,
-      icon: "Logs",
+      icon: selectUniqueMoneyIcon("Audit Logs", AUDIT_LOGS_ROUTE, items) || "",
       sort_order: items.length,
       is_enabled: true,
     });
@@ -338,7 +556,14 @@ export default function MoneySidebarAdminClient() {
     setForm({
       label: item.label,
       href: item.href || "",
-      icon: item.icon || "LayoutDashboard",
+      icon:
+        item.icon &&
+        iconMap[item.icon] &&
+        !items.some(
+          (other) => other.id !== item.id && other.icon === item.icon,
+        )
+          ? item.icon
+          : selectUniqueMoneyIcon(item.label, item.href, items, item.id) || "",
       sort_order: Number(item.sort_order || 0),
       is_enabled: Boolean(item.is_enabled),
     });
@@ -352,17 +577,42 @@ export default function MoneySidebarAdminClient() {
     setNotice(null);
 
     try {
+      const label = form.label.trim();
+      const href = normaliseHref(form.href);
+      const uniqueIcon = selectUniqueMoneyIcon(
+        label,
+        href,
+        items,
+        editingId,
+      );
+
+      if (!label) throw new Error("Please enter a label.");
+      if (!href) throw new Error("Please enter a URL / href.");
+
+      if (!uniqueIcon) {
+        throw new Error(
+          "No unused sidebar icons are available. Delete an unused page or add more icons before creating another link.",
+        );
+      }
+
+      const duplicateOwner = items.find(
+        (item) => item.id !== editingId && item.icon === uniqueIcon,
+      );
+
+      if (duplicateOwner) {
+        throw new Error(
+          `The ${uniqueIcon} icon is already used by "${duplicateOwner.label}". Every money sidebar page must use a different icon.`,
+        );
+      }
+
       const payload = {
         id: editingId || undefined,
-        label: form.label.trim(),
-        href: normaliseHref(form.href),
-        icon: form.icon,
+        label,
+        href,
+        icon: uniqueIcon,
         sort_order: Number(form.sort_order) || 0,
         is_enabled: form.is_enabled,
       };
-
-      if (!payload.label) throw new Error("Please enter a label.");
-      if (!payload.href) throw new Error("Please enter a URL / href.");
 
       const method = editingId ? "PATCH" : "POST";
 
@@ -493,14 +743,28 @@ export default function MoneySidebarAdminClient() {
 
   async function duplicateItem(item: MoneySidebarItem) {
     try {
+      const duplicateLabel = `${item.label} Copy`;
+      const duplicateHref = `${item.href}-copy`;
+      const uniqueIcon = selectUniqueMoneyIcon(
+        duplicateLabel,
+        duplicateHref,
+        items,
+      );
+
+      if (!uniqueIcon) {
+        throw new Error(
+          "Cannot duplicate this item because every available icon is already in use.",
+        );
+      }
+
       const res = await fetch(API_ROUTE, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          label: `${item.label} Copy`,
-          href: `${item.href}-copy`,
-          icon: item.icon,
+          label: duplicateLabel,
+          href: duplicateHref,
+          icon: uniqueIcon,
           sort_order: Number(item.sort_order || 0) + 1,
           is_enabled: false,
         }),
@@ -588,7 +852,7 @@ export default function MoneySidebarAdminClient() {
   const editorTitle =
     editorMode === "edit" ? "Edit money sidebar item" : "Create money link";
 
-  const SelectedIcon = getIcon(form.icon);
+  const SelectedIcon = getIcon(form.icon || "Wallet");
 
   return (
     <div className="mx-auto max-w-7xl p-4 md:p-6">
@@ -598,7 +862,7 @@ export default function MoneySidebarAdminClient() {
         </h1>
 
         <p className="mt-2 text-sm text-white/70">
-          Manage the MoneyManagement sidebar links online.
+          Manage the Money Management sidebar links. Every page is assigned a different automatic icon; duplicate icons are blocked.
         </p>
       </div>
 
@@ -658,9 +922,15 @@ export default function MoneySidebarAdminClient() {
 
                 <input
                   value={form.label}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, label: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const label = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      label,
+                      icon: selectUniqueMoneyIcon(label, prev.href, items, editingId) || "",
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder="e.g. Audit Logs"
                   required
@@ -674,9 +944,15 @@ export default function MoneySidebarAdminClient() {
 
                 <input
                   value={form.href}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, href: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const href = e.target.value;
+
+                    setForm((prev) => ({
+                      ...prev,
+                      href,
+                      icon: selectUniqueMoneyIcon(prev.label, href, items, editingId) || "",
+                    }));
+                  }}
                   className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
                   placeholder={AUDIT_LOGS_ROUTE}
                   required
@@ -689,72 +965,32 @@ export default function MoneySidebarAdminClient() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/80">
-                  Icon
+                  Automatic icon
                 </label>
 
-                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                  <select
-                    value={form.icon}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, icon: e.target.value }))
-                    }
-                    className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                  >
-                    {iconOptions.map((icon) => (
-                      <option
-                        key={icon}
-                        value={icon}
-                        className="bg-[#11111f] text-white"
-                      >
-                        {icon}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-black/20 px-5 text-white">
+                <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
                     <SelectedIcon className="h-5 w-5" />
                   </div>
-                </div>
 
-                <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-                  <p className="mb-3 text-xs font-bold uppercase tracking-wide text-white/50">
-                    Click an icon
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">
+                      {form.icon}
+                    </p>
 
-                  <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-                    {iconOptions.map((icon) => {
-                      const Icon = getIcon(icon);
-                      const active = form.icon === icon;
+                    <p className="mt-1 text-xs leading-5 text-white/50">
+                      The best unused icon is selected automatically. An icon
+                      already assigned to another money page cannot be reused.
+                    </p>
 
-                      return (
-                        <button
-                          key={icon}
-                          type="button"
-                          onClick={() =>
-                            setForm((prev) => ({
-                              ...prev,
-                              icon,
-                            }))
-                          }
-                          title={icon}
-                          className={clsx(
-                            "flex h-12 items-center justify-center rounded-2xl border transition",
-                            active
-                              ? "border-white bg-white text-purple-700"
-                              : "border-white/10 bg-white/10 text-white hover:bg-white/20"
-                          )}
-                        >
-                          <Icon className="h-5 w-5" />
-                        </button>
-                      );
-                    })}
+                    {!form.icon ? (
+                      <p className="mt-2 text-xs font-bold text-red-200">
+                        No unused icons remain. Add more supported icons or
+                        remove an unused sidebar page.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
-
-                <p className="mt-2 text-xs text-white/60">
-                  Selected icon:{" "}
-                  <span className="font-bold text-white">{form.icon}</span>
-                </p>
               </div>
 
               <div>
@@ -792,8 +1028,8 @@ export default function MoneySidebarAdminClient() {
               <div className="flex flex-wrap gap-3">
                 <button
                   type="submit"
-                  disabled={saving}
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:opacity-60"
+                  disabled={saving || !form.icon}
+                  className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving
                     ? "Saving..."
@@ -1017,7 +1253,12 @@ function ItemRow({
   onToggle: () => void;
   onDuplicate: () => void;
 }) {
-  const Icon = getIcon(item.icon);
+  const iconName =
+    item.icon && iconMap[item.icon]
+      ? item.icon
+      : inferMoneyIconName(item.label, item.href);
+  const Icon = getIcon(iconName);
+  const duplicateIcon = false;
 
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -1030,7 +1271,7 @@ function ItemRow({
           <div className="text-sm font-bold text-white">{item.label}</div>
 
           <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
-            {item.icon}
+            {iconName}
           </span>
 
           {item.is_enabled ? (

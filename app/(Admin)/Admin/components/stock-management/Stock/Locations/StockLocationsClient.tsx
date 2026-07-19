@@ -1,0 +1,1747 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRightLeft,
+  Boxes,
+  Building2,
+  CheckCircle2,
+  Edit3,
+  Eye,
+  EyeOff,
+  Loader2,
+  MapPin,
+  Package,
+  Plus,
+  RefreshCcw,
+  Search,
+  Send,
+  Trash2,
+  Warehouse,
+  X,
+} from "lucide-react";
+
+type StockLocation = {
+  id: string;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  isActive: boolean;
+  itemCount: number;
+  totalUnits: number;
+  totalValue: number;
+  updatedAt?: string | null;
+  updatedByName?: string | null;
+};
+
+
+type MoveableStockItem = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  quantity: number;
+  locationId?: string | null;
+  locationName?: string | null;
+  unitValue?: number | null;
+};
+
+type MoveStockResponse = LocationsResponse & {
+  items?: MoveableStockItem[];
+  movement?: {
+    id: string;
+    itemId: string;
+    fromLocationId: string;
+    toLocationId: string;
+    quantity: number;
+  };
+};
+
+type MoveStockForm = {
+  itemId: string;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  notes: string;
+};
+
+type LocationsResponse = {
+  ok?: boolean;
+  locations?: StockLocation[];
+  location?: StockLocation;
+  message?: string;
+  error?: string;
+  reason?: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+  field?: string | null;
+  status?: number;
+};
+
+type LocationForm = {
+  id?: string;
+  name: string;
+  code: string;
+  description: string;
+  isActive: boolean;
+};
+
+type Notice = {
+  tone: "success" | "error" | "warning";
+  title: string;
+  message: string;
+  technicalDetails?: string[];
+};
+
+const ENDPOINT = "/api/admin/stockmanagement/locations";
+const MOVE_STOCK_ENDPOINT =
+  "/api/admin/stockmanagement/locations/move-stock";
+
+const EMPTY_MOVE_FORM: MoveStockForm = {
+  itemId: "",
+  fromLocationId: "",
+  toLocationId: "",
+  quantity: 1,
+  notes: "",
+};
+
+const EMPTY_FORM: LocationForm = {
+  name: "",
+  code: "",
+  description: "",
+  isActive: true,
+};
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(Number(value || 0));
+}
+
+type DetailedApiError = Error & {
+  title?: string;
+  status?: number;
+  statusText?: string;
+  endpoint?: string;
+  method?: string;
+  code?: string;
+  reason?: string;
+  details?: string | null;
+  hint?: string | null;
+  field?: string | null;
+  responseBody?: string | null;
+};
+
+async function readApiResponse(
+  response: Response,
+): Promise<{
+  json: LocationsResponse | null;
+  rawText: string;
+}> {
+  const rawText = await response.text();
+
+  if (!rawText) {
+    return {
+      json: null,
+      rawText: "",
+    };
+  }
+
+  try {
+    return {
+      json: JSON.parse(rawText) as LocationsResponse,
+      rawText,
+    };
+  } catch {
+    return {
+      json: null,
+      rawText,
+    };
+  }
+}
+
+function createDetailedApiError(params: {
+  response?: Response;
+  json?: LocationsResponse | null;
+  rawText?: string;
+  endpoint: string;
+  method: string;
+  fallbackTitle: string;
+  fallbackMessage: string;
+}): DetailedApiError {
+  const status = params.response?.status;
+  const statusText = params.response?.statusText || "";
+  const serverMessage =
+    params.json?.error ||
+    params.json?.message ||
+    params.json?.reason ||
+    "";
+
+  const message =
+    serverMessage ||
+    (status === 400
+      ? "The request contains missing or invalid location details."
+      : status === 401
+        ? "Your admin session is missing or has expired. Sign in again and retry."
+        : status === 403
+          ? "Your administrator account does not have permission to manage stock locations."
+          : status === 404
+            ? `The API route was not found: ${params.endpoint}. Check the route folder and file name.`
+            : status === 409
+              ? "The request conflicts with an existing location or with stock currently assigned to it."
+              : status === 422
+                ? "The server could not accept one or more submitted values."
+                : status === 429
+                  ? "Too many requests were made. Wait a moment and try again."
+                  : status && status >= 500
+                    ? "The server failed while processing the stock-location request. Check the terminal and Supabase logs."
+                    : params.fallbackMessage);
+
+  const error = new Error(message) as DetailedApiError;
+
+  error.title = params.fallbackTitle;
+  error.status = status;
+  error.statusText = statusText;
+  error.endpoint = params.endpoint;
+  error.method = params.method;
+  error.code = params.json?.code;
+  error.reason = params.json?.reason;
+  error.details = params.json?.details;
+  error.hint = params.json?.hint;
+  error.field = params.json?.field;
+  error.responseBody =
+    !params.json && params.rawText
+      ? params.rawText.slice(0, 700)
+      : null;
+
+  return error;
+}
+
+function noticeFromError(
+  caught: unknown,
+  fallbackTitle: string,
+  fallbackMessage: string,
+): Notice {
+  if (!(caught instanceof Error)) {
+    return {
+      tone: "error",
+      title: fallbackTitle,
+      message: fallbackMessage,
+    };
+  }
+
+  const error = caught as DetailedApiError;
+  const technicalDetails: string[] = [];
+
+  if (typeof error.status === "number") {
+    technicalDetails.push(
+      `HTTP status: ${error.status}${
+        error.statusText ? ` ${error.statusText}` : ""
+      }`,
+    );
+  }
+
+  if (error.method && error.endpoint) {
+    technicalDetails.push(
+      `Request: ${error.method} ${error.endpoint}`,
+    );
+  }
+
+  if (error.code) {
+    technicalDetails.push(`Error code: ${error.code}`);
+  }
+
+  if (error.reason && error.reason !== error.message) {
+    technicalDetails.push(`Reason: ${error.reason}`);
+  }
+
+  if (error.field) {
+    technicalDetails.push(`Field: ${error.field}`);
+  }
+
+  if (error.details) {
+    technicalDetails.push(`Server details: ${error.details}`);
+  }
+
+  if (error.hint) {
+    technicalDetails.push(`Server hint: ${error.hint}`);
+  }
+
+  if (error.responseBody) {
+    technicalDetails.push(
+      `Non-JSON response: ${error.responseBody}`,
+    );
+  }
+
+  return {
+    tone: "error",
+    title: error.title || fallbackTitle,
+    message: error.message || fallbackMessage,
+    technicalDetails:
+      technicalDetails.length > 0 ? technicalDetails : undefined,
+  };
+}
+
+export default function StockLocationsClient() {
+  const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [form, setForm] = useState<LocationForm>(EMPTY_FORM);
+  const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StockLocation | null>(null);
+  const [moveFormOpen, setMoveFormOpen] = useState(false);
+  const [moveForm, setMoveForm] =
+    useState<MoveStockForm>(EMPTY_MOVE_FORM);
+  const [moveableItems, setMoveableItems] = useState<MoveableStockItem[]>([]);
+  const [loadingMoveItems, setLoadingMoveItems] = useState(false);
+  const [movingStock, setMovingStock] = useState(false);
+
+  const loadLocations = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${ENDPOINT}?includeArchived=true`, {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+
+      const { json, rawText } = await readApiResponse(response);
+
+      if (!response.ok || !json?.ok) {
+        throw createDetailedApiError({
+          response,
+          json,
+          rawText,
+          endpoint: `${ENDPOINT}?includeArchived=true`,
+          method: "GET",
+          fallbackTitle: "Stock locations could not be loaded",
+          fallbackMessage:
+            "The locations API did not return a successful response.",
+        });
+      }
+
+      setLocations(Array.isArray(json.locations) ? json.locations : []);
+    } catch (caught) {
+      setLocations([]);
+      setNotice(
+        noticeFromError(
+          caught,
+          "Stock locations could not be loaded",
+          "Refresh the page and try again.",
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLocations();
+  }, [loadLocations]);
+
+  const filteredLocations = useMemo(() => {
+    const cleanQuery = query.trim().toLowerCase();
+
+    return locations.filter((location) =>
+      !cleanQuery
+        ? true
+        : [location.name, location.code, location.description]
+            .filter(Boolean)
+            .some((value) =>
+              String(value).toLowerCase().includes(cleanQuery),
+            ),
+    );
+  }, [locations, query]);
+
+  const totals = useMemo(
+    () => ({
+      locations: locations.filter((location) => location.isActive).length,
+      itemCount: locations.reduce(
+        (total, location) => total + location.itemCount,
+        0,
+      ),
+      units: locations.reduce(
+        (total, location) => total + location.totalUnits,
+        0,
+      ),
+    }),
+    [locations],
+  );
+
+  function openCreate() {
+    setForm(EMPTY_FORM);
+    setShowForm(true);
+  }
+
+  function openEdit(location: StockLocation) {
+    setForm({
+      id: location.id,
+      name: location.name,
+      code: location.code || "",
+      description: location.description || "",
+      isActive: location.isActive,
+    });
+    setShowForm(true);
+  }
+
+  async function saveLocation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (saving) return;
+
+    if (!form.name.trim()) {
+      setNotice({
+        tone: "warning",
+        title: "Location name is required",
+        message: "Enter a clear location name before saving.",
+      });
+      return;
+    }
+
+    setSaving(true);
+    setNotice(null);
+
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: form.id ? "PATCH" : "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: form.id,
+          name: form.name.trim(),
+          code: form.code.trim() || null,
+          description: form.description.trim() || null,
+          isActive: form.isActive,
+        }),
+      });
+
+      const { json, rawText } = await readApiResponse(response);
+
+      if (!response.ok || !json?.ok) {
+        throw createDetailedApiError({
+          response,
+          json,
+          rawText,
+          endpoint: ENDPOINT,
+          method: form.id ? "PATCH" : "POST",
+          fallbackTitle: "Location could not be saved",
+          fallbackMessage:
+            "The stock-locations API rejected the submitted location.",
+        });
+      }
+
+      setShowForm(false);
+      setForm(EMPTY_FORM);
+      setNotice({
+        tone: "success",
+        title: form.id ? "Location updated" : "Location created",
+        message: `${form.name.trim()} has been saved.`,
+      });
+      await loadLocations();
+    } catch (caught) {
+      setNotice(
+        noticeFromError(
+          caught,
+          "Location could not be saved",
+          "Check the details and try again.",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function permanentlyDeleteLocation(
+    mainAdminPassword: string,
+  ) {
+    if (!deleteTarget || saving) return;
+
+    if (!mainAdminPassword.trim()) {
+      setNotice({
+        tone: "warning",
+        title: "Main admin password is required",
+        message:
+          "Enter the main administrator password before permanently deleting this location.",
+      });
+      return;
+    }
+
+    setSaving(true);
+    setNotice(null);
+
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: "DELETE",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: deleteTarget.id,
+          mainAdminPassword,
+          permanentDelete: true,
+        }),
+      });
+
+      const { json, rawText } = await readApiResponse(response);
+
+      if (!response.ok || !json?.ok) {
+        throw createDetailedApiError({
+          response,
+          json,
+          rawText,
+          endpoint: ENDPOINT,
+          method: "DELETE",
+          fallbackTitle: "Location could not be deleted",
+          fallbackMessage:
+            "The stock-locations API rejected the permanent delete request.",
+        });
+      }
+
+      setNotice({
+        tone: "success",
+        title: "Location permanently deleted",
+        message: `${deleteTarget.name} has been permanently removed from Stock Control.`,
+      });
+      setDeleteTarget(null);
+      await loadLocations();
+    } catch (caught) {
+      setNotice(
+        noticeFromError(
+          caught,
+          "Location could not be deleted",
+          "Check the password and make sure no inventory items are linked to this location.",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function loadMoveableItems(locationId?: string) {
+    setLoadingMoveItems(true);
+
+    try {
+      const query = new URLSearchParams();
+      if (locationId) query.set("locationId", locationId);
+
+      const response = await fetch(
+        `${MOVE_STOCK_ENDPOINT}?${query.toString()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        },
+      );
+
+      const { json, rawText } = await readApiResponse(response);
+      const moveJson = json as MoveStockResponse | null;
+
+      if (!response.ok || !moveJson?.ok) {
+        throw createDetailedApiError({
+          response,
+          json: moveJson,
+          rawText,
+          endpoint: MOVE_STOCK_ENDPOINT,
+          method: "GET",
+          fallbackTitle: "Stock items could not be loaded",
+          fallbackMessage:
+            "The move-stock API did not return the available stock items.",
+        });
+      }
+
+      setMoveableItems(
+        Array.isArray(moveJson.items) ? moveJson.items : [],
+      );
+    } catch (caught) {
+      setMoveableItems([]);
+      setNotice(
+        noticeFromError(
+          caught,
+          "Stock items could not be loaded",
+          "Refresh the page and try opening the move-stock form again.",
+        ),
+      );
+    } finally {
+      setLoadingMoveItems(false);
+    }
+  }
+
+  function openMoveStock(fromLocation?: StockLocation) {
+    const fromLocationId = fromLocation?.id || "";
+
+    setMoveForm({
+      ...EMPTY_MOVE_FORM,
+      fromLocationId,
+    });
+    setMoveFormOpen(true);
+    setNotice(null);
+    void loadMoveableItems(fromLocationId);
+  }
+
+  function closeMoveStock() {
+    if (movingStock) return;
+
+    setMoveFormOpen(false);
+    setMoveForm(EMPTY_MOVE_FORM);
+    setMoveableItems([]);
+  }
+
+  const selectedMoveItem = useMemo(
+    () =>
+      moveableItems.find((item) => item.id === moveForm.itemId) ||
+      null,
+    [moveableItems, moveForm.itemId],
+  );
+
+  const availableDestinationLocations = useMemo(
+    () =>
+      locations.filter(
+        (location) =>
+          location.isActive &&
+          location.id !== moveForm.fromLocationId,
+      ),
+    [locations, moveForm.fromLocationId],
+  );
+
+  async function moveStock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (movingStock) return;
+
+    const quantity = Number(moveForm.quantity);
+
+    if (!moveForm.itemId) {
+      setNotice({
+        tone: "warning",
+        title: "Choose a stock item",
+        message: "Select the item that you want to move.",
+      });
+      return;
+    }
+
+    if (!moveForm.fromLocationId) {
+      setNotice({
+        tone: "warning",
+        title: "Choose the current location",
+        message: "Select where the stock is currently stored.",
+      });
+      return;
+    }
+
+    if (!moveForm.toLocationId) {
+      setNotice({
+        tone: "warning",
+        title: "Choose the destination",
+        message: "Select the location where the stock should be moved.",
+      });
+      return;
+    }
+
+    if (moveForm.fromLocationId === moveForm.toLocationId) {
+      setNotice({
+        tone: "warning",
+        title: "Choose a different destination",
+        message:
+          "The destination location must be different from the current location.",
+      });
+      return;
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setNotice({
+        tone: "warning",
+        title: "Enter a valid quantity",
+        message: "The movement quantity must be a whole number of at least 1.",
+      });
+      return;
+    }
+
+    if (selectedMoveItem && quantity > selectedMoveItem.quantity) {
+      setNotice({
+        tone: "warning",
+        title: "Not enough stock available",
+        message: `Only ${selectedMoveItem.quantity} unit${
+          selectedMoveItem.quantity === 1 ? "" : "s"
+        } are available at the current location.`,
+      });
+      return;
+    }
+
+    setMovingStock(true);
+    setNotice(null);
+
+    try {
+      const response = await fetch(MOVE_STOCK_ENDPOINT, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          itemId: moveForm.itemId,
+          fromLocationId: moveForm.fromLocationId,
+          toLocationId: moveForm.toLocationId,
+          quantity,
+          notes: moveForm.notes.trim() || null,
+        }),
+      });
+
+      const { json, rawText } = await readApiResponse(response);
+      const moveJson = json as MoveStockResponse | null;
+
+      if (!response.ok || !moveJson?.ok) {
+        throw createDetailedApiError({
+          response,
+          json: moveJson,
+          rawText,
+          endpoint: MOVE_STOCK_ENDPOINT,
+          method: "POST",
+          fallbackTitle: "Stock could not be moved",
+          fallbackMessage:
+            "The move-stock API rejected the stock movement.",
+        });
+      }
+
+      const destination = locations.find(
+        (location) => location.id === moveForm.toLocationId,
+      );
+
+      setNotice({
+        tone: "success",
+        title: "Stock moved successfully",
+        message: `${quantity} unit${
+          quantity === 1 ? "" : "s"
+        } of ${selectedMoveItem?.name || "the selected item"} ${
+          quantity === 1 ? "has" : "have"
+        } been moved to ${destination?.name || "the new location"}.`,
+      });
+
+      closeMoveStock();
+      await loadLocations();
+    } catch (caught) {
+      setNotice(
+        noticeFromError(
+          caught,
+          "Stock could not be moved",
+          "Check the selected item, quantity and destination, then try again.",
+        ),
+      );
+    } finally {
+      setMovingStock(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen w-full bg-transparent px-3 py-5 text-white sm:px-5 sm:py-7 lg:px-7">
+      <div className="w-full max-w-none">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/Admin/StockManagement/Inventory"
+            className="inline-flex items-center gap-2 text-sm font-bold text-white/55 transition hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Inventory
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => void loadLocations()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-black transition hover:bg-white/[0.1]"
+          >
+            <RefreshCcw
+              className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
+
+        <header className="relative overflow-hidden rounded-[2rem] border border-blue-300/15 bg-[#1d2d4d] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)] sm:p-8 lg:p-9">
+          <div className="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full bg-blue-400/10 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 right-8 h-72 w-72 rounded-full bg-indigo-400/10 blur-3xl" />
+
+          <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-blue-300/25 bg-blue-500/10 px-3 py-1 text-xs font-black uppercase tracking-[0.2em] text-blue-100">
+                <MapPin className="h-4 w-4" />
+                Burton Pride Stock Control
+              </div>
+
+              <h1 className="text-3xl font-black tracking-tight sm:text-5xl">
+                Stock locations
+              </h1>
+
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-white/65 sm:text-base">
+                Create storage areas such as cupboards, rooms, shelves and containers. See how many stock items and total units are kept in each location.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => openMoveStock()}
+                disabled={
+                  locations.filter((location) => location.isActive).length < 2
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-200/20 bg-white/10 px-5 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ArrowRightLeft className="h-5 w-5" />
+                Move stock
+              </button>
+
+              <button
+                type="button"
+                onClick={openCreate}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-lg transition hover:bg-blue-300"
+              >
+                <Plus className="h-5 w-5" />
+                Add location
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {notice ? (
+          <div className="mt-6">
+            <NoticePanel notice={notice} onClose={() => setNotice(null)} />
+          </div>
+        ) : null}
+
+        <section className="mt-6 grid gap-4 sm:grid-cols-3">
+          <SummaryCard
+            label="Active locations"
+            value={totals.locations}
+            icon={Warehouse}
+          />
+          <SummaryCard
+            label="Stock items assigned"
+            value={totals.itemCount}
+            icon={Boxes}
+          />
+          <SummaryCard
+            label="Total units stored"
+            value={totals.units}
+            icon={Package}
+          />
+        </section>
+
+        <section className="mt-6 rounded-[2rem] border border-white/14 bg-white/[0.045] p-4 shadow-xl backdrop-blur-md sm:p-5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+            <input
+              type="search"
+              name="stock-location-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search locations by name, code or description..."
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-12 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-blue-300/50"
+            />
+
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-xl text-blue-300 transition hover:bg-white/10 hover:text-white"
+                aria-label="Clear location search"
+                title="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="mt-6">
+          {loading ? (
+            <div className="flex min-h-72 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.04]">
+              <div className="text-center">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-200" />
+                <p className="mt-4 font-black">Loading stock locations...</p>
+              </div>
+            </div>
+          ) : filteredLocations.length === 0 ? (
+            <div className="flex min-h-72 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.04] p-8">
+              <div className="max-w-md text-center">
+                <MapPin className="mx-auto h-10 w-10 text-blue-200" />
+                <h2 className="mt-4 text-xl font-black">
+                  No stock locations found
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-white/50">
+                  Add the first storage location so inventory items can be
+                  assigned to it.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+              {filteredLocations.map((location) => (
+                <LocationCard
+                  key={location.id}
+                  location={location}
+                  onEdit={() => openEdit(location)}
+                  onMove={() => openMoveStock(location)}
+                  onDelete={() => setDeleteTarget(location)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {showForm ? (
+        <LocationFormModal
+          form={form}
+          saving={saving}
+          onChange={setForm}
+          onClose={() => setShowForm(false)}
+          onSubmit={saveLocation}
+        />
+      ) : null}
+
+      {moveFormOpen ? (
+        <MoveStockModal
+          form={moveForm}
+          locations={locations}
+          items={moveableItems}
+          loadingItems={loadingMoveItems}
+          moving={movingStock}
+          selectedItem={selectedMoveItem}
+          destinationLocations={availableDestinationLocations}
+          onChange={(nextForm) => {
+            const locationChanged =
+              nextForm.fromLocationId !== moveForm.fromLocationId;
+
+            setMoveForm(nextForm);
+
+            if (locationChanged) {
+              setMoveForm((current) => ({
+                ...current,
+                itemId: "",
+                toLocationId:
+                  current.toLocationId === nextForm.fromLocationId
+                    ? ""
+                    : current.toLocationId,
+                quantity: 1,
+              }));
+              void loadMoveableItems(nextForm.fromLocationId);
+            }
+          }}
+          onClose={closeMoveStock}
+          onSubmit={moveStock}
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <DeleteLocationModal
+          location={deleteTarget}
+          saving={saving}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={(password) =>
+            void permanentlyDeleteLocation(password)
+          }
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function LocationCard({
+  location,
+  onEdit,
+  onMove,
+  onDelete,
+}: {
+  location: StockLocation;
+  onEdit: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <article className="rounded-[1.75rem] border border-white/10 bg-white/[0.045] p-5 shadow-lg">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-blue-300/15 bg-blue-500/10 text-blue-100">
+            <Building2 className="h-6 w-6" />
+          </div>
+
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-black">{location.name}</h2>
+            <p className="mt-1 text-xs text-white/40">
+              {location.code || "No location code"}
+            </p>
+          </div>
+        </div>
+
+        <span
+          className={`rounded-full border px-2.5 py-1 text-xs font-black ${
+            location.isActive
+              ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-100"
+              : "border-white/10 bg-white/[0.05] text-white/45"
+          }`}
+        >
+          {location.isActive ? "Active" : "Archived"}
+        </span>
+      </div>
+
+      {location.description ? (
+        <p className="mt-4 text-sm leading-6 text-white/55">
+          {location.description}
+        </p>
+      ) : null}
+
+      <div className="mt-5 grid grid-cols-3 gap-3">
+        <Metric label="Items" value={location.itemCount} />
+        <Metric label="Units" value={location.totalUnits} />
+        <Metric label="Value" value={formatCurrency(location.totalValue)} />
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2 border-t border-white/10 pt-4">
+        <Link
+          href={`/Admin/StockManagement/Inventory?location=${encodeURIComponent(
+            location.name,
+          )}`}
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-xs font-black transition hover:bg-white/[0.1]"
+        >
+          <Eye className="h-4 w-4" />
+          View items
+        </Link>
+
+        <button
+          type="button"
+          onClick={onMove}
+          disabled={location.totalUnits < 1}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-300/15 bg-blue-500/10 px-3 py-2.5 text-xs font-black text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ArrowRightLeft className="h-4 w-4" />
+          Move stock
+        </button>
+
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-xs font-black transition hover:bg-white/[0.1]"
+        >
+          <Edit3 className="h-4 w-4" />
+          Edit
+        </button>
+
+        <button
+          type="button"
+          onClick={onDelete}
+          className="inline-flex items-center justify-center rounded-xl border border-red-300/15 bg-red-500/10 px-3 py-2.5 text-red-100 transition hover:bg-red-500/20"
+          aria-label={`Permanently delete ${location.name}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | number;
+  icon: typeof Warehouse;
+}) {
+  return (
+    <article className="rounded-[1.75rem] border border-blue-300/15 bg-blue-500/10 p-5 text-blue-50 shadow-lg">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.13em] text-blue-100/65">
+            {label}
+          </p>
+          <p className="mt-2 text-3xl font-black">{value}</p>
+        </div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black/15">
+          <Icon className="h-6 w-6" />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/15 p-3 text-center">
+      <p className="text-[10px] font-black uppercase tracking-[0.12em] text-white/35">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-black">{value}</p>
+    </div>
+  );
+}
+
+function LocationFormModal({
+  form,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  form: LocationForm;
+  saving: boolean;
+  onChange: (form: LocationForm) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <Modal
+      title={form.id ? "Edit stock location" : "Add stock location"}
+      onClose={onClose}
+    >
+      <form onSubmit={onSubmit} className="space-y-5 p-6">
+        <Field
+          label="Location name"
+          help="Use a clear name people will recognise."
+          value={form.name}
+          onChange={(value) => onChange({ ...form, name: value })}
+          placeholder="Example: Main warehouse"
+          required
+        />
+
+        <Field
+          label="Location code"
+          help="Optional short reference used on labels or reports."
+          value={form.code}
+          onChange={(value) => onChange({ ...form, code: value })}
+          placeholder="Example: WH-01"
+        />
+
+        <label className="block">
+          <span className="block text-sm font-black">Description</span>
+          <span className="mt-1 block text-xs leading-5 text-white/40">
+            Explain where this location is or what is stored there.
+          </span>
+          <textarea
+            value={form.description}
+            onChange={(event) =>
+              onChange({ ...form, description: event.target.value })
+            }
+            rows={4}
+            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
+            placeholder="Example: Ground-floor warehouse beside the loading door."
+          />
+        </label>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <input
+            type="checkbox"
+            checked={form.isActive}
+            onChange={(event) =>
+              onChange({ ...form, isActive: event.target.checked })
+            }
+            className="mt-1 h-4 w-4"
+          />
+          <span>
+            <span className="block text-sm font-black">Active location</span>
+            <span className="mt-1 block text-xs leading-5 text-white/40">
+              Active locations can be selected when adding or editing stock.
+            </span>
+          </span>
+        </label>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MapPin className="h-4 w-4" />
+            )}
+            Save location
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+
+function MoveStockModal({
+  form,
+  locations,
+  items,
+  loadingItems,
+  moving,
+  selectedItem,
+  destinationLocations,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  form: MoveStockForm;
+  locations: StockLocation[];
+  items: MoveableStockItem[];
+  loadingItems: boolean;
+  moving: boolean;
+  selectedItem: MoveableStockItem | null;
+  destinationLocations: StockLocation[];
+  onChange: (form: MoveStockForm) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const currentLocation = locations.find(
+    (location) => location.id === form.fromLocationId,
+  );
+
+  return (
+    <Modal title="Move stock to another location" onClose={onClose}>
+      <form onSubmit={onSubmit} className="space-y-5 p-6">
+        <div className="rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4">
+          <div className="flex gap-3">
+            <ArrowRightLeft className="mt-0.5 h-5 w-5 shrink-0 text-blue-100" />
+            <div>
+              <p className="font-black text-blue-50">Stock movement</p>
+              <p className="mt-1 text-sm leading-6 text-blue-50/65">
+                Move some or all units of an item from its current location to
+                another active stock location. The movement will be recorded in
+                the stock audit history.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <SelectField
+          label="Current location"
+          help="Choose where the stock is currently stored."
+          value={form.fromLocationId}
+          onChange={(value) =>
+            onChange({
+              ...form,
+              fromLocationId: value,
+              itemId: "",
+              quantity: 1,
+            })
+          }
+          required
+        >
+          <option value="">Choose current location</option>
+          {locations
+            .filter((location) => location.isActive)
+            .map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+                {location.code ? ` (${location.code})` : ""}
+              </option>
+            ))}
+        </SelectField>
+
+        <SelectField
+          label="Stock item"
+          help={
+            form.fromLocationId
+              ? "Only items stored at the selected current location are shown."
+              : "Choose the current location first."
+          }
+          value={form.itemId}
+          onChange={(value) =>
+            onChange({
+              ...form,
+              itemId: value,
+              quantity: 1,
+            })
+          }
+          required
+          disabled={!form.fromLocationId || loadingItems}
+        >
+          <option value="">
+            {loadingItems
+              ? "Loading stock items..."
+              : items.length
+                ? "Choose stock item"
+                : "No stock items available"}
+          </option>
+          {items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+              {item.sku ? ` — ${item.sku}` : ""} — {item.quantity} available
+            </option>
+          ))}
+        </SelectField>
+
+        {selectedItem ? (
+          <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:grid-cols-3">
+            <Metric label="Item" value={selectedItem.name} />
+            <Metric label="Available" value={selectedItem.quantity} />
+            <Metric
+              label="Current location"
+              value={currentLocation?.name || selectedItem.locationName || "—"}
+            />
+          </div>
+        ) : null}
+
+        <SelectField
+          label="Move to"
+          help="Choose the new stock location."
+          value={form.toLocationId}
+          onChange={(value) =>
+            onChange({
+              ...form,
+              toLocationId: value,
+            })
+          }
+          required
+          disabled={!form.fromLocationId}
+        >
+          <option value="">Choose destination location</option>
+          {destinationLocations.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.name}
+              {location.code ? ` (${location.code})` : ""}
+            </option>
+          ))}
+        </SelectField>
+
+        <label className="block">
+          <span className="block text-sm font-black">Quantity to move</span>
+          <span className="mt-1 block text-xs leading-5 text-white/40">
+            Enter a whole number. You cannot move more than the available
+            quantity.
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={selectedItem?.quantity || undefined}
+            value={form.quantity}
+            onChange={(event) =>
+              onChange({
+                ...form,
+                quantity: Number(event.target.value) || 1,
+              })
+            }
+            required
+            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
+          />
+
+          {selectedItem ? (
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...form,
+                  quantity: selectedItem.quantity,
+                })
+              }
+              className="mt-2 text-xs font-black text-blue-200 transition hover:text-white"
+            >
+              Move all {selectedItem.quantity} units
+            </button>
+          ) : null}
+        </label>
+
+        <label className="block">
+          <span className="block text-sm font-black">Movement notes</span>
+          <span className="mt-1 block text-xs leading-5 text-white/40">
+            Optional reason or handling note for the audit record.
+          </span>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              onChange({
+                ...form,
+                notes: event.target.value,
+              })
+            }
+            rows={3}
+            maxLength={1000}
+            placeholder="Example: Moved to the event storage cupboard."
+            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
+          />
+        </label>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={moving}
+            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black disabled:opacity-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            disabled={
+              moving ||
+              !form.itemId ||
+              !form.fromLocationId ||
+              !form.toLocationId ||
+              form.fromLocationId === form.toLocationId ||
+              form.quantity < 1
+            }
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {moving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            Move stock
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function SelectField({
+  label,
+  help,
+  value,
+  onChange,
+  children,
+  disabled = false,
+  required = false,
+}: {
+  label: string;
+  help: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+  required?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-black">
+        {label}
+        {required ? <span className="ml-1 text-blue-200">*</span> : null}
+      </span>
+      <span className="mt-1 block text-xs leading-5 text-white/40">
+        {help}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        required={required}
+        className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111827] px-4 py-3 text-sm text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function DeleteLocationModal({
+  location,
+  saving,
+  onClose,
+  onConfirm,
+}: {
+  location: StockLocation;
+  saving: boolean;
+  onClose: () => void;
+  onConfirm: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const hasLinkedItems = location.itemCount > 0;
+
+  return (
+    <Modal title="Permanently delete this stock location?" onClose={onClose}>
+      <div
+        className="space-y-5 p-6"
+        data-lpignore="true"
+        data-1p-ignore="true"
+        data-bwignore="true"
+      >
+        <div
+          className={`rounded-2xl border p-4 ${
+            hasLinkedItems
+              ? "border-red-300/20 bg-red-500/10"
+              : "border-amber-300/20 bg-amber-500/10"
+          }`}
+        >
+          <div className="flex gap-3">
+            <AlertTriangle
+              className={`mt-0.5 h-5 w-5 shrink-0 ${
+                hasLinkedItems ? "text-red-100" : "text-amber-100"
+              }`}
+            />
+            <div>
+              <p
+                className={`font-black ${
+                  hasLinkedItems ? "text-red-50" : "text-amber-50"
+                }`}
+              >
+                {location.name}
+              </p>
+              <p
+                className={`mt-1 text-sm leading-6 ${
+                  hasLinkedItems ? "text-red-50/75" : "text-amber-50/70"
+                }`}
+              >
+                This location currently contains {location.itemCount} stock
+                item{location.itemCount === 1 ? "" : "s"} and{" "}
+                {location.totalUnits} units.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {hasLinkedItems ? (
+          <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
+            <p className="font-black text-red-50">
+              This location cannot be deleted yet
+            </p>
+            <p className="mt-2 text-sm leading-6 text-red-50/75">
+              Move every active inventory item to another stock location first.
+              The delete button will remain disabled while items are linked to
+              this location.
+            </p>
+
+            <Link
+              href={`/Admin/StockManagement/Inventory?location=${encodeURIComponent(
+                location.name,
+              )}`}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-black text-red-700"
+            >
+              <Eye className="h-4 w-4" />
+              View linked inventory items
+            </Link>
+          </div>
+        ) : (
+          <>
+            <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4">
+              <p className="font-black text-red-50">
+                This action cannot be undone
+              </p>
+              <p className="mt-2 text-sm leading-6 text-red-50/75">
+                The location record will be fully removed from the database.
+                It will not be archived and cannot be restored later.
+              </p>
+            </div>
+
+            <label className="block">
+              <span className="block text-sm font-black text-white">
+                Main administrator password
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-white/45">
+                Enter the main admin password to confirm this permanent delete.
+              </span>
+              <div className="relative mt-3">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="stock-location-delete-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  placeholder="Enter main admin password"
+                  className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 pr-14 text-sm text-white outline-none placeholder:text-white/25 focus:border-red-300/50"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute right-2 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-white/55 transition hover:bg-white/[0.1] hover:text-white"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </label>
+          </>
+        )}
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black disabled:opacity-50"
+          >
+            Keep location
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onConfirm(password)}
+            disabled={
+              saving ||
+              hasLinkedItems ||
+              password.trim().length === 0
+            }
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-5 py-3 text-sm font-black text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            Permanently delete location
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="w-full max-w-xl overflow-hidden rounded-[2rem] border border-white/15 bg-[#111827] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/10 p-6">
+          <h2 className="text-2xl font-black">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06]"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  help,
+  value,
+  onChange,
+  placeholder,
+  required,
+}: {
+  label: string;
+  help: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-sm font-black">
+        {label}
+        {required ? <span className="ml-1 text-blue-200">*</span> : null}
+      </span>
+      <span className="mt-1 block text-xs leading-5 text-white/40">
+        {help}
+      </span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        required={required}
+        className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
+      />
+    </label>
+  );
+}
+
+function NoticePanel({
+  notice,
+  onClose,
+}: {
+  notice: Notice;
+  onClose: () => void;
+}) {
+  const success = notice.tone === "success";
+  const warning = notice.tone === "warning";
+
+  return (
+    <div
+      className={`rounded-2xl border p-4 ${
+        success
+          ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-50"
+          : warning
+            ? "border-amber-300/20 bg-amber-500/10 text-amber-50"
+            : "border-red-300/20 bg-red-500/10 text-red-50"
+      }`}
+    >
+      <div className="flex gap-3">
+        {success ? (
+          <CheckCircle2 className="mt-0.5 h-5 w-5" />
+        ) : (
+          <AlertTriangle className="mt-0.5 h-5 w-5" />
+        )}
+        <div className="flex-1">
+          <p className="font-black">{notice.title}</p>
+          <p className="mt-1 text-sm leading-6 opacity-80">
+            {notice.message}
+          </p>
+
+          {notice.technicalDetails?.length ? (
+            <details className="mt-3 rounded-xl border border-current/15 bg-black/15 p-3">
+              <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.12em]">
+                Show technical details
+              </summary>
+
+              <div className="mt-3 space-y-2 text-xs leading-5 opacity-80">
+                {notice.technicalDetails.map((detail) => (
+                  <p key={detail} className="break-words font-mono">
+                    {detail}
+                  </p>
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close message">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -16,29 +16,48 @@ import {
   Archive,
   ArrowRight,
   Banknote,
+  BarChart3,
+  Boxes,
+  Building2,
   CalendarDays,
   ChevronDown,
   ClipboardList,
   Construction,
+  CreditCard,
   FileSpreadsheet,
+  FileText,
+  GalleryHorizontalEnd,
   Gift,
   Globe2,
   HeartHandshake,
   Home,
+  KeyRound,
   LayoutDashboard,
   Lock,
+  LockKeyhole,
+  LogIn,
   LogOut,
+  Logs,
   Mail,
   Menu,
+  Package,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
+  Receipt,
   RefreshCw,
   Search,
   Settings,
   ShieldCheck,
+  ShoppingCart,
+  Store,
+  Tags,
   Ticket,
+  Truck,
   UserCog,
   Users,
+  Vote,
+  Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -416,71 +435,295 @@ function buildNavigationModel(items: AdminSidebarItem[], searchQuery: string) {
 }
 
 const iconMap: Record<string, LucideIcon> = {
+  alert: AlertTriangle,
+  alerttriangle: AlertTriangle,
   archive: Archive,
   audit: ShieldCheck,
   bank: Banknote,
+  banknote: Banknote,
+  barchart3: BarChart3,
+  boxes: Boxes,
+  building: Building2,
+  building2: Building2,
   calendar: CalendarDays,
+  calendardays: CalendarDays,
   cash: Banknote,
+  clipboard: ClipboardList,
+  clipboardlist: ClipboardList,
   contacts: Users,
+  creditcard: CreditCard,
   dashboard: LayoutDashboard,
   donations: Gift,
   email: Mail,
   event: CalendarDays,
+  eventhub: CalendarDays,
   event_hub: CalendarDays,
   exports: FileSpreadsheet,
+  filespreadsheet: FileSpreadsheet,
+  filetext: FileText,
+  gallery: GalleryHorizontalEnd,
+  galleryhorizontalend: GalleryHorizontalEnd,
+  gift: Gift,
+  globe2: Globe2,
+  heart: HeartHandshake,
+  hearthandshake: HeartHandshake,
   home: Home,
-  logs: ShieldCheck,
+  key: KeyRound,
+  keyround: KeyRound,
+  layoutdashboard: LayoutDashboard,
+  lock: Lock,
+  lockkeyhole: LockKeyhole,
+  login: LogIn,
+  logs: Logs,
   mail: Mail,
   money: Banknote,
+  package: Package,
+  palette: Palette,
   raffle: Ticket,
-  reports: FileSpreadsheet,
+  receipt: Receipt,
+  reports: BarChart3,
   settings: Settings,
+  shield: ShieldCheck,
+  shieldcheck: ShieldCheck,
+  shoppingcart: ShoppingCart,
   site: Globe2,
   sponsors: HeartHandshake,
   stalls: ClipboardList,
-  suppliers: ClipboardList,
+  store: Store,
+  suppliers: Truck,
+  tags: Tags,
+  ticket: Ticket,
+  truck: Truck,
+  usercog: UserCog,
   users: UserCog,
   volunteers: Users,
+  vote: Vote,
+  wallet: Wallet,
   website: Globe2,
 };
 
-function getIconForItem(item: AdminSidebarItem): LucideIcon {
-  const unsafeItem = item as ExtendedSidebarItem;
+function normaliseIconKey(value: string | null | undefined) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
+}
 
-  const explicitKey = normalise(unsafeItem.icon_key || unsafeItem.icon);
-
-  if (explicitKey && iconMap[explicitKey]) return iconMap[explicitKey];
-
+function inferIconForItem(item: AdminSidebarItem): LucideIcon {
   const label = normalise(item.label);
   const href = normalise(item.href);
+  const value = `${label} ${href}`;
 
-  if (label.includes("dashboard") || href.includes("dashboard")) {
-    return LayoutDashboard;
+  /*
+    Check specific page names before generic words such as "dashboard".
+    Nearly every route contains /Admin/Dashboard, so checking dashboard first
+    would incorrectly give every page the dashboard icon.
+  */
+  if (
+    label.includes("delete all password") ||
+    label.includes("delete password") ||
+    label.includes("change password") ||
+    label.includes("reset password") ||
+    label.includes("password") ||
+    href.includes("deletepassword") ||
+    href.includes("delete-password") ||
+    href.includes("password")
+  ) {
+    return KeyRound;
+  }
+
+  if (
+    label.includes("login") ||
+    label.includes("sign in") ||
+    href.includes("/login")
+  ) {
+    return LogIn;
+  }
+
+  if (
+    label.includes("security") ||
+    label.includes("access control") ||
+    label.includes("permission")
+  ) {
+    return LockKeyhole;
+  }
+
+  if (
+    label.includes("window showcase") ||
+    label.includes("showcase") ||
+    href.includes("windows-showcase")
+  ) {
+    return GalleryHorizontalEnd;
+  }
+
+  if (
+    label.includes("window votes") ||
+    label.includes("vote") ||
+    href.includes("/votes")
+  ) {
+    return Vote;
+  }
+
+  if (
+    label.includes("community art") ||
+    label.includes("artwork") ||
+    label.includes("gallery")
+  ) {
+    return Palette;
+  }
+
+  if (
+    label.includes("stock control") ||
+    label.includes("stock management") ||
+    label.includes("inventory") ||
+    href.includes("stockmanagement")
+  ) {
+    return Boxes;
   }
 
   if (
     label.includes("money") ||
     label.includes("cash") ||
     label.includes("account") ||
-    href.includes("money")
+    label.includes("budget") ||
+    href.includes("moneymanagement") ||
+    href.includes("/money")
   ) {
     return Banknote;
   }
 
-  if (label.includes("email") || href.includes("email")) return Mail;
-  if (label.includes("user") || label.includes("permission")) return UserCog;
-  if (label.includes("event") || href.includes("eventhub")) return CalendarDays;
-  if (label.includes("contact")) return Users;
-  if (label.includes("sponsor")) return HeartHandshake;
-  if (label.includes("volunteer")) return Users;
-  if (label.includes("raffle")) return Ticket;
-  if (label.includes("donation")) return Gift;
-  if (label.includes("audit") || label.includes("log")) return ShieldCheck;
-  if (label.includes("report") || label.includes("export")) return FileSpreadsheet;
-  if (label.includes("setting")) return Settings;
-  if (label.includes("website") || label.includes("page")) return Globe2;
+  if (label.includes("email") || href.includes("/email")) {
+    return Mail;
+  }
 
-  return ArrowRight;
+  if (
+    label.includes("event") ||
+    label.includes("calendar") ||
+    href.includes("eventhub")
+  ) {
+    return CalendarDays;
+  }
+
+  if (label.includes("form") || label.includes("application")) {
+    return ClipboardList;
+  }
+
+  if (label.includes("raffle") || label.includes("ticket")) {
+    return Ticket;
+  }
+
+  if (label.includes("donation") || label.includes("gift")) {
+    return Gift;
+  }
+
+  if (label.includes("supplier") || label.includes("delivery")) {
+    return Truck;
+  }
+
+  if (label.includes("order") || label.includes("purchase")) {
+    return ShoppingCart;
+  }
+
+  if (label.includes("sponsor") || label.includes("partner")) {
+    return HeartHandshake;
+  }
+
+  if (label.includes("volunteer") || label.includes("team")) {
+    return Users;
+  }
+
+  if (
+    label.includes("user") ||
+    label.includes("admin user") ||
+    href.includes("/users")
+  ) {
+    return UserCog;
+  }
+
+  if (label.includes("audit") || label.includes("log")) {
+    return Logs;
+  }
+
+  if (
+    label.includes("report") ||
+    label.includes("analytics") ||
+    label.includes("export")
+  ) {
+    return BarChart3;
+  }
+
+  if (label.includes("setting")) {
+    return Settings;
+  }
+
+  if (
+    label.includes("website") ||
+    label.includes("page editor") ||
+    label.includes("navbar")
+  ) {
+    return Globe2;
+  }
+
+  if (label.includes("document") || label.includes("file")) {
+    return FileText;
+  }
+
+  if (label.includes("business") || label.includes("organisation")) {
+    return Building2;
+  }
+
+  if (label.includes("shop") || label.includes("store")) {
+    return Store;
+  }
+
+  if (label.includes("category") || label.includes("tag")) {
+    return Tags;
+  }
+
+  if (label.includes("payment") || label.includes("card")) {
+    return CreditCard;
+  }
+
+  if (label.includes("receipt") || label.includes("invoice")) {
+    return Receipt;
+  }
+
+  if (label.includes("warning") || label.includes("alert")) {
+    return AlertTriangle;
+  }
+
+  if (
+    label.includes("dashboard") ||
+    label === "home" ||
+    cleanPath(item.href) === "/admin/dashboard"
+  ) {
+    return LayoutDashboard;
+  }
+
+  if (value.includes("archive")) {
+    return Archive;
+  }
+
+  return Package;
+}
+
+function getIconForItem(item: AdminSidebarItem): LucideIcon {
+  const extendedItem = item as ExtendedSidebarItem;
+
+  /*
+    The sidebar editor saves either `icon` or `icon_key`.
+    Convert PascalCase values such as LayoutDashboard, KeyRound and
+    CalendarDays into the lowercase lookup form used by this component.
+  */
+  const savedIconKey = normaliseIconKey(
+    extendedItem.icon_key || extendedItem.icon,
+  );
+
+  if (savedIconKey && iconMap[savedIconKey]) {
+    return iconMap[savedIconKey];
+  }
+
+  return inferIconForItem(item);
 }
 
 function getPublicLoadError() {
@@ -876,7 +1119,7 @@ export default function AdminSidebar({
 
       <aside
         className={clsx(
-          "relative hidden min-h-full shrink-0 self-stretch overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-[width] duration-300 md:flex md:flex-col",
+          "relative hidden min-h-full min-w-0 shrink-0 self-stretch overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-[width] duration-300 md:flex md:flex-col",
           desktopCollapsed ? "w-28" : "w-72"
         )}
         aria-label="Admin sidebar navigation"
@@ -1187,7 +1430,7 @@ function SidebarContent({
   return (
     <div
       className={clsx(
-        "relative z-10 flex min-h-full flex-1 flex-col",
+        "relative z-10 flex min-h-full min-w-0 flex-1 flex-col overflow-x-hidden",
         collapsed ? "px-5 py-4" : "p-6"
       )}
     >
@@ -1220,7 +1463,7 @@ function SidebarContent({
 
       <nav
         className={clsx(
-          "mt-6 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1",
+          "mt-6 min-h-0 min-w-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto pr-1",
           collapsed && "pr-0"
         )}
         aria-label="Admin navigation"
@@ -1417,7 +1660,7 @@ function DesktopGroup({
   const status = getItemStatus(item);
   const Icon = getIconForItem(item);
   const sharedClassName = clsx(
-    "group flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-black transition",
+    "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition",
     active
       ? "bg-white text-purple-700 shadow-lg"
       : groupHasActiveChild
@@ -1438,8 +1681,13 @@ function DesktopGroup({
   }
 
   return (
-    <div>
-      <div className="flex items-center gap-2">
+    <div className="min-w-0 overflow-hidden">
+      <div
+        className={clsx(
+          "grid min-w-0 items-center gap-2",
+          !collapsed && href ? "grid-cols-[minmax(0,1fr)_44px]" : "grid-cols-1"
+        )}
+      >
         {href ? (
           <Link
             href={href}
@@ -1447,7 +1695,7 @@ function DesktopGroup({
             rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
             aria-current={active ? "page" : undefined}
             title={collapsed ? item.label : undefined}
-            className={clsx(sharedClassName, "flex-1")}
+            className={clsx(sharedClassName, "min-w-0 w-full")}
           >
             <Icon className="h-4 w-4 shrink-0" />
             {!collapsed ? (
@@ -1468,7 +1716,7 @@ function DesktopGroup({
             onClick={() => setIsOpen(!isOpen)}
             aria-expanded={isOpen}
             title={collapsed ? item.label : undefined}
-            className={clsx(sharedClassName, "flex-1 text-left")}
+            className={clsx(sharedClassName, "min-w-0 w-full text-left")}
           >
             <Icon className="h-4 w-4 shrink-0" />
             {!collapsed ? (
@@ -1491,7 +1739,7 @@ function DesktopGroup({
             onClick={() => setIsOpen(!isOpen)}
             aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
-            className="shrink-0 rounded-2xl bg-white/10 px-3 py-3 text-white/90 transition hover:bg-white/20 hover:text-white"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/10 p-0 text-white/90 transition hover:bg-white/20 hover:text-white"
           >
             <ChevronDown
               className={clsx("h-4 w-4 transition", isOpen && "rotate-180")}
@@ -1503,7 +1751,7 @@ function DesktopGroup({
       {isOpen && childrenItems.length > 0 ? (
         <div
           className={clsx(
-            "mt-1 space-y-1 border-l border-white/15",
+            "mt-1 min-w-0 space-y-1 overflow-hidden border-l border-white/15",
             collapsed ? "ml-4 pl-2" : "ml-2 pl-2"
           )}
         >
@@ -1554,7 +1802,7 @@ function DesktopNavLink({
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
       className={clsx(
-        "group flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-black transition",
+        "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition",
         active
           ? "bg-white text-purple-700 shadow-lg"
           : "bg-white/10 text-white hover:bg-white/20",
@@ -1610,7 +1858,7 @@ function DesktopSubNavLink({
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
       className={clsx(
-        "flex items-center gap-3 rounded-2xl px-4 py-2 text-sm font-bold transition",
+        "flex min-w-0 w-full items-center gap-3 overflow-hidden rounded-2xl px-4 py-2 text-sm font-bold transition",
         active
           ? "bg-white text-purple-700 shadow-lg"
           : "text-white/85 hover:bg-white/15 hover:text-white",
@@ -1790,7 +2038,7 @@ function MobileGroup({
 
   return (
     <div>
-      <div className="flex items-center gap-2">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_48px] items-center gap-2">
         {href ? (
           <Link
             href={href}
@@ -1798,7 +2046,7 @@ function MobileGroup({
             target={item.open_in_new_tab ? "_blank" : undefined}
             rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
             aria-current={active ? "page" : undefined}
-            className={clsx(className, "flex-1")}
+            className={clsx(className, "min-w-0 w-full")}
           >
             <Icon className="h-4 w-4 shrink-0" />
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -1825,7 +2073,7 @@ function MobileGroup({
             onClick={() => setIsOpen(!isOpen)}
             aria-expanded={isOpen}
             aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
-            className="shrink-0 rounded-2xl bg-white/10 px-4 py-3 text-white/90 transition hover:bg-white/20 hover:text-white"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 p-0 text-white/90 transition hover:bg-white/20 hover:text-white"
           >
             <ChevronDown
               className={clsx("h-4 w-4 transition", isOpen && "rotate-180")}

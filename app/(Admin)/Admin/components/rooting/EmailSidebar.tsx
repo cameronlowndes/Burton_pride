@@ -12,25 +12,46 @@ import {
 } from "react";
 import {
   AlertTriangle,
+  Archive,
   ArrowLeft,
+  AtSign,
   Banknote,
+  Bell,
+  BookOpen,
   ChevronRight,
+  Contact,
   ExternalLink,
+  FileClock,
   FileText,
   History,
   Home,
+  Inbox,
+  KeyRound,
   LayoutDashboard,
+  ListChecks,
   Loader2,
+  LockKeyhole,
   Mail,
+  MailCheck,
+  MailOpen,
   Menu,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Paperclip,
   PenSquare,
   RefreshCcw,
   Search,
   Send,
   Settings,
+  ShieldCheck,
+  Signature,
+  Sparkles,
+  Star,
+  Tags,
   TestTube2,
+  Trash2,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -160,72 +181,314 @@ function getItemStatus(item: EmailSidebarItem): ItemStatus {
   };
 }
 
-function getIcon(name: string | null | undefined): LucideIcon {
-  const key = normalise(name);
+const emailIconMap: Record<string, LucideIcon> = {
+  archive: Archive,
+  atsign: AtSign,
+  bell: Bell,
+  bookopen: BookOpen,
+  contact: Contact,
+  fileclock: FileClock,
+  filetext: FileText,
+  history: History,
+  inbox: Inbox,
+  keyround: KeyRound,
+  layoutdashboard: LayoutDashboard,
+  listchecks: ListChecks,
+  lockkeyhole: LockKeyhole,
+  mail: Mail,
+  mailcheck: MailCheck,
+  mailopen: MailOpen,
+  messagesquare: MessageSquare,
+  paperclip: Paperclip,
+  pensquare: PenSquare,
+  refreshccw: RefreshCcw,
+  search: Search,
+  send: Send,
+  settings: Settings,
+  shieldcheck: ShieldCheck,
+  signature: Signature,
+  sparkles: Sparkles,
+  star: Star,
+  tags: Tags,
+  testtube2: TestTube2,
+  trash2: Trash2,
+  users: Users,
 
-  switch (key) {
-    case "mail":
-    case "email":
-    case "inbox":
-      return Mail;
+  // Compatibility aliases for older database values.
+  activity: History,
+  compose: PenSquare,
+  dashboard: LayoutDashboard,
+  document: FileText,
+  draft: FileText,
+  drafts: FileText,
+  email: Mail,
+  file: FileText,
+  home: LayoutDashboard,
+  logs: History,
+  sent: Send,
+  sending: Send,
+  setting: Settings,
+  template: BookOpen,
+  templates: BookOpen,
+  test: TestTube2,
+  testing: TestTube2,
+  write: PenSquare,
+};
 
-    case "send":
-    case "sending":
-    case "sent":
-      return Send;
-
-    case "filetext":
-    case "file":
-    case "template":
-    case "templates":
-    case "document":
-    case "draft":
-    case "drafts":
-      return FileText;
-
-    case "history":
-    case "logs":
-    case "activity":
-      return History;
-
-    case "testtube2":
-    case "test":
-    case "testing":
-      return TestTube2;
-
-    case "settings":
-    case "setting":
-      return Settings;
-
-    case "pensquare":
-    case "compose":
-    case "write":
-    case "editor":
-      return PenSquare;
-
-    case "dashboard":
-    case "home":
-      return LayoutDashboard;
-
-    default:
-      return Mail;
-  }
+function normaliseIconKey(value: string | null | undefined) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
 }
 
-function getIconFromItem(item: EmailSidebarItem): LucideIcon {
-  if (item.icon) return getIcon(item.icon);
+function getIcon(name: string | null | undefined): LucideIcon {
+  const key = normaliseIconKey(name);
+  return emailIconMap[key] || Mail;
+}
 
+function inferIconFromItem(item: EmailSidebarItem): LucideIcon {
   const label = normalise(item.label);
   const href = normalise(item.href);
 
-  if (label.includes("send") || href.includes("sending")) return Send;
-  if (label.includes("draft") || label.includes("template")) return FileText;
-  if (label.includes("history") || label.includes("log")) return History;
-  if (label.includes("test")) return TestTube2;
-  if (label.includes("setting")) return Settings;
-  if (label.includes("compose") || label.includes("write")) return PenSquare;
+  /*
+    Check specific page meanings before generic "email" or "/Admin/Email"
+    route text, otherwise every item would fall back to the Mail icon.
+  */
+  if (
+    label.includes("compose") ||
+    label.includes("new email") ||
+    label.includes("write email") ||
+    label.includes("create email") ||
+    href.includes("/compose") ||
+    href.includes("/sending")
+  ) {
+    return PenSquare;
+  }
+
+  if (
+    label.includes("sent") ||
+    label.includes("send history") ||
+    href.includes("/sent")
+  ) {
+    return Send;
+  }
+
+  if (
+    label.includes("inbox") ||
+    label.includes("received") ||
+    href.includes("/inbox")
+  ) {
+    return Inbox;
+  }
+
+  if (
+    label.includes("draft") ||
+    href.includes("/draft")
+  ) {
+    return FileText;
+  }
+
+  if (
+    label.includes("template") ||
+    href.includes("/template")
+  ) {
+    return BookOpen;
+  }
+
+  if (
+    label.includes("schedule") ||
+    label.includes("scheduled") ||
+    label.includes("queue") ||
+    href.includes("/schedule") ||
+    href.includes("/queue")
+  ) {
+    return FileClock;
+  }
+
+  if (
+    label.includes("history") ||
+    label.includes("activity") ||
+    label.includes("log") ||
+    href.includes("/history")
+  ) {
+    return History;
+  }
+
+  if (
+    label.includes("test email") ||
+    label.includes("email test") ||
+    label.includes("testing") ||
+    href.includes("/test")
+  ) {
+    return TestTube2;
+  }
+
+  if (
+    label.includes("signature") ||
+    href.includes("/signature")
+  ) {
+    return Signature;
+  }
+
+  if (
+    label.includes("attachment") ||
+    href.includes("/attachment")
+  ) {
+    return Paperclip;
+  }
+
+  if (
+    label.includes("contact") ||
+    label.includes("address book") ||
+    href.includes("/contact")
+  ) {
+    return Contact;
+  }
+
+  if (
+    label.includes("recipient") ||
+    label.includes("mailing list") ||
+    label.includes("subscriber") ||
+    href.includes("/recipient")
+  ) {
+    return Users;
+  }
+
+  if (
+    label.includes("category") ||
+    label.includes("label") ||
+    label.includes("tag") ||
+    href.includes("/tag")
+  ) {
+    return Tags;
+  }
+
+  if (
+    label.includes("spam") ||
+    label.includes("blocked") ||
+    label.includes("security") ||
+    href.includes("/spam") ||
+    href.includes("/blocked")
+  ) {
+    return ShieldCheck;
+  }
+
+  if (
+    label.includes("password") ||
+    label.includes("api key") ||
+    label.includes("credential")
+  ) {
+    return KeyRound;
+  }
+
+  if (
+    label.includes("permission") ||
+    label.includes("access")
+  ) {
+    return LockKeyhole;
+  }
+
+  if (
+    label.includes("notification") ||
+    label.includes("alert")
+  ) {
+    return Bell;
+  }
+
+  if (
+    label.includes("starred") ||
+    label.includes("favourite") ||
+    label.includes("favorite")
+  ) {
+    return Star;
+  }
+
+  if (
+    label.includes("archive") ||
+    href.includes("/archive")
+  ) {
+    return Archive;
+  }
+
+  if (
+    label.includes("trash") ||
+    label.includes("deleted") ||
+    href.includes("/trash")
+  ) {
+    return Trash2;
+  }
+
+  if (
+    label.includes("read email") ||
+    label.includes("opened") ||
+    href.includes("/read")
+  ) {
+    return MailOpen;
+  }
+
+  if (
+    label.includes("delivered") ||
+    label.includes("delivery status") ||
+    href.includes("/delivery")
+  ) {
+    return MailCheck;
+  }
+
+  if (
+    label.includes("message") ||
+    label.includes("conversation") ||
+    label.includes("thread")
+  ) {
+    return MessageSquare;
+  }
+
+  if (
+    label.includes("automation") ||
+    label.includes("smart") ||
+    label.includes("ai")
+  ) {
+    return Sparkles;
+  }
+
+  if (
+    label.includes("checklist") ||
+    label.includes("task")
+  ) {
+    return ListChecks;
+  }
+
+  if (
+    label.includes("email address") ||
+    label.includes("sender address")
+  ) {
+    return AtSign;
+  }
+
+  if (
+    label.includes("setting") ||
+    label.includes("configuration") ||
+    href.includes("/settings")
+  ) {
+    return Settings;
+  }
 
   return Mail;
+}
+
+function getIconFromItem(item: EmailSidebarItem): LucideIcon {
+  /*
+    The Email Sidebar Manager saves PascalCase icon names such as:
+    PenSquare, FileClock, MailCheck and ShieldCheck.
+    normaliseIconKey() converts those values into the lookup format used here.
+  */
+  const savedIconKey = normaliseIconKey(item.icon);
+
+  if (savedIconKey && emailIconMap[savedIconKey]) {
+    return emailIconMap[savedIconKey];
+  }
+
+  return inferIconFromItem(item);
 }
 
 function safeStringify(value: unknown) {
