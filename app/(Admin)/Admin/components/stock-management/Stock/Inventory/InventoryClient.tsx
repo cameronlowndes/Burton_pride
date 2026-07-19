@@ -25,6 +25,7 @@ import {
   Download,
   Edit3,
   Eye,
+  EyeOff,
   FlaskConical,
   Loader2,
   MapPin,
@@ -878,13 +879,40 @@ export default function InventoryClient() {
     }
   }
 
-  async function archiveItem() {
+  async function archiveItem(password: string) {
     if (!activeItem || saving) return;
 
     setSaving(true);
     setNotice(null);
 
     try {
+      // 1. Verify the main admin password first
+      const authResponse = await fetch("/api/admin/settings/delete-password", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      const authData = await readApiResponse(authResponse);
+
+      if (!authResponse.ok || !authData.json?.ok) {
+        throw createDetailedApiError({
+          response: authResponse,
+          json: authData.json,
+          rawText: authData.rawText,
+          endpoint: "/api/admin/settings/delete-password",
+          method: "POST",
+          fallbackTitle: "Authorisation failed",
+          fallbackMessage:
+            "The main admin password was incorrect or could not be verified.",
+        });
+      }
+
+      // 2. If password is correct, proceed with the archive
       const response = await fetch(INVENTORY_ENDPOINT, {
         method: "DELETE",
         cache: "no-store",
@@ -928,7 +956,7 @@ export default function InventoryClient() {
         noticeFromError(
           caught,
           "Stock item could not be archived",
-          "Please try again.",
+          "Please check the password and try again.",
         ),
       );
     } finally {
@@ -1468,7 +1496,7 @@ export default function InventoryClient() {
             setShowDeleteModal(false);
             setActiveItem(null);
           }}
-          onConfirm={() => void archiveItem()}
+          onConfirm={(password) => void archiveItem(password)}
         />
       ) : null}
 
@@ -1599,7 +1627,7 @@ function InventoryRow({
           <IconButton label="Edit item" onClick={onEdit}>
             <Edit3 className="h-4 w-4" />
           </IconButton>
-          <IconButton label="Archive item" onClick={onArchive} danger>
+          <IconButton label="Delete item" onClick={onArchive} danger>
             <Trash2 className="h-4 w-4" />
           </IconButton>
         </div>
@@ -2283,15 +2311,25 @@ function ArchiveModal({
   item: StockItem;
   saving: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (password: string) => void;
 }) {
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password) {
+      onConfirm(password);
+    }
+  }
+
   return (
     <ModalShell
       title="Archive stock item?"
       subtitle="The item will be removed from active inventory but kept for audit history."
       onClose={onClose}
     >
-      <div className="p-6">
+      <form onSubmit={handleSubmit} className="p-6">
         <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-5">
           <div className="flex gap-3">
             <Trash2 className="mt-0.5 h-5 w-5 shrink-0 text-red-100" />
@@ -2304,6 +2342,37 @@ function ArchiveModal({
           </div>
         </div>
 
+        <div className="mt-5">
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              Main Admin Password
+            </span>
+            <div className="relative flex items-center">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter password to confirm deletion"
+                required
+                autoFocus
+                className="w-full rounded-2xl border border-white/10 bg-white/[0.06] pl-4 pr-12 py-3.5 text-sm font-semibold text-white outline-none placeholder:text-white/25 focus:border-red-400/50 focus:bg-red-500/10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 p-1 text-white/40 hover:text-white/80 transition"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-5 w-5" />
+                ) : (
+                  <Eye className="h-5 w-5" />
+                )}
+              </button>
+            </div>
+          </label>
+        </div>
+
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button
             type="button"
@@ -2314,9 +2383,8 @@ function ArchiveModal({
             Keep item
           </button>
           <button
-            type="button"
-            onClick={onConfirm}
-            disabled={saving}
+            type="submit"
+            disabled={saving || !password}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-5 py-3 text-sm font-black text-white transition hover:bg-red-400 disabled:opacity-50"
           >
             {saving ? (
@@ -2324,10 +2392,10 @@ function ArchiveModal({
             ) : (
               <Trash2 className="h-4 w-4" />
             )}
-            Archive item
+            Delete item permanently
           </button>
         </div>
-      </div>
+      </form>
     </ModalShell>
   );
 }
@@ -2560,4 +2628,3 @@ function FormInput({
     </label>
   );
 }
-
