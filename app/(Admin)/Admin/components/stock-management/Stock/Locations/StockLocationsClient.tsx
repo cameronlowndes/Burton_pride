@@ -98,7 +98,7 @@ type Notice = {
 
 const ENDPOINT = "/api/admin/stockmanagement/locations";
 const MOVE_STOCK_ENDPOINT =
-  "/api/admin/stockmanagement/locations/move-stock";
+  "/api/admin/stockmanagement/locations/movestock";
 
 const EMPTY_MOVE_FORM: MoveStockForm = {
   itemId: "",
@@ -1218,202 +1218,296 @@ function MoveStockModal({
   );
 
   return (
-    <Modal title="Move stock to another location" onClose={onClose}>
-      <form onSubmit={onSubmit} className="space-y-5 p-6">
-        <div className="rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4">
-          <div className="flex gap-3">
-            <ArrowRightLeft className="mt-0.5 h-5 w-5 shrink-0 text-blue-100" />
-            <div>
-              <p className="font-black text-blue-50">Stock movement</p>
-              <p className="mt-1 text-sm leading-6 text-blue-50/65">
-                Move some or all units of an item from its current location to
-                another active stock location. The movement will be recorded in
-                the stock audit history.
-              </p>
-            </div>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Move stock"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !moving) {
+          onClose();
+        }
+      }}
+    >
+      <div className="max-h-[calc(100vh-4rem)] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-white/15 bg-[#111827] shadow-[0_32px_120px_rgba(0,0,0,0.65)]">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[#111827]/95 p-6 backdrop-blur-xl">
+          <div>
+            <h2 className="text-2xl font-black">Move stock</h2>
+            <p className="mt-1 text-sm leading-6 text-white/50">
+              Move an inventory item to a different storage location.
+            </p>
           </div>
-        </div>
 
-        <SelectField
-          label="Current location"
-          help="Choose where the stock is currently stored."
-          value={form.fromLocationId}
-          onChange={(value) =>
-            onChange({
-              ...form,
-              fromLocationId: value,
-              itemId: "",
-              quantity: 1,
-            })
-          }
-          required
-        >
-          <option value="">Choose current location</option>
-          {locations
-            .filter((location) => location.isActive)
-            .map((location) => (
-              <option key={location.id} value={location.id}>
-                {location.name}
-                {location.code ? ` (${location.code})` : ""}
-              </option>
-            ))}
-        </SelectField>
-
-        <SelectField
-          label="Stock item"
-          help={
-            form.fromLocationId
-              ? "Only items stored at the selected current location are shown."
-              : "Choose the current location first."
-          }
-          value={form.itemId}
-          onChange={(value) =>
-            onChange({
-              ...form,
-              itemId: value,
-              quantity: 1,
-            })
-          }
-          required
-          disabled={!form.fromLocationId || loadingItems}
-        >
-          <option value="">
-            {loadingItems
-              ? "Loading stock items..."
-              : items.length
-                ? "Choose stock item"
-                : "No stock items available"}
-          </option>
-          {items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-              {item.sku ? ` — ${item.sku}` : ""} — {item.quantity} available
-            </option>
-          ))}
-        </SelectField>
-
-        {selectedItem ? (
-          <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:grid-cols-3">
-            <Metric label="Item" value={selectedItem.name} />
-            <Metric label="Available" value={selectedItem.quantity} />
-            <Metric
-              label="Current location"
-              value={currentLocation?.name || selectedItem.locationName || "—"}
-            />
-          </div>
-        ) : null}
-
-        <SelectField
-          label="Move to"
-          help="Choose the new stock location."
-          value={form.toLocationId}
-          onChange={(value) =>
-            onChange({
-              ...form,
-              toLocationId: value,
-            })
-          }
-          required
-          disabled={!form.fromLocationId}
-        >
-          <option value="">Choose destination location</option>
-          {destinationLocations.map((location) => (
-            <option key={location.id} value={location.id}>
-              {location.name}
-              {location.code ? ` (${location.code})` : ""}
-            </option>
-          ))}
-        </SelectField>
-
-        <label className="block">
-          <span className="block text-sm font-black">Quantity to move</span>
-          <span className="mt-1 block text-xs leading-5 text-white/40">
-            Enter a whole number. You cannot move more than the available
-            quantity.
-          </span>
-          <input
-            type="number"
-            min={1}
-            max={selectedItem?.quantity || undefined}
-            value={form.quantity}
-            onChange={(event) =>
-              onChange({
-                ...form,
-                quantity: Number(event.target.value) || 1,
-              })
-            }
-            required
-            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
-          />
-
-          {selectedItem ? (
-            <button
-              type="button"
-              onClick={() =>
-                onChange({
-                  ...form,
-                  quantity: selectedItem.quantity,
-                })
-              }
-              className="mt-2 text-xs font-black text-blue-200 transition hover:text-white"
-            >
-              Move all {selectedItem.quantity} units
-            </button>
-          ) : null}
-        </label>
-
-        <label className="block">
-          <span className="block text-sm font-black">Movement notes</span>
-          <span className="mt-1 block text-xs leading-5 text-white/40">
-            Optional reason or handling note for the audit record.
-          </span>
-          <textarea
-            value={form.notes}
-            onChange={(event) =>
-              onChange({
-                ...form,
-                notes: event.target.value,
-              })
-            }
-            rows={3}
-            maxLength={1000}
-            placeholder="Example: Moved to the event storage cupboard."
-            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-blue-300/50"
-          />
-        </label>
-
-        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onClose}
             disabled={moving}
-            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black disabled:opacity-50"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/60 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Close move stock"
           >
-            Cancel
-          </button>
-
-          <button
-            type="submit"
-            disabled={
-              moving ||
-              !form.itemId ||
-              !form.fromLocationId ||
-              !form.toLocationId ||
-              form.fromLocationId === form.toLocationId ||
-              form.quantity < 1
-            }
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {moving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Move stock
+            <X className="h-5 w-5" />
           </button>
         </div>
-      </form>
-    </Modal>
+
+        <form onSubmit={onSubmit} className="space-y-5 p-5 sm:p-6">
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              Current location
+            </span>
+            <p className="mb-3 text-xs leading-5 text-white/45">
+              Choose where the stock is currently stored.
+            </p>
+
+            <select
+              value={form.fromLocationId}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  fromLocationId: event.target.value,
+                  itemId: "",
+                  toLocationId:
+                    form.toLocationId === event.target.value
+                      ? ""
+                      : form.toLocationId,
+                  quantity: 1,
+                })
+              }
+              required
+              disabled={moving}
+              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Select a current location</option>
+              {locations
+                .filter((location) => location.isActive)
+                .map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                    {location.code ? ` (${location.code})` : ""}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              Stock item
+            </span>
+            <p className="mb-3 text-xs leading-5 text-white/45">
+              {form.fromLocationId
+                ? "Only items stored at the selected current location are shown."
+                : "Choose the current location first."}
+            </p>
+
+            <select
+              value={form.itemId}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  itemId: event.target.value,
+                  quantity: 1,
+                })
+              }
+              required
+              disabled={
+                moving || !form.fromLocationId || loadingItems
+              }
+              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">
+                {loadingItems
+                  ? "Loading stock items..."
+                  : items.length
+                    ? "Select a stock item"
+                    : "No stock items available"}
+              </option>
+
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                  {item.sku ? ` — ${item.sku}` : ""} — {item.quantity} units
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {selectedItem ? (
+            <div className="grid gap-3 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4 sm:grid-cols-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
+                  Current location
+                </p>
+                <p className="mt-1 font-black text-blue-50">
+                  {currentLocation?.name ||
+                    selectedItem.locationName ||
+                    "Not set"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
+                  Available units
+                </p>
+                <p className="mt-1 font-black text-blue-50">
+                  {selectedItem.quantity}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
+                  Item
+                </p>
+                <p className="mt-1 truncate font-black text-blue-50">
+                  {selectedItem.name}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              New location
+            </span>
+            <p className="mb-3 text-xs leading-5 text-white/45">
+              Select the new storage location.
+            </p>
+
+            <select
+              value={form.toLocationId}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  toLocationId: event.target.value,
+                })
+              }
+              required
+              disabled={
+                moving ||
+                !form.fromLocationId ||
+                destinationLocations.length === 0
+              }
+              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Select a new location</option>
+              {destinationLocations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                  {location.code ? ` (${location.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              Quantity to move
+            </span>
+            <p className="mb-3 text-xs leading-5 text-white/45">
+              Enter a whole number. You cannot move more than the available
+              quantity.
+            </p>
+
+            <input
+              type="number"
+              min={1}
+              max={selectedItem?.quantity || undefined}
+              value={form.quantity}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  quantity: Number(event.target.value) || 1,
+                })
+              }
+              required
+              disabled={moving || !selectedItem}
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3.5 text-sm text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+
+            {selectedItem ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...form,
+                    quantity: selectedItem.quantity,
+                  })
+                }
+                disabled={moving}
+                className="mt-2 text-xs font-black text-blue-200 transition hover:text-white disabled:opacity-50"
+              >
+                Move all {selectedItem.quantity} units
+              </button>
+            ) : null}
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-black text-white/85">
+              Additional notes
+            </span>
+            <p className="mb-3 text-xs leading-5 text-white/45">
+              Optional reason or handling note for the stock movement record.
+            </p>
+
+            <textarea
+              value={form.notes}
+              onChange={(event) =>
+                onChange({
+                  ...form,
+                  notes: event.target.value,
+                })
+              }
+              rows={4}
+              maxLength={1000}
+              disabled={moving}
+              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-blue-300/50 disabled:opacity-50"
+              placeholder="Optional notes..."
+            />
+          </label>
+
+          {form.fromLocationId &&
+          destinationLocations.length === 0 ? (
+            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-50">
+              No other active stock location is available. Add another
+              location before moving this stock.
+            </div>
+          ) : null}
+
+          <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col-reverse gap-3 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur-xl sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={moving}
+              className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black transition hover:bg-white/[0.1] disabled:opacity-50"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={
+                moving ||
+                !form.itemId ||
+                !form.fromLocationId ||
+                !form.toLocationId ||
+                form.fromLocationId === form.toLocationId ||
+                form.quantity < 1 ||
+                Boolean(
+                  selectedItem &&
+                    form.quantity > selectedItem.quantity,
+                )
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-lg transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {moving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowRightLeft className="h-4 w-4" />
+              )}
+              {moving ? "Moving stock..." : "Move stock"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

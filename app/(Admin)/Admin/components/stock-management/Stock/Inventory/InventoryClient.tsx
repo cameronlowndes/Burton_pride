@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowLeft,
+  ArrowRightLeft,
   ArrowUp,
   Barcode,
   Boxes,
@@ -133,6 +134,13 @@ type AdjustFormState = {
   notes: string;
 };
 
+type MoveFormState = {
+  stockItemId: string;
+  destinationLocation: string;
+  reason: string;
+  notes: string;
+};
+
 type Notice = {
   tone: "success" | "error" | "warning";
   title: string;
@@ -142,6 +150,8 @@ type Notice = {
 
 const INVENTORY_ENDPOINT = "/api/admin/stockmanagement/inventory";
 const MOVEMENT_ENDPOINT = "/api/admin/stockmanagement/inventory/movements";
+const MOVE_STOCK_ENDPOINT =
+  "/api/admin/stockmanagement/locations/movestock";
 const LOCATIONS_ENDPOINT = "/api/admin/stockmanagement/locations";
 
 const EMPTY_SUMMARY: InventorySummary = {
@@ -432,11 +442,18 @@ export default function InventoryClient() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [showItemModal, setShowItemModal] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   const [form, setForm] = useState<StockFormState>(EMPTY_FORM);
+  const [moveForm, setMoveForm] = useState<MoveFormState>({
+    stockItemId: "",
+    destinationLocation: "",
+    reason: "",
+    notes: "",
+  });
   const [adjustForm, setAdjustForm] = useState<AdjustFormState | null>(null);
   const [activeItem, setActiveItem] = useState<StockItem | null>(null);
 
@@ -656,6 +673,23 @@ export default function InventoryClient() {
     filteredItems.length > 0 &&
     filteredItems.every((item) => selectedIds.includes(item.id));
 
+  function openMoveModal(item?: StockItem) {
+    const selectedItem =
+      item ||
+      (selectedIds.length === 1
+        ? items.find((stockItem) => stockItem.id === selectedIds[0])
+        : undefined);
+
+    setMoveForm({
+      stockItemId: selectedItem?.id || "",
+      destinationLocation: "",
+      reason: "",
+      notes: "",
+    });
+    setShowMoveModal(true);
+    setNotice(null);
+  }
+
   function openCreateModal() {
     setForm(EMPTY_FORM);
     setShowItemModal(true);
@@ -798,6 +832,156 @@ export default function InventoryClient() {
     }
   }
 
+  async function saveMove(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (saving) return;
+
+    const stockItem = items.find((item) => item.id === moveForm.stockItemId);
+
+    if (!stockItem) {
+      setNotice({
+        tone: "warning",
+        title: "Select a stock item",
+        message: "Choose the stock item that you want to move.",
+      });
+      return;
+    }
+
+    const destinationLocationId = moveForm.destinationLocation.trim();
+    const destination = locations.find(
+      (location) => location.id === destinationLocationId,
+    );
+
+    if (!destinationLocationId || !destination) {
+      setNotice({
+        tone: "warning",
+        title: "Select a new location",
+        message: "Choose an active storage location.",
+      });
+      return;
+    }
+
+    const currentLocationValue = String(stockItem.location || "").trim();
+
+    const currentLocation = locations.find(
+      (location) =>
+        location.id === currentLocationValue ||
+        location.name.toLowerCase() === currentLocationValue.toLowerCase(),
+    );
+
+    if (!currentLocation) {
+      setNotice({
+        tone: "warning",
+        title: "Current location could not be found",
+        message:
+          "This stock item does not have a valid current location. Edit the item and assign it to an active location before moving it.",
+      });
+      return;
+    }
+
+    if (currentLocation.id === destination.id) {
+      setNotice({
+        tone: "warning",
+        title: "Choose a different location",
+        message: `${stockItem.name} is already stored in ${destination.name}.`,
+      });
+      return;
+    }
+
+    if (!moveForm.reason.trim()) {
+      setNotice({
+        tone: "warning",
+        title: "A reason is required",
+        message: "Explain why the stock item is being moved.",
+      });
+      return;
+    }
+
+    if (!Number.isInteger(stockItem.quantity) || stockItem.quantity < 1) {
+      setNotice({
+        tone: "warning",
+        title: "This item cannot be moved",
+        message:
+          "The stock item must have at least one available unit before it can be moved.",
+      });
+      return;
+    }
+
+    setSaving(true);
+    setNotice(null);
+
+    try {
+      const combinedNotes = [
+        moveForm.reason.trim(),
+        moveForm.notes.trim(),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const response = await fetch(MOVE_STOCK_ENDPOINT, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          itemId: stockItem.id,
+          fromLocationId: currentLocation.id,
+          toLocationId: destination.id,
+          quantity: stockItem.quantity,
+          notes: combinedNotes || null,
+        }),
+      });
+
+      const { json, rawText } = await readApiResponse(response);
+
+      if (!response.ok || !json?.ok) {
+        throw createDetailedApiError({
+          response,
+          json,
+          rawText,
+          endpoint: MOVE_STOCK_ENDPOINT,
+          method: "POST",
+          fallbackTitle: "Stock item could not be moved",
+          fallbackMessage:
+            "The shared move-stock API rejected the location change.",
+        });
+      }
+
+      setShowMoveModal(false);
+      setMoveForm({
+        stockItemId: "",
+        destinationLocation: "",
+        reason: "",
+        notes: "",
+      });
+      setSelectedIds([]);
+
+      setNotice({
+        tone: "success",
+        title: "Stock moved",
+        message:
+          json.message ||
+          `${stockItem.name} has been moved to ${destination.name}.`,
+      });
+
+      await Promise.all([loadInventory(), loadLocations()]);
+    } catch (caught) {
+      setNotice(
+        noticeFromError(
+          caught,
+          "Stock item could not be moved",
+          "Check the item's current location and destination, then try again.",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveAdjustment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -879,7 +1063,7 @@ export default function InventoryClient() {
     }
   }
 
-  async function archiveItem(password: string) {
+  async function deleteItem(password: string) {
     if (!activeItem || saving) return;
 
     setSaving(true);
@@ -912,7 +1096,7 @@ export default function InventoryClient() {
         });
       }
 
-      // 2. If password is correct, proceed with the archive
+      // 2. If the password is correct, permanently delete the item
       const response = await fetch(INVENTORY_ENDPOINT, {
         method: "DELETE",
         cache: "no-store",
@@ -922,6 +1106,9 @@ export default function InventoryClient() {
         },
         body: JSON.stringify({
           id: activeItem.id,
+          password,
+          action: "delete",
+          permanentDelete: true,
         }),
       });
 
@@ -934,9 +1121,9 @@ export default function InventoryClient() {
           rawText,
           endpoint: INVENTORY_ENDPOINT,
           method: "DELETE",
-          fallbackTitle: "Stock item could not be archived",
+          fallbackTitle: "Stock item could not be deleted",
           fallbackMessage:
-            "The inventory API rejected the archive request.",
+            "The inventory API rejected the permanent delete request.",
         });
       }
 
@@ -947,15 +1134,15 @@ export default function InventoryClient() {
       );
       setNotice({
         tone: "success",
-        title: "Stock item archived",
-        message: `${activeItem.name} has been removed from active inventory.`,
+        title: "Stock item deleted",
+        message: `${activeItem.name} has been permanently deleted from inventory.`,
       });
       await loadInventory();
     } catch (caught) {
       setNotice(
         noticeFromError(
           caught,
-          "Stock item could not be archived",
+          "Stock item could not be deleted",
           "Please check the password and try again.",
         ),
       );
@@ -1190,14 +1377,25 @@ export default function InventoryClient() {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={openCreateModal}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-blue-950/25 transition hover:scale-[1.01] hover:bg-blue-300"
-            >
-              <Plus className="h-5 w-5" />
-              Add stock item
-            </button>
+            <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => openMoveModal()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.09] px-5 py-3 text-sm font-black text-white shadow-xl transition hover:bg-white/[0.16]"
+              >
+                <ArrowRightLeft className="h-5 w-5" />
+                Move stock
+              </button>
+
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-xl shadow-blue-950/25 transition hover:scale-[1.01] hover:bg-blue-300"
+              >
+                <Plus className="h-5 w-5" />
+                Add stock item
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1444,7 +1642,8 @@ export default function InventoryClient() {
                       onView={() => openDetailsModal(item)}
                       onEdit={() => openEditModal(item)}
                       onAdjust={() => openAdjustModal(item)}
-                      onArchive={() => openDeleteModal(item)}
+                      onMove={() => openMoveModal(item)}
+                      onDelete={() => openDeleteModal(item)}
                     />
                   ))}
                 </tbody>
@@ -1463,6 +1662,26 @@ export default function InventoryClient() {
           </p>
         </div>
       </div>
+
+      {showMoveModal ? (
+        <MoveStockModal
+          form={moveForm}
+          items={items.filter((item) => item.isActive)}
+          locations={locations}
+          saving={saving}
+          onChange={setMoveForm}
+          onClose={() => {
+            setShowMoveModal(false);
+            setMoveForm({
+              stockItemId: "",
+              destinationLocation: "",
+              reason: "",
+              notes: "",
+            });
+          }}
+          onSubmit={saveMove}
+        />
+      ) : null}
 
       {showItemModal ? (
         <StockItemModal
@@ -1489,14 +1708,14 @@ export default function InventoryClient() {
       ) : null}
 
       {showDeleteModal && activeItem ? (
-        <ArchiveModal
+        <DeleteModal
           item={activeItem}
           saving={saving}
           onClose={() => {
             setShowDeleteModal(false);
             setActiveItem(null);
           }}
-          onConfirm={(password) => void archiveItem(password)}
+          onConfirm={(password) => void deleteItem(password)}
         />
       ) : null}
 
@@ -1528,7 +1747,8 @@ function InventoryRow({
   onView,
   onEdit,
   onAdjust,
-  onArchive,
+  onMove,
+  onDelete,
 }: {
   item: StockItem;
   selected: boolean;
@@ -1536,7 +1756,8 @@ function InventoryRow({
   onView: () => void;
   onEdit: () => void;
   onAdjust: () => void;
-  onArchive: () => void;
+  onMove: () => void;
+  onDelete: () => void;
 }) {
   return (
     <tr className="transition hover:bg-white/[0.035]">
@@ -1624,10 +1845,13 @@ function InventoryRow({
           <IconButton label="Adjust stock" onClick={onAdjust}>
             <PackagePlus className="h-4 w-4" />
           </IconButton>
+          <IconButton label="Move stock" onClick={onMove}>
+            <ArrowRightLeft className="h-4 w-4" />
+          </IconButton>
           <IconButton label="Edit item" onClick={onEdit}>
             <Edit3 className="h-4 w-4" />
           </IconButton>
-          <IconButton label="Delete item" onClick={onArchive} danger>
+          <IconButton label="Delete item permanently" onClick={onDelete} danger>
             <Trash2 className="h-4 w-4" />
           </IconButton>
         </div>
@@ -2179,6 +2403,180 @@ function FormSection({
   );
 }
 
+function MoveStockModal({
+  form,
+  items,
+  locations,
+  saving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  form: MoveFormState;
+  items: StockItem[];
+  locations: StockLocationOption[];
+  saving: boolean;
+  onChange: (value: MoveFormState) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedItem =
+    items.find((item) => item.id === form.stockItemId) || null;
+
+  const availableLocations = locations.filter((location) => {
+    const currentLocation = String(selectedItem?.location || "")
+      .trim()
+      .toLowerCase();
+
+    return (
+      !currentLocation ||
+      (location.id.toLowerCase() !== currentLocation &&
+        location.name.toLowerCase() !== currentLocation)
+    );
+  });
+
+  return (
+    <ModalShell
+      title="Move stock"
+      subtitle="Move an inventory item to a different storage location."
+      onClose={onClose}
+    >
+      <form onSubmit={onSubmit} className="space-y-5 p-5 sm:p-6">
+        <label className="block">
+          <span className="mb-2 block text-sm font-black text-white/85">
+            Stock item
+          </span>
+          <select
+            value={form.stockItemId}
+            onChange={(event) =>
+              onChange({
+                ...form,
+                stockItemId: event.target.value,
+                destinationLocation: "",
+              })
+            }
+            required
+            disabled={saving || items.length === 0}
+            className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none disabled:opacity-50"
+          >
+            <option value="">Select a stock item</option>
+            {items.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} — {item.quantity} units
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {selectedItem ? (
+          <div className="grid gap-3 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4 sm:grid-cols-2">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
+                Current location
+              </p>
+              <p className="mt-1 font-black text-blue-50">
+                {selectedItem.location || "No location set"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
+                Total units
+              </p>
+              <p className="mt-1 font-black text-blue-50">
+                {selectedItem.quantity}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        <label className="block">
+          <span className="mb-2 block text-sm font-black text-white/85">
+            New location
+          </span>
+          <select
+            value={form.destinationLocation}
+            onChange={(event) =>
+              onChange({
+                ...form,
+                destinationLocation: event.target.value,
+              })
+            }
+            required
+            disabled={saving || !selectedItem || availableLocations.length === 0}
+            className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none disabled:opacity-50"
+          >
+            <option value="">Select a new location</option>
+            {availableLocations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+                {location.code ? ` (${location.code})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {locations.length === 0 ? (
+          <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-50">
+            No active locations are available. Create a location before moving stock.
+          </div>
+        ) : null}
+
+        <FormInput
+          label="Reason for moving"
+          value={form.reason}
+          onChange={(value) => onChange({ ...form, reason: value })}
+          placeholder="Example: Moved to the event equipment cupboard"
+          required
+        />
+
+        <label className="block">
+          <span className="mb-2 block text-sm font-black text-white/85">
+            Additional notes
+          </span>
+          <textarea
+            value={form.notes}
+            onChange={(event) =>
+              onChange({ ...form, notes: event.target.value })
+            }
+            rows={4}
+            className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none"
+            placeholder="Optional notes..."
+          />
+        </label>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black disabled:opacity-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            disabled={
+              saving ||
+              !selectedItem ||
+              !form.destinationLocation ||
+              !form.reason.trim()
+            }
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowRightLeft className="h-4 w-4" />
+            )}
+            {saving ? "Moving stock..." : "Move stock"}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
 function StockAdjustModal({
   form,
   saving,
@@ -2302,7 +2700,7 @@ function StockAdjustModal({
   );
 }
 
-function ArchiveModal({
+function DeleteModal({
   item,
   saving,
   onClose,
@@ -2325,8 +2723,8 @@ function ArchiveModal({
 
   return (
     <ModalShell
-      title="Archive stock item?"
-      subtitle="The item will be removed from active inventory but kept for audit history."
+      title="Delete stock item permanently?"
+      subtitle="This permanently removes the item from the inventory database. This action cannot be undone."
       onClose={onClose}
     >
       <form onSubmit={handleSubmit} className="p-6">
@@ -2337,6 +2735,7 @@ function ArchiveModal({
               <p className="font-black text-red-50">{item.name}</p>
               <p className="mt-1 text-sm leading-6 text-red-50/75">
                 SKU {item.sku} currently has {item.quantity} units recorded.
+                This item will be permanently removed and cannot be restored.
               </p>
             </div>
           </div>
