@@ -1,7 +1,7 @@
 "use client";
 
+import type { FormEvent } from "react";
 import {
-  FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -12,6 +12,15 @@ import {
   createTestInventoryPayload,
   getTestItemSuccessMessage,
 } from "./inventoryTestItem";
+import MoveStockModal, {
+  EMPTY_MOVE_STOCK_FORM,
+  type MoveStockFormState,
+} from "../AddStock/MoveStockModal";
+import AddStockModal from "../AddStock/AddStockModal";
+import AddItemModal, {
+  EMPTY_ADD_ITEM_FORM,
+  type AddItemFormState,
+} from "../AddStock/AddStockModal";
 import {
   AlertTriangle,
   ArrowDown,
@@ -109,34 +118,10 @@ type LocationsResponse = {
   hint?: string | null;
 };
 
-type StockFormState = {
-  id?: string;
-  name: string;
-  sku: string;
-  barcode: string;
-  description: string;
-  category: string;
-  location: string;
-  supplier: string;
-  quantity: string;
-  reorderLevel: string;
-  targetLevel: string;
-  unitCost: string;
-  salePrice: string;
-  isActive: boolean;
-};
-
-type AdjustFormState = {
+type StockAdjustmentFormState = {
   item: StockItem;
   movementType: "add" | "remove" | "set";
   quantity: string;
-  reason: string;
-  notes: string;
-};
-
-type MoveFormState = {
-  stockItemId: string;
-  destinationLocation: string;
   reason: string;
   notes: string;
 };
@@ -145,6 +130,9 @@ type Notice = {
   tone: "success" | "error" | "warning";
   title: string;
   message: string;
+  errorReference?: string;
+  likelyCauses?: string[];
+  suggestedFixes?: string[];
   technicalDetails?: string[];
 };
 
@@ -160,22 +148,6 @@ const EMPTY_SUMMARY: InventorySummary = {
   lowStockItems: 0,
   outOfStockItems: 0,
   totalValue: 0,
-};
-
-const EMPTY_FORM: StockFormState = {
-  name: "",
-  sku: "",
-  barcode: "",
-  description: "",
-  category: "",
-  location: "",
-  supplier: "",
-  quantity: "0",
-  reorderLevel: "0",
-  targetLevel: "",
-  unitCost: "",
-  salePrice: "",
-  isActive: true,
 };
 
 function formatCurrency(value: number | null | undefined) {
@@ -217,6 +189,15 @@ function numberValue(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+type ApiErrorPayload = InventoryResponse & Partial<LocationsResponse> & {
+  requestId?: string;
+  request_id?: string;
+  correlationId?: string;
+  correlation_id?: string;
+  path?: string;
+  timestamp?: string;
+};
+
 type DetailedApiError = Error & {
   title?: string;
   status?: number;
@@ -229,39 +210,185 @@ type DetailedApiError = Error & {
   hint?: string | null;
   field?: string | null;
   responseBody?: string | null;
+  requestId?: string | null;
+  occurredAt?: string;
+  isNetworkError?: boolean;
+  likelyCauses?: string[];
+  suggestedFixes?: string[];
 };
+
+function createErrorReference() {
+  const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `STOCK-${Date.now().toString(36).toUpperCase()}-${randomPart}`;
+}
+
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function uniqueMessages(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map(cleanText).filter(Boolean)));
+}
+
+function safeResponsePreview(rawText: string) {
+  const compact = rawText.replace(/\s+/g, " ").trim();
+  return compact.length > 800 ? `${compact.slice(0, 800)}…` : compact;
+}
 
 async function readApiResponse(
   response: Response,
 ): Promise<{
-  json: InventoryResponse | null;
+  json: ApiErrorPayload | null;
   rawText: string;
 }> {
-  const rawText = await response.text();
+  let rawText = "";
+
+  try {
+    rawText = await response.text();
+  } catch (caught) {
+    rawText = caught instanceof Error
+      ? `The response body could not be read: ${caught.message}`
+      : "The response body could not be read.";
+  }
 
   if (!rawText) {
-    return {
-      json: null,
-      rawText: "",
-    };
+    return { json: null, rawText: "" };
   }
 
   try {
-    return {
-      json: JSON.parse(rawText) as InventoryResponse,
-      rawText,
-    };
+    const parsed = JSON.parse(rawText) as unknown;
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return {
+        json: parsed as ApiErrorPayload,
+        rawText,
+      };
+    }
+
+    return { json: null, rawText };
   } catch {
-    return {
-      json: null,
-      rawText,
-    };
+    return { json: null, rawText };
   }
+}
+
+function diagnoseApiFailure(params: {
+  status?: number;
+  code?: string;
+  message: string;
+  details?: string | null;
+  hint?: string | null;
+  endpoint: string;
+}) {
+  const combined = [
+    params.code,
+    params.message,
+    params.details,
+    params.hint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const likelyCauses: string[] = [];
+  const suggestedFixes: string[] = [];
+
+  if (params.status === 401) {
+    likelyCauses.push("The admin session cookie is missing, expired or no longer valid.");
+    suggestedFixes.push("Sign out, sign back in, then retry the action.");
+    suggestedFixes.push("Check that the API reads the same Supabase admin session cookies used by the admin portal.");
+  }
+
+  if (params.status === 403) {
+    likelyCauses.push("The signed-in account does not have the required Stock Management permission or main-admin access.");
+    suggestedFixes.push("Check the admin role and permission checks used by this API route.");
+  }
+
+  if (params.status === 404) {
+    likelyCauses.push(`No API handler was found for ${params.endpoint}.`);
+    suggestedFixes.push("Check the app/api folder spelling, route.ts filename and StockManagement path casing.");
+    suggestedFixes.push("Restart the Next.js development server after creating or moving the route.");
+  }
+
+  if (params.status === 405) {
+    likelyCauses.push("The route exists, but it does not export a handler for this HTTP method.");
+    suggestedFixes.push("Add the matching GET, POST, PATCH or DELETE export to route.ts.");
+  }
+
+  if (params.status === 409 || combined.includes("duplicate") || combined.includes("23505")) {
+    likelyCauses.push("A record already uses the same SKU, barcode, name or other unique value.");
+    suggestedFixes.push("Use a unique SKU/barcode, or update the existing stock item instead.");
+  }
+
+  if (params.status === 422 || params.status === 400) {
+    likelyCauses.push("One or more submitted values are missing, malformed or use the wrong field name/type.");
+    suggestedFixes.push("Compare the client JSON body with the API validation schema and Supabase column names.");
+  }
+
+  if (combined.includes("pgrst205") || combined.includes("could not find the table")) {
+    likelyCauses.push("Supabase cannot find the required table in its schema cache.");
+    suggestedFixes.push("Create the missing public.stock_items, stock_locations or stock_movements table.");
+    suggestedFixes.push("Confirm the table is in the public schema, then reload the Supabase schema cache.");
+  }
+
+  if (combined.includes("pgrst204") || combined.includes("could not find the") && combined.includes("column")) {
+    likelyCauses.push("The API is sending or selecting a column that does not exist in Supabase.");
+    suggestedFixes.push("Compare every select/insert/update field with the exact database column names.");
+    suggestedFixes.push("Reload the Supabase schema cache after adding or renaming columns.");
+  }
+
+  if (combined.includes("23503") || combined.includes("foreign key")) {
+    likelyCauses.push("The selected stock item or location references a record that does not exist.");
+    suggestedFixes.push("Check the item ID, current location ID and destination location ID before saving.");
+  }
+
+  if (combined.includes("23502") || combined.includes("not-null") || combined.includes("null value")) {
+    likelyCauses.push("A required database column received no value.");
+    suggestedFixes.push("Send the missing required field or add a sensible database default.");
+  }
+
+  if (combined.includes("22p02") || combined.includes("invalid input syntax")) {
+    likelyCauses.push("A value was sent using the wrong database type, commonly an invalid UUID or number.");
+    suggestedFixes.push("Check that IDs are valid UUIDs and numeric fields are converted before the request is sent.");
+  }
+
+  if (combined.includes("row-level security") || combined.includes("rls")) {
+    likelyCauses.push("Supabase Row Level Security blocked the database operation.");
+    suggestedFixes.push("Use the server-side service-role client for protected admin routes, or add the correct RLS policy.");
+  }
+
+  if (combined.includes("fetch failed") || combined.includes("failed to fetch") || combined.includes("networkerror")) {
+    likelyCauses.push("The browser could not reach the API route.");
+    suggestedFixes.push("Check that the Next.js server is running and inspect the browser Network tab.");
+  }
+
+  if (params.status === 429) {
+    likelyCauses.push("The server or upstream service rate-limited the request.");
+    suggestedFixes.push("Wait briefly, then retry once rather than repeatedly clicking the action.");
+  }
+
+  if (params.status && params.status >= 500) {
+    likelyCauses.push("The API route threw an unhandled server or Supabase error.");
+    suggestedFixes.push("Check the terminal output and Supabase logs using the error reference and request time below.");
+    suggestedFixes.push("Make sure NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set on the server.");
+  }
+
+  if (!likelyCauses.length) {
+    likelyCauses.push("The API returned an unexpected response that the inventory page could not process.");
+  }
+
+  if (!suggestedFixes.length) {
+    suggestedFixes.push("Refresh the page once, then inspect the technical details and server logs if it happens again.");
+  }
+
+  return {
+    likelyCauses: uniqueMessages(likelyCauses),
+    suggestedFixes: uniqueMessages(suggestedFixes),
+  };
 }
 
 function createDetailedApiError(params: {
   response?: Response;
-  json?: InventoryResponse | null;
+  json?: ApiErrorPayload | null;
   rawText?: string;
   endpoint: string;
   method: string;
@@ -270,11 +397,11 @@ function createDetailedApiError(params: {
 }): DetailedApiError {
   const status = params.response?.status;
   const statusText = params.response?.statusText || "";
-  const serverMessage =
-    params.json?.error ||
-    params.json?.message ||
-    params.json?.reason ||
-    "";
+  const serverMessage = uniqueMessages([
+    params.json?.error,
+    params.json?.message,
+    params.json?.reason,
+  ])[0] || "";
 
   const message =
     serverMessage ||
@@ -283,18 +410,33 @@ function createDetailedApiError(params: {
       : status === 403
         ? "Your administrator account does not have permission to perform this action."
         : status === 404
-          ? `The API route was not found: ${params.endpoint}. Check the route folder and file name.`
-          : status === 409
-            ? "The request conflicts with the current stock record. Refresh the page and try again."
-            : status === 422
-              ? "The server could not accept one or more submitted values."
-              : status === 429
-                ? "Too many requests were made. Wait a moment and try again."
-                : status && status >= 500
-                  ? "The server failed while processing the inventory request. Check the terminal and Supabase logs."
-                  : params.fallbackMessage);
+          ? `The API route was not found: ${params.endpoint}.`
+          : status === 405
+            ? `The API route does not allow ${params.method} requests.`
+            : status === 409
+              ? "The request conflicts with an existing stock record."
+              : status === 422 || status === 400
+                ? "The server could not accept one or more submitted values."
+                : status === 429
+                  ? "Too many requests were made. Please retry shortly."
+                  : status && status >= 500
+                    ? "The server failed while processing the stock request."
+                    : params.fallbackMessage);
+
+  const diagnosis = diagnoseApiFailure({
+    status,
+    code: params.json?.code,
+    message,
+    details: params.json?.details,
+    hint: params.json?.hint,
+    endpoint: params.endpoint,
+  });
 
   const error = new Error(message) as DetailedApiError;
+  const headerRequestId =
+    params.response?.headers.get("x-request-id") ||
+    params.response?.headers.get("x-vercel-id") ||
+    params.response?.headers.get("cf-ray");
 
   error.title = params.fallbackTitle;
   error.status = status;
@@ -306,10 +448,51 @@ function createDetailedApiError(params: {
   error.details = params.json?.details;
   error.hint = params.json?.hint;
   error.field = params.json?.field;
-  error.responseBody =
-    !params.json && params.rawText
-      ? params.rawText.slice(0, 500)
-      : null;
+  error.requestId =
+    params.json?.requestId ||
+    params.json?.request_id ||
+    params.json?.correlationId ||
+    params.json?.correlation_id ||
+    headerRequestId ||
+    null;
+  error.occurredAt = new Date().toISOString();
+  error.responseBody = !params.json && params.rawText
+    ? safeResponsePreview(params.rawText)
+    : null;
+  error.likelyCauses = diagnosis.likelyCauses;
+  error.suggestedFixes = diagnosis.suggestedFixes;
+
+  return error;
+}
+
+function createNetworkApiError(params: {
+  caught: unknown;
+  endpoint: string;
+  method: string;
+  title: string;
+  fallbackMessage: string;
+}): DetailedApiError {
+  const originalMessage =
+    params.caught instanceof Error ? params.caught.message : "Unknown network error";
+  const error = new Error(
+    originalMessage || params.fallbackMessage,
+  ) as DetailedApiError;
+
+  error.title = params.title;
+  error.endpoint = params.endpoint;
+  error.method = params.method;
+  error.occurredAt = new Date().toISOString();
+  error.isNetworkError = true;
+  error.reason = originalMessage;
+  error.likelyCauses = [
+    "The browser could not connect to the Stock Management API.",
+    "The Next.js server may be stopped, restarting, or blocked by a network problem.",
+  ];
+  error.suggestedFixes = [
+    "Check that the development or production server is running.",
+    "Open the browser Network tab and retry the request.",
+    "Confirm the API endpoint path is correct and uses the same website origin.",
+  ];
 
   return error;
 }
@@ -324,58 +507,48 @@ function noticeFromError(
       tone: "error",
       title: fallbackTitle,
       message: fallbackMessage,
+      errorReference: createErrorReference(),
+      likelyCauses: ["An unknown non-standard error was thrown."],
+      suggestedFixes: ["Check the browser console and server terminal for the original error."],
     };
   }
 
   const error = caught as DetailedApiError;
   const technicalDetails: string[] = [];
+  const errorReference = createErrorReference();
+
+  technicalDetails.push(`Error reference: ${errorReference}`);
+  technicalDetails.push(`Time: ${error.occurredAt || new Date().toISOString()}`);
+  technicalDetails.push(`Browser online: ${typeof navigator === "undefined" ? "Unknown" : navigator.onLine ? "Yes" : "No"}`);
 
   if (typeof error.status === "number") {
     technicalDetails.push(
-      `HTTP status: ${error.status}${
-        error.statusText ? ` ${error.statusText}` : ""
-      }`,
+      `HTTP status: ${error.status}${error.statusText ? ` ${error.statusText}` : ""}`,
     );
+  } else if (error.isNetworkError) {
+    technicalDetails.push("HTTP status: No response received");
   }
 
   if (error.method && error.endpoint) {
-    technicalDetails.push(
-      `Request: ${error.method} ${error.endpoint}`,
-    );
+    technicalDetails.push(`Request: ${error.method} ${error.endpoint}`);
   }
 
-  if (error.code) {
-    technicalDetails.push(`Error code: ${error.code}`);
-  }
-
-  if (error.reason && error.reason !== error.message) {
-    technicalDetails.push(`Reason: ${error.reason}`);
-  }
-
-  if (error.field) {
-    technicalDetails.push(`Field: ${error.field}`);
-  }
-
-  if (error.details) {
-    technicalDetails.push(`Server details: ${error.details}`);
-  }
-
-  if (error.hint) {
-    technicalDetails.push(`Server hint: ${error.hint}`);
-  }
-
-  if (error.responseBody) {
-    technicalDetails.push(
-      `Non-JSON response: ${error.responseBody}`,
-    );
-  }
+  if (error.requestId) technicalDetails.push(`Server request ID: ${error.requestId}`);
+  if (error.code) technicalDetails.push(`Error code: ${error.code}`);
+  if (error.reason && error.reason !== error.message) technicalDetails.push(`Reason: ${error.reason}`);
+  if (error.field) technicalDetails.push(`Affected field: ${error.field}`);
+  if (error.details) technicalDetails.push(`Server details: ${error.details}`);
+  if (error.hint) technicalDetails.push(`Server hint: ${error.hint}`);
+  if (error.responseBody) technicalDetails.push(`Non-JSON response: ${error.responseBody}`);
 
   return {
     tone: "error",
     title: error.title || fallbackTitle,
     message: error.message || fallbackMessage,
-    technicalDetails:
-      technicalDetails.length > 0 ? technicalDetails : undefined,
+    errorReference,
+    likelyCauses: error.likelyCauses,
+    suggestedFixes: error.suggestedFixes,
+    technicalDetails: uniqueMessages(technicalDetails),
   };
 }
 
@@ -447,14 +620,12 @@ export default function InventoryClient() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
-  const [form, setForm] = useState<StockFormState>(EMPTY_FORM);
-  const [moveForm, setMoveForm] = useState<MoveFormState>({
-    stockItemId: "",
-    destinationLocation: "",
-    reason: "",
-    notes: "",
-  });
-  const [adjustForm, setAdjustForm] = useState<AdjustFormState | null>(null);
+  const [form, setForm] =
+    useState<AddItemFormState>(EMPTY_ADD_ITEM_FORM);
+  const [moveForm, setMoveForm] =
+    useState<MoveStockFormState>(EMPTY_MOVE_STOCK_FORM);
+  const [adjustForm, setAdjustForm] =
+    useState<StockAdjustmentFormState | null>(null);
   const [activeItem, setActiveItem] = useState<StockItem | null>(null);
 
   const loadLocations = useCallback(async () => {
@@ -593,18 +764,6 @@ export default function InventoryClient() {
     [items],
   );
 
-  const uniqueLocations = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          items
-            .map((item) => item.location?.trim())
-            .filter((value): value is string => Boolean(value)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [items],
-  );
-
   const filteredItems = useMemo(() => {
     const cleanQuery = query.trim().toLowerCase();
 
@@ -628,8 +787,19 @@ export default function InventoryClient() {
       const matchesCategory =
         categoryFilter === "all" || item.category === categoryFilter;
 
+      const selectedLocation =
+        locationFilter === "all"
+          ? null
+          : locations.find((location) => location.id === locationFilter) || null;
+
       const matchesLocation =
-        locationFilter === "all" || item.location === locationFilter;
+        locationFilter === "all" ||
+        item.location === locationFilter ||
+        Boolean(
+          selectedLocation &&
+            item.location?.trim().toLowerCase() ===
+              selectedLocation.name.trim().toLowerCase(),
+        );
 
       return (
         matchesSearch &&
@@ -665,6 +835,7 @@ export default function InventoryClient() {
     statusFilter,
     categoryFilter,
     locationFilter,
+    locations,
     sortBy,
     sortDirection,
   ]);
@@ -681,17 +852,15 @@ export default function InventoryClient() {
         : undefined);
 
     setMoveForm({
+      ...EMPTY_MOVE_STOCK_FORM,
       stockItemId: selectedItem?.id || "",
-      destinationLocation: "",
-      reason: "",
-      notes: "",
     });
     setShowMoveModal(true);
     setNotice(null);
   }
 
   function openCreateModal() {
-    setForm(EMPTY_FORM);
+    setForm(EMPTY_ADD_ITEM_FORM);
     setShowItemModal(true);
     setNotice(null);
   }
@@ -704,7 +873,15 @@ export default function InventoryClient() {
       barcode: item.barcode || "",
       description: item.description || "",
       category: item.category || "",
-      location: item.location || "",
+      location:
+        locations.find(
+          (location) =>
+            location.id === item.location ||
+            location.name.trim().toLowerCase() ===
+              String(item.location || "").trim().toLowerCase(),
+        )?.id ||
+        item.location ||
+        "",
       supplier: item.supplier || "",
       quantity: String(item.quantity),
       reorderLevel: String(item.reorderLevel),
@@ -730,7 +907,7 @@ export default function InventoryClient() {
     setAdjustForm({
       item,
       movementType: "add",
-      quantity: "",
+      quantity: "1",
       reason: "",
       notes: "",
     });
@@ -766,6 +943,29 @@ export default function InventoryClient() {
       return;
     }
 
+    const quantity = numberValue(form.quantity);
+    const reorderLevel = numberValue(form.reorderLevel);
+    const targetLevel = form.targetLevel
+      ? numberValue(form.targetLevel)
+      : null;
+
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 0 ||
+      !Number.isInteger(reorderLevel) ||
+      reorderLevel < 0 ||
+      (targetLevel !== null &&
+        (!Number.isInteger(targetLevel) || targetLevel < 0))
+    ) {
+      setNotice({
+        tone: "warning",
+        title: "Check the stock levels",
+        message:
+          "Current quantity, reorder level and target level must be whole numbers of zero or more.",
+      });
+      return;
+    }
+
     setSaving(true);
     setNotice(null);
 
@@ -786,11 +986,9 @@ export default function InventoryClient() {
           category: form.category.trim() || null,
           location: form.location.trim() || null,
           supplier: form.supplier.trim() || null,
-          quantity: numberValue(form.quantity),
-          reorderLevel: numberValue(form.reorderLevel),
-          targetLevel: form.targetLevel
-            ? numberValue(form.targetLevel)
-            : null,
+          quantity,
+          reorderLevel,
+          targetLevel,
           unitCost: form.unitCost ? numberValue(form.unitCost) : null,
           salePrice: form.salePrice ? numberValue(form.salePrice) : null,
           isActive: form.isActive,
@@ -813,6 +1011,7 @@ export default function InventoryClient() {
       }
 
       setShowItemModal(false);
+      setForm(EMPTY_ADD_ITEM_FORM);
       setNotice({
         tone: "success",
         title: form.id ? "Stock item updated" : "Stock item created",
@@ -908,6 +1107,23 @@ export default function InventoryClient() {
       return;
     }
 
+    const moveQuantity = moveForm.moveAllStock
+      ? stockItem.quantity
+      : Number(moveForm.quantity);
+
+    if (
+      !Number.isInteger(moveQuantity) ||
+      moveQuantity < 1 ||
+      moveQuantity > stockItem.quantity
+    ) {
+      setNotice({
+        tone: "warning",
+        title: "Enter a valid move quantity",
+        message: `Choose a whole number between 1 and ${stockItem.quantity}, or select Move all stock.`,
+      });
+      return;
+    }
+
     setSaving(true);
     setNotice(null);
 
@@ -931,7 +1147,7 @@ export default function InventoryClient() {
           itemId: stockItem.id,
           fromLocationId: currentLocation.id,
           toLocationId: destination.id,
-          quantity: stockItem.quantity,
+          quantity: moveQuantity,
           notes: combinedNotes || null,
         }),
       });
@@ -952,12 +1168,7 @@ export default function InventoryClient() {
       }
 
       setShowMoveModal(false);
-      setMoveForm({
-        stockItemId: "",
-        destinationLocation: "",
-        reason: "",
-        notes: "",
-      });
+      setMoveForm(EMPTY_MOVE_STOCK_FORM);
       setSelectedIds([]);
 
       setNotice({
@@ -989,7 +1200,11 @@ export default function InventoryClient() {
 
     const quantity = numberValue(adjustForm.quantity);
 
-    if (quantity < 0 || (!quantity && adjustForm.movementType !== "set")) {
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 0 ||
+      (!quantity && adjustForm.movementType !== "set")
+    ) {
       setNotice({
         tone: "warning",
         title: "Enter a valid quantity",
@@ -1666,40 +1881,43 @@ export default function InventoryClient() {
       {showMoveModal ? (
         <MoveStockModal
           form={moveForm}
-          items={items.filter((item) => item.isActive)}
+          items={items.filter(
+            (item) => item.isActive && item.quantity > 0,
+          )}
           locations={locations}
           saving={saving}
           onChange={setMoveForm}
           onClose={() => {
             setShowMoveModal(false);
-            setMoveForm({
-              stockItemId: "",
-              destinationLocation: "",
-              reason: "",
-              notes: "",
-            });
+            setMoveForm(EMPTY_MOVE_STOCK_FORM);
           }}
           onSubmit={saveMove}
         />
       ) : null}
 
       {showItemModal ? (
-        <StockItemModal
+        <AddItemModal
           form={form}
           locations={locations}
           saving={saving}
           onChange={setForm}
-          onClose={() => setShowItemModal(false)}
+          onClose={() => {
+            if (saving) return;
+            setShowItemModal(false);
+            setForm(EMPTY_ADD_ITEM_FORM);
+          }}
           onSubmit={saveItem}
         />
       ) : null}
 
-      {showAdjustModal && adjustForm ? (
-        <StockAdjustModal
-          form={adjustForm}
+      {showAdjustModal && adjustForm?.item ? (
+        <AddStockModal
+          form={adjustForm as any}
+          locations={locations}
           saving={saving}
-          onChange={setAdjustForm}
+          onChange={(value) => setAdjustForm(value as unknown as StockAdjustmentFormState)}
           onClose={() => {
+            if (saving) return;
             setShowAdjustModal(false);
             setAdjustForm(null);
           }}
@@ -1845,7 +2063,11 @@ function InventoryRow({
           <IconButton label="Adjust stock" onClick={onAdjust}>
             <PackagePlus className="h-4 w-4" />
           </IconButton>
-          <IconButton label="Move stock" onClick={onMove}>
+          <IconButton
+            label="Move stock"
+            onClick={onMove}
+            disabled={!item.isActive || item.quantity < 1}
+          >
             <ArrowRightLeft className="h-4 w-4" />
           </IconButton>
           <IconButton label="Edit item" onClick={onEdit}>
@@ -1971,30 +2193,65 @@ function NoticePanel({
       ? "border-emerald-300/20 bg-emerald-500/10 text-emerald-50"
       : notice.tone === "warning"
         ? "border-amber-300/20 bg-amber-500/10 text-amber-50"
-        : "border-red-300/20 bg-red-500/10 text-red-50";
+        : "border-red-300/25 bg-red-500/10 text-red-50 shadow-[0_18px_60px_rgba(127,29,29,0.18)]";
 
-  const Icon =
-    notice.tone === "success" ? CheckCircle2 : AlertTriangle;
+  const Icon = notice.tone === "success" ? CheckCircle2 : AlertTriangle;
 
   return (
-    <div className={`rounded-2xl border p-4 ${className}`}>
+    <div className={`rounded-2xl border p-4 sm:p-5 ${className}`} role="alert">
       <div className="flex gap-3">
         <Icon className="mt-0.5 h-5 w-5 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-black">{notice.title}</p>
-          <p className="mt-1 text-sm leading-6 opacity-85">
-            {notice.message}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-black">{notice.title}</p>
+              <p className="mt-1 text-sm leading-6 opacity-90">{notice.message}</p>
+            </div>
+
+            {notice.errorReference ? (
+              <span className="rounded-lg border border-current/15 bg-black/15 px-2.5 py-1 font-mono text-[10px] font-black tracking-wide opacity-80">
+                {notice.errorReference}
+              </span>
+            ) : null}
+          </div>
+
+          {notice.likelyCauses?.length ? (
+            <div className="mt-4 rounded-xl border border-current/15 bg-black/10 p-3">
+              <p className="text-xs font-black uppercase tracking-[0.12em]">Likely cause</p>
+              <ul className="mt-2 space-y-1.5 text-xs leading-5 opacity-85">
+                {notice.likelyCauses.map((cause) => (
+                  <li key={cause} className="flex gap-2">
+                    <span aria-hidden="true">•</span>
+                    <span>{cause}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {notice.suggestedFixes?.length ? (
+            <div className="mt-3 rounded-xl border border-current/15 bg-black/10 p-3">
+              <p className="text-xs font-black uppercase tracking-[0.12em]">What to check</p>
+              <ol className="mt-2 space-y-1.5 text-xs leading-5 opacity-85">
+                {notice.suggestedFixes.map((fix, index) => (
+                  <li key={fix} className="flex gap-2">
+                    <span className="font-black">{index + 1}.</span>
+                    <span>{fix}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
 
           {notice.technicalDetails?.length ? (
             <details className="mt-3 rounded-xl border border-current/15 bg-black/15 p-3">
               <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.12em]">
-                Show technical details
+                Show full technical details
               </summary>
 
-              <div className="mt-3 space-y-2 text-xs leading-5 opacity-80">
+              <div className="mt-3 space-y-2 rounded-lg bg-black/15 p-3 text-xs leading-5 opacity-85">
                 {notice.technicalDetails.map((detail) => (
-                  <p key={detail} className="break-words font-mono">
+                  <p key={detail} className="break-words font-mono select-text">
                     {detail}
                   </p>
                 ))}
@@ -2002,10 +2259,11 @@ function NoticePanel({
             </details>
           ) : null}
         </div>
+
         <button
           type="button"
           onClick={onClose}
-          className="h-8 w-8 rounded-xl p-1 opacity-60 transition hover:bg-white/10 hover:opacity-100"
+          className="h-8 w-8 shrink-0 rounded-xl p-1 opacity-60 transition hover:bg-white/10 hover:opacity-100"
           aria-label="Close message"
         >
           <X className="h-4 w-4" />
@@ -2019,21 +2277,26 @@ function IconButton({
   label,
   onClick,
   danger,
+  disabled,
   children,
 }: {
   label: string;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${
-        danger
+        disabled
+          ? "border-white/5 bg-white/[0.02] text-white/30 cursor-not-allowed"
+          : danger
           ? "border-red-300/15 bg-red-500/10 text-red-100 hover:bg-red-500/20"
           : "border-white/10 bg-white/[0.05] text-white/65 hover:bg-white/[0.1] hover:text-white"
       }`}
@@ -2086,617 +2349,6 @@ function ModalShell({
         {children}
       </div>
     </div>
-  );
-}
-
-function StockItemModal({
-  form,
-  locations,
-  saving,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  form: StockFormState;
-  locations: StockLocationOption[];
-  saving: boolean;
-  onChange: (value: StockFormState) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  function setField<K extends keyof StockFormState>(
-    key: K,
-    value: StockFormState[K],
-  ) {
-    onChange({
-      ...form,
-      [key]: value,
-    });
-  }
-
-  return (
-    <ModalShell
-      title={form.id ? "Edit stock item" : "Add stock item"}
-      subtitle="Complete the sections below. Only the item name and SKU are required."
-      onClose={onClose}
-    >
-      <form onSubmit={onSubmit} className="space-y-6 p-5 sm:p-6">
-        <FormSection
-          number="1"
-          title="Basic item details"
-          description="Give the item a clear name and a unique reference so it is easy to find."
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormInput
-              label="Item name"
-              helpText="The name people will recognise, for example: Folding table."
-              value={form.name}
-              onChange={(value) => setField("name", value)}
-              placeholder="Example: Folding table"
-              required
-            />
-
-            <FormInput
-              label="SKU"
-              helpText="A short unique code used to identify this item."
-              value={form.sku}
-              onChange={(value) => setField("sku", value)}
-              placeholder="Example: TABLE-001"
-              required
-            />
-
-            <FormInput
-              label="Barcode"
-              helpText="Optional. Enter the barcode number if the item has one."
-              value={form.barcode}
-              onChange={(value) => setField("barcode", value)}
-              placeholder="Example: 5012345678900"
-            />
-
-            <FormInput
-              label="Category"
-              helpText="Group similar items together."
-              value={form.category}
-              onChange={(value) => setField("category", value)}
-              placeholder="Example: Event equipment"
-            />
-          </div>
-        </FormSection>
-
-        <FormSection
-          number="2"
-          title="Where it is kept and who supplies it"
-          description="These details help administrators find and reorder the item."
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <LocationSelect
-              label="Storage location"
-              helpText="Choose where this item is physically stored."
-              value={form.location}
-              locations={locations}
-              onChange={(value) => setField("location", value)}
-            />
-
-            <FormInput
-              label="Supplier"
-              helpText="The business or person the item is normally bought from."
-              value={form.supplier}
-              onChange={(value) => setField("supplier", value)}
-              placeholder="Example: Burton Event Supplies"
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4">
-            <div>
-              <p className="text-sm font-black text-blue-50">
-                Need another storage location?
-              </p>
-              <p className="mt-1 text-xs leading-5 text-blue-50/65">
-                Add and manage cupboards, rooms, shelves, containers and other
-                storage areas from the Stock Locations page.
-              </p>
-            </div>
-
-            <Link
-              href="/Admin/StockManagement/Locations"
-              target="_blank"
-              className="inline-flex items-center gap-2 rounded-xl border border-blue-300/20 bg-blue-400 px-4 py-2.5 text-xs font-black text-slate-950 transition hover:bg-blue-300"
-            >
-              <MapPin className="h-4 w-4" />
-              Manage locations
-            </Link>
-          </div>
-        </FormSection>
-
-        <FormSection
-          number="3"
-          title="Stock levels"
-          description="Set the current amount and when the system should warn you to order more."
-        >
-          <div className="grid gap-4 sm:grid-cols-3">
-            <FormInput
-              label="Current quantity"
-              helpText="How many are available right now."
-              value={form.quantity}
-              onChange={(value) => setField("quantity", value)}
-              type="number"
-              min="0"
-              step="1"
-              placeholder="0"
-            />
-
-            <FormInput
-              label="Low-stock warning level"
-              helpText="You will be warned when stock reaches this number."
-              value={form.reorderLevel}
-              onChange={(value) => setField("reorderLevel", value)}
-              type="number"
-              min="0"
-              step="1"
-              placeholder="0"
-            />
-
-            <FormInput
-              label="Preferred stock level"
-              helpText="The amount you would ideally like to keep in stock."
-              value={form.targetLevel}
-              onChange={(value) => setField("targetLevel", value)}
-              type="number"
-              min="0"
-              step="1"
-              placeholder="Optional"
-            />
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4">
-            <div className="flex gap-3">
-              <PackageMinus className="mt-0.5 h-5 w-5 shrink-0 text-blue-100" />
-              <div>
-                <p className="text-sm font-black text-blue-50">
-                  Example
-                </p>
-                <p className="mt-1 text-xs leading-5 text-blue-50/70">
-                  If the current quantity is 20 and the low-stock warning is 5,
-                  the item will show as low stock when only 5 remain.
-                </p>
-              </div>
-            </div>
-          </div>
-        </FormSection>
-
-        <FormSection
-          number="4"
-          title="Cost and selling price"
-          description="Optional financial details used to calculate stock value."
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormInput
-              label="Cost per item"
-              helpText="How much Burton Pride pays for one item."
-              value={form.unitCost}
-              onChange={(value) => setField("unitCost", value)}
-              type="number"
-              min="0"
-              step="0.01"
-              prefix="£"
-              placeholder="0.00"
-            />
-
-            <FormInput
-              label="Selling price per item"
-              helpText="How much one item is sold for, if applicable."
-              value={form.salePrice}
-              onChange={(value) => setField("salePrice", value)}
-              type="number"
-              min="0"
-              step="0.01"
-              prefix="£"
-              placeholder="0.00"
-            />
-          </div>
-        </FormSection>
-
-        <FormSection
-          number="5"
-          title="Extra information"
-          description="Add anything administrators should know about this item."
-        >
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              Description or notes
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              Optional. Include size, colour, condition, usage instructions or
-              anything else that helps identify the item.
-            </p>
-            <textarea
-              value={form.description}
-              onChange={(event) =>
-                setField("description", event.target.value)
-              }
-              rows={4}
-              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-blue-300/50"
-              placeholder="Example: Six-foot folding table used for event stalls..."
-            />
-          </label>
-
-          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 transition hover:bg-white/[0.07]">
-            <input
-              type="checkbox"
-              checked={form.isActive}
-              onChange={(event) =>
-                setField("isActive", event.target.checked)
-              }
-              className="mt-1 h-4 w-4 rounded border-white/20 bg-white/10"
-            />
-            <span>
-              <span className="block text-sm font-black">
-                Keep this item active
-              </span>
-              <span className="mt-1 block text-xs leading-5 text-white/45">
-                Active items appear in the main inventory and can trigger
-                stock alerts. Turn this off only when the item is no longer
-                being used.
-              </span>
-            </span>
-          </label>
-        </FormSection>
-
-        <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col-reverse gap-3 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur-xl sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black transition hover:bg-white/[0.1] disabled:opacity-50"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-lg transition hover:bg-blue-300 disabled:opacity-50"
-          >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PackageCheck className="h-4 w-4" />
-            )}
-            {form.id ? "Save item changes" : "Add item to inventory"}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function FormSection({
-  number,
-  title,
-  description,
-  children,
-}: {
-  number: string;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-4 sm:p-5">
-      <div className="mb-5 flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-500/15 text-sm font-black text-blue-100">
-          {number}
-        </div>
-
-        <div>
-          <h3 className="text-base font-black text-white sm:text-lg">
-            {title}
-          </h3>
-          <p className="mt-1 text-xs leading-5 text-white/45 sm:text-sm">
-            {description}
-          </p>
-        </div>
-      </div>
-
-      {children}
-    </section>
-  );
-}
-
-function MoveStockModal({
-  form,
-  items,
-  locations,
-  saving,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  form: MoveFormState;
-  items: StockItem[];
-  locations: StockLocationOption[];
-  saving: boolean;
-  onChange: (value: MoveFormState) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  const selectedItem =
-    items.find((item) => item.id === form.stockItemId) || null;
-
-  const availableLocations = locations.filter((location) => {
-    const currentLocation = String(selectedItem?.location || "")
-      .trim()
-      .toLowerCase();
-
-    return (
-      !currentLocation ||
-      (location.id.toLowerCase() !== currentLocation &&
-        location.name.toLowerCase() !== currentLocation)
-    );
-  });
-
-  return (
-    <ModalShell
-      title="Move stock"
-      subtitle="Move an inventory item to a different storage location."
-      onClose={onClose}
-    >
-      <form onSubmit={onSubmit} className="space-y-5 p-5 sm:p-6">
-        <label className="block">
-          <span className="mb-2 block text-sm font-black text-white/85">
-            Stock item
-          </span>
-          <select
-            value={form.stockItemId}
-            onChange={(event) =>
-              onChange({
-                ...form,
-                stockItemId: event.target.value,
-                destinationLocation: "",
-              })
-            }
-            required
-            disabled={saving || items.length === 0}
-            className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none disabled:opacity-50"
-          >
-            <option value="">Select a stock item</option>
-            {items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} — {item.quantity} units
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {selectedItem ? (
-          <div className="grid gap-3 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4 sm:grid-cols-2">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
-                Current location
-              </p>
-              <p className="mt-1 font-black text-blue-50">
-                {selectedItem.location || "No location set"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
-                Total units
-              </p>
-              <p className="mt-1 font-black text-blue-50">
-                {selectedItem.quantity}
-              </p>
-            </div>
-          </div>
-        ) : null}
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-black text-white/85">
-            New location
-          </span>
-          <select
-            value={form.destinationLocation}
-            onChange={(event) =>
-              onChange({
-                ...form,
-                destinationLocation: event.target.value,
-              })
-            }
-            required
-            disabled={saving || !selectedItem || availableLocations.length === 0}
-            className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none disabled:opacity-50"
-          >
-            <option value="">Select a new location</option>
-            {availableLocations.map((location) => (
-              <option key={location.id} value={location.id}>
-                {location.name}
-                {location.code ? ` (${location.code})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {locations.length === 0 ? (
-          <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-50">
-            No active locations are available. Create a location before moving stock.
-          </div>
-        ) : null}
-
-        <FormInput
-          label="Reason for moving"
-          value={form.reason}
-          onChange={(value) => onChange({ ...form, reason: value })}
-          placeholder="Example: Moved to the event equipment cupboard"
-          required
-        />
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-black text-white/85">
-            Additional notes
-          </span>
-          <textarea
-            value={form.notes}
-            onChange={(event) =>
-              onChange({ ...form, notes: event.target.value })
-            }
-            rows={4}
-            className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none"
-            placeholder="Optional notes..."
-          />
-        </label>
-
-        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black disabled:opacity-50"
-          >
-            Cancel
-          </button>
-
-          <button
-            type="submit"
-            disabled={
-              saving ||
-              !selectedItem ||
-              !form.destinationLocation ||
-              !form.reason.trim()
-            }
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 disabled:opacity-50"
-          >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ArrowRightLeft className="h-4 w-4" />
-            )}
-            {saving ? "Moving stock..." : "Move stock"}
-          </button>
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function StockAdjustModal({
-  form,
-  saving,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  form: AdjustFormState;
-  saving: boolean;
-  onChange: (value: AdjustFormState) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  return (
-    <ModalShell
-      title="Adjust stock quantity"
-      subtitle={`${form.item.name} currently has ${form.item.quantity} units.`}
-      onClose={onClose}
-    >
-      <form onSubmit={onSubmit} className="space-y-5 p-6">
-        <div className="grid gap-3 sm:grid-cols-3">
-          {[
-            ["add", "Add stock", PackagePlus],
-            ["remove", "Remove stock", PackageMinus],
-            ["set", "Set quantity", SlidersHorizontal],
-          ].map(([value, label, Icon]) => (
-            <button
-              key={String(value)}
-              type="button"
-              onClick={() =>
-                onChange({
-                  ...form,
-                  movementType: value as "add" | "remove" | "set",
-                })
-              }
-              className={`rounded-2xl border p-4 text-left transition ${
-                form.movementType === value
-                  ? "border-fuchsia-300/40 bg-fuchsia-500/15"
-                  : "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]"
-              }`}
-            >
-              <Icon className="h-5 w-5 text-fuchsia-100" />
-              <p className="mt-3 text-sm font-black">{String(label)}</p>
-            </button>
-          ))}
-        </div>
-
-        <FormInput
-          label={
-            form.movementType === "set"
-              ? "New total quantity"
-              : "Quantity to change"
-          }
-          value={form.quantity}
-          onChange={(value) =>
-            onChange({
-              ...form,
-              quantity: value,
-            })
-          }
-          type="number"
-          min="0"
-          required
-        />
-
-        <FormInput
-          label="Reason"
-          value={form.reason}
-          onChange={(value) =>
-            onChange({
-              ...form,
-              reason: value,
-            })
-          }
-          placeholder="For example: delivery received, event use, damaged item..."
-          required
-        />
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-black text-white/80">
-            Additional notes
-          </span>
-          <textarea
-            value={form.notes}
-            onChange={(event) =>
-              onChange({
-                ...form,
-                notes: event.target.value,
-              })
-            }
-            rows={4}
-            className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-fuchsia-300/50"
-            placeholder="Optional extra information..."
-          />
-        </label>
-
-        <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black transition hover:bg-white/[0.1]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-purple-700 shadow-lg transition hover:bg-white/90 disabled:opacity-50"
-          >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            Save stock adjustment
-          </button>
-        </div>
-      </form>
-    </ModalShell>
   );
 }
 

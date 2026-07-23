@@ -2,6 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import MoveStockModal, {
+  EMPTY_MOVE_STOCK_FORM,
+  type MoveStockFormState,
+  type StockItemForMove,
+} from "../AddStock/MoveStockModal";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,7 +23,6 @@ import {
   Plus,
   RefreshCcw,
   Search,
-  Send,
   Trash2,
   Warehouse,
   X,
@@ -37,7 +41,6 @@ type StockLocation = {
   updatedByName?: string | null;
 };
 
-
 type MoveableStockItem = {
   id: string;
   name: string;
@@ -48,29 +51,24 @@ type MoveableStockItem = {
   unitValue?: number | null;
 };
 
-type MoveStockResponse = LocationsResponse & {
-  items?: MoveableStockItem[];
-  movement?: {
-    id: string;
-    itemId: string;
-    fromLocationId: string;
-    toLocationId: string;
-    quantity: number;
-  };
-};
-
-type MoveStockForm = {
-  itemId: string;
-  fromLocationId: string;
-  toLocationId: string;
-  quantity: number;
-  notes: string;
-};
-
 type LocationsResponse = {
   ok?: boolean;
   locations?: StockLocation[];
   location?: StockLocation;
+  items?: MoveableStockItem[];
+  message?: string;
+  error?: string;
+  reason?: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+  field?: string | null;
+  status?: number;
+};
+
+type MoveStockResponse = {
+  ok?: boolean;
+  items?: MoveableStockItem[];
   message?: string;
   error?: string;
   reason?: string;
@@ -99,14 +97,6 @@ type Notice = {
 const ENDPOINT = "/api/admin/stockmanagement/locations";
 const MOVE_STOCK_ENDPOINT =
   "/api/admin/stockmanagement/locations/movestock";
-
-const EMPTY_MOVE_FORM: MoveStockForm = {
-  itemId: "",
-  fromLocationId: "",
-  toLocationId: "",
-  quantity: 1,
-  notes: "",
-};
 
 const EMPTY_FORM: LocationForm = {
   name: "",
@@ -297,7 +287,7 @@ export default function StockLocationsClient() {
   const [deleteTarget, setDeleteTarget] = useState<StockLocation | null>(null);
   const [moveFormOpen, setMoveFormOpen] = useState(false);
   const [moveForm, setMoveForm] =
-    useState<MoveStockForm>(EMPTY_MOVE_FORM);
+    useState<MoveStockFormState>(EMPTY_MOVE_STOCK_FORM);
   const [moveableItems, setMoveableItems] = useState<MoveableStockItem[]>([]);
   const [loadingMoveItems, setLoadingMoveItems] = useState(false);
   const [movingStock, setMovingStock] = useState(false);
@@ -577,50 +567,29 @@ export default function StockLocationsClient() {
   }
 
   function openMoveStock(fromLocation?: StockLocation) {
-    const fromLocationId = fromLocation?.id || "";
-
-    setMoveForm({
-      ...EMPTY_MOVE_FORM,
-      fromLocationId,
-    });
+    setMoveForm(EMPTY_MOVE_STOCK_FORM);
     setMoveFormOpen(true);
     setNotice(null);
-    void loadMoveableItems(fromLocationId);
+    void loadMoveableItems(fromLocation?.id);
   }
 
   function closeMoveStock() {
     if (movingStock) return;
 
     setMoveFormOpen(false);
-    setMoveForm(EMPTY_MOVE_FORM);
+    setMoveForm(EMPTY_MOVE_STOCK_FORM);
     setMoveableItems([]);
   }
-
-  const selectedMoveItem = useMemo(
-    () =>
-      moveableItems.find((item) => item.id === moveForm.itemId) ||
-      null,
-    [moveableItems, moveForm.itemId],
-  );
-
-  const availableDestinationLocations = useMemo(
-    () =>
-      locations.filter(
-        (location) =>
-          location.isActive &&
-          location.id !== moveForm.fromLocationId,
-      ),
-    [locations, moveForm.fromLocationId],
-  );
 
   async function moveStock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (movingStock) return;
 
-    const quantity = Number(moveForm.quantity);
+    const selectedItem =
+      moveableItems.find((item) => item.id === moveForm.stockItemId) || null;
 
-    if (!moveForm.itemId) {
+    if (!selectedItem) {
       setNotice({
         tone: "warning",
         title: "Choose a stock item",
@@ -629,25 +598,40 @@ export default function StockLocationsClient() {
       return;
     }
 
-    if (!moveForm.fromLocationId) {
+    const currentLocationValue = String(
+      selectedItem.locationId || selectedItem.locationName || "",
+    ).trim();
+
+    const currentLocation = locations.find(
+      (location) =>
+        location.id === currentLocationValue ||
+        location.name.toLowerCase() === currentLocationValue.toLowerCase(),
+    );
+
+    if (!currentLocation) {
       setNotice({
         tone: "warning",
-        title: "Choose the current location",
-        message: "Select where the stock is currently stored.",
+        title: "Current location could not be found",
+        message:
+          "The selected stock item is not assigned to a valid active location.",
       });
       return;
     }
 
-    if (!moveForm.toLocationId) {
+    const destination = locations.find(
+      (location) => location.id === moveForm.destinationLocation,
+    );
+
+    if (!destination || destination.isActive === false) {
       setNotice({
         tone: "warning",
         title: "Choose the destination",
-        message: "Select the location where the stock should be moved.",
+        message: "Select an active location where the stock should be moved.",
       });
       return;
     }
 
-    if (moveForm.fromLocationId === moveForm.toLocationId) {
+    if (currentLocation.id === destination.id) {
       setNotice({
         tone: "warning",
         title: "Choose a different destination",
@@ -657,22 +641,28 @@ export default function StockLocationsClient() {
       return;
     }
 
-    if (!Number.isInteger(quantity) || quantity < 1) {
+    if (!moveForm.reason.trim()) {
       setNotice({
         tone: "warning",
-        title: "Enter a valid quantity",
-        message: "The movement quantity must be a whole number of at least 1.",
+        title: "A reason is required",
+        message: "Explain why the stock is being moved.",
       });
       return;
     }
 
-    if (selectedMoveItem && quantity > selectedMoveItem.quantity) {
+    const quantity = moveForm.moveAllStock
+      ? selectedItem.quantity
+      : Number(moveForm.quantity);
+
+    if (
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      quantity > selectedItem.quantity
+    ) {
       setNotice({
         tone: "warning",
-        title: "Not enough stock available",
-        message: `Only ${selectedMoveItem.quantity} unit${
-          selectedMoveItem.quantity === 1 ? "" : "s"
-        } are available at the current location.`,
+        title: "Enter a valid quantity",
+        message: `Choose a whole number between 1 and ${selectedItem.quantity}.`,
       });
       return;
     }
@@ -681,6 +671,13 @@ export default function StockLocationsClient() {
     setNotice(null);
 
     try {
+      const combinedNotes = [
+        moveForm.reason.trim(),
+        moveForm.notes.trim(),
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
       const response = await fetch(MOVE_STOCK_ENDPOINT, {
         method: "POST",
         cache: "no-store",
@@ -690,21 +687,20 @@ export default function StockLocationsClient() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          itemId: moveForm.itemId,
-          fromLocationId: moveForm.fromLocationId,
-          toLocationId: moveForm.toLocationId,
+          itemId: selectedItem.id,
+          fromLocationId: currentLocation.id,
+          toLocationId: destination.id,
           quantity,
-          notes: moveForm.notes.trim() || null,
+          notes: combinedNotes || null,
         }),
       });
 
       const { json, rawText } = await readApiResponse(response);
-      const moveJson = json as MoveStockResponse | null;
 
-      if (!response.ok || !moveJson?.ok) {
+      if (!response.ok || !json?.ok) {
         throw createDetailedApiError({
           response,
-          json: moveJson,
+          json,
           rawText,
           endpoint: MOVE_STOCK_ENDPOINT,
           method: "POST",
@@ -714,18 +710,16 @@ export default function StockLocationsClient() {
         });
       }
 
-      const destination = locations.find(
-        (location) => location.id === moveForm.toLocationId,
-      );
-
       setNotice({
         tone: "success",
         title: "Stock moved successfully",
-        message: `${quantity} unit${
-          quantity === 1 ? "" : "s"
-        } of ${selectedMoveItem?.name || "the selected item"} ${
-          quantity === 1 ? "has" : "have"
-        } been moved to ${destination?.name || "the new location"}.`,
+        message:
+          json.message ||
+          `${quantity} unit${quantity === 1 ? "" : "s"} of ${
+            selectedItem.name
+          } ${quantity === 1 ? "has" : "have"} been moved to ${
+            destination.name
+          }.`,
       });
 
       closeMoveStock();
@@ -920,31 +914,24 @@ export default function StockLocationsClient() {
       {moveFormOpen ? (
         <MoveStockModal
           form={moveForm}
-          locations={locations}
-          items={moveableItems}
-          loadingItems={loadingMoveItems}
-          moving={movingStock}
-          selectedItem={selectedMoveItem}
-          destinationLocations={availableDestinationLocations}
-          onChange={(nextForm) => {
-            const locationChanged =
-              nextForm.fromLocationId !== moveForm.fromLocationId;
-
-            setMoveForm(nextForm);
-
-            if (locationChanged) {
-              setMoveForm((current) => ({
-                ...current,
-                itemId: "",
-                toLocationId:
-                  current.toLocationId === nextForm.fromLocationId
-                    ? ""
-                    : current.toLocationId,
-                quantity: 1,
-              }));
-              void loadMoveableItems(nextForm.fromLocationId);
-            }
-          }}
+          items={moveableItems.map(
+            (item): StockItemForMove => ({
+              id: item.id,
+              name: item.name,
+              sku: item.sku || "",
+              location: item.locationName || item.locationId || null,
+              quantity: item.quantity,
+              isActive: true,
+            }),
+          )}
+          locations={locations.map((location) => ({
+            id: location.id,
+            name: location.name,
+            code: location.code,
+            isActive: location.isActive,
+          }))}
+          saving={movingStock || loadingMoveItems}
+          onChange={setMoveForm}
           onClose={closeMoveStock}
           onSubmit={moveStock}
         />
@@ -1186,367 +1173,6 @@ function LocationFormModal({
         </div>
       </form>
     </Modal>
-  );
-}
-
-
-function MoveStockModal({
-  form,
-  locations,
-  items,
-  loadingItems,
-  moving,
-  selectedItem,
-  destinationLocations,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  form: MoveStockForm;
-  locations: StockLocation[];
-  items: MoveableStockItem[];
-  loadingItems: boolean;
-  moving: boolean;
-  selectedItem: MoveableStockItem | null;
-  destinationLocations: StockLocation[];
-  onChange: (form: MoveStockForm) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  const currentLocation = locations.find(
-    (location) => location.id === form.fromLocationId,
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-md"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Move stock"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !moving) {
-          onClose();
-        }
-      }}
-    >
-      <div className="max-h-[calc(100vh-4rem)] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-white/15 bg-[#111827] shadow-[0_32px_120px_rgba(0,0,0,0.65)]">
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[#111827]/95 p-6 backdrop-blur-xl">
-          <div>
-            <h2 className="text-2xl font-black">Move stock</h2>
-            <p className="mt-1 text-sm leading-6 text-white/50">
-              Move an inventory item to a different storage location.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={moving}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/60 transition hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Close move stock"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <form onSubmit={onSubmit} className="space-y-5 p-5 sm:p-6">
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              Current location
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              Choose where the stock is currently stored.
-            </p>
-
-            <select
-              value={form.fromLocationId}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  fromLocationId: event.target.value,
-                  itemId: "",
-                  toLocationId:
-                    form.toLocationId === event.target.value
-                      ? ""
-                      : form.toLocationId,
-                  quantity: 1,
-                })
-              }
-              required
-              disabled={moving}
-              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">Select a current location</option>
-              {locations
-                .filter((location) => location.isActive)
-                .map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                    {location.code ? ` (${location.code})` : ""}
-                  </option>
-                ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              Stock item
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              {form.fromLocationId
-                ? "Only items stored at the selected current location are shown."
-                : "Choose the current location first."}
-            </p>
-
-            <select
-              value={form.itemId}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  itemId: event.target.value,
-                  quantity: 1,
-                })
-              }
-              required
-              disabled={
-                moving || !form.fromLocationId || loadingItems
-              }
-              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">
-                {loadingItems
-                  ? "Loading stock items..."
-                  : items.length
-                    ? "Select a stock item"
-                    : "No stock items available"}
-              </option>
-
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                  {item.sku ? ` — ${item.sku}` : ""} — {item.quantity} units
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {selectedItem ? (
-            <div className="grid gap-3 rounded-2xl border border-blue-300/15 bg-blue-500/10 p-4 sm:grid-cols-3">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
-                  Current location
-                </p>
-                <p className="mt-1 font-black text-blue-50">
-                  {currentLocation?.name ||
-                    selectedItem.locationName ||
-                    "Not set"}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
-                  Available units
-                </p>
-                <p className="mt-1 font-black text-blue-50">
-                  {selectedItem.quantity}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-100/55">
-                  Item
-                </p>
-                <p className="mt-1 truncate font-black text-blue-50">
-                  {selectedItem.name}
-                </p>
-              </div>
-            </div>
-          ) : null}
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              New location
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              Select the new storage location.
-            </p>
-
-            <select
-              value={form.toLocationId}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  toLocationId: event.target.value,
-                })
-              }
-              required
-              disabled={
-                moving ||
-                !form.fromLocationId ||
-                destinationLocations.length === 0
-              }
-              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">Select a new location</option>
-              {destinationLocations.map((location) => (
-                <option key={location.id} value={location.id}>
-                  {location.name}
-                  {location.code ? ` (${location.code})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              Quantity to move
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              Enter a whole number. You cannot move more than the available
-              quantity.
-            </p>
-
-            <input
-              type="number"
-              min={1}
-              max={selectedItem?.quantity || undefined}
-              value={form.quantity}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  quantity: Number(event.target.value) || 1,
-                })
-              }
-              required
-              disabled={moving || !selectedItem}
-              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3.5 text-sm text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-            />
-
-            {selectedItem ? (
-              <button
-                type="button"
-                onClick={() =>
-                  onChange({
-                    ...form,
-                    quantity: selectedItem.quantity,
-                  })
-                }
-                disabled={moving}
-                className="mt-2 text-xs font-black text-blue-200 transition hover:text-white disabled:opacity-50"
-              >
-                Move all {selectedItem.quantity} units
-              </button>
-            ) : null}
-          </label>
-
-          <label className="block">
-            <span className="mb-2 block text-sm font-black text-white/85">
-              Additional notes
-            </span>
-            <p className="mb-3 text-xs leading-5 text-white/45">
-              Optional reason or handling note for the stock movement record.
-            </p>
-
-            <textarea
-              value={form.notes}
-              onChange={(event) =>
-                onChange({
-                  ...form,
-                  notes: event.target.value,
-                })
-              }
-              rows={4}
-              maxLength={1000}
-              disabled={moving}
-              className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-blue-300/50 disabled:opacity-50"
-              placeholder="Optional notes..."
-            />
-          </label>
-
-          {form.fromLocationId &&
-          destinationLocations.length === 0 ? (
-            <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm text-amber-50">
-              No other active stock location is available. Add another
-              location before moving this stock.
-            </div>
-          ) : null}
-
-          <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col-reverse gap-3 border-t border-white/10 bg-[#111827]/95 px-5 py-4 backdrop-blur-xl sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={moving}
-              className="rounded-2xl border border-white/10 bg-white/[0.06] px-5 py-3 text-sm font-black transition hover:bg-white/[0.1] disabled:opacity-50"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="submit"
-              disabled={
-                moving ||
-                !form.itemId ||
-                !form.fromLocationId ||
-                !form.toLocationId ||
-                form.fromLocationId === form.toLocationId ||
-                form.quantity < 1 ||
-                Boolean(
-                  selectedItem &&
-                    form.quantity > selectedItem.quantity,
-                )
-              }
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-400 px-5 py-3 text-sm font-black text-slate-950 shadow-lg transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {moving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <ArrowRightLeft className="h-4 w-4" />
-              )}
-              {moving ? "Moving stock..." : "Move stock"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function SelectField({
-  label,
-  help,
-  value,
-  onChange,
-  children,
-  disabled = false,
-  required = false,
-}: {
-  label: string;
-  help: string;
-  value: string;
-  onChange: (value: string) => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-  required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="block text-sm font-black">
-        {label}
-        {required ? <span className="ml-1 text-blue-200">*</span> : null}
-      </span>
-      <span className="mt-1 block text-xs leading-5 text-white/40">
-        {help}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        required={required}
-        className="mt-2 w-full rounded-2xl border border-white/10 bg-[#111827] px-4 py-3 text-sm text-white outline-none focus:border-blue-300/50 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {children}
-      </select>
-    </label>
   );
 }
 

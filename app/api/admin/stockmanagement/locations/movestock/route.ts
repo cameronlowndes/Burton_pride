@@ -99,6 +99,10 @@ function nullable(value: unknown) {
   return cleaned || null;
 }
 
+function baseSku(value: unknown) {
+  return clean(value).replace(/-MOVE-[A-Z0-9]{8}$/i, "");
+}
+
 function wholeNumber(value: unknown) {
   const parsed =
     typeof value === "number"
@@ -607,11 +611,109 @@ export async function POST(request: NextRequest) {
 
   let destinationItemId = sourceItem.id;
   let destinationItem: StockItemRow | null = null;
-  let sourceWasUpdated = false;
-  let destinationWasCreated = false;
 
   try {
-    if (quantity === availableQuantity) {
+    /*
+     * Keep one inventory row for the same product at each location.
+     * Old split rows use SKUs ending in -MOVE-XXXXXXXX, so compare the
+     * base SKU as well as the item name.
+     */
+    const { data: destinationCandidates, error: destinationLookupError } =
+      await supabaseAdmin
+        .from(STOCK_ITEMS_TABLE)
+        .select("*")
+        .eq("location", toLocation.name)
+        .eq("is_active", true)
+        .neq("id", sourceItem.id);
+
+    if (destinationLookupError) {
+      throw Object.assign(
+        new Error("The destination stock records could not be checked."),
+        { databaseError: destinationLookupError },
+      );
+    }
+
+    const sourceBaseSku = baseSku(sourceItem.sku).toLowerCase();
+    const matchingDestination = (
+      (destinationCandidates ?? []) as unknown as StockItemRow[]
+    ).find((candidate) => {
+      return (
+        clean(candidate.name).toLowerCase() ===
+          clean(sourceItem.name).toLowerCase() &&
+        baseSku(candidate.sku).toLowerCase() === sourceBaseSku
+      );
+    });
+
+    if (matchingDestination) {
+      const destinationQuantity = Math.max(
+        0,
+        Math.floor(Number(matchingDestination.quantity ?? 0) || 0),
+      );
+
+      const { data: mergedDestination, error: mergeError } =
+        await supabaseAdmin
+          .from(STOCK_ITEMS_TABLE)
+          .update({
+            quantity: destinationQuantity + quantity,
+            updated_at: movedAt,
+            updated_by: admin.id,
+            updated_by_name: movedByName,
+          })
+          .eq("id", matchingDestination.id)
+          .select("*")
+          .maybeSingle();
+
+      if (mergeError || !mergedDestination) {
+        throw Object.assign(
+          new Error("The moved stock could not be merged at the destination."),
+          { databaseError: mergeError },
+        );
+      }
+
+      destinationItem = mergedDestination as unknown as StockItemRow;
+      destinationItemId = destinationItem.id;
+
+      if (quantity === availableQuantity) {
+        const { error: deleteSourceError } = await supabaseAdmin
+          .from(STOCK_ITEMS_TABLE)
+          .delete()
+          .eq("id", sourceItem.id);
+
+        if (deleteSourceError) {
+          await supabaseAdmin
+            .from(STOCK_ITEMS_TABLE)
+            .update({ quantity: destinationQuantity })
+            .eq("id", matchingDestination.id);
+
+          throw Object.assign(
+            new Error("The old source stock row could not be removed."),
+            { databaseError: deleteSourceError },
+          );
+        }
+      } else {
+        const { error: sourceUpdateError } = await supabaseAdmin
+          .from(STOCK_ITEMS_TABLE)
+          .update({
+            quantity: remainingQuantity,
+            updated_at: movedAt,
+            updated_by: admin.id,
+            updated_by_name: movedByName,
+          })
+          .eq("id", sourceItem.id);
+
+        if (sourceUpdateError) {
+          await supabaseAdmin
+            .from(STOCK_ITEMS_TABLE)
+            .update({ quantity: destinationQuantity })
+            .eq("id", matchingDestination.id);
+
+          throw Object.assign(
+            new Error("The source stock quantity could not be updated."),
+            { databaseError: sourceUpdateError },
+          );
+        }
+      }
+    } else if (quantity === availableQuantity) {
       const { data, error } = await supabaseAdmin
         .from(STOCK_ITEMS_TABLE)
         .update({
@@ -624,44 +726,29 @@ export async function POST(request: NextRequest) {
         .select("*")
         .maybeSingle();
 
-      if (error) {
+      if (error || !data) {
         throw Object.assign(
           new Error("The stock item's location could not be updated."),
           { databaseError: error },
         );
       }
 
-      if (!data) {
-        return json(
-          {
-            ok: false,
-            error:
-              "The stock item disappeared before it could be moved.",
-          },
-          404,
-        );
-      }
-
-      sourceWasUpdated = true;
       destinationItem = data as unknown as StockItemRow;
     } else {
-      const splitSku = `${sourceItem.sku}-MOVE-${randomUUID()
+      const splitSku = `${baseSku(sourceItem.sku)}-MOVE-${randomUUID()
         .replaceAll("-", "")
         .slice(0, 8)
         .toUpperCase()}`;
 
-      const { data: updatedSource, error: sourceUpdateError } =
-        await supabaseAdmin
-          .from(STOCK_ITEMS_TABLE)
-          .update({
-            quantity: remainingQuantity,
-            updated_at: movedAt,
-            updated_by: admin.id,
-            updated_by_name: movedByName,
-          })
-          .eq("id", sourceItem.id)
-          .select("*")
-          .maybeSingle();
+      const { error: sourceUpdateError } = await supabaseAdmin
+        .from(STOCK_ITEMS_TABLE)
+        .update({
+          quantity: remainingQuantity,
+          updated_at: movedAt,
+          updated_by: admin.id,
+          updated_by_name: movedByName,
+        })
+        .eq("id", sourceItem.id);
 
       if (sourceUpdateError) {
         throw Object.assign(
@@ -669,19 +756,6 @@ export async function POST(request: NextRequest) {
           { databaseError: sourceUpdateError },
         );
       }
-
-      if (!updatedSource) {
-        return json(
-          {
-            ok: false,
-            error:
-              "The source stock item disappeared before it could be updated.",
-          },
-          404,
-        );
-      }
-
-      sourceWasUpdated = true;
 
       const { data: createdDestination, error: createError } =
         await supabaseAdmin
@@ -713,25 +787,16 @@ export async function POST(request: NextRequest) {
       if (createError || !createdDestination) {
         await supabaseAdmin
           .from(STOCK_ITEMS_TABLE)
-          .update({
-            quantity: availableQuantity,
-            updated_at: sourceItem.updated_at ?? movedAt,
-            updated_by: sourceItem.updated_by,
-            updated_by_name: sourceItem.updated_by_name,
-          })
+          .update({ quantity: availableQuantity })
           .eq("id", sourceItem.id);
 
         throw Object.assign(
-          new Error(
-            "The destination stock record could not be created. The source quantity was restored.",
-          ),
+          new Error("The destination stock record could not be created."),
           { databaseError: createError },
         );
       }
 
-      destinationWasCreated = true;
-      destinationItem =
-        createdDestination as unknown as StockItemRow;
+      destinationItem = createdDestination as unknown as StockItemRow;
       destinationItemId = destinationItem.id;
     }
 
@@ -739,146 +804,71 @@ export async function POST(request: NextRequest) {
       await supabaseAdmin
         .from(STOCK_MOVEMENTS_TABLE)
         .insert({
-          item_id: sourceItem.id,
+          // Always point item_id at the surviving destination row. This means
+          // a merged move can safely remove the old source inventory row.
+          item_id: destinationItemId,
+
+          // Preserve the original source details even when that source row is
+          // deleted after all of its units have been merged elsewhere.
+          source_item_id: sourceItem.id,
           item_name: sourceItem.name,
           sku: sourceItem.sku,
-          movement_type: "location_transfer",
+
+          movement_type: "transfer",
           quantity,
           from_location_id: fromLocation.id,
           to_location_id: toLocation.id,
+          reason: notes ?? "Stock moved between locations",
           notes: notes ?? null,
-          moved_by: admin.id,
-          moved_by_name: movedByName,
-          moved_at: movedAt,
+          admin_id: admin.id,
+          admin_name: movedByName,
+          admin_email: clean(admin.email) || null,
+          quantity_before: availableQuantity,
+          quantity_after: remainingQuantity,
+          created_at: movedAt,
         })
         .select("*")
         .maybeSingle();
 
-    const movementTableUnavailable =
-      movementError?.code === "PGRST205" ||
-      movementError?.code === "42P01" ||
-      movementError?.code === "42703";
-
-    /*
-     * Moving stock must still succeed when the optional stock_movements
-     * audit table has not been created yet or has an older column layout.
-     * In that situation, keep the completed inventory change and return a
-     * generated movement reference with a warning for the administrator.
-     */
-    if (movementError && movementTableUnavailable) {
-      const fallbackMovementId = randomUUID();
-
-      console.warn("Stock move completed without a database movement record:", {
+    if (movementError) {
+      console.warn("Stock move completed without an audit record:", {
         route: ROUTE_NAME,
         itemId: sourceItem.id,
-        fromLocationId: fromLocation.id,
-        toLocationId: toLocation.id,
-        quantity,
         code: movementError.code ?? null,
         message: movementError.message ?? null,
-        details: movementError.details ?? null,
-        hint: movementError.hint ?? null,
-      });
-
-      return json({
-        ok: true,
-        message: `${quantity} unit${
-          quantity === 1 ? "" : "s"
-        } of ${sourceItem.name} ${
-          quantity === 1 ? "has" : "have"
-        } been moved to ${toLocation.name}.`,
-        warning:
-          "The stock was moved successfully, but the stock movement audit record could not be saved because the stock_movements table or its columns are not available.",
-        auditRecorded: false,
-        auditError: errorPayload(movementError),
-        item: destinationItem,
-        items: [
-          {
-            id: destinationItemId,
-            name: destinationItem?.name || sourceItem.name,
-            sku: destinationItem?.sku || sourceItem.sku,
-            quantity,
-            locationId: toLocation.id,
-            locationName: toLocation.name,
-            unitValue: Number(sourceItem.unit_cost || 0),
-          },
-        ],
-        movement: {
-          id: fallbackMovementId,
-          itemId: sourceItem.id,
-          fromLocationId: fromLocation.id,
-          toLocationId: toLocation.id,
-          quantity,
-        },
       });
     }
 
-    if (movementError || !movement) {
-      if (quantity === availableQuantity && sourceWasUpdated) {
-        await supabaseAdmin
-          .from(STOCK_ITEMS_TABLE)
-          .update({
-            location: sourceItem.location,
-            updated_at: sourceItem.updated_at ?? movedAt,
-            updated_by: sourceItem.updated_by,
-            updated_by_name: sourceItem.updated_by_name,
-          })
-          .eq("id", sourceItem.id);
-      } else {
-        if (destinationWasCreated && destinationItem) {
-          await supabaseAdmin
-            .from(STOCK_ITEMS_TABLE)
-            .delete()
-            .eq("id", destinationItem.id);
-        }
-
-        if (sourceWasUpdated) {
-          await supabaseAdmin
-            .from(STOCK_ITEMS_TABLE)
-            .update({
-              quantity: availableQuantity,
-              updated_at: sourceItem.updated_at ?? movedAt,
-              updated_by: sourceItem.updated_by,
-              updated_by_name: sourceItem.updated_by_name,
-            })
-            .eq("id", sourceItem.id);
-        }
-      }
-
-      return json(
-        {
-          ok: false,
-          error:
-            "The stock move could not be recorded. The inventory changes were reversed.",
-          ...(movementError ? errorPayload(movementError) : {}),
-          rolledBack: true,
-        },
-        500,
-      );
-    }
+    const finalQuantity = Math.max(
+      0,
+      Math.floor(Number(destinationItem?.quantity ?? quantity) || quantity),
+    );
 
     return json({
       ok: true,
-      message: `${quantity} unit${
-        quantity === 1 ? "" : "s"
-      } of ${sourceItem.name} ${
-        quantity === 1 ? "has" : "have"
-      } been moved to ${toLocation.name}.`,
-      auditRecorded: true,
+      message: `${quantity} unit${quantity === 1 ? "" : "s"} of ${
+        sourceItem.name
+      } ${quantity === 1 ? "has" : "have"} been moved to ${
+        toLocation.name
+      }. Stock for this product is now kept in one row at that location.`,
+      auditRecorded: !movementError && Boolean(movement),
+      warning: movementError
+        ? "The stock move succeeded, but its audit record could not be saved."
+        : null,
       item: destinationItem,
       items: [
         {
           id: destinationItemId,
           name: destinationItem?.name || sourceItem.name,
           sku: destinationItem?.sku || sourceItem.sku,
-          quantity,
+          quantity: finalQuantity,
           locationId: toLocation.id,
           locationName: toLocation.name,
           unitValue: Number(sourceItem.unit_cost || 0),
         },
       ],
       movement: {
-        id: movement.id,
+        id: movement?.id ?? randomUUID(),
         itemId: sourceItem.id,
         fromLocationId: fromLocation.id,
         toLocationId: toLocation.id,
