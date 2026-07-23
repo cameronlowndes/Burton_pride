@@ -12,6 +12,8 @@ import {
   createTestInventoryPayload,
   getTestItemSuccessMessage,
 } from "./inventoryTestItem";
+import InventoryHeaderActions from "./InventoryHeaderActions";
+import { exportInventoryWorkbook } from "./exportInventoryWorkbook";
 import MoveStockModal, {
   EMPTY_MOVE_STOCK_FORM,
   type MoveStockFormState,
@@ -32,11 +34,9 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
-  Download,
   Edit3,
   Eye,
   EyeOff,
-  FlaskConical,
   Loader2,
   MapPin,
   Package,
@@ -45,7 +45,6 @@ import {
   PackageOpen,
   PackagePlus,
   Plus,
-  RefreshCcw,
   Search,
   SlidersHorizontal,
   Tags,
@@ -601,6 +600,7 @@ export default function InventoryClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [creatingTestItem, setCreatingTestItem] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const [query, setQuery] = useState("");
@@ -1454,59 +1454,38 @@ export default function InventoryClient() {
     );
   }
 
-  function exportCsv() {
-    const rows = filteredItems.map((item) => ({
-      Name: item.name,
-      SKU: item.sku,
-      Barcode: item.barcode || "",
-      Category: item.category || "",
-      Location: item.location || "",
-      Supplier: item.supplier || "",
-      Quantity: item.quantity,
-      "Reorder level": item.reorderLevel,
-      "Target level": item.targetLevel ?? "",
-      "Unit cost": item.unitCost ?? "",
-      "Sale price": item.salePrice ?? "",
-      "Stock value": item.stockValue ?? 0,
-      Status: statusLabel(item.status),
-      "Last updated": item.updatedAt || "",
-      "Updated by": item.updatedByName || "",
-    }));
+  async function exportXlsx() {
+    if (filteredItems.length === 0 || exportingXlsx) return;
 
-    const headers = Object.keys(rows[0] || {
-      Name: "",
-      SKU: "",
-      Quantity: "",
-    });
+    setExportingXlsx(true);
+    setNotice(null);
 
-    const escape = (value: unknown) =>
-      `"${String(value ?? "").replaceAll('"', '""')}"`;
+    try {
+      await exportInventoryWorkbook({
+        items: filteredItems,
+        summary,
+        reportTitle: "Burton Pride Inventory Report",
+        generatedBy: null,
+      });
 
-    const csv = [
-      headers.map(escape).join(","),
-      ...rows.map((row) =>
-        headers
-          .map((header) =>
-            escape((row as Record<string, unknown>)[header]),
-          )
-          .join(","),
-      ),
-    ].join("\n");
-
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-
-    anchor.href = url;
-    anchor.download = `burton-pride-inventory-${new Date()
-      .toISOString()
-      .slice(0, 10)}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+      setNotice({
+        tone: "success",
+        title: "Excel report created",
+        message:
+          "The styled inventory Excel report has been downloaded successfully.",
+      });
+    } catch (caught) {
+      setNotice({
+        tone: "error",
+        title: "Excel report could not be created",
+        message:
+          caught instanceof Error
+            ? caught.message
+            : "The inventory report could not be exported.",
+      });
+    } finally {
+      setExportingXlsx(false);
+    }
   }
 
   function clearFilters() {
@@ -1530,44 +1509,16 @@ export default function InventoryClient() {
             Back to Stock Control
           </Link>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void createTestItem()}
-              disabled={creatingTestItem || saving}
-              className="inline-flex items-center gap-2 rounded-2xl border border-amber-300/20 bg-amber-500/10 px-4 py-2.5 text-sm font-black text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Create a clearly marked test stock item"
-            >
-              {creatingTestItem ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FlaskConical className="h-4 w-4" />
-              )}
-              {creatingTestItem ? "Creating test item..." : "Create test item"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void loadInventory()}
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-black transition hover:bg-white/[0.1] disabled:opacity-50"
-            >
-              <RefreshCcw
-                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-              />
-              Refresh
-            </button>
-
-            <button
-              type="button"
-              onClick={exportCsv}
-              disabled={filteredItems.length === 0}
-              className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-purple-700 shadow-lg transition hover:bg-white/90 disabled:opacity-50"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </button>
-          </div>
+          <InventoryHeaderActions
+            loading={loading}
+            creatingTestItem={creatingTestItem}
+            exportingXlsx={exportingXlsx}
+            hasExportRows={filteredItems.length > 0}
+            onMoveStock={() => openMoveModal()}
+            onRefresh={() => void loadInventory()}
+            onCreateTestItem={() => void createTestItem()}
+            onExportXlsx={() => void exportXlsx()}
+          />
         </div>
 
         <header className="relative overflow-hidden rounded-[2rem] border border-blue-300/15 bg-[#1d2d4d] p-6 shadow-[0_24px_80px_rgba(2,6,23,0.35)] sm:p-8 lg:p-9">

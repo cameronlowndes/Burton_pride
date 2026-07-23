@@ -13,16 +13,24 @@ import {
 import {
   AlertTriangle,
   Banknote,
+  BarChart3,
   Boxes,
+  Building2,
   CalendarDays,
   ChevronRight,
   ClipboardList,
+  Coins,
+  CreditCard,
   ExternalLink,
   FileText,
+  Gift,
+  HandCoins,
   History,
   Home,
+  Landmark,
   LayoutDashboard,
   Loader2,
+  Logs,
   Mail,
   Menu,
   Package,
@@ -30,12 +38,21 @@ import {
   PackageSearch,
   PanelLeftClose,
   PanelLeftOpen,
+  PiggyBank,
+  Receipt,
   RefreshCcw,
+  ScanBarcode,
   Search,
   Settings,
   Shield,
+  ShieldCheck,
+  ShoppingCart,
   Store,
+  Tags,
+  Trophy,
   Truck,
+  Users,
+  Wallet,
   Warehouse,
   X,
   type LucideIcon,
@@ -58,12 +75,9 @@ type SidebarItem = {
   sort_order?: number | null;
 
   /**
-   * Optional database fields supported by this upgraded component.
-   * These can be added later without breaking the current sidebar.
+   * Optional database fields supported by the sidebar.
    */
   open_in_new_tab?: boolean | null;
-  is_coming_soon?: boolean | null;
-  coming_soon?: boolean | null;
   disabled?: boolean | null;
   disabled_reason?: string | null;
   permission_key?: string | null;
@@ -110,7 +124,6 @@ type SidebarLoadError = {
 
 type ItemStatus = {
   disabled: boolean;
-  comingSoon: boolean;
   reason: string;
 };
 
@@ -180,13 +193,20 @@ const fallbackItems: SidebarItem[] = [
     sort_order: 70,
   },
   {
+    id: "audit-logs",
+    label: "Audit Logs",
+    href: "/Admin/StockManagement/AuditLogs",
+    icon: "Logs",
+    is_enabled: true,
+    sort_order: 80,
+  },
+  {
     id: "settings",
     label: "Settings",
     href: "/Admin/StockManagement/Settings",
-    icon: "settings",
+    icon: "Settings",
     is_enabled: true,
-    sort_order: 80,
-    is_coming_soon: true,
+    sort_order: 90,
   },
 ];
 
@@ -196,6 +216,10 @@ function clsx(...values: Array<string | false | null | undefined>) {
 
 function normalise(value: string | null | undefined) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normaliseIconKey(value: string | null | undefined) {
+  return normalise(value).replace(/[^a-z0-9]/g, "");
 }
 
 function cleanPath(value: string | null | undefined) {
@@ -226,156 +250,282 @@ function getSafeHref(value: string | null | undefined) {
 }
 
 function getItemStatus(item: SidebarItem): ItemStatus {
-  const comingSoon = Boolean(
-    item.is_coming_soon ||
-      item.coming_soon ||
-      normalise(item.label).includes("coming soon")
-  );
-
   const href = getSafeHref(item.href);
-  const disabled = Boolean(item.disabled || comingSoon || !href);
+  const disabled = Boolean(item.disabled || !href);
   const reason =
     item.disabled_reason ||
-    (comingSoon ? "Coming soon" : !href ? "Unavailable" : "");
+    (!href ? "Unavailable" : item.disabled ? "Disabled" : "");
 
   return {
     disabled,
-    comingSoon,
     reason,
   };
 }
 
-function getIcon(name: string | null | undefined): LucideIcon {
-  const key = normalise(name);
+const SIDEBAR_ICON_MAP: Record<string, LucideIcon> = {
+  // Dashboard and navigation
+  layoutdashboard: LayoutDashboard,
+  dashboard: LayoutDashboard,
+  home: LayoutDashboard,
+  overview: LayoutDashboard,
 
-  switch (key) {
-    case "layoutdashboard":
-    case "dashboard":
-    case "home":
-      return LayoutDashboard;
+  // Inventory
+  boxes: Boxes,
+  inventory: Boxes,
+  stock: Boxes,
+  allstock: Boxes,
 
-    case "boxes":
-    case "inventory":
-    case "stock":
-    case "all-stock":
-      return Boxes;
+  package: Package,
+  item: Package,
+  product: Package,
 
-    case "package":
-    case "item":
-    case "product":
-      return Package;
+  packageplus: PackagePlus,
+  add: PackagePlus,
+  addstock: PackagePlus,
+  newstock: PackagePlus,
 
-    case "package-plus":
-    case "packageplus":
-    case "add":
-    case "add-stock":
-    case "new-stock":
-      return PackagePlus;
+  packagesearch: PackageSearch,
+  lookup: PackageSearch,
+  searchstock: PackageSearch,
 
-    case "package-search":
-    case "packagesearch":
-    case "lookup":
-    case "search-stock":
-      return PackageSearch;
+  scanbarcode: ScanBarcode,
+  barcode: ScanBarcode,
+  scanner: ScanBarcode,
 
-    case "warehouse":
-    case "storage":
-    case "locations":
-      return Warehouse;
+  warehouse: Warehouse,
+  storage: Warehouse,
+  locations: Warehouse,
+  stocklocation: Warehouse,
 
-    case "history":
-    case "movement":
-    case "movements":
-    case "stock-movements":
-      return History;
+  history: History,
+  movement: History,
+  movements: History,
+  stockmovements: History,
 
-    case "alert":
-    case "warning":
-    case "low-stock":
-    case "lowstock":
-      return AlertTriangle;
+  alerttriangle: AlertTriangle,
+  alert: AlertTriangle,
+  warning: AlertTriangle,
+  lowstock: AlertTriangle,
 
-    case "clipboard":
-    case "clipboard-list":
-    case "order":
-    case "orders":
-    case "purchase-orders":
-      return ClipboardList;
+  // Orders, suppliers and reports
+  shoppingcart: ShoppingCart,
+  order: ShoppingCart,
+  orders: ShoppingCart,
+  purchaseorders: ShoppingCart,
 
-    case "truck":
-    case "delivery":
-    case "deliveries":
-      return Truck;
+  clipboardlist: ClipboardList,
+  clipboard: ClipboardList,
+  checklist: ClipboardList,
 
-    case "store":
-    case "supplier":
-    case "suppliers":
-    case "vendor":
-    case "vendors":
-      return Store;
+  truck: Truck,
+  delivery: Truck,
+  deliveries: Truck,
+  supplier: Truck,
+  suppliers: Truck,
 
-    case "filetext":
-    case "file":
-    case "report":
-    case "reports":
-    case "export":
-    case "exports":
-      return FileText;
+  store: Store,
+  shop: Store,
+  vendor: Store,
+  vendors: Store,
 
-    case "settings":
-    case "setting":
-      return Settings;
+  barchart3: BarChart3,
+  chart: BarChart3,
+  analytics: BarChart3,
+  report: BarChart3,
+  reports: BarChart3,
 
-    case "shield":
-    case "audit":
-    case "security":
-      return Shield;
+  filetext: FileText,
+  file: FileText,
+  document: FileText,
+  documents: FileText,
+  export: FileText,
+  exports: FileText,
 
-    default:
-      return Boxes;
-  }
+  logs: Logs,
+  log: Logs,
+  auditlogs: Logs,
+  activitylogs: Logs,
+
+  shield: Shield,
+  audit: Shield,
+  security: Shield,
+
+  shieldcheck: ShieldCheck,
+  permissions: ShieldCheck,
+  permission: ShieldCheck,
+
+  settings: Settings,
+  setting: Settings,
+  configuration: Settings,
+
+  // People and organisations
+  users: Users,
+  user: Users,
+  team: Users,
+  staff: Users,
+
+  building2: Building2,
+  building: Building2,
+  organisation: Building2,
+  organization: Building2,
+
+  tags: Tags,
+  tag: Tags,
+  categories: Tags,
+  category: Tags,
+
+  calendardays: CalendarDays,
+  calendar: CalendarDays,
+  schedule: CalendarDays,
+
+  gift: Gift,
+  donation: Gift,
+  donations: Gift,
+
+  trophy: Trophy,
+  award: Trophy,
+  awards: Trophy,
+
+  // Money icons also offered by the shared sidebar manager
+  receipt: Receipt,
+  wallet: Wallet,
+  creditcard: CreditCard,
+  piggybank: PiggyBank,
+  banknote: Banknote,
+  coins: Coins,
+  handcoins: HandCoins,
+  landmark: Landmark,
+};
+
+function getIcon(
+  name: string | null | undefined,
+): LucideIcon | null {
+  const key = normaliseIconKey(name);
+  return key ? SIDEBAR_ICON_MAP[key] || null : null;
 }
-
 function getIconFromItem(item: SidebarItem): LucideIcon {
-  if (item.icon) return getIcon(item.icon);
+  /*
+   * The database icon selected in Sidebar Manager is always checked first.
+   * This supports values such as:
+   * LayoutDashboard, BarChart3, ShoppingCart, ShieldCheck, ScanBarcode,
+   * as well as lowercase and kebab-case versions.
+   */
+  const selectedIcon = getIcon(item.icon);
+
+  if (selectedIcon) {
+    return selectedIcon;
+  }
 
   const label = normalise(item.label);
   const href = normalise(item.href);
 
-  if (label.includes("low stock") || label.includes("alert")) {
+  if (
+    label.includes("dashboard") ||
+    label.includes("overview") ||
+    cleanPath(item.href) === cleanPath(STOCK_ROOT)
+  ) {
+    return LayoutDashboard;
+  }
+
+  if (
+    label.includes("low stock") ||
+    label.includes("reorder") ||
+    label.includes("alert")
+  ) {
     return AlertTriangle;
   }
 
-  if (label.includes("add stock") || label.includes("new stock")) {
-    return PackagePlus;
-  }
-
-  if (label.includes("movement") || label.includes("history")) {
-    return History;
-  }
-
-  if (label.includes("purchase order") || label.includes("order")) {
-    return ClipboardList;
-  }
-
-  if (label.includes("supplier") || label.includes("vendor")) {
-    return Store;
-  }
-
-  if (label.includes("warehouse") || label.includes("location")) {
+  if (
+    label.includes("stock location") ||
+    label.includes("warehouse") ||
+    label.includes("storage") ||
+    label.includes("location")
+  ) {
     return Warehouse;
   }
 
-  if (label.includes("delivery")) return Truck;
-  if (label.includes("report") || label.includes("export")) return FileText;
-  if (label.includes("setting")) return Settings;
-  if (label.includes("audit") || label.includes("security")) return Shield;
-  if (label.includes("stock") || label.includes("inventory")) return Boxes;
-  if (href.includes("stockmanagement")) return Boxes;
+  if (
+    label.includes("stock movement") ||
+    label.includes("movement") ||
+    label.includes("transfer") ||
+    label.includes("history")
+  ) {
+    return History;
+  }
+
+  if (
+    label.includes("purchase order") ||
+    label.includes("orders") ||
+    href.includes("/orders")
+  ) {
+    return ShoppingCart;
+  }
+
+  if (
+    label.includes("supplier") ||
+    label.includes("delivery")
+  ) {
+    return Truck;
+  }
+
+  if (
+    label.includes("report") ||
+    label.includes("analytics") ||
+    label.includes("statistics")
+  ) {
+    return BarChart3;
+  }
+
+  if (
+    label.includes("audit log") ||
+    label.includes("activity log") ||
+    href.includes("auditlogs")
+  ) {
+    return Logs;
+  }
+
+  if (
+    label.includes("audit") ||
+    label.includes("security")
+  ) {
+    return ShieldCheck;
+  }
+
+  if (label.includes("setting")) {
+    return Settings;
+  }
+
+  if (
+    label.includes("barcode") ||
+    label.includes("scanner")
+  ) {
+    return ScanBarcode;
+  }
+
+  if (
+    label.includes("category") ||
+    label.includes("tag")
+  ) {
+    return Tags;
+  }
+
+  if (
+    label.includes("add stock") ||
+    label.includes("new stock")
+  ) {
+    return PackagePlus;
+  }
+
+  if (
+    label.includes("all stock") ||
+    label.includes("inventory") ||
+    href.includes("/inventory")
+  ) {
+    return Boxes;
+  }
 
   return Package;
 }
-
 function safeStringify(value: unknown) {
   try {
     if (typeof value === "string") return value;
@@ -581,6 +731,22 @@ function cleanSidebarItems(items: SidebarItem[]) {
   return items
     .filter((item) => item.is_enabled)
     .filter((item) => String(item.label || "").trim())
+    .map((item) => {
+      const isSettingsItem =
+        normalise(item.id) === "settings" ||
+        normalise(item.label) === "settings" ||
+        cleanPath(item.href) ===
+          cleanPath("/Admin/StockManagement/Settings");
+
+      if (!isSettingsItem) return item;
+
+      return {
+        ...item,
+        href: "/Admin/StockManagement/Settings",
+        disabled: false,
+        disabled_reason: null,
+      };
+    })
     .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
 }
 
@@ -802,7 +968,23 @@ export default function StockManagementSidebar({
   }, [open]);
 
   const enabledItems = useMemo(() => {
-    return cleanSidebarItems(items);
+    const cleaned = cleanSidebarItems(items);
+    const hasSettings = cleaned.some(
+      (item) =>
+        normalise(item.id) === "settings" ||
+        cleanPath(item.href) ===
+          cleanPath("/Admin/StockManagement/Settings"),
+    );
+
+    if (hasSettings) return cleaned;
+
+    const settingsItem = fallbackItems.find(
+      (item) => normalise(item.id) === "settings",
+    );
+
+    return settingsItem
+      ? cleanSidebarItems([...cleaned, settingsItem])
+      : cleaned;
   }, [items]);
 
   const visibleItems = useMemo(() => {
@@ -1404,7 +1586,11 @@ function StockNavLink({
       target={item.open_in_new_tab ? "_blank" : undefined}
       rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
       aria-current={active ? "page" : undefined}
-      title={collapsed ? item.label : undefined}
+      title={
+        collapsed
+          ? `${item.label}${item.icon ? ` — ${item.icon}` : ""}`
+          : undefined
+      }
       className={clsx(
         "group flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-black transition",
         active
