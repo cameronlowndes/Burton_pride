@@ -24,7 +24,9 @@ import {
   Download,
   Eye,
   FileText,
+  Link2,
   Loader2,
+  PackageCheck,
   Pencil,
   Printer,
   RefreshCcw,
@@ -166,6 +168,7 @@ type SortKey =
   | "type"
   | "amount"
   | "budget"
+  | "stockOrder"
   | "funding"
   | "payment"
   | "checked"
@@ -185,6 +188,7 @@ type QuickFilter =
   | "bank_unmatched"
   | "personal_unpaid"
   | "funding"
+  | "stock_orders"
   | "refunds";
 
 type ColumnKey =
@@ -195,6 +199,7 @@ type ColumnKey =
   | "type"
   | "amount"
   | "budget"
+  | "stockOrder"
   | "funding"
   | "fundingNote"
   | "supplier"
@@ -259,6 +264,29 @@ type TrackingRow =
       item: TrackingRefund;
     };
 
+
+type LinkedStockOrder = {
+  id: string;
+  orderNumber: string;
+  title: string;
+  status: string;
+  supplierName: string | null;
+  estimatedTotal: number;
+  actualTotal: number | null;
+  expectedDeliveryDate: string | null;
+  moneyTransactionId: string;
+};
+
+type LinkedStockOrdersResponse = {
+  ok?: boolean;
+  links?: Record<string, LinkedStockOrder[]>;
+  orders?: LinkedStockOrder[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
 const paymentMethodFilterOptions = [
   "all",
   "Stripe",
@@ -296,6 +324,7 @@ const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "type", label: "Type" },
   { key: "amount", label: "Amount", locked: true },
   { key: "budget", label: "Budget" },
+  { key: "stockOrder", label: "Stock Control Order" },
   { key: "funding", label: "Funding" },
   { key: "fundingNote", label: "Funding Note" },
   { key: "supplier", label: "Supplier" },
@@ -318,6 +347,7 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   type: true,
   amount: true,
   budget: true,
+  stockOrder: true,
 
   // Keep normal mode clean by default. These advanced columns can still be
   // switched back on from the Columns menu.
@@ -344,6 +374,7 @@ const easyModeVisibleColumns: Record<ColumnKey, boolean> = {
   type: true,
   amount: true,
   budget: true,
+  stockOrder: true,
   funding: false,
   fundingNote: false,
   supplier: false,
@@ -1291,6 +1322,179 @@ function getRowSearchText(item: Transaction) {
     .toLowerCase();
 }
 
+
+function stockOrderStatusLabel(status?: string | null) {
+  const cleanStatus = cleanText(status);
+
+  if (!cleanStatus) return "Unknown";
+
+  return cleanStatus
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function stockOrderStatusClass(status?: string | null) {
+  if (status === "received") {
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  }
+
+  if (status === "cancelled") {
+    return "bg-red-500/15 text-red-100 ring-red-300/20";
+  }
+
+  if (status === "ordered" || status === "partially_received") {
+    return "bg-blue-500/15 text-blue-100 ring-blue-300/20";
+  }
+
+  if (status === "approved") {
+    return "bg-cyan-500/15 text-cyan-100 ring-cyan-300/20";
+  }
+
+  if (status === "awaiting_approval") {
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  }
+
+  return "bg-white/10 text-white/65 ring-white/10";
+}
+
+function getLinkedOrderSearchText(
+  orders: LinkedStockOrder[],
+) {
+  return orders
+    .flatMap((order) => [
+      "stock order",
+      "stock control order",
+      "linked order",
+      order.orderNumber,
+      order.title,
+      order.status,
+      order.supplierName,
+    ])
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function StockOrderConnectionState({
+  orders,
+  compact = false,
+}: {
+  orders: LinkedStockOrder[];
+  compact?: boolean;
+}) {
+  if (orders.length === 0) {
+    return (
+      <div className="inline-flex min-w-[155px] items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black text-white/45">
+        <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
+        Not connected to Stock Control
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-w-[195px] space-y-2">
+      <div className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100">
+        <Link2 className="h-3.5 w-3.5" />
+        Connected
+      </div>
+
+      {orders.map((order) => (
+        <div
+          key={order.id}
+          className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-2.5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/Admin/StockManagement/Orders?order=${encodeURIComponent(
+                order.id,
+              )}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-400 px-2.5 py-1 text-[11px] font-black text-slate-950 transition hover:bg-cyan-300"
+              title={`Open ${order.orderNumber} in Stock Control`}
+            >
+              <PackageCheck className="h-3 w-3" />
+              {order.orderNumber}
+            </Link>
+
+            <span
+              className={`inline-flex rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wide ring-1 ${stockOrderStatusClass(
+                order.status,
+              )}`}
+            >
+              {stockOrderStatusLabel(order.status)}
+            </span>
+          </div>
+
+          {!compact ? (
+            <>
+              <p className="mt-2 max-w-[240px] break-words text-xs font-bold text-white/80">
+                {order.title}
+              </p>
+              <p className="mt-1 text-[11px] text-white/45">
+                Supplier: {order.supplierName || "Not recorded"}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LinkedStockOrderBadges({
+  orders,
+  compact = false,
+}: {
+  orders: LinkedStockOrder[];
+  compact?: boolean;
+}) {
+  if (orders.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={compact ? "mt-2 space-y-1.5" : "mt-3 space-y-2"}>
+      {orders.map((order) => (
+        <div
+          key={order.id}
+          className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-2.5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/Admin/StockManagement/Orders?order=${encodeURIComponent(
+                order.id,
+              )}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-400 px-2.5 py-1 text-[11px] font-black text-slate-950 transition hover:bg-cyan-300"
+              title={`Open ${order.orderNumber} in Stock Control`}
+            >
+              <PackageCheck className="h-3 w-3" />
+              {order.orderNumber}
+            </Link>
+
+            <span
+              className={`inline-flex rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wide ring-1 ${stockOrderStatusClass(
+                order.status,
+              )}`}
+            >
+              {stockOrderStatusLabel(order.status)}
+            </span>
+          </div>
+
+          {!compact ? (
+            <>
+              <p className="mt-2 break-words text-xs font-bold text-white/80">
+                {order.title}
+              </p>
+              <p className="mt-1 text-[11px] text-white/45">
+                Supplier: {order.supplierName || "Not recorded"}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function transactionMatchesQuickFilter(
   item: Transaction,
   quickFilter: QuickFilter,
@@ -1314,6 +1518,7 @@ function transactionMatchesQuickFilter(
   if (quickFilter === "personal_unpaid")
     return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
   if (quickFilter === "funding") return isSponsorshipTransaction(item);
+  if (quickFilter === "stock_orders") return true;
   if (quickFilter === "refunds") return false;
   return true;
 }
@@ -1596,6 +1801,13 @@ export default function MoneyTransactionsTable({
   const [refunds, setRefunds] = useState<TrackingRefund[]>([]);
   const [refundsLoading, setRefundsLoading] = useState(false);
   const [refundsError, setRefundsError] = useState("");
+  const [linkedStockOrders, setLinkedStockOrders] = useState<
+    Record<string, LinkedStockOrder[]>
+  >({});
+  const [linkedStockOrdersLoading, setLinkedStockOrdersLoading] =
+    useState(false);
+  const [linkedStockOrdersError, setLinkedStockOrdersError] =
+    useState("");
 
   /**
    * Fallback lock data loaded directly by this table.
@@ -1976,6 +2188,96 @@ export default function MoneyTransactionsTable({
   }, [selectedYear]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadLinkedStockOrders() {
+      const transactionIds = transactions
+        .map((transaction) => cleanText(transaction.id))
+        .filter(Boolean);
+
+      if (transactionIds.length === 0) {
+        setLinkedStockOrders({});
+        setLinkedStockOrdersError("");
+        return;
+      }
+
+      setLinkedStockOrdersLoading(true);
+      setLinkedStockOrdersError("");
+
+      try {
+        const response = await fetch(
+          "/api/admin/stockmanagement/orders/transaction-links",
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "include",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              transactionIds,
+            }),
+          },
+        );
+
+        const raw = await response.text();
+        let payload: LinkedStockOrdersResponse = {};
+
+        if (raw) {
+          try {
+            payload = JSON.parse(raw) as LinkedStockOrdersResponse;
+          } catch {
+            payload = {
+              ok: false,
+              error: "The Stock Order link API returned invalid JSON.",
+              details: raw.slice(0, 1000),
+            };
+          }
+        }
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(
+            [
+              payload.error || "Linked Stock Orders could not be loaded.",
+              payload.code ? `Code: ${payload.code}` : "",
+              payload.details ? `Details: ${payload.details}` : "",
+              payload.hint ? `Hint: ${payload.hint}` : "",
+              `HTTP: ${response.status}`,
+              "Endpoint: /api/admin/stockmanagement/orders/transaction-links",
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          );
+        }
+
+        if (!cancelled) {
+          setLinkedStockOrders(payload.links || {});
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLinkedStockOrders({});
+          setLinkedStockOrdersError(
+            error instanceof Error
+              ? error.message
+              : "Linked Stock Orders could not be loaded.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLinkedStockOrdersLoading(false);
+        }
+      }
+    }
+
+    void loadLinkedStockOrders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transactions]);
+
+  useEffect(() => {
     setSelectedIds((previous) => {
       let changed = false;
       const next = new Set<string>();
@@ -2081,6 +2383,9 @@ export default function MoneyTransactionsTable({
     const baseItems = isSpecialSearch ? yearTransactions : filteredTransactions;
 
     const filtered = baseItems.filter((item) => {
+      const itemLinkedOrders =
+        linkedStockOrders[item.id] || [];
+
       const matchesMonth =
         selectedViewMonth === "all" ||
         transactionMonthKey(item) === selectedViewMonth;
@@ -2124,15 +2429,27 @@ export default function MoneyTransactionsTable({
       const matchesReceiptOverdueSearch = isReceiptOverdueSearch
         ? isReceiptOverdue(item, activeReceiptReminderDays)
         : true;
-      const matchesQuickFilter = transactionMatchesQuickFilter(
-        item,
-        quickFilter,
-        activeReceiptReminderDays,
-      );
+      const matchesQuickFilter =
+        quickFilter === "stock_orders"
+          ? itemLinkedOrders.length > 0
+          : transactionMatchesQuickFilter(
+              item,
+              quickFilter,
+              activeReceiptReminderDays,
+            );
       const matchesTextSearch =
         !cleanSearch ||
         isSpecialSearch ||
-        getRowSearchText(item).includes(cleanSearch);
+        [
+          getRowSearchText(item),
+          itemLinkedOrders.length > 0
+            ? `connected stock control order ${getLinkedOrderSearchText(
+                itemLinkedOrders,
+              )}`
+            : "not connected no stock control order unlinked",
+        ]
+          .join(" ")
+          .includes(cleanSearch);
 
       return (
         matchesMonth &&
@@ -2203,6 +2520,7 @@ export default function MoneyTransactionsTable({
     sortDirection,
     quickFilter,
     activeReceiptReminderDays,
+    linkedStockOrders,
   ]);
 
   const visibleRefunds = useMemo(() => {
@@ -2291,6 +2609,21 @@ export default function MoneyTransactionsTable({
       },
     );
   }, [refunds]);
+
+  const linkedStockOrderSummary = useMemo(() => {
+    const linkedTransactionIds = Object.entries(
+      linkedStockOrders,
+    ).filter(([, linkedOrders]) => linkedOrders.length > 0);
+
+    return {
+      linkedTransactions: linkedTransactionIds.length,
+      linkedOrders: linkedTransactionIds.reduce(
+        (total, [, linkedOrders]) =>
+          total + linkedOrders.length,
+        0,
+      ),
+    };
+  }, [linkedStockOrders]);
 
   const visibleIds = useMemo(
     () =>
@@ -2824,6 +3157,7 @@ export default function MoneyTransactionsTable({
             <p className="mt-2 text-sm font-semibold text-white/55">
               {item.transaction_reference || "Reference not added yet"}
             </p>
+
           </div>
 
           <div
@@ -2871,6 +3205,32 @@ export default function MoneyTransactionsTable({
             <div className="mt-2">
               <BudgetBadge item={item} />
             </div>
+          </div>
+
+          <div
+            className={`rounded-2xl p-4 ring-1 ${
+              (linkedStockOrders[item.id] || []).length > 0
+                ? "bg-cyan-500/10 ring-cyan-300/20"
+                : "bg-white/[0.06] ring-white/10"
+            }`}
+          >
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Stock Control order
+            </p>
+
+            <div className="mt-3">
+              <StockOrderConnectionState
+                orders={
+                  linkedStockOrders[item.id] || []
+                }
+              />
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-white/45">
+              {(linkedStockOrders[item.id] || []).length > 0
+                ? "This Money Management transaction is connected to a Stock Management order."
+                : "This transaction is not connected to any Stock Management order."}
+            </p>
           </div>
 
           <div
@@ -4077,7 +4437,7 @@ export default function MoneyTransactionsTable({
               title="Hold and drag left or right to move across the table"
             >
               <table
-                className="w-full min-w-[1550px] text-sm"
+                className="w-full min-w-[1775px] text-sm"
               >
                 <thead className="bg-white/10 text-white/60">
                   <tr>
@@ -4130,6 +4490,12 @@ export default function MoneyTransactionsTable({
                     </ColumnHeader>
                     <ColumnHeader column="budget" className="p-3 text-left">
                       Budget
+                    </ColumnHeader>
+                    <ColumnHeader
+                      column="stockOrder"
+                      className="p-3 text-left"
+                    >
+                      Stock Control Order
                     </ColumnHeader>
                     <ColumnHeader column="funding" className="p-3 text-left">
                       <SortButton
@@ -4296,6 +4662,15 @@ export default function MoneyTransactionsTable({
                           >
                             <span className="text-white/40">
                               Managed in Refund Tracker
+                            </span>
+                          </ColumnCell>
+
+                          <ColumnCell
+                            column="stockOrder"
+                            className="p-3 align-top"
+                          >
+                            <span className="inline-flex min-w-[155px] items-center rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black text-white/40">
+                              Not applicable
                             </span>
                           </ColumnCell>
 
@@ -4478,6 +4853,7 @@ export default function MoneyTransactionsTable({
                           ) : (
                             <span className="text-white/40">Pending</span>
                           )}
+
                         </ColumnCell>
 
                         <ColumnCell
@@ -4552,6 +4928,18 @@ export default function MoneyTransactionsTable({
                           className="max-w-[230px] p-3 align-top"
                         >
                           <BudgetBadge item={item} showReason={false} />
+                        </ColumnCell>
+
+                        <ColumnCell
+                          column="stockOrder"
+                          className="p-3 align-top"
+                        >
+                          <StockOrderConnectionState
+                            orders={
+                              linkedStockOrders[item.id] || []
+                            }
+                            compact
+                          />
                         </ColumnCell>
 
                         <ColumnCell
@@ -5082,6 +5470,36 @@ export default function MoneyTransactionsTable({
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {(linkedStockOrders[detailsItem.id] || []).length > 0 ? (
+              <div className="mb-5 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <Link2 className="h-5 w-5 text-cyan-100" />
+                  <p className="font-black text-cyan-50">
+                    Connected Stock Control order
+                  </p>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-cyan-50/60">
+                  This Money Management payment is linked to the following
+                  Stock Control order record.
+                </p>
+                <LinkedStockOrderBadges
+                  orders={
+                    linkedStockOrders[detailsItem.id] || []
+                  }
+                />
+              </div>
+            ) : (
+              <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <p className="font-black text-white/75">
+                  No Stock Control order linked
+                </p>
+                <p className="mt-1 text-xs leading-5 text-white/40">
+                  This transaction is not currently connected to a Stock
+                  Management order.
+                </p>
+              </div>
+            )}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl bg-white/5 p-4">

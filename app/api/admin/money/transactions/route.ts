@@ -224,6 +224,110 @@ function isValidYear(value: string) {
   return year >= 2000 && year <= 2200;
 }
 
+function normaliseTransactionOption(row: Record<string, any>) {
+  const amountPence = Number(row.amount_pence || 0);
+
+  return {
+    id: String(row.id || ""),
+    date:
+      clean(
+        row.transaction_date ||
+          row.created_at
+      ) || null,
+    description:
+      clean(
+        row.title ||
+          row.description ||
+          "Unnamed transaction"
+      ) || "Unnamed transaction",
+    amountPence:
+      Number.isFinite(amountPence)
+        ? Math.round(amountPence)
+        : 0,
+    supplierName:
+      clean(row.supplier_name) || null,
+    reference:
+      clean(
+        row.transaction_reference ||
+          row.bank_reference ||
+          row.stripe_payment_intent_id
+      ) || null,
+    category:
+      clean(row.category) || null,
+    transactionType:
+      clean(row.type) || null,
+    paymentMethod:
+      clean(row.payment_method) || null,
+    source:
+      clean(row.source) || null,
+    isReconciled:
+      row.bank_reconciliation_status === "matched",
+    bankReconciliationStatus:
+      clean(row.bank_reconciliation_status) ||
+      "unmatched",
+    isPersonalFunds:
+      Boolean(row.is_personal_funds),
+    personalFundsName:
+      clean(row.personal_funds_name) || null,
+    deletedAt:
+      row.deleted_at || null,
+  };
+}
+
+function transactionOptionSearchText(
+  row: Record<string, any>
+) {
+  return [
+    row.title,
+    row.description,
+    row.supplier_name,
+    row.transaction_reference,
+    row.category,
+    row.payment_method,
+    row.source,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function transactionOptionErrorResponse({
+  error,
+  endpoint,
+}: {
+  error: any;
+  endpoint: string;
+}) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error:
+        error?.message ||
+        "Money Management transaction options could not be loaded.",
+      code:
+        error?.code ||
+        "MONEY_TRANSACTION_OPTIONS_FAILED",
+      details:
+        error?.details ||
+        error?.message ||
+        null,
+      hint:
+        error?.hint ||
+        "Check public.money_transactions and confirm id, title, amount_pence, transaction_date, deleted_at and created_at exist.",
+      field: null,
+      endpoint,
+      method: "GET",
+    },
+    {
+      status: 500,
+      headers: {
+        "Cache-Control":
+          "no-store, no-cache, must-revalidate",
+      },
+    }
+  );
+}
+
 async function createTransactionReference(year: string) {
   const cleanYear = String(
     year || new Date().getFullYear()
@@ -2001,12 +2105,34 @@ export async function GET(req: NextRequest) {
   try {
     await syncPaidDonationsToMoneyTracker();
 
+    const mode =
+      String(
+        req.nextUrl.searchParams.get(
+          "mode"
+        ) || ""
+      )
+        .trim()
+        .toLowerCase();
+
+    const optionsMode =
+      mode === "options" ||
+      mode === "dropdown";
+
     const yearParam =
       String(
         req.nextUrl.searchParams.get(
           "year"
         ) || ""
       ).trim();
+
+    const searchParam =
+      String(
+        req.nextUrl.searchParams.get(
+          "search"
+        ) || ""
+      )
+        .trim()
+        .toLowerCase();
 
     const safeLimit =
       parseSafeLimit(
@@ -2020,7 +2146,9 @@ export async function GET(req: NextRequest) {
         req.nextUrl.searchParams.get(
           "includeDeleted"
         ),
-        true
+        optionsMode
+          ? false
+          : true
       );
 
     const activeOnly =
@@ -2028,13 +2156,181 @@ export async function GET(req: NextRequest) {
         req.nextUrl.searchParams.get(
           "activeOnly"
         ),
-        false
+        optionsMode
+          ? true
+          : false
       );
 
     const shouldOnlyShowActive =
       activeOnly ||
       !includeDeleted;
 
+    /*
+     * Stock Orders transaction dropdown mode.
+     *
+     * Example:
+     * /api/admin/money/transactions?mode=options
+     *
+     * This deliberately avoids loading receipt attachments and signed URLs.
+     * It returns only the fields needed by the order-payment dropdown.
+     */
+    if (optionsMode) {
+      let optionsQuery =
+        supabaseAdmin
+          .from("money_transactions")
+          .select(
+            `
+              id,
+              title,
+              description,
+              type,
+              category,
+              amount_pence,
+              payment_method,
+              transaction_date,
+              bank_reconciliation_status,
+              is_personal_funds,
+              personal_funds_name,
+              supplier_id,
+              supplier_name,
+              transaction_reference,
+              source,
+              stripe_payment_intent_id,
+              deleted_at,
+              created_at,
+              updated_at
+            `
+          )
+          .order(
+            "transaction_date",
+            {
+              ascending: false,
+            }
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false,
+            }
+          );
+
+      if (shouldOnlyShowActive) {
+        optionsQuery =
+          optionsQuery.is(
+            "deleted_at",
+            null
+          );
+      }
+
+      if (
+        yearParam &&
+        isValidYear(yearParam)
+      ) {
+        optionsQuery =
+          optionsQuery
+            .gte(
+              "transaction_date",
+              `${yearParam}-01-01`
+            )
+            .lte(
+              "transaction_date",
+              `${yearParam}-12-31`
+            );
+      }
+
+      optionsQuery =
+        optionsQuery.limit(
+          safeLimit || 500
+        );
+
+      const {
+        data: optionRows,
+        error: optionsError,
+      } = await optionsQuery;
+
+      if (optionsError) {
+        return transactionOptionErrorResponse({
+          error:
+            optionsError,
+          endpoint:
+            req.nextUrl.pathname +
+            req.nextUrl.search,
+        });
+      }
+
+      let filteredRows =
+        optionRows || [];
+
+      /*
+       * Search in memory so this endpoint remains compatible even when
+       * optional text columns differ between older Money Management tables.
+       */
+      if (searchParam) {
+        filteredRows =
+          filteredRows.filter(
+            (row) =>
+              transactionOptionSearchText(
+                row
+              ).includes(
+                searchParam
+              )
+          );
+      }
+
+      const transactionOptions =
+        filteredRows
+          .map(
+            normaliseTransactionOption
+          )
+          .filter(
+            (transaction) =>
+              Boolean(
+                transaction.id
+              )
+          );
+
+      return NextResponse.json(
+        {
+          ok: true,
+          mode:
+            "options",
+          table:
+            "money_transactions",
+          transactions:
+            transactionOptions,
+          transactionOptions,
+          filters: {
+            year:
+              yearParam &&
+              isValidYear(yearParam)
+                ? yearParam
+                : null,
+            search:
+              searchParam || null,
+            include_deleted:
+              !shouldOnlyShowActive,
+            active_only:
+              shouldOnlyShowActive,
+            limit:
+              safeLimit || 500,
+            returned_count:
+              transactionOptions.length,
+          },
+        },
+        {
+          headers: {
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate",
+          },
+        }
+      );
+    }
+
+    /*
+     * Existing Money Management response.
+     * This section keeps the original contract used by the main tracker,
+     * Refund Tracker and other Money Management pages.
+     */
     let query = supabaseAdmin
       .from("money_transactions")
       .select("*")
@@ -2094,8 +2390,28 @@ export async function GET(req: NextRequest) {
           error:
             error.message,
 
+          code:
+            error.code ||
+            "MONEY_TRANSACTIONS_LOAD_FAILED",
+
           details:
-            error,
+            error.details ||
+            error.message ||
+            null,
+
+          hint:
+            error.hint ||
+            null,
+
+          field:
+            null,
+
+          endpoint:
+            req.nextUrl.pathname +
+            req.nextUrl.search,
+
+          method:
+            "GET",
 
           likelyFix:
             "Check the public.money_transactions table and confirm that transaction_date, deleted_at and created_at exist.",
@@ -2205,7 +2521,7 @@ export async function GET(req: NextRequest) {
         },
       }
     );
-  } catch (err) {
+  } catch (err: any) {
     console.error(
       "Money transactions GET error:",
       err
@@ -2220,8 +2536,30 @@ export async function GET(req: NextRequest) {
             ? err.message
             : "Server error",
 
+        code:
+          err?.code ||
+          "MONEY_TRANSACTIONS_GET_FAILED",
+
         details:
-          err,
+          err?.details ||
+          (err instanceof Error
+            ? err.stack
+            : err) ||
+          null,
+
+        hint:
+          err?.hint ||
+          "Check the terminal or Vercel logs. Confirm that the money_transactions table and Stripe environment settings are available.",
+
+        field:
+          null,
+
+        endpoint:
+          req.nextUrl.pathname +
+          req.nextUrl.search,
+
+        method:
+          "GET",
 
         likelyFix:
           "Check the terminal or Vercel logs. Confirm that the money_transactions table and Stripe environment settings are available.",

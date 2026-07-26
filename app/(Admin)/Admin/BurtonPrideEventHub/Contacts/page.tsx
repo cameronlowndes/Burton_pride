@@ -12,6 +12,8 @@ import {
   Eye,
   Globe,
   ImagePlus,
+  Link2,
+  ExternalLink,
   Lock,
   Mail,
   MapPin,
@@ -61,6 +63,45 @@ type ApiResponse = {
   path?: string;
 };
 
+
+type MoneySupplier = {
+  id: string;
+  supplier_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  category?: string | null;
+  notes?: string | null;
+  is_active?: boolean | null;
+};
+
+type MoneySupplierConnectionState =
+  | "connected"
+  | "possible_match"
+  | "not_connected";
+
+type MoneySupplierConnection = {
+  state: MoneySupplierConnectionState;
+  supplierId: string | null;
+  supplierName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  category: string | null;
+  isActive: boolean;
+  matchScore: number;
+  matchReason: string | null;
+};
+
+type MoneySuppliersApiResponse = {
+  ok?: boolean;
+  suppliers?: MoneySupplier[];
+  error?: string;
+  details?: string;
+  code?: string;
+};
+
 type NoticeMessage = {
   type: "success" | "error";
   title: string;
@@ -97,6 +138,12 @@ type FormState = {
 const CONTACTS_API = "/api/admin/burton-pride-event-hub/contacts";
 const IMAGE_UPLOAD_API = "/api/admin/burton-pride-event-hub/contacts/event-hub-selling-images";
 const CHECKLIST_API = "/api/admin/burton-pride-event-hub/checklist";
+
+const MONEY_SUPPLIERS_API =
+  "/api/admin/money/suppliers?includeInactive=true";
+
+const MONEY_SUPPLIERS_PAGE =
+  "/Admin/MoneyManagement/TrackingMoney/Suppliers";
 
 const emptyForm: FormState = {
   business_name: "",
@@ -222,6 +269,239 @@ function isDoNotInvite(contact: Pick<Contact, "working_rating">) {
   return contact.working_rating === "do_not_invite";
 }
 
+
+function normaliseMatchValue(value: unknown) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9@.+]/g, "");
+}
+
+function moneySupplierMatch(
+  contact: Contact,
+  supplier: MoneySupplier,
+) {
+  let score = 0;
+  const reasons: string[] = [];
+
+  const contactBusiness =
+    normaliseMatchValue(
+      contact.business_name,
+    );
+  const contactPerson =
+    normaliseMatchValue(
+      contact.contact_name,
+    );
+  const contactEmail =
+    normaliseMatchValue(contact.email);
+  const contactPhone =
+    normaliseMatchValue(contact.phone);
+  const contactWebsite =
+    normaliseMatchValue(contact.website);
+
+  const supplierBusiness =
+    normaliseMatchValue(
+      supplier.supplier_name,
+    );
+  const supplierPerson =
+    normaliseMatchValue(
+      supplier.contact_name,
+    );
+  const supplierEmail =
+    normaliseMatchValue(supplier.email);
+  const supplierPhone =
+    normaliseMatchValue(supplier.phone);
+  const supplierWebsite =
+    normaliseMatchValue(supplier.website);
+
+  if (
+    contactEmail &&
+    supplierEmail &&
+    contactEmail === supplierEmail
+  ) {
+    score += 100;
+    reasons.push("exact email");
+  }
+
+  if (
+    contactPhone &&
+    supplierPhone &&
+    contactPhone === supplierPhone
+  ) {
+    score += 80;
+    reasons.push("exact phone");
+  }
+
+  if (
+    contactWebsite &&
+    supplierWebsite &&
+    contactWebsite === supplierWebsite
+  ) {
+    score += 70;
+    reasons.push("exact website");
+  }
+
+  if (
+    contactBusiness &&
+    supplierBusiness &&
+    contactBusiness === supplierBusiness
+  ) {
+    score += 60;
+    reasons.push("exact business name");
+  }
+
+  if (
+    contactPerson &&
+    supplierPerson &&
+    contactPerson === supplierPerson
+  ) {
+    score += 35;
+    reasons.push("exact contact name");
+  }
+
+  return {
+    score,
+    reason:
+      reasons.join(", ") || null,
+  };
+}
+
+function buildMoneySupplierConnections(
+  contacts: Contact[],
+  suppliers: MoneySupplier[],
+) {
+  const connections: Record<
+    string,
+    MoneySupplierConnection
+  > = {};
+
+  for (const contact of contacts) {
+    const matches = suppliers
+      .map((supplier) => ({
+        supplier,
+        ...moneySupplierMatch(
+          contact,
+          supplier,
+        ),
+      }))
+      .filter((match) => match.score > 0)
+      .sort(
+        (left, right) =>
+          right.score - left.score,
+      );
+
+    const best = matches[0] || null;
+
+    if (!best) {
+      connections[contact.id] = {
+        state: "not_connected",
+        supplierId: null,
+        supplierName: null,
+        contactName: null,
+        email: null,
+        phone: null,
+        category: null,
+        isActive: false,
+        matchScore: 0,
+        matchReason: null,
+      };
+      continue;
+    }
+
+    const state:
+      MoneySupplierConnectionState =
+        best.score >= 100
+          ? "connected"
+          : best.score >= 60
+            ? "possible_match"
+            : "not_connected";
+
+    connections[contact.id] = {
+      state,
+      supplierId:
+        state === "not_connected"
+          ? null
+          : best.supplier.id,
+      supplierName:
+        state === "not_connected"
+          ? null
+          : best.supplier.supplier_name,
+      contactName:
+        state === "not_connected"
+          ? null
+          : best.supplier.contact_name ||
+            null,
+      email:
+        state === "not_connected"
+          ? null
+          : best.supplier.email || null,
+      phone:
+        state === "not_connected"
+          ? null
+          : best.supplier.phone || null,
+      category:
+        state === "not_connected"
+          ? null
+          : best.supplier.category ||
+            null,
+      isActive:
+        state === "not_connected"
+          ? false
+          : best.supplier.is_active !==
+            false,
+      matchScore:
+        best.score,
+      matchReason:
+        best.reason,
+    };
+  }
+
+  return connections;
+}
+
+function moneyConnectionLabel(
+  connection?: MoneySupplierConnection | null,
+) {
+  if (connection?.state === "connected") {
+    return "Connected to Money Management";
+  }
+
+  if (
+    connection?.state ===
+    "possible_match"
+  ) {
+    return "Possible Money supplier match";
+  }
+
+  return "Not connected to Money Management";
+}
+
+function moneySupplierPageUrl(
+  contact: Contact,
+  connection?: MoneySupplierConnection | null,
+) {
+  const params = new URLSearchParams();
+
+  if (connection?.supplierId) {
+    params.set(
+      "supplier",
+      connection.supplierId,
+    );
+  }
+
+  params.set(
+    "search",
+    connection?.supplierName ||
+      contact.business_name,
+  );
+
+  params.set(
+    "eventContactId",
+    contact.id,
+  );
+
+  return `${MONEY_SUPPLIERS_PAGE}?${params.toString()}`;
+}
+
 export default function EventHubContactsPage() {
   const {
     currentEvent,
@@ -234,6 +514,23 @@ export default function EventHubContactsPage() {
   } = useBurtonPrideEvent();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [moneySuppliers, setMoneySuppliers] =
+    useState<MoneySupplier[]>([]);
+  const [
+    moneySupplierConnections,
+    setMoneySupplierConnections,
+  ] = useState<
+    Record<string, MoneySupplierConnection>
+  >({});
+  const [
+    moneySuppliersLoading,
+    setMoneySuppliersLoading,
+  ] = useState(false);
+  const [
+    moneySuppliersError,
+    setMoneySuppliersError,
+  ] = useState<string | null>(null);
+
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -473,6 +770,108 @@ export default function EventHubContactsPage() {
     return query ? `?${query}` : "";
   }
 
+  async function loadMoneySuppliers(
+    contactRows: Contact[],
+  ) {
+    setMoneySuppliersLoading(true);
+    setMoneySuppliersError(null);
+
+    try {
+      const res = await fetch(
+        MONEY_SUPPLIERS_API,
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
+
+      const raw = await res.text();
+      let data:
+        | MoneySuppliersApiResponse
+        | null = null;
+
+      if (raw) {
+        try {
+          data =
+            JSON.parse(
+              raw,
+            ) as MoneySuppliersApiResponse;
+        } catch {
+          throw createLocalError(
+            "Load Money Management suppliers",
+            "Money Management returned invalid JSON.",
+            [
+              `Endpoint: ${MONEY_SUPPLIERS_API}`,
+              `Status: ${res.status}`,
+              `Response: ${raw.slice(0, 1000)}`,
+            ].join("\n"),
+          );
+        }
+      }
+
+      if (!res.ok) {
+        const error =
+          createLocalError(
+            "Load Money Management suppliers",
+            data?.error ||
+              "Money Management suppliers could not be loaded.",
+            [
+              data?.details
+                ? `Details: ${data.details}`
+                : "",
+              data?.code
+                ? `Code: ${data.code}`
+                : "",
+              `Endpoint: ${MONEY_SUPPLIERS_API}`,
+              `Status: ${res.status}`,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          ) as DetailedError;
+
+        error.status = res.status;
+        error.endpoint =
+          MONEY_SUPPLIERS_API;
+
+        throw error;
+      }
+
+      const supplierRows =
+        Array.isArray(data?.suppliers)
+          ? data.suppliers
+          : [];
+
+      setMoneySuppliers(
+        supplierRows,
+      );
+      setMoneySupplierConnections(
+        buildMoneySupplierConnections(
+          contactRows,
+          supplierRows,
+        ),
+      );
+    } catch (error) {
+      setMoneySuppliers([]);
+      setMoneySupplierConnections(
+        buildMoneySupplierConnections(
+          contactRows,
+          [],
+        ),
+      );
+      setMoneySuppliersError(
+        error instanceof Error
+          ? error.message
+          : "Money Management suppliers could not be loaded.",
+      );
+    } finally {
+      setMoneySuppliersLoading(false);
+    }
+  }
+
   async function loadContacts() {
     try {
       setLoading(true);
@@ -500,6 +899,9 @@ export default function EventHubContactsPage() {
 
       const loadedContacts = data.contacts || [];
       setContacts(loadedContacts);
+      await loadMoneySuppliers(
+        loadedContacts,
+      );
     } catch (error) {
       setNotice(
         buildErrorNotice(
@@ -536,6 +938,31 @@ export default function EventHubContactsPage() {
       (contact) => contact.working_rating === "do_not_invite",
     ).length;
 
+    const connectedToMoney =
+      contacts.filter(
+        (contact) =>
+          moneySupplierConnections[
+            contact.id
+          ]?.state === "connected",
+      ).length;
+
+    const possibleMoneyMatch =
+      contacts.filter(
+        (contact) =>
+          moneySupplierConnections[
+            contact.id
+          ]?.state ===
+          "possible_match",
+      ).length;
+
+    const notConnectedToMoney =
+      Math.max(
+        contacts.length -
+          connectedToMoney -
+          possibleMoneyMatch,
+        0,
+      );
+
     return {
       total,
       active,
@@ -547,8 +974,18 @@ export default function EventHubContactsPage() {
       goodToWorkWith,
       okayToWorkWith,
       doNotInvite,
+      connectedToMoney,
+      possibleMoneyMatch,
+      notConnectedToMoney,
     };
-  }, [contacts, localImageUrls, editingId, form.selling_image_url, formLocalImageUrl]);
+  }, [
+    contacts,
+    localImageUrls,
+    editingId,
+    form.selling_image_url,
+    formLocalImageUrl,
+    moneySupplierConnections,
+  ]);
 
   const duplicateWarning = useMemo(() => {
     const name = clean(form.business_name).toLowerCase();
@@ -608,7 +1045,21 @@ export default function EventHubContactsPage() {
         serviceType.includes(q) ||
         getRatingLabel(contact.working_rating).toLowerCase().includes(q) ||
         clean(contact.selling).toLowerCase().includes(q) ||
-        clean(contact.notes).toLowerCase().includes(q);
+        clean(contact.notes).toLowerCase().includes(q) ||
+        moneyConnectionLabel(
+          moneySupplierConnections[
+            contact.id
+          ],
+        )
+          .toLowerCase()
+          .includes(q) ||
+        clean(
+          moneySupplierConnections[
+            contact.id
+          ]?.supplierName,
+        )
+          .toLowerCase()
+          .includes(q);
 
       return (
         matchesServiceType &&
@@ -626,6 +1077,7 @@ export default function EventHubContactsPage() {
     ratingFilter,
     dataFilter,
     localImageUrls,
+    moneySupplierConnections,
   ]);
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -1206,6 +1658,10 @@ export default function EventHubContactsPage() {
       "selling_image_url",
       "is_active",
       "sent_to_checklist",
+      "money_management_connection",
+      "money_supplier_name",
+      "money_supplier_category",
+      "money_supplier_match_reason",
       "notes",
     ];
 
@@ -1222,6 +1678,20 @@ export default function EventHubContactsPage() {
       contact.selling_image_url || "",
       contact.is_active ? "yes" : "no",
       contact.sent_to_checklist ? "yes" : "no",
+      moneyConnectionLabel(
+        moneySupplierConnections[
+          contact.id
+        ],
+      ),
+      moneySupplierConnections[
+        contact.id
+      ]?.supplierName || "",
+      moneySupplierConnections[
+        contact.id
+      ]?.category || "",
+      moneySupplierConnections[
+        contact.id
+      ]?.matchReason || "",
       contact.notes || "",
     ]);
 
@@ -1301,6 +1771,40 @@ export default function EventHubContactsPage() {
           </div>
         </div>
 
+        <div className="mb-6 rounded-[32px] border border-emerald-400/20 bg-gradient-to-r from-emerald-500/10 via-cyan-500/10 to-blue-500/10 p-6 shadow-xl">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/20 bg-emerald-500/15">
+                <Link2 className="h-6 w-6 text-emerald-100" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-100/65">
+                  Connected supplier system
+                </p>
+                <h2 className="mt-1 text-xl font-black text-white">
+                  This Event Hub page is connected to the Money Management app
+                </h2>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
+                  Event Hub keeps the main event contact, application history,
+                  relationship rating and checklist information. Money
+                  Management keeps the financial supplier record, transactions,
+                  invoices, refunds and payment history. Every contact below
+                  states whether a matching Money Management supplier exists.
+                </p>
+              </div>
+            </div>
+
+            <a
+              href={MONEY_SUPPLIERS_PAGE}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-black text-slate-950 hover:bg-emerald-300"
+            >
+              Open Money suppliers
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          </div>
+        </div>
+
         {(eventError || !currentEvent || isEventLocked) && (
           <div
             className={`mb-6 rounded-3xl border p-4 text-sm font-semibold shadow-xl ${
@@ -1376,6 +1880,21 @@ export default function EventHubContactsPage() {
           </div>
         )}
 
+        {moneySuppliersLoading ? (
+          <div className="mb-6 flex items-center gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-100">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            Checking Money Management supplier connections...
+          </div>
+        ) : null}
+
+        {moneySuppliersError ? (
+          <div className="mb-6 whitespace-pre-wrap rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 font-mono text-xs leading-6 text-amber-100">
+            Money Management connection could not be checked:
+            {"\n"}
+            {moneySuppliersError}
+          </div>
+        ) : null}
+
         <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Total contacts" value={stats.total} />
           <StatCard label="Active" value={stats.active} good />
@@ -1387,6 +1906,21 @@ export default function EventHubContactsPage() {
           <StatCard label="Missing selling info" value={stats.missingSelling} warning={stats.missingSelling > 0} />
           <StatCard label="Missing image" value={stats.missingImage} warning={stats.missingImage > 0} />
           <StatCard label="Not sent to checklist" value={stats.notSentToChecklist} warning={stats.notSentToChecklist > 0} />
+          <StatCard
+            label="Connected to Money"
+            value={stats.connectedToMoney}
+            good
+          />
+          <StatCard
+            label="Possible supplier matches"
+            value={stats.possibleMoneyMatch}
+            warning={stats.possibleMoneyMatch > 0}
+          />
+          <StatCard
+            label="Not connected to Money"
+            value={stats.notConnectedToMoney}
+            warning={stats.notConnectedToMoney > 0}
+          />
         </div>
 
         <div className="grid w-full gap-6 xl:grid-cols-[minmax(360px,430px)_minmax(0,1fr)]">
@@ -1639,6 +2173,17 @@ export default function EventHubContactsPage() {
                       imageUrl={contactImageUrl}
                       locked={!canEdit}
                       actionLoading={actionId === contact.id}
+                      moneyConnection={
+                        moneySupplierConnections[
+                          contact.id
+                        ]
+                      }
+                      moneySupplierUrl={moneySupplierPageUrl(
+                        contact,
+                        moneySupplierConnections[
+                          contact.id
+                        ],
+                      )}
                       onViewImage={() => handleViewContactImage(contact)}
                       onEmail={() => openEmailAppForContact(contact)}
                       onEdit={() => startEdit(contact)}
@@ -1831,6 +2376,8 @@ function ContactCard({
   imageUrl,
   locked,
   actionLoading,
+  moneyConnection,
+  moneySupplierUrl,
   onViewImage,
   onEmail,
   onEdit,
@@ -1841,6 +2388,10 @@ function ContactCard({
   imageUrl: string;
   locked: boolean;
   actionLoading: boolean;
+  moneyConnection?:
+    | MoneySupplierConnection
+    | null;
+  moneySupplierUrl: string;
   onViewImage: () => void;
   onEmail: () => void;
   onEdit: () => void;
@@ -1879,6 +2430,90 @@ function ContactCard({
               </div>
             </div>
           )}
+
+          <div
+            className={`mt-4 rounded-2xl border p-4 ${
+              moneyConnection?.state ===
+              "connected"
+                ? "border-emerald-400/25 bg-emerald-500/10"
+                : moneyConnection?.state ===
+                    "possible_match"
+                  ? "border-amber-400/25 bg-amber-500/10"
+                  : "border-white/10 bg-black/20"
+            }`}
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  {moneyConnection?.state ===
+                  "connected" ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-100" />
+                  ) : moneyConnection?.state ===
+                    "possible_match" ? (
+                    <AlertTriangle className="h-4 w-4 text-amber-100" />
+                  ) : (
+                    <Link2 className="h-4 w-4 text-white/45" />
+                  )}
+
+                  <p className="text-xs font-black uppercase tracking-[0.13em] text-white/70">
+                    {moneyConnectionLabel(
+                      moneyConnection,
+                    )}
+                  </p>
+                </div>
+
+                {moneyConnection?.supplierName ? (
+                  <div className="mt-2 text-xs leading-5 text-white/60">
+                    <p className="font-black text-white">
+                      {
+                        moneyConnection.supplierName
+                      }
+                    </p>
+
+                    {moneyConnection.category ? (
+                      <p>
+                        Category:{" "}
+                        {
+                          moneyConnection.category
+                        }
+                      </p>
+                    ) : null}
+
+                    {moneyConnection.matchReason ? (
+                      <p>
+                        Match:{" "}
+                        {
+                          moneyConnection.matchReason
+                        }
+                      </p>
+                    ) : null}
+
+                    <p>
+                      Supplier status:{" "}
+                      {moneyConnection.isActive
+                        ? "Active"
+                        : "Archived"}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs leading-5 text-white/45">
+                    No matching supplier record was
+                    found in Money Management.
+                  </p>
+                )}
+              </div>
+
+              <a
+                href={moneySupplierUrl}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/20"
+              >
+                {moneyConnection?.supplierId
+                  ? "Open Money supplier"
+                  : "Find or add supplier"}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
 
           <div className="mt-4 grid gap-2 text-sm text-white/70">
             {contact.email && (

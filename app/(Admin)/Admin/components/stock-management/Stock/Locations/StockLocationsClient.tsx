@@ -79,6 +79,29 @@ type MoveStockResponse = {
   status?: number;
 };
 
+type InventoryStockItem = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  quantity?: number | string | null;
+  location?: string | null;
+  isActive?: boolean;
+  unitCost?: number | string | null;
+  stockValue?: number | string | null;
+};
+
+type InventoryResponse = {
+  ok?: boolean;
+  items?: InventoryStockItem[];
+  error?: string;
+  message?: string;
+  reason?: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+  field?: string | null;
+};
+
 type LocationForm = {
   id?: string;
   name: string;
@@ -95,8 +118,12 @@ type Notice = {
 };
 
 const ENDPOINT = "/api/admin/stockmanagement/locations";
+const INVENTORY_ENDPOINT =
+  "/api/admin/stockmanagement/inventory";
 const MOVE_STOCK_ENDPOINT =
   "/api/admin/stockmanagement/locations/movestock";
+const AUDIT_ENDPOINT =
+  "/api/admin/stockmanagement/audit-logs";
 
 const EMPTY_FORM: LocationForm = {
   name: "",
@@ -276,6 +303,134 @@ function noticeFromError(
   };
 }
 
+
+type StockAuditResponse = {
+  ok?: boolean;
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  auditId?: string | null;
+  requestId?: string | null;
+  message?: string;
+};
+
+type StockAuditPayload = {
+  actionKey: string;
+  actionLabel: string;
+  actionCategory: "create" | "update" | "delete" | "move";
+  module: "locations";
+  status: "success";
+  riskLevel: "low" | "medium" | "high";
+  description: string;
+  reason?: string | null;
+  notes?: string | null;
+  recordType: "stock_location" | "stock_movement";
+  recordId?: string | null;
+  recordName?: string | null;
+  recordReference?: string | null;
+  stockItemId?: string | null;
+  stockItemName?: string | null;
+  stockItemSku?: string | null;
+  locationId?: string | null;
+  locationName?: string | null;
+  fromLocationId?: string | null;
+  fromLocationName?: string | null;
+  toLocationId?: string | null;
+  toLocationName?: string | null;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
+  quantityChanged?: number | null;
+  beforeData?: Record<string, unknown> | null;
+  afterData?: Record<string, unknown> | null;
+  changedFields?: string[];
+  responseStatus?: number;
+  apiEndpoint?: string;
+  metadata?: Record<string, unknown>;
+};
+
+async function reportStockAudit(payload: StockAuditPayload) {
+  const response = await fetch(AUDIT_ENDPOINT, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const rawText = await response.text();
+
+  let json: StockAuditResponse | null = null;
+
+  if (rawText) {
+    try {
+      const parsed: unknown = JSON.parse(rawText);
+
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
+        json = parsed as StockAuditResponse;
+      }
+    } catch {
+      json = null;
+    }
+  }
+
+  if (!response.ok || !json?.ok) {
+    const message =
+      json?.error ||
+      `Audit reporting failed with HTTP ${response.status}.`;
+
+    const error = new Error(message) as DetailedApiError;
+    error.title = "The change succeeded but audit reporting failed";
+    error.status = response.status;
+    error.statusText = response.statusText;
+    error.endpoint = AUDIT_ENDPOINT;
+    error.method = "POST";
+    error.code = json?.code;
+    error.details = json?.details;
+    error.hint = json?.hint;
+    error.responseBody = !json && rawText ? rawText.slice(0, 700) : null;
+
+    throw error;
+  }
+
+  return json;
+}
+
+function locationSnapshot(location: {
+  id?: string | null;
+  name?: string | null;
+  code?: string | null;
+  description?: string | null;
+  isActive?: boolean | null;
+}) {
+  return {
+    id: location.id || null,
+    name: location.name || null,
+    code: location.code || null,
+    description: location.description || null,
+    isActive: location.isActive !== false,
+  };
+}
+
+function changedLocationFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+) {
+  return Array.from(
+    new Set([...Object.keys(before), ...Object.keys(after)]),
+  ).filter(
+    (key) =>
+      JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+  );
+}
+
 export default function StockLocationsClient() {
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -396,6 +551,10 @@ export default function StockLocationsClient() {
       return;
     }
 
+    const existingLocation = form.id
+      ? locations.find((location) => location.id === form.id) || null
+      : null;
+
     setSaving(true);
     setNotice(null);
 
@@ -429,12 +588,63 @@ export default function StockLocationsClient() {
         });
       }
 
+      const savedLocation =
+        json.location ||
+        ({
+          id: form.id || null,
+          name: form.name.trim(),
+          code: form.code.trim() || null,
+          description: form.description.trim() || null,
+          isActive: form.isActive,
+        } as unknown as StockLocation);
+
+      const beforeData = existingLocation
+        ? locationSnapshot(existingLocation)
+        : null;
+      const afterData = locationSnapshot(savedLocation);
+
+      await reportStockAudit({
+        actionKey: form.id
+          ? "stock_location_updated"
+          : "stock_location_created",
+        actionLabel: form.id
+          ? "Stock location updated"
+          : "Stock location created",
+        actionCategory: form.id ? "update" : "create",
+        module: "locations",
+        status: "success",
+        riskLevel: "low",
+        description: form.id
+          ? `${form.name.trim()} was updated in Stock Management.`
+          : `${form.name.trim()} was added as a Stock Management location.`,
+        reason: form.id
+          ? "Location details were changed using the Edit stock location form."
+          : "Location was created using the Add stock location form.",
+        recordType: "stock_location",
+        recordId: savedLocation.id || form.id || null,
+        recordName: form.name.trim(),
+        recordReference: form.code.trim() || null,
+        locationId: savedLocation.id || form.id || null,
+        locationName: form.name.trim(),
+        beforeData,
+        afterData,
+        changedFields: beforeData
+          ? changedLocationFields(beforeData, afterData)
+          : Object.keys(afterData),
+        responseStatus: form.id ? 200 : 201,
+        apiEndpoint: ENDPOINT,
+        metadata: {
+          source: "stock_locations_client",
+          operation: form.id ? "update" : "create",
+        },
+      });
+
       setShowForm(false);
       setForm(EMPTY_FORM);
       setNotice({
         tone: "success",
         title: form.id ? "Location updated" : "Location created",
-        message: `${form.name.trim()} has been saved.`,
+        message: `${form.name.trim()} has been saved and reported to the audit logs.`,
       });
       await loadLocations();
     } catch (caught) {
@@ -496,10 +706,40 @@ export default function StockLocationsClient() {
         });
       }
 
+      const deletedLocation = locationSnapshot(deleteTarget);
+
+      await reportStockAudit({
+        actionKey: "stock_location_deleted",
+        actionLabel: "Stock location permanently deleted",
+        actionCategory: "delete",
+        module: "locations",
+        status: "success",
+        riskLevel: "high",
+        description: `${deleteTarget.name} was permanently deleted from Stock Management.`,
+        reason: "Permanent deletion was confirmed with the main administrator password.",
+        recordType: "stock_location",
+        recordId: deleteTarget.id,
+        recordName: deleteTarget.name,
+        recordReference: deleteTarget.code || null,
+        locationId: deleteTarget.id,
+        locationName: deleteTarget.name,
+        beforeData: deletedLocation,
+        afterData: null,
+        changedFields: Object.keys(deletedLocation),
+        responseStatus: 200,
+        apiEndpoint: ENDPOINT,
+        metadata: {
+          source: "stock_locations_client",
+          permanentDelete: true,
+          linkedItemCountBeforeDelete: deleteTarget.itemCount,
+          totalUnitsBeforeDelete: deleteTarget.totalUnits,
+        },
+      });
+
       setNotice({
         tone: "success",
         title: "Location permanently deleted",
-        message: `${deleteTarget.name} has been permanently removed from Stock Control.`,
+        message: `${deleteTarget.name} has been permanently removed and reported to the audit logs.`,
       });
       setDeleteTarget(null);
       await loadLocations();
@@ -520,45 +760,101 @@ export default function StockLocationsClient() {
     setLoadingMoveItems(true);
 
     try {
-      const query = new URLSearchParams();
-      if (locationId) query.set("locationId", locationId);
+      /*
+       * Stock items are owned by the Inventory API.
+       * The move-stock endpoint is only used when the move is submitted.
+       */
+      const response = await fetch(INVENTORY_ENDPOINT, {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
 
-      const response = await fetch(
-        `${MOVE_STOCK_ENDPOINT}?${query.toString()}`,
-        {
-          method: "GET",
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        },
-      );
+      const rawText = await response.text();
 
-      const { json, rawText } = await readApiResponse(response);
-      const moveJson = json as MoveStockResponse | null;
+      let inventoryJson: InventoryResponse | null = null;
 
-      if (!response.ok || !moveJson?.ok) {
+      if (rawText) {
+        try {
+          inventoryJson = JSON.parse(rawText) as InventoryResponse;
+        } catch {
+          inventoryJson = null;
+        }
+      }
+
+      if (!response.ok || !inventoryJson?.ok) {
         throw createDetailedApiError({
           response,
-          json: moveJson,
+          json: inventoryJson as LocationsResponse | null,
           rawText,
-          endpoint: MOVE_STOCK_ENDPOINT,
+          endpoint: INVENTORY_ENDPOINT,
           method: "GET",
           fallbackTitle: "Stock items could not be loaded",
           fallbackMessage:
-            "The move-stock API did not return the available stock items.",
+            "The Inventory API did not return the available stock items.",
         });
       }
 
-      setMoveableItems(
-        Array.isArray(moveJson.items) ? moveJson.items : [],
+      const activeLocationsById = new Map(
+        locations
+          .filter((location) => location.isActive)
+          .map((location) => [location.id, location]),
       );
+
+      const nextItems = (Array.isArray(inventoryJson.items)
+        ? inventoryJson.items
+        : []
+      )
+        .map((item): MoveableStockItem | null => {
+          const quantity = Math.max(
+            0,
+            Math.floor(Number(item.quantity || 0)),
+          );
+          const itemLocationId = String(item.location || "").trim();
+          const itemLocation =
+            activeLocationsById.get(itemLocationId) || null;
+
+          if (
+            item.isActive === false ||
+            quantity < 1 ||
+            !itemLocation
+          ) {
+            return null;
+          }
+
+          return {
+            id: item.id,
+            name: item.name,
+            sku: item.sku || null,
+            quantity,
+            locationId: itemLocation.id,
+            locationName: itemLocation.name,
+            unitValue:
+              item.unitCost === null || item.unitCost === undefined
+                ? null
+                : Number(item.unitCost),
+          };
+        })
+        .filter(
+          (item): item is MoveableStockItem => item !== null,
+        )
+        .filter(
+          (item) =>
+            !locationId || item.locationId === locationId,
+        )
+        .sort((left, right) =>
+          left.name.localeCompare(right.name),
+        );
+
+      setMoveableItems(nextItems);
     } catch (caught) {
       setMoveableItems([]);
       setNotice(
         noticeFromError(
           caught,
           "Stock items could not be loaded",
-          "Refresh the page and try opening the move-stock form again.",
+          "The live inventory could not be loaded. Refresh the page and try opening the move-stock form again.",
         ),
       );
     } finally {
@@ -710,6 +1006,69 @@ export default function StockLocationsClient() {
         });
       }
 
+      const quantityBefore = selectedItem.quantity;
+      const quantityAfter = moveForm.moveAllStock
+        ? 0
+        : Math.max(0, selectedItem.quantity - quantity);
+
+      await reportStockAudit({
+        actionKey: "stock_location_moved",
+        actionLabel: "Stock moved between locations",
+        actionCategory: "move",
+        module: "locations",
+        status: "success",
+        riskLevel: "medium",
+        description: `${quantity} unit${
+          quantity === 1 ? "" : "s"
+        } of ${selectedItem.name} ${
+          quantity === 1 ? "was" : "were"
+        } moved from ${currentLocation.name} to ${destination.name}.`,
+        reason: moveForm.reason.trim(),
+        notes: moveForm.notes.trim() || null,
+        recordType: "stock_movement",
+        recordId: null,
+        recordName: selectedItem.name,
+        recordReference: selectedItem.sku || null,
+        stockItemId: selectedItem.id,
+        stockItemName: selectedItem.name,
+        stockItemSku: selectedItem.sku || null,
+        locationId: destination.id,
+        locationName: destination.name,
+        fromLocationId: currentLocation.id,
+        fromLocationName: currentLocation.name,
+        toLocationId: destination.id,
+        toLocationName: destination.name,
+        quantityBefore,
+        quantityAfter,
+        quantityChanged: -quantity,
+        beforeData: {
+          stockItemId: selectedItem.id,
+          stockItemName: selectedItem.name,
+          locationId: currentLocation.id,
+          locationName: currentLocation.name,
+          quantity: quantityBefore,
+        },
+        afterData: {
+          stockItemId: selectedItem.id,
+          stockItemName: selectedItem.name,
+          locationId: destination.id,
+          locationName: destination.name,
+          quantityMoved: quantity,
+          quantityRemainingAtSource: quantityAfter,
+        },
+        changedFields: [
+          "locationId",
+          "locationName",
+          "quantity",
+        ],
+        responseStatus: 200,
+        apiEndpoint: MOVE_STOCK_ENDPOINT,
+        metadata: {
+          source: "stock_locations_client",
+          moveAllStock: moveForm.moveAllStock,
+        },
+      });
+
       setNotice({
         tone: "success",
         title: "Stock moved successfully",
@@ -719,7 +1078,7 @@ export default function StockLocationsClient() {
             selectedItem.name
           } ${quantity === 1 ? "has" : "have"} been moved to ${
             destination.name
-          }.`,
+          } and reported to the audit logs.`,
       });
 
       closeMoveStock();
@@ -930,7 +1289,8 @@ export default function StockLocationsClient() {
             code: location.code,
             isActive: location.isActive,
           }))}
-          saving={movingStock || loadingMoveItems}
+          saving={movingStock}
+          loadingItems={loadingMoveItems}
           onChange={setMoveForm}
           onClose={closeMoveStock}
           onSubmit={moveStock}

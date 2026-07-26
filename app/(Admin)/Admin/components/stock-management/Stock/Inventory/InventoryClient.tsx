@@ -140,6 +140,58 @@ const MOVEMENT_ENDPOINT = "/api/admin/stockmanagement/inventory/movements";
 const MOVE_STOCK_ENDPOINT =
   "/api/admin/stockmanagement/locations/movestock";
 const LOCATIONS_ENDPOINT = "/api/admin/stockmanagement/locations";
+const STOCK_AUDIT_ENDPOINT = "/api/admin/stockmanagement/audit-logs";
+
+type StockAuditPayload = {
+  action: string;
+  actionLabel: string;
+  summary: string;
+  recordType: "stock_item" | "stock_movement" | "inventory_report";
+  recordId?: string | null;
+  recordTitle?: string | null;
+  reason?: string | null;
+  beforeData?: Record<string, unknown> | null;
+  afterData?: Record<string, unknown> | null;
+  changedFields?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+async function reportStockAudit(payload: StockAuditPayload) {
+  try {
+    const response = await fetch(STOCK_AUDIT_ENDPOINT, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    if (!response.ok || !json.ok) {
+      console.error("Stock audit log failed", {
+        status: response.status,
+        action: payload.action,
+        error: json.error || "Unknown audit error",
+      });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Stock audit log request failed", {
+      action: payload.action,
+      error: error instanceof Error ? error.message : error,
+    });
+    return false;
+  }
+}
 
 const EMPTY_SUMMARY: InventorySummary = {
   totalItems: 0,
@@ -966,6 +1018,10 @@ export default function InventoryClient() {
       return;
     }
 
+    const previousItem = form.id
+      ? items.find((item) => item.id === form.id) || null
+      : null;
+
     setSaving(true);
     setNotice(null);
 
@@ -1010,12 +1066,38 @@ export default function InventoryClient() {
         });
       }
 
+      const savedItem = json.item ? normaliseItem(json.item) : null;
+      const auditOk = await reportStockAudit({
+        action: form.id ? "stock.item.updated" : "stock.item.created",
+        actionLabel: form.id ? "Stock item updated" : "Stock item created",
+        summary: form.id
+          ? `${name} was updated in Stock Management.`
+          : `${name} was added to Stock Management.`,
+        recordType: "stock_item",
+        recordId: savedItem?.id || form.id || null,
+        recordTitle: name,
+        reason: form.id ? "Stock item details were edited." : "New stock item created.",
+        beforeData: previousItem ? { ...previousItem } : null,
+        afterData: savedItem || {
+          id: form.id || null, name, sku, barcode: form.barcode.trim() || null,
+          description: form.description.trim() || null, category: form.category.trim() || null,
+          location: form.location.trim() || null, supplier: form.supplier.trim() || null,
+          quantity, reorderLevel, targetLevel,
+          unitCost: form.unitCost ? numberValue(form.unitCost) : null,
+          salePrice: form.salePrice ? numberValue(form.salePrice) : null,
+          isActive: form.isActive,
+        },
+        metadata: { source: "stock_inventory_client", endpoint: INVENTORY_ENDPOINT },
+      });
+
       setShowItemModal(false);
       setForm(EMPTY_ADD_ITEM_FORM);
       setNotice({
         tone: "success",
         title: form.id ? "Stock item updated" : "Stock item created",
-        message: `${name} has been saved successfully.`,
+        message: auditOk
+          ? `${name} has been saved successfully and recorded in the audit log.`
+          : `${name} was saved, but the audit entry could not be confirmed. Check the server logs.`,
       });
       await loadInventory();
     } catch (caught) {
@@ -1167,6 +1249,20 @@ export default function InventoryClient() {
         });
       }
 
+      const auditOk = await reportStockAudit({
+        action: "stock.location.moved",
+        actionLabel: "Stock moved between locations",
+        summary: `${moveQuantity} unit${moveQuantity === 1 ? "" : "s"} of ${stockItem.name} moved from ${currentLocation.name} to ${destination.name}.`,
+        recordType: "stock_movement",
+        recordId: stockItem.id,
+        recordTitle: stockItem.name,
+        reason: moveForm.reason.trim(),
+        beforeData: { locationId: currentLocation.id, locationName: currentLocation.name, quantity: stockItem.quantity },
+        afterData: { locationId: destination.id, locationName: destination.name, quantityMoved: moveQuantity },
+        changedFields: { location: { before: currentLocation.name, after: destination.name }, quantityMoved: moveQuantity },
+        metadata: { notes: moveForm.notes.trim() || null, moveAllStock: moveForm.moveAllStock, endpoint: MOVE_STOCK_ENDPOINT },
+      });
+
       setShowMoveModal(false);
       setMoveForm(EMPTY_MOVE_STOCK_FORM);
       setSelectedIds([]);
@@ -1176,7 +1272,7 @@ export default function InventoryClient() {
         title: "Stock moved",
         message:
           json.message ||
-          `${stockItem.name} has been moved to ${destination.name}.`,
+          `${stockItem.name} has been moved to ${destination.name}.${auditOk ? " The change was recorded in the audit log." : " The audit entry could not be confirmed."}`,
       });
 
       await Promise.all([loadInventory(), loadLocations()]);
@@ -1257,12 +1353,36 @@ export default function InventoryClient() {
         });
       }
 
+      const oldQuantity = adjustForm.item.quantity;
+      const newQuantity =
+        adjustForm.movementType === "add"
+          ? oldQuantity + quantity
+          : adjustForm.movementType === "remove"
+            ? Math.max(0, oldQuantity - quantity)
+            : quantity;
+
+      const auditOk = await reportStockAudit({
+        action: "stock.quantity.adjusted",
+        actionLabel: "Stock quantity adjusted",
+        summary: `${adjustForm.item.name} quantity changed from ${oldQuantity} to ${newQuantity}.`,
+        recordType: "stock_movement",
+        recordId: adjustForm.item.id,
+        recordTitle: adjustForm.item.name,
+        reason: adjustForm.reason.trim(),
+        beforeData: { quantity: oldQuantity },
+        afterData: { quantity: newQuantity },
+        changedFields: { quantity: { before: oldQuantity, after: newQuantity } },
+        metadata: { movementType: adjustForm.movementType, enteredQuantity: quantity, notes: adjustForm.notes.trim() || null, endpoint: MOVEMENT_ENDPOINT },
+      });
+
       setShowAdjustModal(false);
       setAdjustForm(null);
       setNotice({
         tone: "success",
         title: "Stock quantity updated",
-        message: `${adjustForm.item.name} has been adjusted successfully.`,
+        message: auditOk
+          ? `${adjustForm.item.name} has been adjusted and recorded in the audit log.`
+          : `${adjustForm.item.name} was adjusted, but the audit entry could not be confirmed.`,
       });
       await loadInventory();
     } catch (caught) {
@@ -1342,6 +1462,20 @@ export default function InventoryClient() {
         });
       }
 
+      const deletedItem = activeItem;
+      const auditOk = await reportStockAudit({
+        action: "stock.item.deleted",
+        actionLabel: "Stock item permanently deleted",
+        summary: `${deletedItem.name} was permanently deleted from Stock Management.`,
+        recordType: "stock_item",
+        recordId: deletedItem.id,
+        recordTitle: deletedItem.name,
+        reason: "Permanent deletion authorised with the main-admin password.",
+        beforeData: { ...deletedItem },
+        afterData: null,
+        metadata: { permanentDelete: true, endpoint: INVENTORY_ENDPOINT },
+      });
+
       setShowDeleteModal(false);
       setActiveItem(null);
       setSelectedIds((current) =>
@@ -1350,7 +1484,9 @@ export default function InventoryClient() {
       setNotice({
         tone: "success",
         title: "Stock item deleted",
-        message: `${activeItem.name} has been permanently deleted from inventory.`,
+        message: auditOk
+          ? `${deletedItem.name} has been permanently deleted and recorded in the audit log.`
+          : `${deletedItem.name} was deleted, but the audit entry could not be confirmed.`,
       });
       await loadInventory();
     } catch (caught) {
@@ -1406,6 +1542,20 @@ export default function InventoryClient() {
         });
       }
 
+      const createdTestItem = json.item ? normaliseItem(json.item) : null;
+      const auditOk = await reportStockAudit({
+        action: "stock.item.test_created",
+        actionLabel: "Test stock item created",
+        summary: `${payload.name} was created for Stock Management testing.`,
+        recordType: "stock_item",
+        recordId: createdTestItem?.id || null,
+        recordTitle: payload.name,
+        reason: "Test inventory item created from the inventory test button.",
+        beforeData: null,
+        afterData: createdTestItem || payload,
+        metadata: { isTestItem: true, endpoint: INVENTORY_ENDPOINT },
+      });
+
       setNotice({
         tone: "success",
         title: "Test item created",
@@ -1413,7 +1563,9 @@ export default function InventoryClient() {
           payload.name,
           payload.sku,
           preferredLocation?.name || null,
-        ),
+        ) + (auditOk
+          ? " The test item was recorded in the audit log."
+          : " The audit entry could not be confirmed."),
       });
 
       await loadInventory();
@@ -1468,11 +1620,32 @@ export default function InventoryClient() {
         generatedBy: null,
       });
 
+      const auditOk = await reportStockAudit({
+        action: "stock.report.exported",
+        actionLabel: "Inventory Excel report exported",
+        summary: `An inventory Excel report containing ${filteredItems.length} stock item${filteredItems.length === 1 ? "" : "s"} was exported.`,
+        recordType: "inventory_report",
+        recordId: null,
+        recordTitle: "Burton Pride Inventory Report",
+        reason: "Inventory report downloaded from Stock Management.",
+        beforeData: null,
+        afterData: null,
+        metadata: {
+          exportedRows: filteredItems.length,
+          selectedRows: selectedIds.length,
+          filters: { query, statusFilter, categoryFilter, locationFilter, sortBy, sortDirection },
+          summary,
+          format: "xlsx",
+        },
+      });
+
       setNotice({
         tone: "success",
         title: "Excel report created",
         message:
-          "The styled inventory Excel report has been downloaded successfully.",
+          auditOk
+            ? "The styled inventory Excel report was downloaded and recorded in the audit log."
+            : "The Excel report was downloaded, but the audit entry could not be confirmed.",
       });
     } catch (caught) {
       setNotice({

@@ -8,6 +8,7 @@ import {
   Calculator,
   CheckCircle2,
   ChevronDown,
+  Copy,
   ChevronUp,
   Edit3,
   PiggyBank,
@@ -1414,6 +1415,53 @@ async function saveSavingTargetToDatabase(
   }
 }
 
+
+async function copyBudgetId(
+  budgetId: string,
+  onError?: (message: string) => void,
+) {
+  try {
+    await navigator.clipboard.writeText(budgetId);
+  } catch {
+    onError?.(
+      "The budget ID could not be copied automatically. Select the ID and copy it manually.",
+    );
+  }
+}
+
+function BudgetIdBadge({
+  id,
+  onCopyError,
+}: {
+  id?: string | null;
+  onCopyError?: (message: string) => void;
+}) {
+  if (!id) {
+    return (
+      <span className="inline-flex rounded-full border border-amber-300/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-100">
+        Save budget to create ID
+      </span>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex min-w-0 items-center gap-2">
+      <code className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black/25 px-2.5 py-1.5 text-[10px] font-bold text-white/55">
+        ID: {id}
+      </code>
+      <button
+        type="button"
+        onClick={() => void copyBudgetId(id, onCopyError)}
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-white/60 transition hover:bg-white/[0.12] hover:text-white"
+        aria-label="Copy budget ID"
+        title="Copy budget ID"
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function MoneyBudgetPlanning({
   selectedYear,
   budgetItems,
@@ -2404,6 +2452,8 @@ export default function MoneyBudgetPlanning({
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-100/75">
                   This view only shows the main numbers. Use the large buttons
                   below to change your budget or update your saving target.
+                  Saved budget areas are also available automatically in the
+                  Stock Orders budget dropdown.
                 </p>
               </div>
 
@@ -2580,11 +2630,17 @@ export default function MoneyBudgetPlanning({
                         : "border-white/10 bg-white/[0.03]"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <Banknote className="h-4 w-4 text-white/45" />
-                      <p className="font-black text-white">
-                        {item.category_label}
-                      </p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Banknote className="h-4 w-4 text-white/45" />
+                        <p className="font-black text-white">
+                          {item.category_label}
+                        </p>
+                      </div>
+                      <BudgetIdBadge
+                        id={item.id}
+                        onCopyError={setAuditLogError}
+                      />
                     </div>
 
                     {editing ? (
@@ -3516,6 +3572,10 @@ export default function MoneyBudgetPlanning({
                               </span>
                             )}
                           </div>
+                          <BudgetIdBadge
+                            id={item.id}
+                            onCopyError={setAuditLogError}
+                          />
                         </td>
 
                         <td className="px-4 py-4">

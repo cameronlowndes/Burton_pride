@@ -52,6 +52,37 @@ type CompletedRefundTotals = {
   sentBack: number;
 };
 
+
+type LinkedStockOrder = {
+  id: string;
+  orderNumber: string;
+  title: string;
+  status: string;
+  supplierName: string | null;
+  estimatedTotal: number;
+  actualTotal: number | null;
+  expectedDeliveryDate: string | null;
+  moneyTransactionId: string;
+};
+
+type LinkedStockOrdersResponse = {
+  ok?: boolean;
+  links?: Record<string, LinkedStockOrder[]>;
+  orders?: LinkedStockOrder[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
+type StockOrderExportDetails = {
+  connectionState: "Connected" | "Not connected";
+  orderNumbers: string;
+  orderTitles: string;
+  orderStatuses: string;
+  orderSuppliers: string;
+};
+
 async function readJsonResponse(response: Response) {
   const rawBody = await response.text();
 
@@ -66,6 +97,132 @@ async function readJsonResponse(response: Response) {
       rawResponse: rawBody,
     };
   }
+}
+
+
+async function loadStockOrderLinksForExcelExport(
+  transactionIds: string[]
+) {
+  const uniqueIds = Array.from(
+    new Set(
+      transactionIds
+        .map((id) => String(id || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (uniqueIds.length === 0) {
+    return {} as Record<string, LinkedStockOrder[]>;
+  }
+
+  const response = await fetch(
+    "/api/admin/stockmanagement/orders/transaction-links",
+    {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        transactionIds: uniqueIds,
+      }),
+    }
+  );
+
+  const payload =
+    (await readJsonResponse(
+      response
+    )) as LinkedStockOrdersResponse;
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(
+      [
+        payload.error ||
+          "Stock Control order links could not be loaded for the Excel export.",
+        payload.code
+          ? `Code: ${payload.code}`
+          : "",
+        payload.details
+          ? `Details: ${payload.details}`
+          : "",
+        payload.hint
+          ? `Hint: ${payload.hint}`
+          : "",
+        `HTTP: ${response.status}`,
+        "Endpoint: /api/admin/stockmanagement/orders/transaction-links",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  return payload.links || {};
+}
+
+function stockOrderStatusLabel(
+  status?: string | null
+) {
+  const cleanStatus = String(
+    status || ""
+  ).trim();
+
+  if (!cleanStatus) {
+    return "Unknown";
+  }
+
+  return cleanStatus
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    );
+}
+
+function stockOrderExportDetails(
+  transactionId: string,
+  linkedStockOrders: Record<
+    string,
+    LinkedStockOrder[]
+  >
+): StockOrderExportDetails {
+  const orders =
+    linkedStockOrders[transactionId] || [];
+
+  if (orders.length === 0) {
+    return {
+      connectionState: "Not connected",
+      orderNumbers: "",
+      orderTitles: "",
+      orderStatuses: "",
+      orderSuppliers: "",
+    };
+  }
+
+  return {
+    connectionState: "Connected",
+    orderNumbers: orders
+      .map((order) => order.orderNumber)
+      .filter(Boolean)
+      .join(", "),
+    orderTitles: orders
+      .map((order) => order.title)
+      .filter(Boolean)
+      .join(" | "),
+    orderStatuses: orders
+      .map((order) =>
+        stockOrderStatusLabel(order.status)
+      )
+      .filter(Boolean)
+      .join(", "),
+    orderSuppliers: orders
+      .map(
+        (order) =>
+          order.supplierName ||
+          "Not recorded"
+      )
+      .join(", "),
+  };
 }
 
 async function loadRefundsForExcelExport(selectedYear: string) {
@@ -494,6 +651,71 @@ function styleTransactionRow(row: ExcelJS.Row, item: Transaction) {
     wrapText: true,
   };
 
+  const connectionState =
+    String(
+      row.getCell(
+        "stockControlConnection"
+      ).value || ""
+    );
+
+  if (connectionState === "Connected") {
+    row.getCell(
+      "stockControlConnection"
+    ).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: {
+        argb: "FFDCFCE7",
+      },
+    };
+
+    row.getCell(
+      "stockControlConnection"
+    ).font = {
+      bold: true,
+      color: {
+        argb: "FF166534",
+      },
+    };
+
+    row.getCell(
+      "stockOrderNumber"
+    ).font = {
+      bold: true,
+      color: {
+        argb: "FF155E75",
+      },
+    };
+
+    row.getCell(
+      "stockOrderStatus"
+    ).font = {
+      bold: true,
+      color: {
+        argb: "FF155E75",
+      },
+    };
+  } else {
+    row.getCell(
+      "stockControlConnection"
+    ).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: {
+        argb: "FFF3F4F6",
+      },
+    };
+
+    row.getCell(
+      "stockControlConnection"
+    ).font = {
+      bold: true,
+      color: {
+        argb: "FF6B7280",
+      },
+    };
+  }
+
   if (item.checked_at) {
     row.getCell("checkedStatus").fill = {
       type: "pattern",
@@ -682,6 +904,12 @@ function transactionColumns() {
     { key: "payment", width: 20 },
     { key: "source", width: 22 },
 
+    { key: "stockControlConnection", width: 24 },
+    { key: "stockOrderNumber", width: 24 },
+    { key: "stockOrderTitle", width: 34 },
+    { key: "stockOrderStatus", width: 22 },
+    { key: "stockOrderSupplier", width: 28 },
+
     { key: "bankStatus", width: 18 },
     { key: "bankNote", width: 34 },
     { key: "bankBy", width: 28 },
@@ -718,6 +946,12 @@ function transactionHeaderLabels() {
     "Payment Method",
     "Source",
 
+    "Stock Control Connection",
+    "Stock Order Number",
+    "Stock Order Title",
+    "Stock Order Status",
+    "Stock Order Supplier",
+
     "Bank Match",
     "Bank Note",
     "Bank Matched By",
@@ -745,10 +979,19 @@ function transactionHeaderLabels() {
 function addTransactionRow(
   sheet: ExcelJS.Worksheet,
   item: Transaction,
-  selectedYear: string
+  selectedYear: string,
+  linkedStockOrders: Record<
+    string,
+    LinkedStockOrder[]
+  >
 ) {
   const isPersonal = isPersonalFundsTransaction(item);
   const hasFunding = isSponsorshipTransaction(item);
+  const stockOrderDetails =
+    stockOrderExportDetails(
+      item.id,
+      linkedStockOrders
+    );
 
   const row = sheet.addRow({
     reference: item.transaction_reference || "Pending",
@@ -760,6 +1003,17 @@ function addTransactionRow(
     amount: pounds(item.amount_pence),
     payment: hasFunding ? "Funding Money" : item.payment_method || "None",
     source: fundingSourceLabel(item),
+
+    stockControlConnection:
+      stockOrderDetails.connectionState,
+    stockOrderNumber:
+      stockOrderDetails.orderNumbers,
+    stockOrderTitle:
+      stockOrderDetails.orderTitles,
+    stockOrderStatus:
+      stockOrderDetails.orderStatuses,
+    stockOrderSupplier:
+      stockOrderDetails.orderSuppliers,
 
     bankStatus: bankReconciliationLabel(item.bank_reconciliation_status),
     bankNote: bankReconciliationNote(item),
@@ -977,12 +1231,17 @@ function addFilteredExportSummaryWorksheet({
   selectedViewMonth,
   filteredTransactions,
   refunds,
+  linkedStockOrders,
 }: {
   workbook: ExcelJS.Workbook;
   selectedYear: string;
   selectedViewMonth: string;
   filteredTransactions: Transaction[];
   refunds: MoneyRefundExportRecord[];
+  linkedStockOrders: Record<
+    string,
+    LinkedStockOrder[]
+  >;
 }) {
   const sheet = workbook.addWorksheet("Export Summary", {
     views: [{ state: "frozen", ySplit: 5 }],
@@ -1024,6 +1283,21 @@ function addFilteredExportSummaryWorksheet({
 
   const availableBalance =
     moneyInIncludingRefunds - moneyOutIncludingRefunds;
+
+
+  const connectedTransactionCount =
+    filteredTransactions.filter(
+      (item) =>
+        (linkedStockOrders[item.id] || [])
+          .length > 0
+    ).length;
+
+  const notConnectedTransactionCount =
+    Math.max(
+      filteredTransactions.length -
+        connectedTransactionCount,
+      0
+    );
 
   addMergedTitle(
     sheet,
@@ -1085,13 +1359,36 @@ function addFilteredExportSummaryWorksheet({
       pounds(availableBalance),
       "Money In including completed refunds minus Money Out including completed refunds.",
     ],
+    [
+      "Transactions Connected to Stock Control",
+      connectedTransactionCount,
+      "Money Management transactions linked to one or more Stock Management orders.",
+    ],
+    [
+      "Transactions Not Connected to Stock Control",
+      notConnectedTransactionCount,
+      "Money Management transactions with no linked Stock Management order.",
+    ],
   ];
 
   rows.forEach(([label, amount, notes]) => {
     const row = sheet.addRow([label, amount, notes]);
     styleBodyRow(row);
     row.getCell(1).font = { bold: true };
-    styleCurrencyCell(row.getCell(2), true);
+
+    if (
+      label.includes("Connected to Stock Control") ||
+      label.includes("Not Connected to Stock Control")
+    ) {
+      row.getCell(2).numFmt = "0";
+      row.getCell(2).font = { bold: true };
+      row.getCell(2).alignment = {
+        horizontal: "right",
+        vertical: "top",
+      };
+    } else {
+      styleCurrencyCell(row.getCell(2), true);
+    }
   });
 
   return sheet;
@@ -1124,12 +1421,21 @@ export async function exportTransactionsToExcelFile({
     })
   );
 
+
+  const linkedStockOrders =
+    await loadStockOrderLinksForExcelExport(
+      filteredTransactions.map(
+        (item) => item.id
+      )
+    );
+
   addFilteredExportSummaryWorksheet({
     workbook,
     selectedYear,
     selectedViewMonth,
     filteredTransactions,
     refunds: filteredRefunds,
+    linkedStockOrders,
   });
 
   const sheet = workbook.addWorksheet("Filtered Transactions", {
@@ -1149,7 +1455,7 @@ export async function exportTransactionsToExcelFile({
     sheet,
     "Burton Pride C.I.C - Money Transactions Export",
     "A1",
-    "AA1"
+    "AF1"
   );
 
   addMergedSubtitle(
@@ -1162,7 +1468,7 @@ export async function exportTransactionsToExcelFile({
       filteredTransactions.length
     } | Refund rows: ${filteredRefunds.length}`,
     "A2",
-    "AA2"
+    "AF2"
   );
 
   sheet.addRow([]);
@@ -1172,12 +1478,17 @@ export async function exportTransactionsToExcelFile({
   styleHeaderRow(sheet.getRow(4), "FF047857");
 
   filteredTransactions.forEach((item) => {
-    addTransactionRow(sheet, item, selectedYear);
+    addTransactionRow(
+      sheet,
+      item,
+      selectedYear,
+      linkedStockOrders
+    );
   });
 
   sheet.autoFilter = {
     from: "A4",
-    to: "AA4",
+    to: "AF4",
   };
 
   addRefundWorksheet({
@@ -1194,7 +1505,7 @@ export async function exportTransactionsToExcelFile({
 
   await downloadWorkbook(
     workbook,
-    `burton-pride-money-transactions-${selectedYear}-${fileDate}.xlsx`
+    `burton-pride-money-transactions-with-stock-control-${selectedYear}-${fileDate}.xlsx`
   );
 }
 
@@ -1249,6 +1560,28 @@ export async function exportFullYearlyReportFile({
   );
 
   const refundTotals = calculateCompletedRefundTotals(yearRefunds);
+
+
+  const linkedStockOrders =
+    await loadStockOrderLinksForExcelExport(
+      yearTransactions.map(
+        (item) => item.id
+      )
+    );
+
+  const connectedTransactionCount =
+    yearTransactions.filter(
+      (item) =>
+        (linkedStockOrders[item.id] || [])
+          .length > 0
+    ).length;
+
+  const notConnectedTransactionCount =
+    Math.max(
+      yearTransactions.length -
+        connectedTransactionCount,
+      0
+    );
 
   const moneyInIncludingRefunds =
     Number(totals.income || 0) + refundTotals.receivedBack;
@@ -1373,13 +1706,36 @@ export async function exportFullYearlyReportFile({
       pounds(closingBalanceIncludingRefunds),
       "Opening balance plus ordinary income plus completed refunds received back, minus eligible expenses and completed refunds sent back.",
     ],
+    [
+      "Transactions Connected to Stock Control",
+      connectedTransactionCount,
+      "Money Management transactions linked to one or more Stock Management orders.",
+    ],
+    [
+      "Transactions Not Connected to Stock Control",
+      notConnectedTransactionCount,
+      "Money Management transactions with no linked Stock Management order.",
+    ],
   ];
 
   summaryRows.forEach(([label, amount, notes]) => {
     const row = summarySheet.addRow([label, amount, notes]);
     styleBodyRow(row);
     row.getCell(1).font = { bold: true };
-    styleCurrencyCell(row.getCell(2), true);
+
+    if (
+      label.includes("Connected to Stock Control") ||
+      label.includes("Not Connected to Stock Control")
+    ) {
+      row.getCell(2).numFmt = "0";
+      row.getCell(2).font = { bold: true };
+      row.getCell(2).alignment = {
+        horizontal: "right",
+        vertical: "top",
+      };
+    } else {
+      styleCurrencyCell(row.getCell(2), true);
+    }
   });
 
   const sponsorSheet = workbook.addWorksheet("Funding Breakdown", {
@@ -1512,7 +1868,7 @@ export async function exportFullYearlyReportFile({
     transactionSheet,
     "Burton Pride C.I.C - All Ordinary Transactions",
     "A1",
-    "AA1"
+    "AF1"
   );
 
   addMergedSubtitle(
@@ -1521,7 +1877,7 @@ export async function exportFullYearlyReportFile({
       yearTransactions.length
     }`,
     "A2",
-    "AA2"
+    "AF2"
   );
 
   transactionSheet.addRow([]);
@@ -1537,13 +1893,18 @@ export async function exportFullYearlyReportFile({
     styleBodyRow(row);
   } else {
     yearTransactions.forEach((item) => {
-      addTransactionRow(transactionSheet, item, selectedYear);
+      addTransactionRow(
+        transactionSheet,
+        item,
+        selectedYear,
+        linkedStockOrders
+      );
     });
   }
 
   transactionSheet.autoFilter = {
     from: "A4",
-    to: "AA4",
+    to: "AF4",
   };
 
   addRefundWorksheet({
@@ -1558,7 +1919,7 @@ export async function exportFullYearlyReportFile({
 
   await downloadWorkbook(
     workbook,
-    `burton-pride-full-yearly-report-${selectedYear}-${fileDate}.xlsx`
+    `burton-pride-full-yearly-report-with-stock-control-${selectedYear}-${fileDate}.xlsx`
   );
 }
 

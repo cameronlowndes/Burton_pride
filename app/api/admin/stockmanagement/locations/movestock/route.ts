@@ -1,5 +1,8 @@
 import { randomUUID } from "crypto";
-import { type NextRequest, NextResponse } from "next/server";
+import {
+  type NextRequest,
+  NextResponse,
+} from "next/server";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -32,7 +35,14 @@ type StockItemRow = {
   barcode: string | null;
   description: string | null;
   category: string | null;
+
+  /*
+   * location_id is the current source of truth.
+   * location is retained only for older records and display compatibility.
+   */
+  location_id: string | null;
   location: string | null;
+
   supplier: string | null;
   quantity: number | string | null;
   reorder_level: number | string | null;
@@ -81,17 +91,21 @@ function json(
   return NextResponse.json(body, {
     status,
     headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "Cache-Control":
+        "no-store, no-cache, must-revalidate",
       Pragma: "no-cache",
       Expires: "0",
-      "X-Robots-Tag": "noindex, nofollow, noarchive",
+      "X-Robots-Tag":
+        "noindex, nofollow, noarchive",
       ...headers,
     },
   });
 }
 
 function clean(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+  return typeof value === "string"
+    ? value.trim()
+    : "";
 }
 
 function nullable(value: unknown) {
@@ -100,16 +114,26 @@ function nullable(value: unknown) {
 }
 
 function baseSku(value: unknown) {
-  return clean(value).replace(/-MOVE-[A-Z0-9]{8}$/i, "");
+  return clean(value).replace(
+    /-MOVE-[A-Z0-9]{8}$/i,
+    "",
+  );
 }
 
 function wholeNumber(value: unknown) {
   const parsed =
     typeof value === "number"
       ? value
-      : Number(typeof value === "string" ? value.trim() : value);
+      : Number(
+          typeof value === "string"
+            ? value.trim()
+            : value,
+        );
 
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+  if (
+    !Number.isFinite(parsed) ||
+    !Number.isInteger(parsed)
+  ) {
     return null;
   }
 
@@ -117,7 +141,9 @@ function wholeNumber(value: unknown) {
 }
 
 function adminName(admin: AdminIdentity) {
-  const explicit = clean(admin.full_name) || clean(admin.name);
+  const explicit =
+    clean(admin.full_name) ||
+    clean(admin.name);
 
   if (explicit) return explicit;
 
@@ -128,10 +154,16 @@ function adminName(admin: AdminIdentity) {
     .filter(Boolean)
     .join(" ");
 
-  return combined || clean(admin.email) || "Administrator";
+  return (
+    combined ||
+    clean(admin.email) ||
+    "Administrator"
+  );
 }
 
-function errorPayload(error: SupabaseErrorLike) {
+function errorPayload(
+  error: SupabaseErrorLike,
+) {
   return {
     code: error.code ?? null,
     details: error.details ?? null,
@@ -150,7 +182,10 @@ type AdminResult =
     };
 
 async function requireAdmin(): Promise<AdminResult> {
-  const admin = (await getCurrentAdmin()) as AdminIdentity | null;
+  const admin =
+    (await getCurrentAdmin()) as
+      | AdminIdentity
+      | null;
 
   if (!admin?.id) {
     return {
@@ -158,7 +193,8 @@ async function requireAdmin(): Promise<AdminResult> {
       response: json(
         {
           ok: false,
-          error: "Your administrator session is missing or has expired.",
+          error:
+            "Your administrator session is missing or has expired.",
         },
         401,
       ),
@@ -171,7 +207,8 @@ async function requireAdmin(): Promise<AdminResult> {
       response: json(
         {
           ok: false,
-          error: "This administrator account is inactive.",
+          error:
+            "This administrator account is inactive.",
         },
         403,
       ),
@@ -192,28 +229,114 @@ async function getLocationById(id: string) {
     .maybeSingle();
 }
 
-function mapItem(
+function itemSelectColumns() {
+  return [
+    "id",
+    "name",
+    "sku",
+    "barcode",
+    "description",
+    "category",
+    "location_id",
+    "location",
+    "supplier",
+    "quantity",
+    "reorder_level",
+    "target_level",
+    "unit_cost",
+    "sale_price",
+    "is_active",
+    "created_at",
+    "updated_at",
+    "created_by",
+    "created_by_name",
+    "updated_by",
+    "updated_by_name",
+  ].join(",");
+}
+
+function resolveItemLocationId(
   item: StockItemRow,
   locationIdByName: Map<string, string>,
 ) {
-  const locationName = clean(item.location);
-  const quantity = Math.max(0, Number(item.quantity || 0));
-  const unitValue = Number(item.unit_cost || 0);
+  const directId = clean(item.location_id);
+
+  if (directId) return directId;
+
+  const legacyName = clean(item.location);
+
+  if (!legacyName) return null;
+
+  return (
+    locationIdByName.get(
+      legacyName.toLowerCase(),
+    ) || null
+  );
+}
+
+function mapItem(
+  item: StockItemRow,
+  locationsById: Map<string, StockLocationRow>,
+  locationIdByName: Map<string, string>,
+) {
+  const locationId = resolveItemLocationId(
+    item,
+    locationIdByName,
+  );
+
+  const location = locationId
+    ? locationsById.get(locationId) || null
+    : null;
+
+  const quantity = Math.max(
+    0,
+    Math.floor(Number(item.quantity || 0)),
+  );
+
+  const unitValue = Number(
+    item.unit_cost || 0,
+  );
 
   return {
     id: item.id,
     name: item.name,
     sku: item.sku,
     quantity,
-    locationId: locationName
-      ? locationIdByName.get(locationName.toLowerCase()) || null
-      : null,
-    locationName: locationName || null,
-    unitValue: Number.isFinite(unitValue) ? unitValue : 0,
+    locationId,
+    locationName:
+      location?.name ||
+      clean(item.location) ||
+      null,
+    unitValue: Number.isFinite(unitValue)
+      ? unitValue
+      : 0,
   };
 }
 
-export async function GET(request: NextRequest) {
+async function rollbackQuantity(
+  itemId: string,
+  quantity: number,
+) {
+  const { error } = await supabaseAdmin
+    .from(STOCK_ITEMS_TABLE)
+    .update({ quantity })
+    .eq("id", itemId);
+
+  if (error) {
+    console.error(
+      "Stock move rollback failed:",
+      {
+        itemId,
+        quantity,
+        error,
+      },
+    );
+  }
+}
+
+export async function GET(
+  request: NextRequest,
+) {
   const auth = await requireAdmin();
 
   if (auth.response) {
@@ -221,19 +344,25 @@ export async function GET(request: NextRequest) {
   }
 
   const locationId = clean(
-    request.nextUrl.searchParams.get("locationId"),
+    request.nextUrl.searchParams.get(
+      "locationId",
+    ),
   );
 
-  let requestedLocation: StockLocationRow | null = null;
+  let requestedLocation:
+    | StockLocationRow
+    | null = null;
 
   if (locationId) {
-    const { data, error } = await getLocationById(locationId);
+    const { data, error } =
+      await getLocationById(locationId);
 
     if (error) {
       return json(
         {
           ok: false,
-          error: "The selected stock location could not be loaded.",
+          error:
+            "The selected stock location could not be loaded.",
           ...errorPayload(error),
         },
         500,
@@ -244,97 +373,159 @@ export async function GET(request: NextRequest) {
       return json(
         {
           ok: false,
-          error: "The selected stock location could not be found.",
+          error:
+            "The selected stock location could not be found.",
         },
         404,
       );
     }
 
-    requestedLocation = data as StockLocationRow;
+    requestedLocation =
+      data as StockLocationRow;
   }
 
-  const { data: locationRows, error: locationError } =
-    await supabaseAdmin
-      .from(STOCK_LOCATIONS_TABLE)
-      .select("id,name,code,is_active")
-      .eq("is_active", true)
-      .order("name", { ascending: true });
+  const {
+    data: locationRows,
+    error: locationError,
+  } = await supabaseAdmin
+    .from(STOCK_LOCATIONS_TABLE)
+    .select("id,name,code,is_active")
+    .eq("is_active", true)
+    .order("name", {
+      ascending: true,
+    });
 
   if (locationError) {
     return json(
       {
         ok: false,
-        error: "Active stock locations could not be loaded.",
+        error:
+          "Active stock locations could not be loaded.",
         ...errorPayload(locationError),
       },
       500,
     );
   }
 
-  const locationIdByName = new Map<string, string>();
+  const locations =
+    (locationRows || []) as StockLocationRow[];
 
-  for (const location of (locationRows || []) as StockLocationRow[]) {
-    locationIdByName.set(location.name.toLowerCase(), location.id);
-  }
+  const locationsById = new Map(
+    locations.map((location) => [
+      location.id,
+      location,
+    ]),
+  );
+
+  const locationIdByName = new Map(
+    locations.map((location) => [
+      location.name.toLowerCase(),
+      location.id,
+    ]),
+  );
 
   let itemQuery = supabaseAdmin
     .from(STOCK_ITEMS_TABLE)
-    .select(
-      [
-        "id",
-        "name",
-        "sku",
-        "barcode",
-        "description",
-        "category",
-        "location",
-        "supplier",
-        "quantity",
-        "reorder_level",
-        "target_level",
-        "unit_cost",
-        "sale_price",
-        "is_active",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "created_by_name",
-        "updated_by",
-        "updated_by_name",
-      ].join(","),
-    )
+    .select(itemSelectColumns())
     .eq("is_active", true)
     .gt("quantity", 0)
-    .order("name", { ascending: true });
+    .order("name", {
+      ascending: true,
+    });
 
+  /*
+   * Filter by location_id. This is the current relationship.
+   * Legacy text-only rows are added separately below when needed.
+   */
   if (requestedLocation) {
-    itemQuery = itemQuery.eq("location", requestedLocation.name);
+    itemQuery = itemQuery.eq(
+      "location_id",
+      requestedLocation.id,
+    );
   }
 
-  const { data: itemRows, error: itemError } = await itemQuery;
+  const {
+    data: directRows,
+    error: itemError,
+  } = await itemQuery;
 
   if (itemError) {
     return json(
       {
         ok: false,
-        error: "Stock items could not be loaded.",
+        error:
+          "Stock items could not be loaded.",
         ...errorPayload(itemError),
       },
       500,
     );
   }
 
-  const typedItemRows = (itemRows ?? []) as unknown as StockItemRow[];
+  let allRows =
+    (directRows || []) as unknown as StockItemRow[];
+
+  /*
+   * Include legacy items which have no location_id but still
+   * store the location name in stock_items.location.
+   */
+  if (requestedLocation) {
+    const {
+      data: legacyRows,
+      error: legacyError,
+    } = await supabaseAdmin
+      .from(STOCK_ITEMS_TABLE)
+      .select(itemSelectColumns())
+      .is("location_id", null)
+      .eq("location", requestedLocation.name)
+      .eq("is_active", true)
+      .gt("quantity", 0)
+      .order("name", {
+        ascending: true,
+      });
+
+    if (legacyError) {
+      return json(
+        {
+          ok: false,
+          error:
+            "Legacy stock items could not be loaded.",
+          ...errorPayload(legacyError),
+        },
+        500,
+      );
+    }
+
+    allRows = [
+      ...allRows,
+      ...((legacyRows ||
+        []) as unknown as StockItemRow[]),
+    ];
+  }
+
+  const uniqueRows = Array.from(
+    new Map(
+      allRows.map((row) => [
+        row.id,
+        row,
+      ]),
+    ).values(),
+  );
 
   return json({
     ok: true,
-    items: typedItemRows.map((item) =>
-      mapItem(item, locationIdByName),
+    items: uniqueRows.map((item) =>
+      mapItem(
+        item,
+        locationsById,
+        locationIdByName,
+      ),
     ),
   });
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+) {
   const auth = await requireAdmin();
 
   if (auth.response) {
@@ -346,30 +537,49 @@ export async function POST(request: NextRequest) {
   let body: MoveBody;
 
   try {
-    body = (await request.json()) as MoveBody;
+    body =
+      (await request.json()) as MoveBody;
   } catch {
     return json(
       {
         ok: false,
-        error: "The request body must contain valid JSON.",
+        error:
+          "The request body must contain valid JSON.",
       },
       400,
     );
   }
 
-  const itemId = clean(body.itemId ?? body.stockItemId);
-  const fromLocationId = clean(body.fromLocationId);
-  const toLocationId = clean(
-    body.toLocationId ?? body.destinationLocationId,
+  const itemId = clean(
+    body.itemId ?? body.stockItemId,
   );
-  const quantity = wholeNumber(body.quantity);
-  const notes = nullable(body.notes ?? body.reason);
+
+  const fromLocationId = clean(
+    body.fromLocationId,
+  );
+
+  const toLocationId = clean(
+    body.toLocationId ??
+      body.destinationLocationId,
+  );
+
+  const quantity = wholeNumber(
+    body.quantity,
+  );
+
+  const reason = nullable(body.reason);
+  const notes = nullable(body.notes);
+  const movementReason =
+    reason ||
+    notes ||
+    "Stock moved between locations";
 
   if (!itemId) {
     return json(
       {
         ok: false,
-        error: "Choose the stock item that you want to move.",
+        error:
+          "Choose the stock item that you want to move.",
         field: "itemId",
       },
       400,
@@ -380,7 +590,8 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "Choose the current stock location.",
+        error:
+          "Choose the current stock location.",
         field: "fromLocationId",
       },
       400,
@@ -391,14 +602,17 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "Choose the destination stock location.",
+        error:
+          "Choose the destination stock location.",
         field: "toLocationId",
       },
       400,
     );
   }
 
-  if (fromLocationId === toLocationId) {
+  if (
+    fromLocationId === toLocationId
+  ) {
     return json(
       {
         ok: false,
@@ -410,7 +624,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (quantity === null || quantity < 1) {
+  if (
+    quantity === null ||
+    quantity < 1
+  ) {
     return json(
       {
         ok: false,
@@ -422,11 +639,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (notes && notes.length > 1000) {
+  if (
+    movementReason.length > 1000
+  ) {
     return json(
       {
         ok: false,
-        error: "Movement notes must be 1,000 characters or fewer.",
+        error:
+          "Movement notes must be 1,000 characters or fewer.",
         field: "notes",
       },
       400,
@@ -442,30 +662,7 @@ export async function POST(request: NextRequest) {
     getLocationById(toLocationId),
     supabaseAdmin
       .from(STOCK_ITEMS_TABLE)
-      .select(
-        [
-          "id",
-          "name",
-          "sku",
-          "barcode",
-          "description",
-          "category",
-          "location",
-          "supplier",
-          "quantity",
-          "reorder_level",
-          "target_level",
-          "unit_cost",
-          "sale_price",
-          "is_active",
-          "created_at",
-          "updated_at",
-          "created_by",
-          "created_by_name",
-          "updated_by",
-          "updated_by_name",
-        ].join(","),
-      )
+      .select(itemSelectColumns())
       .eq("id", itemId)
       .maybeSingle(),
   ]);
@@ -474,8 +671,11 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The current stock location could not be loaded.",
-        ...errorPayload(fromLocationResult.error),
+        error:
+          "The current stock location could not be loaded.",
+        ...errorPayload(
+          fromLocationResult.error,
+        ),
       },
       500,
     );
@@ -485,8 +685,11 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The destination stock location could not be loaded.",
-        ...errorPayload(toLocationResult.error),
+        error:
+          "The destination stock location could not be loaded.",
+        ...errorPayload(
+          toLocationResult.error,
+        ),
       },
       500,
     );
@@ -496,8 +699,11 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The selected stock item could not be loaded.",
-        ...errorPayload(itemResult.error),
+        error:
+          "The selected stock item could not be loaded.",
+        ...errorPayload(
+          itemResult.error,
+        ),
       },
       500,
     );
@@ -507,7 +713,8 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The current stock location could not be found.",
+        error:
+          "The current stock location could not be found.",
       },
       404,
     );
@@ -517,7 +724,8 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The destination stock location could not be found.",
+        error:
+          "The destination stock location could not be found.",
       },
       404,
     );
@@ -527,7 +735,8 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The selected stock item could not be found.",
+        error:
+          "The selected stock item could not be found.",
       },
       404,
     );
@@ -535,25 +744,34 @@ export async function POST(request: NextRequest) {
 
   const fromLocation =
     fromLocationResult.data as StockLocationRow;
-  const toLocation = toLocationResult.data as StockLocationRow;
+
+  const toLocation =
+    toLocationResult.data as StockLocationRow;
+
   const sourceItem =
     itemResult.data as unknown as StockItemRow;
 
-  if (fromLocation.is_active === false) {
+  if (
+    fromLocation.is_active === false
+  ) {
     return json(
       {
         ok: false,
-        error: "The current stock location is inactive.",
+        error:
+          "The current stock location is inactive.",
       },
       409,
     );
   }
 
-  if (toLocation.is_active === false) {
+  if (
+    toLocation.is_active === false
+  ) {
     return json(
       {
         ok: false,
-        error: "The destination stock location is inactive.",
+        error:
+          "The destination stock location is inactive.",
       },
       409,
     );
@@ -563,17 +781,28 @@ export async function POST(request: NextRequest) {
     return json(
       {
         ok: false,
-        error: "The selected stock item is archived or inactive.",
+        error:
+          "The selected stock item is archived or inactive.",
       },
       409,
     );
   }
 
-  const sourceLocationName = clean(sourceItem.location);
+  /*
+   * Use location_id as the source of truth.
+   * Fall back to the old location text only for legacy rows.
+   */
+  const sourceLocationId =
+    clean(sourceItem.location_id) ||
+    (clean(sourceItem.location)
+      .toLowerCase() ===
+    fromLocation.name.toLowerCase()
+      ? fromLocation.id
+      : "");
 
   if (
-    sourceLocationName.toLowerCase() !==
-    fromLocation.name.toLowerCase()
+    sourceLocationId !==
+    fromLocation.id
   ) {
     return json(
       {
@@ -581,22 +810,44 @@ export async function POST(request: NextRequest) {
         error:
           "The stock item is no longer stored at the selected current location. Refresh the page and try again.",
         field: "fromLocationId",
+        currentLocationId:
+          clean(sourceItem.location_id) ||
+          null,
+        currentLocationName:
+          clean(sourceItem.location) ||
+          null,
+        selectedLocationId:
+          fromLocation.id,
       },
       409,
     );
   }
 
-  const parsedAvailableQuantity = Number(sourceItem.quantity ?? 0);
-  const availableQuantity = Number.isFinite(parsedAvailableQuantity)
-    ? Math.max(0, Math.floor(parsedAvailableQuantity))
-    : 0;
+  const parsedAvailableQuantity =
+    Number(sourceItem.quantity ?? 0);
 
-  if (quantity > availableQuantity) {
+  const availableQuantity =
+    Number.isFinite(
+      parsedAvailableQuantity,
+    )
+      ? Math.max(
+          0,
+          Math.floor(
+            parsedAvailableQuantity,
+          ),
+        )
+      : 0;
+
+  if (
+    quantity > availableQuantity
+  ) {
     return json(
       {
         ok: false,
         error: `Only ${availableQuantity} unit${
-          availableQuantity === 1 ? "" : "s"
+          availableQuantity === 1
+            ? ""
+            : "s"
         } are available at the current location.`,
         field: "quantity",
         availableQuantity,
@@ -605,122 +856,218 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const movedAt = new Date().toISOString();
-  const movedByName = adminName(admin);
-  const remainingQuantity = availableQuantity - quantity;
+  const movedAt =
+    new Date().toISOString();
 
-  let destinationItemId = sourceItem.id;
-  let destinationItem: StockItemRow | null = null;
+  const movedByName =
+    adminName(admin);
+
+  const remainingQuantity =
+    availableQuantity - quantity;
+
+  let destinationItemId =
+    sourceItem.id;
+
+  let destinationItem:
+    | StockItemRow
+    | null = null;
 
   try {
     /*
-     * Keep one inventory row for the same product at each location.
-     * Old split rows use SKUs ending in -MOVE-XXXXXXXX, so compare the
-     * base SKU as well as the item name.
+     * Look for the same product at the destination by location_id.
+     * Also check legacy rows which still use the destination name.
      */
-    const { data: destinationCandidates, error: destinationLookupError } =
-      await supabaseAdmin
-        .from(STOCK_ITEMS_TABLE)
-        .select("*")
-        .eq("location", toLocation.name)
-        .eq("is_active", true)
-        .neq("id", sourceItem.id);
+    const {
+      data: destinationCandidates,
+      error: destinationLookupError,
+    } = await supabaseAdmin
+      .from(STOCK_ITEMS_TABLE)
+      .select("*")
+      .or(
+        `location_id.eq.${toLocation.id},and(location_id.is.null,location.eq.${toLocation.name})`,
+      )
+      .eq("is_active", true)
+      .neq("id", sourceItem.id);
 
     if (destinationLookupError) {
       throw Object.assign(
-        new Error("The destination stock records could not be checked."),
-        { databaseError: destinationLookupError },
+        new Error(
+          "The destination stock records could not be checked.",
+        ),
+        {
+          databaseError:
+            destinationLookupError,
+        },
       );
     }
 
-    const sourceBaseSku = baseSku(sourceItem.sku).toLowerCase();
+    const sourceBaseSku =
+      baseSku(sourceItem.sku)
+        .toLowerCase();
+
     const matchingDestination = (
-      (destinationCandidates ?? []) as unknown as StockItemRow[]
+      (destinationCandidates ??
+        []) as unknown as StockItemRow[]
     ).find((candidate) => {
       return (
-        clean(candidate.name).toLowerCase() ===
-          clean(sourceItem.name).toLowerCase() &&
-        baseSku(candidate.sku).toLowerCase() === sourceBaseSku
+        clean(candidate.name)
+          .toLowerCase() ===
+          clean(sourceItem.name)
+            .toLowerCase() &&
+        baseSku(candidate.sku)
+          .toLowerCase() ===
+          sourceBaseSku
       );
     });
 
     if (matchingDestination) {
-      const destinationQuantity = Math.max(
-        0,
-        Math.floor(Number(matchingDestination.quantity ?? 0) || 0),
-      );
+      const destinationQuantity =
+        Math.max(
+          0,
+          Math.floor(
+            Number(
+              matchingDestination.quantity ??
+                0,
+            ) || 0,
+          ),
+        );
 
-      const { data: mergedDestination, error: mergeError } =
-        await supabaseAdmin
-          .from(STOCK_ITEMS_TABLE)
-          .update({
-            quantity: destinationQuantity + quantity,
-            updated_at: movedAt,
-            updated_by: admin.id,
-            updated_by_name: movedByName,
-          })
-          .eq("id", matchingDestination.id)
-          .select("*")
-          .maybeSingle();
+      const {
+        data: mergedDestination,
+        error: mergeError,
+      } = await supabaseAdmin
+        .from(STOCK_ITEMS_TABLE)
+        .update({
+          quantity:
+            destinationQuantity +
+            quantity,
+          location_id:
+            toLocation.id,
+          location:
+            toLocation.name,
+          updated_at:
+            movedAt,
+          updated_by:
+            admin.id,
+          updated_by_name:
+            movedByName,
+        })
+        .eq(
+          "id",
+          matchingDestination.id,
+        )
+        .select("*")
+        .maybeSingle();
 
-      if (mergeError || !mergedDestination) {
+      if (
+        mergeError ||
+        !mergedDestination
+      ) {
         throw Object.assign(
-          new Error("The moved stock could not be merged at the destination."),
-          { databaseError: mergeError },
+          new Error(
+            "The moved stock could not be merged at the destination.",
+          ),
+          {
+            databaseError:
+              mergeError,
+          },
         );
       }
 
-      destinationItem = mergedDestination as unknown as StockItemRow;
-      destinationItemId = destinationItem.id;
+      destinationItem =
+        mergedDestination as unknown as StockItemRow;
 
-      if (quantity === availableQuantity) {
-        const { error: deleteSourceError } = await supabaseAdmin
+      destinationItemId =
+        destinationItem.id;
+
+      if (
+        quantity ===
+        availableQuantity
+      ) {
+        const {
+          error: deleteSourceError,
+        } = await supabaseAdmin
           .from(STOCK_ITEMS_TABLE)
           .delete()
           .eq("id", sourceItem.id);
 
         if (deleteSourceError) {
-          await supabaseAdmin
-            .from(STOCK_ITEMS_TABLE)
-            .update({ quantity: destinationQuantity })
-            .eq("id", matchingDestination.id);
+          await rollbackQuantity(
+            matchingDestination.id,
+            destinationQuantity,
+          );
 
           throw Object.assign(
-            new Error("The old source stock row could not be removed."),
-            { databaseError: deleteSourceError },
+            new Error(
+              "The old source stock row could not be removed.",
+            ),
+            {
+              databaseError:
+                deleteSourceError,
+            },
           );
         }
       } else {
-        const { error: sourceUpdateError } = await supabaseAdmin
+        const {
+          error: sourceUpdateError,
+        } = await supabaseAdmin
           .from(STOCK_ITEMS_TABLE)
           .update({
-            quantity: remainingQuantity,
-            updated_at: movedAt,
-            updated_by: admin.id,
-            updated_by_name: movedByName,
+            quantity:
+              remainingQuantity,
+            location_id:
+              fromLocation.id,
+            location:
+              fromLocation.name,
+            updated_at:
+              movedAt,
+            updated_by:
+              admin.id,
+            updated_by_name:
+              movedByName,
           })
           .eq("id", sourceItem.id);
 
         if (sourceUpdateError) {
-          await supabaseAdmin
-            .from(STOCK_ITEMS_TABLE)
-            .update({ quantity: destinationQuantity })
-            .eq("id", matchingDestination.id);
+          await rollbackQuantity(
+            matchingDestination.id,
+            destinationQuantity,
+          );
 
           throw Object.assign(
-            new Error("The source stock quantity could not be updated."),
-            { databaseError: sourceUpdateError },
+            new Error(
+              "The source stock quantity could not be updated.",
+            ),
+            {
+              databaseError:
+                sourceUpdateError,
+            },
           );
         }
       }
-    } else if (quantity === availableQuantity) {
-      const { data, error } = await supabaseAdmin
+    } else if (
+      quantity === availableQuantity
+    ) {
+      /*
+       * Moving all units means the existing stock row can simply
+       * be reassigned to the destination location.
+       */
+      const {
+        data,
+        error,
+      } = await supabaseAdmin
         .from(STOCK_ITEMS_TABLE)
         .update({
-          location: toLocation.name,
-          updated_at: movedAt,
-          updated_by: admin.id,
-          updated_by_name: movedByName,
+          location_id:
+            toLocation.id,
+          location:
+            toLocation.name,
+          updated_at:
+            movedAt,
+          updated_by:
+            admin.id,
+          updated_by_name:
+            movedByName,
         })
         .eq("id", sourceItem.id)
         .select("*")
@@ -728,151 +1075,276 @@ export async function POST(request: NextRequest) {
 
       if (error || !data) {
         throw Object.assign(
-          new Error("The stock item's location could not be updated."),
-          { databaseError: error },
+          new Error(
+            "The stock item's location could not be updated.",
+          ),
+          {
+            databaseError: error,
+          },
         );
       }
 
-      destinationItem = data as unknown as StockItemRow;
+      destinationItem =
+        data as unknown as StockItemRow;
+
+      destinationItemId =
+        destinationItem.id;
     } else {
-      const splitSku = `${baseSku(sourceItem.sku)}-MOVE-${randomUUID()
+      /*
+       * Partial movement:
+       * reduce the source row and create a separate destination row.
+       */
+      const splitSku = `${baseSku(
+        sourceItem.sku,
+      )}-MOVE-${randomUUID()
         .replaceAll("-", "")
         .slice(0, 8)
         .toUpperCase()}`;
 
-      const { error: sourceUpdateError } = await supabaseAdmin
+      const {
+        error: sourceUpdateError,
+      } = await supabaseAdmin
         .from(STOCK_ITEMS_TABLE)
         .update({
-          quantity: remainingQuantity,
-          updated_at: movedAt,
-          updated_by: admin.id,
-          updated_by_name: movedByName,
+          quantity:
+            remainingQuantity,
+          location_id:
+            fromLocation.id,
+          location:
+            fromLocation.name,
+          updated_at:
+            movedAt,
+          updated_by:
+            admin.id,
+          updated_by_name:
+            movedByName,
         })
         .eq("id", sourceItem.id);
 
       if (sourceUpdateError) {
         throw Object.assign(
-          new Error("The source stock quantity could not be updated."),
-          { databaseError: sourceUpdateError },
+          new Error(
+            "The source stock quantity could not be updated.",
+          ),
+          {
+            databaseError:
+              sourceUpdateError,
+          },
         );
       }
 
-      const { data: createdDestination, error: createError } =
-        await supabaseAdmin
-          .from(STOCK_ITEMS_TABLE)
-          .insert({
-            name: sourceItem.name,
-            sku: splitSku,
-            barcode: null,
-            description: sourceItem.description,
-            category: sourceItem.category,
-            location: toLocation.name,
-            supplier: sourceItem.supplier,
-            quantity,
-            reorder_level: sourceItem.reorder_level,
-            target_level: sourceItem.target_level,
-            unit_cost: sourceItem.unit_cost,
-            sale_price: sourceItem.sale_price,
-            is_active: true,
-            created_at: movedAt,
-            updated_at: movedAt,
-            created_by: admin.id,
-            created_by_name: movedByName,
-            updated_by: admin.id,
-            updated_by_name: movedByName,
-          })
-          .select("*")
-          .maybeSingle();
-
-      if (createError || !createdDestination) {
-        await supabaseAdmin
-          .from(STOCK_ITEMS_TABLE)
-          .update({ quantity: availableQuantity })
-          .eq("id", sourceItem.id);
-
-        throw Object.assign(
-          new Error("The destination stock record could not be created."),
-          { databaseError: createError },
-        );
-      }
-
-      destinationItem = createdDestination as unknown as StockItemRow;
-      destinationItemId = destinationItem.id;
-    }
-
-    const { data: movement, error: movementError } =
-      await supabaseAdmin
-        .from(STOCK_MOVEMENTS_TABLE)
+      const {
+        data: createdDestination,
+        error: createError,
+      } = await supabaseAdmin
+        .from(STOCK_ITEMS_TABLE)
         .insert({
-          // Always point item_id at the surviving destination row. This means
-          // a merged move can safely remove the old source inventory row.
-          item_id: destinationItemId,
-
-          // Preserve the original source details even when that source row is
-          // deleted after all of its units have been merged elsewhere.
-          source_item_id: sourceItem.id,
-          item_name: sourceItem.name,
-          sku: sourceItem.sku,
-
-          movement_type: "transfer",
+          name:
+            sourceItem.name,
+          sku:
+            splitSku,
+          barcode:
+            null,
+          description:
+            sourceItem.description,
+          category:
+            sourceItem.category,
+          location_id:
+            toLocation.id,
+          location:
+            toLocation.name,
+          supplier:
+            sourceItem.supplier,
           quantity,
-          from_location_id: fromLocation.id,
-          to_location_id: toLocation.id,
-          reason: notes ?? "Stock moved between locations",
-          notes: notes ?? null,
-          admin_id: admin.id,
-          admin_name: movedByName,
-          admin_email: clean(admin.email) || null,
-          quantity_before: availableQuantity,
-          quantity_after: remainingQuantity,
-          created_at: movedAt,
+          reorder_level:
+            sourceItem.reorder_level,
+          target_level:
+            sourceItem.target_level,
+          unit_cost:
+            sourceItem.unit_cost,
+          sale_price:
+            sourceItem.sale_price,
+          is_active:
+            true,
+          created_at:
+            movedAt,
+          updated_at:
+            movedAt,
+          created_by:
+            admin.id,
+          created_by_name:
+            movedByName,
+          updated_by:
+            admin.id,
+          updated_by_name:
+            movedByName,
         })
         .select("*")
         .maybeSingle();
 
-    if (movementError) {
-      console.warn("Stock move completed without an audit record:", {
-        route: ROUTE_NAME,
-        itemId: sourceItem.id,
-        code: movementError.code ?? null,
-        message: movementError.message ?? null,
-      });
+      if (
+        createError ||
+        !createdDestination
+      ) {
+        await rollbackQuantity(
+          sourceItem.id,
+          availableQuantity,
+        );
+
+        throw Object.assign(
+          new Error(
+            "The destination stock record could not be created.",
+          ),
+          {
+            databaseError:
+              createError,
+          },
+        );
+      }
+
+      destinationItem =
+        createdDestination as unknown as StockItemRow;
+
+      destinationItemId =
+        destinationItem.id;
     }
 
-    const finalQuantity = Math.max(
-      0,
-      Math.floor(Number(destinationItem?.quantity ?? quantity) || quantity),
-    );
+    const {
+      data: movement,
+      error: movementError,
+    } = await supabaseAdmin
+      .from(STOCK_MOVEMENTS_TABLE)
+      .insert({
+        /*
+         * item_id points to the surviving destination stock row.
+         */
+        item_id:
+          destinationItemId,
+
+        /*
+         * Preserve the original source item details even if the
+         * source row was deleted after a full merge.
+         */
+        source_item_id:
+          sourceItem.id,
+        item_name:
+          sourceItem.name,
+        sku:
+          sourceItem.sku,
+
+        movement_type:
+          "transfer",
+        quantity,
+        from_location_id:
+          fromLocation.id,
+        to_location_id:
+          toLocation.id,
+        reason:
+          movementReason,
+        notes:
+          notes,
+        admin_id:
+          admin.id,
+        admin_name:
+          movedByName,
+        admin_email:
+          clean(admin.email) ||
+          null,
+        quantity_before:
+          availableQuantity,
+        quantity_after:
+          remainingQuantity,
+        created_at:
+          movedAt,
+      })
+      .select("*")
+      .maybeSingle();
+
+    if (movementError) {
+      console.warn(
+        "Stock move completed without a movement record:",
+        {
+          route:
+            ROUTE_NAME,
+          itemId:
+            sourceItem.id,
+          code:
+            movementError.code ??
+            null,
+          message:
+            movementError.message ??
+            null,
+        },
+      );
+    }
+
+    const finalQuantity =
+      Math.max(
+        0,
+        Math.floor(
+          Number(
+            destinationItem?.quantity ??
+              quantity,
+          ) || quantity,
+        ),
+      );
 
     return json({
       ok: true,
-      message: `${quantity} unit${quantity === 1 ? "" : "s"} of ${
-        sourceItem.name
-      } ${quantity === 1 ? "has" : "have"} been moved to ${
-        toLocation.name
-      }. Stock for this product is now kept in one row at that location.`,
-      auditRecorded: !movementError && Boolean(movement),
+      message: `${quantity} unit${
+        quantity === 1 ? "" : "s"
+      } of ${sourceItem.name} ${
+        quantity === 1 ? "has" : "have"
+      } been moved from ${
+        fromLocation.name
+      } to ${toLocation.name}.`,
+      auditRecorded:
+        !movementError &&
+        Boolean(movement),
       warning: movementError
-        ? "The stock move succeeded, but its audit record could not be saved."
+        ? "The stock move succeeded, but its movement record could not be saved."
         : null,
-      item: destinationItem,
+      item:
+        destinationItem,
       items: [
         {
-          id: destinationItemId,
-          name: destinationItem?.name || sourceItem.name,
-          sku: destinationItem?.sku || sourceItem.sku,
-          quantity: finalQuantity,
-          locationId: toLocation.id,
-          locationName: toLocation.name,
-          unitValue: Number(sourceItem.unit_cost || 0),
+          id:
+            destinationItemId,
+          name:
+            destinationItem?.name ||
+            sourceItem.name,
+          sku:
+            destinationItem?.sku ||
+            sourceItem.sku,
+          quantity:
+            finalQuantity,
+          locationId:
+            toLocation.id,
+          locationName:
+            toLocation.name,
+          unitValue:
+            Number(
+              sourceItem.unit_cost ||
+                0,
+            ),
         },
       ],
       movement: {
-        id: movement?.id ?? randomUUID(),
-        itemId: sourceItem.id,
-        fromLocationId: fromLocation.id,
-        toLocationId: toLocation.id,
+        id:
+          movement?.id ??
+          randomUUID(),
+        itemId:
+          sourceItem.id,
+        destinationItemId,
+        fromLocationId:
+          fromLocation.id,
+        toLocationId:
+          toLocation.id,
         quantity,
+        quantityBefore:
+          availableQuantity,
+        quantityAfter:
+          remainingQuantity,
       },
     });
   } catch (caught) {
@@ -880,18 +1352,25 @@ export async function POST(request: NextRequest) {
       caught &&
       typeof caught === "object" &&
       "databaseError" in caught
-        ? (caught as { databaseError?: SupabaseErrorLike })
-            .databaseError
+        ? (
+            caught as {
+              databaseError?: SupabaseErrorLike;
+            }
+          ).databaseError
         : null;
 
-    console.error(`${ROUTE_NAME} failed:`, {
-      caught,
-      itemId,
-      fromLocationId,
-      toLocationId,
-      quantity,
-      adminId: admin.id,
-    });
+    console.error(
+      `${ROUTE_NAME} failed:`,
+      {
+        caught,
+        itemId,
+        fromLocationId,
+        toLocationId,
+        quantity,
+        adminId:
+          admin.id,
+      },
+    );
 
     return json(
       {
@@ -900,7 +1379,11 @@ export async function POST(request: NextRequest) {
           caught instanceof Error
             ? caught.message
             : "An unexpected error occurred while moving stock.",
-        ...(databaseError ? errorPayload(databaseError) : {}),
+        ...(databaseError
+          ? errorPayload(
+              databaseError,
+            )
+          : {}),
       },
       500,
     );

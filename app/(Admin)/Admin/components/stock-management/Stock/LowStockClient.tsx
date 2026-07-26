@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import ExcelJS from "exceljs";
 import {
   AlertTriangle,
   ArrowDown,
@@ -131,6 +132,8 @@ const MOVEMENT_ENDPOINT = "/api/admin/stockmanagement/inventory/movements";
 const LOCATIONS_ENDPOINT = "/api/admin/stockmanagement/locations";
 const MOVE_STOCK_ENDPOINT =
   "/api/admin/stockmanagement/locations/movestock";
+const AUDIT_ENDPOINT =
+  "/api/admin/stockmanagement/audit-logs";
 
 function formatCurrency(value: number | null | undefined) {
   return new Intl.NumberFormat("en-GB", {
@@ -272,6 +275,109 @@ function errorNotice(params: {
     title: params.title,
     message,
     technicalDetails,
+  };
+}
+
+
+type AuditResponse = {
+  ok?: boolean;
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  auditId?: string | null;
+  requestId?: string | null;
+};
+
+type AuditPayload = {
+  actionKey:
+    | "stock_item_created"
+    | "stock_item_updated"
+    | "test_stock_item_created"
+    | "stock_quantity_adjusted"
+    | "stock_location_moved"
+    | "inventory_report_exported";
+  actionLabel: string;
+  actionCategory:
+    | "create"
+    | "update"
+    | "adjust"
+    | "move"
+    | "export";
+  module: "inventory" | "movements" | "locations" | "reports";
+  status: "success";
+  riskLevel: "low" | "medium";
+  description: string;
+  reason?: string | null;
+  notes?: string | null;
+  recordType: "stock_item" | "stock_movement" | "inventory_report";
+  recordId?: string | null;
+  recordName?: string | null;
+  recordReference?: string | null;
+  stockItemId?: string | null;
+  stockItemName?: string | null;
+  stockItemSku?: string | null;
+  locationId?: string | null;
+  locationName?: string | null;
+  fromLocationId?: string | null;
+  fromLocationName?: string | null;
+  toLocationId?: string | null;
+  toLocationName?: string | null;
+  quantityBefore?: number | null;
+  quantityAfter?: number | null;
+  quantityChanged?: number | null;
+  beforeData?: Record<string, unknown> | null;
+  afterData?: Record<string, unknown> | null;
+  changedFields?: string[];
+  responseStatus?: number;
+  apiEndpoint?: string;
+  metadata?: Record<string, unknown>;
+};
+
+async function reportAudit(payload: AuditPayload) {
+  const response = await fetch(AUDIT_ENDPOINT, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const { data, rawText } = await readJson<AuditResponse>(response);
+
+  if (!response.ok || !data?.ok) {
+    throw new Error(
+      data?.error ||
+        `Audit reporting failed with HTTP ${response.status}${
+          rawText ? `: ${rawText.slice(0, 300)}` : ""
+        }.`,
+    );
+  }
+
+  return data;
+}
+
+function itemSnapshot(item: StockItem) {
+  return {
+    id: item.id,
+    name: item.name,
+    sku: item.sku,
+    barcode: item.barcode || null,
+    description: item.description || null,
+    category: item.category || null,
+    location: item.location || null,
+    supplier: item.supplier || null,
+    quantity: item.quantity,
+    reorderLevel: item.reorderLevel,
+    targetLevel: item.targetLevel ?? null,
+    unitCost: item.unitCost ?? null,
+    salePrice: item.salePrice ?? null,
+    stockValue: item.stockValue ?? null,
+    status: item.status,
+    isActive: item.isActive,
   };
 }
 
@@ -579,62 +685,695 @@ export default function LowStockClient() {
     );
   }
 
-  function exportCsv(selectedOnly = false) {
+  async function exportXlsx(selectedOnly = false) {
     const exportItems = selectedOnly
       ? filteredItems.filter((item) => selectedIds.includes(item.id))
       : filteredItems;
 
-    const rows = exportItems.map((item) => ({
-      Item: item.name,
-      SKU: item.sku,
-      Category: item.category || "",
-      Location: item.location || "",
-      "Current quantity": item.quantity,
-      "Reorder level": item.reorderLevel,
-      "Target level": item.targetLevel ?? "",
-      "Suggested order quantity": item.unitsNeeded,
-      Supplier: item.supplier || "",
-      "Unit cost": item.unitCost ?? "",
-      "Estimated cost": item.estimatedOrderCost,
-      Priority: item.priority,
-      "Last updated": item.updatedAt || "",
-    }));
+    if (exportItems.length === 0) {
+      setNotice({
+        tone: "warning",
+        title: "Nothing to export",
+        message:
+          selectedOnly
+            ? "Select at least one low-stock item before exporting."
+            : "There are no matching low-stock items to export.",
+      });
+      return;
+    }
 
-    const headers = Object.keys(rows[0] || {
-      Item: "",
-      SKU: "",
-      "Current quantity": "",
-    });
+    setNotice(null);
 
-    const escape = (value: unknown) =>
-      `"${String(value ?? "").replaceAll('"', '""')}"`;
+    try {
+      const workbook = new ExcelJS.Workbook();
 
-    const csv = [
-      headers.map(escape).join(","),
-      ...rows.map((row) =>
-        headers
-          .map((header) =>
-            escape((row as Record<string, unknown>)[header]),
-          )
-          .join(","),
-      ),
-    ].join("\n");
+      workbook.creator = "Burton Pride Stock Management";
+      workbook.lastModifiedBy = "Burton Pride Stock Management";
+      workbook.created = new Date();
+      workbook.modified = new Date();
+      // ExcelJS Workbook has no 'company' property; keep company info in description instead
+      // workbook.company = "Burton Pride";
+      Object.assign(workbook.properties, {
+        subject: "Low-stock report",
+        title: selectedOnly
+          ? "Selected Low Stock Report"
+          : "Low Stock Report",
+        description:
+          "A styled Microsoft Excel report exported from Burton Pride Stock Management.",
+      });
 
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
+      const exportedAt = new Date();
+      const fileDate = exportedAt.toISOString().slice(0, 10);
 
-    anchor.href = url;
-    anchor.download = `burton-pride-low-stock-${new Date()
-      .toISOString()
-      .slice(0, 10)}.csv`;
+      const summarySheet = workbook.addWorksheet("Summary", {
+        views: [{ state: "frozen", ySplit: 5 }],
+        properties: {
+          defaultRowHeight: 20,
+        },
+        pageSetup: {
+          orientation: "landscape",
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          paperSize: 9,
+          margins: {
+            left: 0.3,
+            right: 0.3,
+            top: 0.5,
+            bottom: 0.5,
+            header: 0.2,
+            footer: 0.2,
+          },
+        },
+      });
 
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+      const reportSheet = workbook.addWorksheet("Low Stock Report", {
+        views: [{ state: "frozen", ySplit: 6 }],
+        properties: {
+          defaultRowHeight: 20,
+        },
+        pageSetup: {
+          orientation: "landscape",
+          fitToPage: true,
+          fitToWidth: 1,
+          fitToHeight: 0,
+          paperSize: 9,
+          margins: {
+            left: 0.2,
+            right: 0.2,
+            top: 0.4,
+            bottom: 0.4,
+            header: 0.2,
+            footer: 0.2,
+          },
+        },
+      });
+
+      const titleFill = "FF24163A";
+      const headingFill = "FF4C1D95";
+      const accentFill = "FFF59E0B";
+      const lightFill = "FFF8FAFC";
+      const borderColour = "FFD1D5DB";
+      const textColour = "FF111827";
+      const mutedColour = "FF6B7280";
+      const white = "FFFFFFFF";
+      const redFill = "FFFEE2E2";
+      const redText = "FF991B1B";
+      const orangeFill = "FFFFEDD5";
+      const orangeText = "FF9A3412";
+      const amberFill = "FFFEF3C7";
+      const amberText = "FF92400E";
+      const greenFill = "FFDCFCE7";
+      const greenText = "FF166534";
+
+      function applyThinBorder(cell: ExcelJS.Cell) {
+        cell.border = {
+          top: { style: "thin", color: { argb: borderColour } },
+          left: { style: "thin", color: { argb: borderColour } },
+          bottom: { style: "thin", color: { argb: borderColour } },
+          right: { style: "thin", color: { argb: borderColour } },
+        };
+      }
+
+      function styleSectionHeader(
+        sheet: ExcelJS.Worksheet,
+        range: string,
+        textValue: string,
+      ) {
+        sheet.mergeCells(range);
+        const firstCell = sheet.getCell(range.split(":")[0]);
+        firstCell.value = textValue;
+        firstCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: headingFill },
+        };
+        firstCell.font = {
+          bold: true,
+          color: { argb: white },
+          size: 12,
+        };
+        firstCell.alignment = {
+          vertical: "middle",
+          horizontal: "left",
+        };
+      }
+
+      const totalUnitsNeeded = exportItems.reduce(
+        (total, item) => total + item.unitsNeeded,
+        0,
+      );
+      const totalEstimatedCost = exportItems.reduce(
+        (total, item) => total + item.estimatedOrderCost,
+        0,
+      );
+      const outOfStockCount = exportItems.filter(
+        (item) => item.quantity <= 0,
+      ).length;
+      const lowStockCount = exportItems.filter(
+        (item) => item.quantity > 0,
+      ).length;
+      const supplierCount = new Set(
+        exportItems.map((item) => item.supplier).filter(Boolean),
+      ).size;
+
+      // Summary sheet title.
+      summarySheet.mergeCells("A1:F2");
+      const summaryTitle = summarySheet.getCell("A1");
+      summaryTitle.value = selectedOnly
+        ? "Burton Pride Selected Low Stock Report"
+        : "Burton Pride Low Stock Report";
+      summaryTitle.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: titleFill },
+      };
+      summaryTitle.font = {
+        bold: true,
+        color: { argb: white },
+        size: 20,
+      };
+      summaryTitle.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+      };
+      summarySheet.getRow(1).height = 28;
+      summarySheet.getRow(2).height = 28;
+
+      summarySheet.mergeCells("A3:F3");
+      const generatedCell = summarySheet.getCell("A3");
+      generatedCell.value = `Generated ${new Intl.DateTimeFormat("en-GB", {
+        dateStyle: "full",
+        timeStyle: "short",
+      }).format(exportedAt)}`;
+      generatedCell.font = {
+        italic: true,
+        color: { argb: mutedColour },
+      };
+      generatedCell.alignment = {
+        horizontal: "center",
+      };
+
+      summarySheet.mergeCells("A4:F4");
+      const filterCell = summarySheet.getCell("A4");
+      filterCell.value = [
+        `Scope: ${selectedOnly ? "Selected items" : "All matching items"}`,
+        `Search: ${query.trim() || "None"}`,
+        `Priority: ${priorityFilter}`,
+        `Category: ${categoryFilter}`,
+        `Supplier: ${supplierFilter}`,
+        `Location: ${locationFilter}`,
+      ].join("  |  ");
+      filterCell.font = {
+        color: { argb: mutedColour },
+        size: 10,
+      };
+      filterCell.alignment = {
+        horizontal: "center",
+        wrapText: true,
+      };
+      summarySheet.getRow(4).height = 32;
+
+      styleSectionHeader(summarySheet, "A6:F6", "Low-stock overview");
+
+      const summaryMetrics = [
+        ["Items in report", exportItems.length],
+        ["Low-stock items", lowStockCount],
+        ["Out-of-stock items", outOfStockCount],
+        ["Units needed", totalUnitsNeeded],
+        ["Suppliers affected", supplierCount],
+        ["Estimated restock cost", totalEstimatedCost],
+      ];
+
+      summaryMetrics.forEach(([label, value], index) => {
+        const row = summarySheet.getRow(7 + index);
+        row.getCell(1).value = label;
+        row.getCell(1).font = {
+          bold: true,
+          color: { argb: textColour },
+        };
+        row.getCell(2).value = value;
+
+        if (label === "Estimated restock cost") {
+          row.getCell(2).numFmt = '£#,##0.00;[Red]-£#,##0.00';
+        } else {
+          row.getCell(2).numFmt = "0";
+        }
+
+        row.getCell(1).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: lightFill },
+        };
+        row.getCell(2).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: white },
+        };
+        applyThinBorder(row.getCell(1));
+        applyThinBorder(row.getCell(2));
+      });
+
+      styleSectionHeader(summarySheet, "A15:F15", "Important notes");
+
+      const noteRows = [
+        [
+          "Supplier warning",
+          `${warnings.withoutSupplier} low-stock item${
+            warnings.withoutSupplier === 1 ? "" : "s"
+          } without a supplier.`,
+        ],
+        [
+          "Target-level warning",
+          `${warnings.withoutTarget} item${
+            warnings.withoutTarget === 1 ? "" : "s"
+          } without a suitable target level.`,
+        ],
+        [
+          "Unit-cost warning",
+          `${warnings.withoutCost} item${
+            warnings.withoutCost === 1 ? "" : "s"
+          } without a usable unit cost.`,
+        ],
+      ];
+
+      noteRows.forEach(([label, value], index) => {
+        const row = summarySheet.getRow(16 + index);
+        row.getCell(1).value = label;
+        row.getCell(2).value = value;
+        summarySheet.mergeCells(`B${16 + index}:F${16 + index}`);
+
+        row.getCell(1).font = {
+          bold: true,
+          color: { argb: amberText },
+        };
+        row.getCell(1).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: amberFill },
+        };
+        row.getCell(2).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: amberFill },
+        };
+        row.getCell(2).alignment = { wrapText: true };
+
+        for (let column = 1; column <= 6; column += 1) {
+          applyThinBorder(row.getCell(column));
+        }
+      });
+
+      summarySheet.columns = [
+        { width: 25 },
+        { width: 22 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 24 },
+      ];
+
+      summarySheet.headerFooter.oddHeader =
+        "&C&B Burton Pride Stock Management";
+      summarySheet.headerFooter.oddFooter =
+        "&L Low Stock Report&C Page &P of &N&R Generated &D";
+
+      // Detailed report title and metadata.
+      reportSheet.mergeCells("A1:N2");
+      const reportTitle = reportSheet.getCell("A1");
+      reportTitle.value = selectedOnly
+        ? "Burton Pride Selected Low Stock Items"
+        : "Burton Pride Low Stock Items";
+      reportTitle.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: titleFill },
+      };
+      reportTitle.font = {
+        bold: true,
+        color: { argb: white },
+        size: 20,
+      };
+      reportTitle.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+      };
+      reportSheet.getRow(1).height = 28;
+      reportSheet.getRow(2).height = 28;
+
+      reportSheet.mergeCells("A3:N3");
+      const reportGenerated = reportSheet.getCell("A3");
+      reportGenerated.value = `Generated: ${new Intl.DateTimeFormat("en-GB", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(exportedAt)} | Rows: ${exportItems.length}`;
+      reportGenerated.font = {
+        italic: true,
+        color: { argb: mutedColour },
+      };
+      reportGenerated.alignment = {
+        horizontal: "center",
+      };
+
+      reportSheet.mergeCells("A4:N4");
+      const reportFilters = reportSheet.getCell("A4");
+      reportFilters.value = `Filters — Search: ${
+        query.trim() || "None"
+      }; Priority: ${priorityFilter}; Category: ${categoryFilter}; Supplier: ${supplierFilter}; Location: ${locationFilter}; Sort: ${sortBy} ${sortDirection}`;
+      reportFilters.font = {
+        color: { argb: mutedColour },
+        size: 10,
+      };
+      reportFilters.alignment = {
+        horizontal: "center",
+        wrapText: true,
+      };
+
+      const headers = [
+        "Item",
+        "SKU",
+        "Category",
+        "Location",
+        "Current quantity",
+        "Reorder level",
+        "Target level",
+        "Units needed",
+        "Supplier",
+        "Unit cost",
+        "Estimated order cost",
+        "Priority",
+        "Last updated",
+        "Updated by",
+      ];
+
+      const headerRowNumber = 6;
+      const headerRow = reportSheet.getRow(headerRowNumber);
+      headerRow.values = headers;
+      headerRow.height = 30;
+
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: headingFill },
+        };
+        cell.font = {
+          bold: true,
+          color: { argb: white },
+          size: 10,
+        };
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "center",
+          wrapText: true,
+        };
+        applyThinBorder(cell);
+      });
+
+      exportItems.forEach((item, index) => {
+        const rowNumber = headerRowNumber + 1 + index;
+        const row = reportSheet.getRow(rowNumber);
+        const locationName =
+          locations.find((location) => location.id === item.location)?.name ||
+          item.location ||
+          "Not set";
+
+        row.values = [
+          item.name,
+          item.sku,
+          item.category || "Uncategorised",
+          locationName,
+          item.quantity,
+          item.reorderLevel,
+          item.targetLevel ?? item.desiredLevel,
+          item.unitsNeeded,
+          item.supplier || "Not assigned",
+          item.unitCost ?? null,
+          item.estimatedOrderCost,
+          item.priority === "critical"
+            ? "Critical"
+            : item.priority === "high"
+              ? "High priority"
+              : "Low stock",
+          item.updatedAt ? new Date(item.updatedAt) : null,
+          item.updatedByName || "Not recorded",
+        ];
+
+        row.height = 24;
+
+        row.eachCell((cell, columnNumber) => {
+          cell.font = {
+            color: { argb: textColour },
+            size: 10,
+          };
+          cell.alignment = {
+            vertical: "middle",
+            horizontal:
+              columnNumber >= 5 && columnNumber <= 8
+                ? "center"
+                : columnNumber === 10 || columnNumber === 11
+                  ? "right"
+                  : "left",
+            wrapText: true,
+          };
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: {
+              argb: index % 2 === 0 ? white : lightFill,
+            },
+          };
+          applyThinBorder(cell);
+        });
+
+        row.getCell(5).numFmt = "0";
+        row.getCell(6).numFmt = "0";
+        row.getCell(7).numFmt = "0";
+        row.getCell(8).numFmt = "0";
+        row.getCell(10).numFmt = '£#,##0.00;[Red]-£#,##0.00';
+        row.getCell(11).numFmt = '£#,##0.00;[Red]-£#,##0.00';
+        row.getCell(13).numFmt = "dd/mm/yyyy hh:mm";
+
+        const priorityCell = row.getCell(12);
+        if (item.priority === "critical") {
+          priorityCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: redFill },
+          };
+          priorityCell.font = {
+            bold: true,
+            color: { argb: redText },
+          };
+        } else if (item.priority === "high") {
+          priorityCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: orangeFill },
+          };
+          priorityCell.font = {
+            bold: true,
+            color: { argb: orangeText },
+          };
+        } else {
+          priorityCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: amberFill },
+          };
+          priorityCell.font = {
+            bold: true,
+            color: { argb: amberText },
+          };
+        }
+
+        const quantityCell = row.getCell(5);
+        if (item.quantity <= 0) {
+          quantityCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: redFill },
+          };
+          quantityCell.font = {
+            bold: true,
+            color: { argb: redText },
+          };
+        } else {
+          quantityCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: amberFill },
+          };
+          quantityCell.font = {
+            bold: true,
+            color: { argb: amberText },
+          };
+        }
+
+        const estimatedCostCell = row.getCell(11);
+        if (item.estimatedOrderCost <= 0) {
+          estimatedCostCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: greenFill },
+          };
+          estimatedCostCell.font = {
+            color: { argb: greenText },
+          };
+        }
+      });
+
+      const finalDataRow = headerRowNumber + exportItems.length;
+
+      reportSheet.autoFilter = {
+        from: {
+          row: headerRowNumber,
+          column: 1,
+        },
+        to: {
+          row: finalDataRow,
+          column: headers.length,
+        },
+      };
+
+      reportSheet.columns = [
+        { key: "item", width: 30 },
+        { key: "sku", width: 20 },
+        { key: "category", width: 20 },
+        { key: "location", width: 24 },
+        { key: "currentQuantity", width: 14 },
+        { key: "reorderLevel", width: 14 },
+        { key: "targetLevel", width: 14 },
+        { key: "unitsNeeded", width: 14 },
+        { key: "supplier", width: 25 },
+        { key: "unitCost", width: 14 },
+        { key: "estimatedCost", width: 20 },
+        { key: "priority", width: 16 },
+        { key: "updatedAt", width: 20 },
+        { key: "updatedBy", width: 24 },
+      ];
+
+      reportSheet.headerFooter.oddHeader =
+        "&C&B Burton Pride Stock Management";
+      reportSheet.headerFooter.oddFooter =
+        "&L Low Stock Report&C Page &P of &N&R Generated &D";
+
+      // Add a totals row below the report table.
+      const totalsRowNumber = finalDataRow + 2;
+      reportSheet.mergeCells(`A${totalsRowNumber}:G${totalsRowNumber}`);
+      const totalsLabelCell = reportSheet.getCell(`A${totalsRowNumber}`);
+      totalsLabelCell.value = "Report totals";
+      totalsLabelCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: accentFill },
+      };
+      totalsLabelCell.font = {
+        bold: true,
+        color: { argb: textColour },
+      };
+
+      reportSheet.getCell(`H${totalsRowNumber}`).value = totalUnitsNeeded;
+      reportSheet.getCell(`H${totalsRowNumber}`).numFmt = "0";
+      reportSheet.getCell(`J${totalsRowNumber}`).value = "Estimated total";
+      reportSheet.getCell(`J${totalsRowNumber}`).font = { bold: true };
+      reportSheet.getCell(`K${totalsRowNumber}`).value = totalEstimatedCost;
+      reportSheet.getCell(`K${totalsRowNumber}`).numFmt =
+        '£#,##0.00;[Red]-£#,##0.00';
+      reportSheet.getCell(`K${totalsRowNumber}`).font = { bold: true };
+
+      for (let column = 1; column <= headers.length; column += 1) {
+        const cell = reportSheet.getRow(totalsRowNumber).getCell(column);
+        if (!cell.fill || cell.fill.type !== "pattern") {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: amberFill },
+          };
+        }
+        applyThinBorder(cell);
+      }
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = selectedOnly
+        ? `burton-pride-selected-low-stock-${fileDate}.xlsx`
+        : `burton-pride-low-stock-${fileDate}.xlsx`;
+
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      await reportAudit({
+        actionKey: "inventory_report_exported",
+        actionLabel: selectedOnly
+          ? "Selected low-stock Excel report exported"
+          : "Low-stock Excel report exported",
+        actionCategory: "export",
+        module: "reports",
+        status: "success",
+        riskLevel: "low",
+        description: selectedOnly
+          ? `${exportItems.length} selected low-stock item${
+              exportItems.length === 1 ? "" : "s"
+            } were exported as a styled Excel workbook.`
+          : `${exportItems.length} low-stock item${
+              exportItems.length === 1 ? "" : "s"
+            } were exported as a styled Excel workbook.`,
+        reason:
+          "Styled XLSX low-stock report downloaded from Stock Management.",
+        recordType: "inventory_report",
+        recordId: null,
+        recordName: selectedOnly
+          ? "Burton Pride selected low-stock Excel report"
+          : "Burton Pride low-stock Excel report",
+        responseStatus: 200,
+        apiEndpoint: "client://stockmanagement/low-stock/export",
+        metadata: {
+          source: "low_stock_client",
+          format: "xlsx",
+          styledWorkbook: true,
+          sheets: ["Summary", "Low Stock Report"],
+          selectedOnly,
+          exportedRows: exportItems.length,
+          totalUnitsNeeded,
+          totalEstimatedCost,
+          filters: {
+            search: query,
+            priority: priorityFilter,
+            category: categoryFilter,
+            supplier: supplierFilter,
+            location: locationFilter,
+            sortBy,
+            sortDirection,
+          },
+        },
+      });
+
+      setNotice({
+        tone: "success",
+        title: "Excel report exported",
+        message: `${exportItems.length} low-stock item${
+          exportItems.length === 1 ? "" : "s"
+        } were exported as a styled XLSX workbook and reported to the audit logs.`,
+      });
+    } catch (caught) {
+      setNotice({
+        tone: "error",
+        title: "Excel report could not be exported",
+        message:
+          caught instanceof Error
+            ? caught.message
+            : "The styled XLSX workbook could not be created.",
+      });
+    }
   }
 
   function openAdjust(item: LowStockItem) {
@@ -791,13 +1530,85 @@ export default function LowStockClient() {
         return;
       }
 
+      const beforeItem =
+        items.find((item) => item.id === editItemId) || null;
+      const returnedItem = result.data.items?.[0] || null;
+      const afterItem = returnedItem
+        ? normaliseItem(returnedItem)
+        : normaliseItem({
+            ...beforeItem,
+            id: editItemId,
+            name,
+            sku,
+            barcode: editItemForm.barcode.trim() || null,
+            description: editItemForm.description.trim() || null,
+            category: editItemForm.category.trim() || null,
+            location: editItemForm.location.trim() || null,
+            supplier: editItemForm.supplier.trim() || null,
+            quantity,
+            reorderLevel,
+            targetLevel,
+            unitCost: editItemForm.unitCost
+              ? numberValue(editItemForm.unitCost)
+              : null,
+            salePrice: editItemForm.salePrice
+              ? numberValue(editItemForm.salePrice)
+              : null,
+            isActive: editItemForm.isActive,
+          });
+
+      await reportAudit({
+        actionKey: "stock_item_updated",
+        actionLabel: "Low-stock item updated",
+        actionCategory: "update",
+        module: "inventory",
+        status: "success",
+        riskLevel: "low",
+        description: `${name} was updated from the Low Stock page.`,
+        reason: "Stock item details were changed using the Low Stock edit form.",
+        recordType: "stock_item",
+        recordId: editItemId,
+        recordName: name,
+        recordReference: sku,
+        stockItemId: editItemId,
+        stockItemName: name,
+        stockItemSku: sku,
+        locationId: editItemForm.location.trim() || null,
+        quantityBefore: beforeItem?.quantity ?? null,
+        quantityAfter: quantity,
+        quantityChanged:
+          beforeItem ? quantity - beforeItem.quantity : null,
+        beforeData: beforeItem ? itemSnapshot(beforeItem) : null,
+        afterData: itemSnapshot(afterItem),
+        changedFields: beforeItem
+          ? Object.keys(itemSnapshot(afterItem)).filter(
+              (key) =>
+                JSON.stringify(
+                  itemSnapshot(beforeItem)[
+                    key as keyof ReturnType<typeof itemSnapshot>
+                  ],
+                ) !==
+                JSON.stringify(
+                  itemSnapshot(afterItem)[
+                    key as keyof ReturnType<typeof itemSnapshot>
+                  ],
+                ),
+            )
+          : Object.keys(itemSnapshot(afterItem)),
+        responseStatus: 200,
+        apiEndpoint: INVENTORY_ENDPOINT,
+        metadata: {
+          source: "low_stock_client",
+        },
+      });
+
       setShowEditModal(false);
       setEditItemId(null);
       setEditItemForm(EMPTY_ADD_ITEM_FORM);
       setNotice({
         tone: "success",
         title: "Stock item updated",
-        message: `${name} has been updated successfully.`,
+        message: `${name} has been updated and reported to the audit logs.`,
       });
 
       await loadData();
@@ -873,6 +1684,49 @@ export default function LowStockClient() {
         return;
       }
 
+      const quantityBefore = adjustForm.item.quantity;
+      const quantityAfter = quantityBefore + quantity;
+
+      await reportAudit({
+        actionKey: "stock_quantity_adjusted",
+        actionLabel: "Low-stock item restocked",
+        actionCategory: "adjust",
+        module: "movements",
+        status: "success",
+        riskLevel: "medium",
+        description: `${quantity} unit${
+          quantity === 1 ? "" : "s"
+        } were added to ${adjustForm.item.name}.`,
+        reason: adjustForm.reason.trim(),
+        notes: adjustForm.notes.trim() || null,
+        recordType: "stock_movement",
+        recordId: null,
+        recordName: adjustForm.item.name,
+        recordReference: adjustForm.item.sku,
+        stockItemId: adjustForm.item.id,
+        stockItemName: adjustForm.item.name,
+        stockItemSku: adjustForm.item.sku,
+        locationId: adjustForm.item.location || null,
+        quantityBefore,
+        quantityAfter,
+        quantityChanged: quantity,
+        beforeData: {
+          ...itemSnapshot(adjustForm.item),
+          quantity: quantityBefore,
+        },
+        afterData: {
+          ...itemSnapshot(adjustForm.item),
+          quantity: quantityAfter,
+        },
+        changedFields: ["quantity"],
+        responseStatus: 200,
+        apiEndpoint: MOVEMENT_ENDPOINT,
+        metadata: {
+          source: "low_stock_client",
+          movementType: "add",
+        },
+      });
+
       setShowAdjustModal(false);
       setAdjustForm(null);
       setNotice({
@@ -880,7 +1734,7 @@ export default function LowStockClient() {
         title: "Stock added",
         message: `${quantity} unit${
           quantity === 1 ? "" : "s"
-        } were added to ${adjustForm.item.name}.`,
+        } were added to ${adjustForm.item.name} and reported to the audit logs.`,
       });
       await loadData();
     } catch (caught) {
@@ -1007,6 +1861,56 @@ export default function LowStockClient() {
         return;
       }
 
+      await reportAudit({
+        actionKey: "stock_location_moved",
+        actionLabel: "Low-stock item moved",
+        actionCategory: "move",
+        module: "locations",
+        status: "success",
+        riskLevel: "medium",
+        description: `${quantity} unit${
+          quantity === 1 ? "" : "s"
+        } of ${selectedItem.name} ${
+          quantity === 1 ? "was" : "were"
+        } moved from ${currentLocation.name} to ${destination.name}.`,
+        reason: moveForm.reason.trim(),
+        notes: moveForm.notes.trim() || null,
+        recordType: "stock_movement",
+        recordId: null,
+        recordName: selectedItem.name,
+        recordReference: selectedItem.sku,
+        stockItemId: selectedItem.id,
+        stockItemName: selectedItem.name,
+        stockItemSku: selectedItem.sku,
+        locationId: destination.id,
+        locationName: destination.name,
+        fromLocationId: currentLocation.id,
+        fromLocationName: currentLocation.name,
+        toLocationId: destination.id,
+        toLocationName: destination.name,
+        quantityBefore: selectedItem.quantity,
+        quantityAfter: Math.max(0, selectedItem.quantity - quantity),
+        quantityChanged: -quantity,
+        beforeData: {
+          ...itemSnapshot(selectedItem),
+          location: currentLocation.id,
+          quantity: selectedItem.quantity,
+        },
+        afterData: {
+          ...itemSnapshot(selectedItem),
+          location: destination.id,
+          quantity: Math.max(0, selectedItem.quantity - quantity),
+          quantityMoved: quantity,
+        },
+        changedFields: ["location", "quantity"],
+        responseStatus: 200,
+        apiEndpoint: MOVE_STOCK_ENDPOINT,
+        metadata: {
+          source: "low_stock_client",
+          moveAllStock: moveForm.moveAllStock,
+        },
+      });
+
       setShowMoveModal(false);
       setMoveForm(EMPTY_MOVE_STOCK_FORM);
       setNotice({
@@ -1018,7 +1922,7 @@ export default function LowStockClient() {
             quantity === 1 ? "" : "s"
           } of ${selectedItem.name} ${
             quantity === 1 ? "has" : "have"
-          } been moved to ${destination.name}.`,
+          } been moved to ${destination.name} and reported to the audit logs.`,
       });
       await loadData();
     } catch (caught) {
@@ -1113,12 +2017,65 @@ export default function LowStockClient() {
         return;
       }
 
+      const createdItem =
+        result.data.items?.[0] ||
+        normaliseItem({
+          id: "",
+          name,
+          sku,
+          barcode: addItemForm.barcode.trim() || null,
+          description: addItemForm.description.trim() || null,
+          category: addItemForm.category.trim() || null,
+          location: addItemForm.location.trim() || null,
+          supplier: addItemForm.supplier.trim() || null,
+          quantity: numberValue(addItemForm.quantity),
+          reorderLevel: numberValue(addItemForm.reorderLevel),
+          targetLevel: addItemForm.targetLevel
+            ? numberValue(addItemForm.targetLevel)
+            : null,
+          unitCost: addItemForm.unitCost
+            ? numberValue(addItemForm.unitCost)
+            : null,
+          salePrice: addItemForm.salePrice
+            ? numberValue(addItemForm.salePrice)
+            : null,
+          isActive: addItemForm.isActive,
+        });
+
+      await reportAudit({
+        actionKey: "stock_item_created",
+        actionLabel: "Stock item created from Low Stock",
+        actionCategory: "create",
+        module: "inventory",
+        status: "success",
+        riskLevel: "low",
+        description: `${name} was created from the Low Stock page.`,
+        reason: "Created using the Add stock item form on the Low Stock page.",
+        recordType: "stock_item",
+        recordId: createdItem.id || null,
+        recordName: name,
+        recordReference: sku,
+        stockItemId: createdItem.id || null,
+        stockItemName: name,
+        stockItemSku: sku,
+        locationId: addItemForm.location.trim() || null,
+        quantityAfter: numberValue(addItemForm.quantity),
+        beforeData: null,
+        afterData: itemSnapshot(normaliseItem(createdItem)),
+        changedFields: Object.keys(itemSnapshot(normaliseItem(createdItem))),
+        responseStatus: 201,
+        apiEndpoint: INVENTORY_ENDPOINT,
+        metadata: {
+          source: "low_stock_client",
+        },
+      });
+
       setShowAddItemModal(false);
       setAddItemForm(EMPTY_ADD_ITEM_FORM);
       setNotice({
         tone: "success",
         title: "Stock item created",
-        message: `${name} has been added to inventory.`,
+        message: `${name} has been added to inventory and reported to the audit logs.`,
       });
 
       await loadData();
@@ -1177,13 +2134,49 @@ export default function LowStockClient() {
         return;
       }
 
+      const createdTestItem =
+        result.data.items?.[0] || null;
+
+      await reportAudit({
+        actionKey: "test_stock_item_created",
+        actionLabel: "Test low-stock item created",
+        actionCategory: "create",
+        module: "inventory",
+        status: "success",
+        riskLevel: "low",
+        description: `${payload.name} was created for Low Stock testing.`,
+        reason: "Created using the Low Stock test-item button.",
+        recordType: "stock_item",
+        recordId: createdTestItem?.id || null,
+        recordName: payload.name,
+        recordReference: payload.sku,
+        stockItemId: createdTestItem?.id || null,
+        stockItemName: payload.name,
+        stockItemSku: payload.sku,
+        locationId: preferredLocation?.id || null,
+        locationName: preferredLocation?.name || null,
+        quantityAfter: Number(payload.quantity || 0),
+        beforeData: null,
+        afterData: {
+          ...payload,
+          id: createdTestItem?.id || null,
+        },
+        changedFields: Object.keys(payload),
+        responseStatus: 201,
+        apiEndpoint: INVENTORY_ENDPOINT,
+        metadata: {
+          source: "low_stock_client",
+          isTestItem: true,
+        },
+      });
+
       setNotice({
         tone: "success",
         title: "Test low-stock item created",
-        message: lowStockTestSuccessMessage(
+        message: `${lowStockTestSuccessMessage(
           payload.name,
           preferredLocation?.name || null,
-        ),
+        )} The action was reported to the audit logs.`,
       });
 
       await loadData();
@@ -1245,12 +2238,12 @@ export default function LowStockClient() {
 
             <button
               type="button"
-              onClick={() => exportCsv(false)}
+              onClick={() => void exportXlsx(false)}
               disabled={filteredItems.length === 0}
               className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-black text-purple-700 transition hover:bg-white/90 disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
-              Export report
+              Export Excel report
             </button>
 
             <button
@@ -1510,10 +2503,10 @@ export default function LowStockClient() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => exportCsv(true)}
+                onClick={() => void exportXlsx(true)}
                 className="rounded-xl bg-white px-4 py-2 text-xs font-black text-purple-700"
               >
-                Export selected
+                Export selected to Excel
               </button>
               <button
                 type="button"

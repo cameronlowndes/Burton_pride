@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ClipboardList,
   Edit3,
+  ExternalLink,
+  Link2,
   Loader2,
   Mail,
   Phone,
@@ -33,6 +35,8 @@ type Supplier = {
   category?: string | null;
   notes?: string | null;
   is_active?: boolean | null;
+  event_contact_id?: string | null;
+  event_record_type?: string | null;
 };
 
 type SupplierForm = {
@@ -44,6 +48,58 @@ type SupplierForm = {
   category: string;
   notes: string;
   isActive: boolean;
+};
+
+
+type EventContactLinkState =
+  | "connected"
+  | "possible_match"
+  | "not_connected";
+
+type EventContactLink = {
+  supplierId: string;
+  state: EventContactLinkState;
+  eventRecordId: string | null;
+  eventRecordType: string | null;
+  organisationName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  eventName: string | null;
+  eventYear: number | null;
+  rating: string | null;
+  doNotInvite: boolean;
+  matchReason: string | null;
+};
+
+type EventHubContactListItem = {
+  id: string;
+  recordType: string;
+  organisationName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  address?: string | null;
+  serviceType?: string | null;
+  selling?: string | null;
+  eventId?: string | null;
+  eventName: string | null;
+  eventYear: number | null;
+  rating: string | null;
+  doNotInvite: boolean;
+  isActive?: boolean;
+  sentToChecklist?: boolean;
+};
+
+type EventContactLinksResponse = {
+  ok?: boolean;
+  links?: Record<string, EventContactLink>;
+  contacts?: EventHubContactListItem[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
 };
 
 const DEFAULT_CATEGORIES = [
@@ -75,6 +131,12 @@ const EASY_MODE_STORAGE_KEY = "burton-pride-money-suppliers-easy-mode";
 
 const DELETED_SUPPLIERS_PATH =
   "/Admin/MoneyManagement/TrackingMoney/Suppliers/Deleted";
+
+const EVENT_HUB_CONTACTS_PATH =
+  "/Admin/BurtonPrideEventHub/Contacts";
+
+const EVENT_LINKS_ENDPOINT =
+  "/api/admin/burton-pride-event-hub/contacts/supplier-links";
 
 function cleanText(value: unknown) {
   return String(value ?? "").trim();
@@ -153,6 +215,136 @@ function getCategoryList(apiCategories: string[], suppliers: Supplier[]) {
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
+
+function eventConnectionLabel(
+  link?: EventContactLink | null,
+) {
+  if (link?.state === "connected") {
+    return "Connected to Event Hub";
+  }
+
+  if (link?.state === "possible_match") {
+    return "Possible Event Hub match";
+  }
+
+  return "Not connected to Event Hub";
+}
+
+function eventConnectionClass(
+  link?: EventContactLink | null,
+) {
+  if (link?.state === "connected") {
+    return "border-emerald-300/20 bg-emerald-500/10 text-emerald-100";
+  }
+
+  if (link?.state === "possible_match") {
+    return "border-amber-300/20 bg-amber-500/10 text-amber-100";
+  }
+
+  return "border-white/10 bg-white/[0.04] text-white/45";
+}
+
+function eventContactUrl(
+  link?: EventContactLink | null,
+) {
+  if (!link?.eventRecordId) {
+    return EVENT_HUB_CONTACTS_PATH;
+  }
+
+  const params = new URLSearchParams({
+    contact: link.eventRecordId,
+  });
+
+  if (link.eventRecordType) {
+    params.set(
+      "type",
+      link.eventRecordType,
+    );
+  }
+
+  return `${EVENT_HUB_CONTACTS_PATH}?${params.toString()}`;
+}
+
+function EventHubConnectionBadge({
+  link,
+  compact = false,
+}: {
+  link?: EventContactLink | null;
+  compact?: boolean;
+}) {
+  const connected =
+    link?.state === "connected";
+  const possible =
+    link?.state === "possible_match";
+
+  return (
+    <div
+      className={`rounded-2xl border p-3 ${eventConnectionClass(
+        link,
+      )}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {connected ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : possible ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : (
+          <Link2 className="h-4 w-4" />
+        )}
+
+        <p className="text-xs font-black uppercase tracking-wide">
+          {eventConnectionLabel(link)}
+        </p>
+      </div>
+
+      {!compact && link?.eventRecordId ? (
+        <div className="mt-3 space-y-1 text-xs leading-5">
+          <p className="font-black text-white">
+            {link.organisationName ||
+              "Event Hub contact"}
+          </p>
+
+          {link.contactName ? (
+            <p className="text-white/60">
+              Contact: {link.contactName}
+            </p>
+          ) : null}
+
+          {link.eventName || link.eventYear ? (
+            <p className="text-white/60">
+              Event:{" "}
+              {[
+                link.eventName,
+                link.eventYear,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+          ) : null}
+
+          {link.rating ? (
+            <p className="text-white/60">
+              Event rating: {link.rating}
+            </p>
+          ) : null}
+
+          {link.doNotInvite ? (
+            <p className="font-black text-red-200">
+              Event Hub warning: Do not invite
+            </p>
+          ) : null}
+
+          {link.matchReason ? (
+            <p className="text-white/45">
+              Match: {link.matchReason}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function MoneySuppliersPage() {
   const router = useRouter();
 
@@ -165,6 +357,22 @@ export default function MoneySuppliersPage() {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [apiCategories, setApiCategories] = useState<string[]>([]);
+  const [eventLinks, setEventLinks] = useState<
+    Record<string, EventContactLink>
+  >({});
+  const [eventLinksLoading, setEventLinksLoading] =
+    useState(false);
+  const [eventLinksError, setEventLinksError] =
+    useState<string | null>(null);
+  const [eventContacts, setEventContacts] = useState<
+    EventHubContactListItem[]
+  >([]);
+  const [eventContactSearch, setEventContactSearch] =
+    useState("");
+  const [eventContactFilter, setEventContactFilter] =
+    useState<
+      "all" | "linked" | "unlinked" | "warning"
+    >("all");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -254,6 +462,13 @@ export default function MoneySuppliersPage() {
           supplier.website,
           supplier.category,
           supplier.notes,
+          eventConnectionLabel(
+            eventLinks[supplier.id],
+          ),
+          eventLinks[supplier.id]?.organisationName,
+          eventLinks[supplier.id]?.contactName,
+          eventLinks[supplier.id]?.eventName,
+          eventLinks[supplier.id]?.rating,
         ]
           .map((item) => cleanText(item).toLowerCase())
           .join(" ");
@@ -265,14 +480,244 @@ export default function MoneySuppliersPage() {
         if (a.is_active !== false && b.is_active === false) return -1;
         return cleanText(a.supplier_name).localeCompare(cleanText(b.supplier_name));
       });
-  }, [categoryFilter, searchTerm, statusFilter, suppliers]);
+  }, [
+    categoryFilter,
+    searchTerm,
+    statusFilter,
+    suppliers,
+    eventLinks,
+  ]);
 
   const activeCount = suppliers.filter((item) => item.is_active !== false).length;
   const archivedCount = suppliers.filter((item) => item.is_active === false).length;
+  const eventConnectedCount = suppliers.filter(
+    (supplier) =>
+      eventLinks[supplier.id]?.state ===
+      "connected",
+  ).length;
+  const eventPossibleMatchCount = suppliers.filter(
+    (supplier) =>
+      eventLinks[supplier.id]?.state ===
+      "possible_match",
+  ).length;
+  const eventNotConnectedCount = Math.max(
+    suppliers.length -
+      eventConnectedCount -
+      eventPossibleMatchCount,
+    0,
+  );
+
+  const linkedEventContactIds = useMemo(() => {
+    return new Set(
+      Object.values(eventLinks)
+        .filter(
+          (link) =>
+            link.state === "connected" &&
+            Boolean(link.eventRecordId),
+        )
+        .map((link) => String(link.eventRecordId)),
+    );
+  }, [eventLinks]);
+
+  const filteredEventContacts = useMemo(() => {
+    const search =
+      eventContactSearch.trim().toLowerCase();
+
+    return eventContacts
+      .filter((contact) => {
+        const isLinked =
+          linkedEventContactIds.has(contact.id);
+
+        if (
+          eventContactFilter === "linked" &&
+          !isLinked
+        ) {
+          return false;
+        }
+
+        if (
+          eventContactFilter === "unlinked" &&
+          isLinked
+        ) {
+          return false;
+        }
+
+        if (
+          eventContactFilter === "warning" &&
+          !contact.doNotInvite
+        ) {
+          return false;
+        }
+
+        if (!search) {
+          return true;
+        }
+
+        return [
+          contact.organisationName,
+          contact.contactName,
+          contact.email,
+          contact.phone,
+          contact.website,
+          contact.address,
+          contact.serviceType,
+          contact.selling,
+          contact.eventName,
+          contact.eventYear,
+          contact.rating,
+          contact.recordType,
+          isLinked
+            ? "linked connected"
+            : "unlinked not connected",
+          contact.doNotInvite
+            ? "do not invite warning"
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(search);
+      })
+      .sort((a, b) => {
+        const aLinked =
+          linkedEventContactIds.has(a.id);
+        const bLinked =
+          linkedEventContactIds.has(b.id);
+
+        if (aLinked && !bLinked) return -1;
+        if (!aLinked && bLinked) return 1;
+
+        return cleanText(
+          a.organisationName ||
+            a.contactName,
+        ).localeCompare(
+          cleanText(
+            b.organisationName ||
+              b.contactName,
+          ),
+        );
+      });
+  }, [
+    eventContacts,
+    eventContactSearch,
+    eventContactFilter,
+    linkedEventContactIds,
+  ]);
+
+  async function loadEventConnections(
+    supplierRows: Supplier[],
+  ) {
+    setEventLinksLoading(true);
+    setEventLinksError(null);
+
+    try {
+      const response = await fetch(
+        EVENT_LINKS_ENDPOINT,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            suppliers: supplierRows.map(
+              (supplier) => ({
+                id: supplier.id,
+                supplierName:
+                  supplier.supplier_name,
+                contactName:
+                  supplier.contact_name ||
+                  null,
+                email:
+                  supplier.email || null,
+                phone:
+                  supplier.phone || null,
+                website:
+                  supplier.website || null,
+                eventContactId:
+                  supplier.event_contact_id ||
+                  null,
+                eventRecordType:
+                  supplier.event_record_type ||
+                  null,
+              }),
+            ),
+          }),
+        },
+      );
+
+      const raw =
+        await response.text();
+      let payload:
+        | EventContactLinksResponse
+        | null = null;
+
+      if (raw) {
+        try {
+          payload =
+            JSON.parse(
+              raw,
+            ) as EventContactLinksResponse;
+        } catch {
+          throw new Error(
+            `Event Hub supplier connection API returned invalid JSON.\nHTTP: ${response.status}\nResponse: ${raw.slice(
+              0,
+              1200,
+            )}`,
+          );
+        }
+      }
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          [
+            payload?.error ||
+              "Event Hub supplier connections could not be loaded.",
+            payload?.code
+              ? `Code: ${payload.code}`
+              : "",
+            payload?.details
+              ? `Details: ${payload.details}`
+              : "",
+            payload?.hint
+              ? `Hint: ${payload.hint}`
+              : "",
+            `HTTP: ${response.status}`,
+            `Endpoint: ${EVENT_LINKS_ENDPOINT}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
+
+      setEventLinks(
+        payload.links || {},
+      );
+      setEventContacts(
+        Array.isArray(payload.contacts)
+          ? payload.contacts
+          : [],
+      );
+    } catch (requestError) {
+      setEventLinks({});
+      setEventContacts([]);
+      setEventLinksError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Event Hub supplier connections could not be loaded.",
+      );
+    } finally {
+      setEventLinksLoading(false);
+    }
+  }
 
   async function loadSuppliers() {
     setLoading(true);
     setError(null);
+
+    let supplierRows: Supplier[] = [];
 
     try {
       const response = await fetch(
@@ -280,29 +725,78 @@ export default function MoneySuppliersPage() {
         {
           method: "GET",
           cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
         },
       );
 
-      const payload = await response.json().catch(() => null);
+      const raw = await response.text();
+      let payload: any = null;
+
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          throw new Error(
+            [
+              "The Money Management suppliers API returned invalid JSON.",
+              `HTTP: ${response.status}`,
+              "Endpoint: /api/admin/money/suppliers?includeInactive=true",
+              `Response: ${raw.slice(0, 1200)}`,
+            ].join("\n"),
+          );
+        }
+      }
 
       if (!response.ok) {
         throw new Error(
-          payload?.error ||
-            payload?.details ||
-            "Failed to load supplier/contact records.",
+          [
+            payload?.error ||
+              payload?.details ||
+              "Failed to load supplier/contact records.",
+            payload?.code
+              ? `Code: ${payload.code}`
+              : "",
+            `HTTP: ${response.status}`,
+            "Endpoint: /api/admin/money/suppliers?includeInactive=true",
+          ]
+            .filter(Boolean)
+            .join("\n"),
         );
       }
 
-      setSuppliers(Array.isArray(payload?.suppliers) ? payload.suppliers : []);
+      supplierRows =
+        Array.isArray(payload?.suppliers)
+          ? payload.suppliers
+          : [];
+
+      setSuppliers(supplierRows);
       setApiCategories(
-        Array.isArray(payload?.categories) ? payload.categories : [],
+        Array.isArray(payload?.categories)
+          ? payload.categories
+          : [],
       );
-    } catch (requestError: any) {
+    } catch (requestError) {
+      setSuppliers([]);
+      setApiCategories([]);
       setError(
-        requestError?.message ||
-          "Something went wrong while loading suppliers.",
+        requestError instanceof Error
+          ? requestError.message
+          : "Something went wrong while loading suppliers.",
       );
     } finally {
+      /*
+       * Event Hub contacts are independent from Money Management suppliers.
+       * Always call this API, including when:
+       * - the Money supplier list is empty;
+       * - Money Management is in migration mode;
+       * - the Money supplier API failed.
+       */
+      await loadEventConnections(
+        supplierRows,
+      );
       setLoading(false);
     }
   }
@@ -452,8 +946,8 @@ export default function MoneySuppliersPage() {
 
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
                     {easyMode
-                      ? "Add and manage the main supplier details used by your money tracker."
-                      : "View, add, edit and archive regular suppliers such as printers, venues, insurance providers, entertainers, food vendors, security, equipment hire and custom contacts. Payments can be linked to these suppliers from the transaction form."}
+                      ? "Add and manage supplier details used by Money Management and see whether each one is connected to the Event Hub contact used for the main event."
+                      : "View, add, edit and archive regular suppliers, connect them to Event Hub contacts used for the main event, and link payments through Money Management. Each supplier clearly shows whether the Event Hub relationship is connected, a possible match or not connected."}
                   </p>
                 </div>
               </div>
@@ -463,14 +957,27 @@ export default function MoneySuppliersPage() {
               <button
                 type="button"
                 onClick={loadSuppliers}
-                disabled={loading}
+                disabled={loading || eventLinksLoading}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20 disabled:opacity-60"
               >
                 <RefreshCcw
-                  className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                  className={`h-4 w-4 ${
+                    loading || eventLinksLoading
+                      ? "animate-spin"
+                      : ""
+                  }`}
                 />
                 Refresh
               </button>
+
+              <Link
+                href={EVENT_HUB_CONTACTS_PATH}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-300/20 bg-violet-500/10 px-4 py-3 text-sm font-black text-violet-100 hover:bg-violet-500/20"
+              >
+                <Building2 className="h-4 w-4" />
+                Open Event Hub contacts
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
 
               {!easyMode && (
                 <>
@@ -503,6 +1010,40 @@ export default function MoneySuppliersPage() {
             </div>
           </div>
         </header>
+
+        <section className="rounded-3xl border border-violet-300/20 bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-cyan-500/10 p-5 shadow-2xl shadow-black/20">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-500/15">
+                <Link2 className="h-6 w-6 text-violet-100" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.15em] text-violet-100/65">
+                  Shared contact system
+                </p>
+                <h2 className="mt-1 text-xl font-black text-white">
+                  Connected to the Burton Pride Event Hub
+                </h2>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+                  Event Hub remains the main place for event contacts,
+                  applications and relationship history. Money Management
+                  remains the owner of supplier payments and financial records.
+                  This page shows whether each financial supplier is connected
+                  to the matching Event Hub contact.
+                </p>
+              </div>
+            </div>
+
+            <Link
+              href={EVENT_HUB_CONTACTS_PATH}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-violet-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-violet-300"
+            >
+              Open Event Hub
+              <ExternalLink className="h-4 w-4" />
+            </Link>
+          </div>
+        </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -551,40 +1092,74 @@ export default function MoneySuppliersPage() {
           </div>
         </section>
 
-        <section
-          className={`grid gap-4 ${
-            easyMode ? "md:grid-cols-1" : "md:grid-cols-3"
-          }`}
-        >
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5">
             <p className="text-xs font-black uppercase tracking-wide text-emerald-100/80">
               Active suppliers
             </p>
-            <p className="mt-2 text-3xl font-black text-white">{activeCount}</p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {activeCount}
+            </p>
           </div>
 
-          {!easyMode && (
-            <>
-              <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
-                <p className="text-xs font-black uppercase tracking-wide text-sky-100/80">
-                  Categories
-                </p>
-                <p className="mt-2 text-3xl font-black text-white">
-                  {categories.length}
-                </p>
-              </div>
+          <div className="rounded-3xl border border-violet-300/20 bg-violet-500/10 p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-violet-100/80">
+              Event Hub connected
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {eventConnectedCount}
+            </p>
+          </div>
 
-              <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
-                <p className="text-xs font-black uppercase tracking-wide text-amber-100/80">
-                  Archived suppliers
-                </p>
-                <p className="mt-2 text-3xl font-black text-white">
-                  {archivedCount}
-                </p>
-              </div>
-            </>
-          )}
+          <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-amber-100/80">
+              Possible matches
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {eventPossibleMatchCount}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-white/50">
+              Not connected
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {eventNotConnectedCount}
+            </p>
+          </div>
+
+          {!easyMode ? (
+            <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
+              <p className="text-xs font-black uppercase tracking-wide text-sky-100/80">
+                Categories
+              </p>
+              <p className="mt-2 text-3xl font-black text-white">
+                {categories.length}
+              </p>
+              <p className="mt-1 text-xs text-white/40">
+                Archived: {archivedCount}
+              </p>
+            </div>
+          ) : null}
         </section>
+
+        {eventLinksLoading ? (
+          <div className="rounded-3xl border border-violet-300/20 bg-violet-500/10 p-4 text-sm font-bold text-violet-100">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Checking Event Hub contact connections...
+            </div>
+          </div>
+        ) : null}
+
+        {eventLinksError ? (
+          <div className="whitespace-pre-wrap rounded-3xl border border-amber-300/20 bg-amber-500/10 p-4 font-mono text-xs leading-6 text-amber-100">
+            Event Hub connection check failed:
+            {"\n"}
+            {eventLinksError}
+          </div>
+        ) : null}
 
         {error && (
           <div className="rounded-3xl border border-red-300/20 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
@@ -662,6 +1237,310 @@ export default function MoneySuppliersPage() {
               </>
             )}
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-violet-300/20 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.15em] text-violet-100/60">
+                Event Hub contact list
+              </p>
+              <h2 className="mt-1 text-2xl font-black text-white">
+                Main event contacts
+              </h2>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
+                These contacts are loaded directly from Event Hub, even when
+                Money Management currently has no suppliers. Each card states
+                whether the contact is already connected to a Money Management
+                supplier. Event Hub remains the main place to edit
+                event applications, event history and relationship details.
+              </p>
+
+              <p className="mt-3 inline-flex rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 font-mono text-xs font-black text-violet-100">
+                Source: public.event_business_contacts
+              </p>
+            </div>
+
+            <Link
+              href={EVENT_HUB_CONTACTS_PATH}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-violet-300"
+            >
+              Open full Event Hub contacts
+              <ExternalLink className="h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+            <label className="relative block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+              <input
+                value={eventContactSearch}
+                onChange={(event) =>
+                  setEventContactSearch(
+                    event.target.value,
+                  )
+                }
+                placeholder="Search Event Hub organisation, contact, email, phone, event or rating..."
+                className="w-full rounded-2xl bg-black/20 py-3 pl-10 pr-3 text-white outline-none ring-1 ring-white/10 placeholder:text-white/30 focus:ring-violet-300/40"
+              />
+            </label>
+
+            <select
+              value={eventContactFilter}
+              onChange={(event) =>
+                setEventContactFilter(
+                  event.target.value as
+                    | "all"
+                    | "linked"
+                    | "unlinked"
+                    | "warning",
+                )
+              }
+              className="rounded-2xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ring-white/10 focus:ring-violet-300/40"
+            >
+              <option className="bg-[#070716]" value="all">
+                All Event Hub contacts
+              </option>
+              <option className="bg-[#070716]" value="linked">
+                Connected to supplier
+              </option>
+              <option className="bg-[#070716]" value="unlinked">
+                Not connected
+              </option>
+              <option className="bg-[#070716]" value="warning">
+                Do not invite warnings
+              </option>
+            </select>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+              <p className="text-xs font-black uppercase tracking-wide text-violet-100/60">
+                Event Hub contacts
+              </p>
+              <p className="mt-1 text-2xl font-black text-white">
+                {eventContacts.length}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
+              <p className="text-xs font-black uppercase tracking-wide text-emerald-100/60">
+                Connected to suppliers
+              </p>
+              <p className="mt-1 text-2xl font-black text-white">
+                {eventContacts.filter((contact) =>
+                  linkedEventContactIds.has(contact.id),
+                ).length}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+              <p className="text-xs font-black uppercase tracking-wide text-white/45">
+                Not connected
+              </p>
+              <p className="mt-1 text-2xl font-black text-white">
+                {Math.max(
+                  eventContacts.length -
+                    eventContacts.filter((contact) =>
+                      linkedEventContactIds.has(contact.id),
+                    ).length,
+                  0,
+                )}
+              </p>
+            </div>
+          </div>
+
+          {eventLinksLoading ? (
+            <div className="mt-5 flex items-center justify-center gap-3 rounded-2xl bg-black/20 p-8 text-violet-100">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Loading Event Hub contacts...
+            </div>
+          ) : filteredEventContacts.length === 0 ? (
+            <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
+              <Building2 className="mx-auto h-10 w-10 text-white/25" />
+              <h3 className="mt-3 text-lg font-black text-white">
+                No Event Hub contacts found
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-white/50">
+                {eventContacts.length === 0
+                  ? "No contacts were returned. The page called /api/admin/event-hub/contacts/supplier-links, which should load public.event_business_contacts even when there are no Money Management suppliers. Check the warning shown above for the exact API error."
+                  : "Change the Event Hub contact search or filter."}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+              {filteredEventContacts.map((contact) => {
+                const connected =
+                  linkedEventContactIds.has(
+                    contact.id,
+                  );
+
+                return (
+                  <article
+                    key={`${contact.recordType}-${contact.id}`}
+                    className={`rounded-3xl border p-4 ${
+                      contact.doNotInvite
+                        ? "border-red-300/25 bg-red-500/10"
+                        : connected
+                          ? "border-emerald-300/20 bg-emerald-500/10"
+                          : "border-violet-300/15 bg-black/25"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-lg font-black text-white">
+                          {contact.organisationName ||
+                            contact.contactName ||
+                            "Unnamed Event Hub contact"}
+                        </h3>
+
+                        {contact.contactName &&
+                        contact.contactName !==
+                          contact.organisationName ? (
+                          <p className="mt-1 text-sm text-white/60">
+                            {contact.contactName}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <span
+                        className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-black ring-1 ${
+                          connected
+                            ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20"
+                            : "bg-white/10 text-white/50 ring-white/10"
+                        }`}
+                      >
+                        {connected
+                          ? "Connected"
+                          : "Not connected"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-sm">
+                      {contact.email ? (
+                        <a
+                          href={`mailto:${contact.email}`}
+                          className="block break-all rounded-xl bg-white/[0.05] p-3 text-cyan-100 hover:bg-white/[0.09]"
+                        >
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Email
+                          </span>
+                          {contact.email}
+                        </a>
+                      ) : null}
+
+                      {contact.phone ? (
+                        <a
+                          href={`tel:${contact.phone}`}
+                          className="block rounded-xl bg-white/[0.05] p-3 text-cyan-100 hover:bg-white/[0.09]"
+                        >
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Phone
+                          </span>
+                          {contact.phone}
+                        </a>
+                      ) : null}
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Event
+                          </p>
+                          <p className="mt-1 text-white/75">
+                            {[
+                              contact.eventName,
+                              contact.eventYear,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") ||
+                              "Not recorded"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Rating
+                          </p>
+                          <p className="mt-1 text-white/75">
+                            {contact.rating ||
+                              "Not recorded"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {contact.serviceType ? (
+                        <span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-100 ring-1 ring-violet-300/20">
+                          {contact.serviceType}
+                        </span>
+                      ) : null}
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-black ring-1 ${
+                          contact.isActive === false
+                            ? "bg-white/10 text-white/45 ring-white/10"
+                            : "bg-emerald-500/10 text-emerald-100 ring-emerald-300/20"
+                        }`}
+                      >
+                        {contact.isActive === false
+                          ? "Inactive Event contact"
+                          : "Active Event contact"}
+                      </span>
+
+                      {contact.sentToChecklist ? (
+                        <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-black text-cyan-100 ring-1 ring-cyan-300/20">
+                          Sent to checklist
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {contact.doNotInvite ? (
+                      <div className="mt-3 rounded-xl border border-red-300/25 bg-red-500/15 p-3 text-xs font-black text-red-100">
+                        Event Hub warning: Do not invite
+                      </div>
+                    ) : null}
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Link
+                        href={`${EVENT_HUB_CONTACTS_PATH}?contact=${encodeURIComponent(
+                          contact.id,
+                        )}&type=${encodeURIComponent(
+                          contact.recordType,
+                        )}`}
+                        className="inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 hover:bg-violet-500/20"
+                      >
+                        Open Event contact
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+
+                      {!connected ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearchTerm(
+                              contact.organisationName ||
+                                contact.contactName ||
+                                contact.email ||
+                                "",
+                            );
+                            window.scrollTo({
+                              top: document.body.scrollHeight,
+                              behavior: "smooth",
+                            });
+                          }}
+                          className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100 hover:bg-cyan-500/20"
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                          Find matching supplier
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
@@ -754,6 +1633,35 @@ export default function MoneySuppliersPage() {
                     </div>
                   </div>
 
+                  <div className="mt-4">
+                    <EventHubConnectionBadge
+                      link={
+                        eventLinks[
+                          supplier.id
+                        ]
+                      }
+                      compact={easyMode}
+                    />
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Link
+                        href={eventContactUrl(
+                          eventLinks[
+                            supplier.id
+                          ],
+                        )}
+                        className="inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 hover:bg-violet-500/20"
+                      >
+                        {eventLinks[
+                          supplier.id
+                        ]?.eventRecordId
+                          ? "Open Event Hub contact"
+                          : "Find Event Hub contact"}
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+
                   <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                     {supplier.contact_name && (
                       <div className="rounded-2xl bg-white/[0.04] p-3">
@@ -834,8 +1742,9 @@ export default function MoneySuppliersPage() {
                   {editingSupplier ? "Edit Supplier / Contact" : "Add Supplier / Contact"}
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-white/60">
-                  Save supplier details here, then link payments to them from
-                  the transaction form.
+                  Save the financial supplier here. The page will then check Event Hub
+                  for the matching main-event contact using the organisation,
+                  email, phone and website details.
                 </p>
 
                 {easyMode && (
@@ -855,6 +1764,18 @@ export default function MoneySuppliersPage() {
               >
                 <X className="h-4 w-4" />
               </button>
+            </div>
+
+            <div className="mb-4 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+              <p className="font-black text-violet-50">
+                Event Hub connection
+              </p>
+              <p className="mt-1 text-xs leading-5 text-violet-50/65">
+                Saving this supplier does not create a duplicate Event Hub
+                contact. After saving, the page searches for an existing
+                contact and clearly shows Connected, Possible match or Not
+                connected.
+              </p>
             </div>
 
             <div className="space-y-4">

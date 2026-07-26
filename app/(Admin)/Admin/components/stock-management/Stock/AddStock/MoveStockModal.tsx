@@ -40,6 +40,7 @@ type MoveStockModalProps = {
   items: StockItemForMove[];
   locations: StockLocationForMove[];
   saving: boolean;
+  loadingItems?: boolean;
   onChange: (value: MoveStockFormState) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -67,12 +68,17 @@ export default function MoveStockModal({
   items,
   locations,
   saving,
+  loadingItems = false,
   onChange,
   onClose,
   onSubmit,
 }: MoveStockModalProps) {
+  const activeItems = items.filter(
+    (item) => item.isActive && Number(item.quantity) > 0,
+  );
+
   const selectedItem =
-    items.find((item) => item.id === form.stockItemId) || null;
+    activeItems.find((item) => item.id === form.stockItemId) || null;
 
   const currentLocation = String(selectedItem?.location || "")
     .trim()
@@ -129,7 +135,10 @@ export default function MoveStockModal({
         if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
-      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] border border-white/15 bg-[#111a2d] text-white shadow-[0_30px_120px_rgba(0,0,0,0.65)]">
+      <div
+        className="pointer-events-auto flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] border border-white/15 bg-[#111a2d] text-white shadow-[0_30px_120px_rgba(0,0,0,0.65)]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <header className="flex items-start justify-between gap-4 border-b border-white/10 bg-white/[0.035] p-5 sm:p-6">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-300/20 bg-blue-500/15 text-blue-100">
@@ -174,19 +183,34 @@ export default function MoveStockModal({
               value={form.stockItemId}
               onChange={(event) => changeSelectedItem(event.target.value)}
               required
-              disabled={saving || items.length === 0}
+              disabled={saving || loadingItems || activeItems.length === 0}
               className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:opacity-50"
             >
-              <option value="">Select a stock item</option>
-              {items
-                .filter((item) => item.isActive && item.quantity > 0)
-                .map((item) => (
+              <option value="">
+                {loadingItems
+                  ? "Loading stock items..."
+                  : activeItems.length === 0
+                    ? "No movable stock items found"
+                    : "Select a stock item"}
+              </option>
+              {activeItems.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name} — {item.quantity} unit
                     {item.quantity === 1 ? "" : "s"} — {item.location || "No location"}
                   </option>
                 ))}
             </select>
+
+            {loadingItems ? (
+              <p className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-blue-100/70">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading available stock items…
+              </p>
+            ) : activeItems.length === 0 ? (
+              <p className="mt-2 text-xs font-semibold text-amber-100/75">
+                No active stock items with available quantity were returned by the move-stock API.
+              </p>
+            ) : null}
           </label>
 
           {selectedItem ? (
@@ -228,7 +252,7 @@ export default function MoveStockModal({
                 })
               }
               required
-              disabled={saving || !selectedItem}
+              disabled={saving || loadingItems || !selectedItem}
               className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3.5 text-sm font-bold text-white outline-none focus:border-blue-300/50 disabled:opacity-50"
             >
               <option value="">Select the new location</option>
@@ -280,7 +304,7 @@ export default function MoveStockModal({
                   onChange={(event) =>
                     changeMoveAllStock(event.target.checked)
                   }
-                  disabled={saving || !selectedItem}
+                  disabled={saving || loadingItems || !selectedItem}
                   className="h-4 w-4 rounded border-white/20 bg-white/10"
                 />
                 <span className="text-sm font-black">Move all stock</span>
