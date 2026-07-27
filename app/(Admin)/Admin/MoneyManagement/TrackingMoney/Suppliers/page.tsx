@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  Boxes,
   CheckCircle2,
   ClipboardList,
   Edit3,
@@ -20,6 +21,7 @@ import {
   Search,
   Settings2,
   Sparkles,
+  ShoppingCart,
   Trash2,
   X,
 } from "lucide-react";
@@ -102,6 +104,78 @@ type EventContactLinksResponse = {
   hint?: string | null;
 };
 
+type StockSupplierView = {
+  id: string;
+  displayName: string;
+  supplierUse: string;
+  isActive: boolean;
+  needsReview: boolean;
+  doNotUse: boolean;
+  eventHub: {
+    connected: boolean;
+    recordType: string | null;
+    recordId: string | null;
+    organisationName: string | null;
+    contactName: string | null;
+    email: string | null;
+    phone: string | null;
+    lastEvent: string | null;
+    eventRating: string | null;
+    doNotInvite: boolean;
+    requiresReview?: boolean;
+  };
+  moneyManagement: {
+    connected: boolean;
+    supplierId: string | null;
+    supplierName?: string | null;
+    accountReference?: string | null;
+    totalPaidPence: number;
+    currentYearPaidPence: number;
+    transactionCount: number;
+    missingReceiptCount: number;
+    unreconciledCount: number;
+    doNotUse: boolean;
+  };
+  stockManagement: {
+    itemCount: number;
+    openOrderCount: number;
+    overdueOrderCount: number;
+    lastOrderDate: string | null;
+    totalEstimatedSpendPence: number;
+    totalActualSpendPence: number;
+    averageDeliveryDays: number | null;
+  };
+};
+
+type StockSupplierLinkState =
+  | "connected"
+  | "possible_match"
+  | "not_connected";
+
+type StockSupplierLink = {
+  supplierId: string;
+  state: StockSupplierLinkState;
+  stockSupplierId: string | null;
+  stockSupplierName: string | null;
+  supplierUse: string | null;
+  itemCount: number;
+  openOrderCount: number;
+  overdueOrderCount: number;
+  needsReview: boolean;
+  doNotUse: boolean;
+  eventConnected: boolean;
+  matchReason: string | null;
+};
+
+type StockSuppliersResponse = {
+  ok?: boolean;
+  suppliers?: StockSupplierView[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
 const DEFAULT_CATEGORIES = [
   "Printer",
   "Venue",
@@ -137,6 +211,12 @@ const EVENT_HUB_CONTACTS_PATH =
 
 const EVENT_LINKS_ENDPOINT =
   "/api/admin/burton-pride-event-hub/contacts/supplier-links";
+
+const STOCK_SUPPLIERS_ENDPOINT =
+  "/api/admin/stockmanagement/suppliers";
+
+const STOCK_SUPPLIERS_PATH =
+  "/Admin/StockManagement/Suppliers";
 
 function cleanText(value: unknown) {
   return String(value ?? "").trim();
@@ -265,6 +345,310 @@ function eventContactUrl(
   return `${EVENT_HUB_CONTACTS_PATH}?${params.toString()}`;
 }
 
+
+function normaliseMatchValue(value: unknown) {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9@.+]/g, "");
+}
+
+function buildStockSupplierLinks(
+  supplierRows: Supplier[],
+  stockSuppliers: StockSupplierView[],
+) {
+  const links: Record<string, StockSupplierLink> = {};
+
+  for (const supplier of supplierRows) {
+    const matches = stockSuppliers
+      .map((stockSupplier) => {
+        let score = 0;
+        const reasons: string[] = [];
+
+        if (
+          stockSupplier.moneyManagement.supplierId &&
+          stockSupplier.moneyManagement.supplierId === supplier.id
+        ) {
+          score += 1000;
+          reasons.push("linked Money supplier ID");
+        }
+
+        const moneyName = normaliseMatchValue(
+          supplier.supplier_name,
+        );
+        const moneyContact = normaliseMatchValue(
+          supplier.contact_name,
+        );
+        const moneyEmail = normaliseMatchValue(
+          supplier.email,
+        );
+        const moneyPhone = normaliseMatchValue(
+          supplier.phone,
+        );
+
+        const stockName = normaliseMatchValue(
+          stockSupplier.displayName,
+        );
+        const stockContact = normaliseMatchValue(
+          stockSupplier.eventHub.contactName,
+        );
+        const stockEmail = normaliseMatchValue(
+          stockSupplier.eventHub.email,
+        );
+        const stockPhone = normaliseMatchValue(
+          stockSupplier.eventHub.phone,
+        );
+
+        if (
+          moneyEmail &&
+          stockEmail &&
+          moneyEmail === stockEmail
+        ) {
+          score += 100;
+          reasons.push("exact email");
+        }
+
+        if (
+          moneyPhone &&
+          stockPhone &&
+          moneyPhone === stockPhone
+        ) {
+          score += 80;
+          reasons.push("exact phone");
+        }
+
+        if (
+          moneyName &&
+          stockName &&
+          moneyName === stockName
+        ) {
+          score += 60;
+          reasons.push("exact supplier name");
+        }
+
+        if (
+          moneyContact &&
+          stockContact &&
+          moneyContact === stockContact
+        ) {
+          score += 35;
+          reasons.push("exact contact name");
+        }
+
+        return {
+          stockSupplier,
+          score,
+          reason: reasons.join(", ") || null,
+        };
+      })
+      .filter((match) => match.score > 0)
+      .sort((left, right) => right.score - left.score);
+
+    const best = matches[0] || null;
+
+    if (!best) {
+      links[supplier.id] = {
+        supplierId: supplier.id,
+        state: "not_connected",
+        stockSupplierId: null,
+        stockSupplierName: null,
+        supplierUse: null,
+        itemCount: 0,
+        openOrderCount: 0,
+        overdueOrderCount: 0,
+        needsReview: false,
+        doNotUse: false,
+        eventConnected: false,
+        matchReason: null,
+      };
+      continue;
+    }
+
+    const state: StockSupplierLinkState =
+      best.score >= 1000
+        ? "connected"
+        : best.score >= 60
+          ? "possible_match"
+          : "not_connected";
+
+    links[supplier.id] = {
+      supplierId: supplier.id,
+      state,
+      stockSupplierId:
+        state === "not_connected"
+          ? null
+          : best.stockSupplier.id,
+      stockSupplierName:
+        state === "not_connected"
+          ? null
+          : best.stockSupplier.displayName,
+      supplierUse:
+        state === "not_connected"
+          ? null
+          : best.stockSupplier.supplierUse,
+      itemCount:
+        state === "not_connected"
+          ? 0
+          : best.stockSupplier.stockManagement.itemCount,
+      openOrderCount:
+        state === "not_connected"
+          ? 0
+          : best.stockSupplier.stockManagement.openOrderCount,
+      overdueOrderCount:
+        state === "not_connected"
+          ? 0
+          : best.stockSupplier.stockManagement.overdueOrderCount,
+      needsReview:
+        state === "not_connected"
+          ? false
+          : best.stockSupplier.needsReview,
+      doNotUse:
+        state === "not_connected"
+          ? false
+          : best.stockSupplier.doNotUse,
+      eventConnected:
+        state === "not_connected"
+          ? false
+          : best.stockSupplier.eventHub.connected,
+      matchReason: best.reason,
+    };
+  }
+
+  return links;
+}
+
+function stockConnectionLabel(
+  link?: StockSupplierLink | null,
+) {
+  if (link?.state === "connected") {
+    return "Connected to Stock Management";
+  }
+
+  if (link?.state === "possible_match") {
+    return "Possible Stock supplier match";
+  }
+
+  return "Not connected to Stock Management";
+}
+
+function stockConnectionClass(
+  link?: StockSupplierLink | null,
+) {
+  if (link?.state === "connected") {
+    return "border-cyan-300/20 bg-cyan-500/10 text-cyan-100";
+  }
+
+  if (link?.state === "possible_match") {
+    return "border-amber-300/20 bg-amber-500/10 text-amber-100";
+  }
+
+  return "border-white/10 bg-white/[0.04] text-white/45";
+}
+
+function stockSupplierUrl(
+  supplier: Supplier,
+  link?: StockSupplierLink | null,
+) {
+  if (link?.stockSupplierId) {
+    return `${STOCK_SUPPLIERS_PATH}/${link.stockSupplierId}`;
+  }
+
+  const params = new URLSearchParams({
+    search: supplier.supplier_name,
+    moneySupplierId: supplier.id,
+  });
+
+  return `${STOCK_SUPPLIERS_PATH}?${params.toString()}`;
+}
+
+function StockManagementConnectionBadge({
+  link,
+  compact = false,
+}: {
+  link?: StockSupplierLink | null;
+  compact?: boolean;
+}) {
+  const connected =
+    link?.state === "connected";
+  const possible =
+    link?.state === "possible_match";
+
+  return (
+    <div
+      className={`rounded-2xl border p-3 ${stockConnectionClass(
+        link,
+      )}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {connected ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : possible ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : (
+          <Boxes className="h-4 w-4" />
+        )}
+
+        <p className="text-xs font-black uppercase tracking-wide">
+          {stockConnectionLabel(link)}
+        </p>
+      </div>
+
+      {!compact && link?.stockSupplierId ? (
+        <div className="mt-3 space-y-1 text-xs leading-5">
+          <p className="font-black text-white">
+            {link.stockSupplierName ||
+              "Stock supplier"}
+          </p>
+
+          <p className="text-white/60">
+            Supplier use:{" "}
+            {link.supplierUse
+              ? link.supplierUse.replaceAll("_", " ")
+              : "Not recorded"}
+          </p>
+
+          <p className="text-white/60">
+            Stock items: {link.itemCount}
+          </p>
+
+          <p className="text-white/60">
+            Open orders: {link.openOrderCount}
+          </p>
+
+          {link.overdueOrderCount > 0 ? (
+            <p className="font-black text-orange-200">
+              Overdue deliveries:{" "}
+              {link.overdueOrderCount}
+            </p>
+          ) : null}
+
+          <p className="text-white/60">
+            Event Hub link:{" "}
+            {link.eventConnected
+              ? "Connected"
+              : "Not connected"}
+          </p>
+
+          {link.doNotUse ? (
+            <p className="font-black text-red-200">
+              Stock warning: Do not use
+            </p>
+          ) : link.needsReview ? (
+            <p className="font-black text-amber-200">
+              Stock warning: Needs review
+            </p>
+          ) : null}
+
+          {link.matchReason ? (
+            <p className="text-white/45">
+              Match: {link.matchReason}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EventHubConnectionBadge({
   link,
   compact = false,
@@ -367,6 +751,15 @@ export default function MoneySuppliersPage() {
   const [eventContacts, setEventContacts] = useState<
     EventHubContactListItem[]
   >([]);
+  const [stockSuppliers, setStockSuppliers] =
+    useState<StockSupplierView[]>([]);
+  const [stockLinks, setStockLinks] = useState<
+    Record<string, StockSupplierLink>
+  >({});
+  const [stockLinksLoading, setStockLinksLoading] =
+    useState(false);
+  const [stockLinksError, setStockLinksError] =
+    useState<string | null>(null);
   const [eventContactSearch, setEventContactSearch] =
     useState("");
   const [eventContactFilter, setEventContactFilter] =
@@ -469,6 +862,11 @@ export default function MoneySuppliersPage() {
           eventLinks[supplier.id]?.contactName,
           eventLinks[supplier.id]?.eventName,
           eventLinks[supplier.id]?.rating,
+          stockConnectionLabel(
+            stockLinks[supplier.id],
+          ),
+          stockLinks[supplier.id]?.stockSupplierName,
+          stockLinks[supplier.id]?.supplierUse,
         ]
           .map((item) => cleanText(item).toLowerCase())
           .join(" ");
@@ -486,6 +884,7 @@ export default function MoneySuppliersPage() {
     statusFilter,
     suppliers,
     eventLinks,
+    stockLinks,
   ]);
 
   const activeCount = suppliers.filter((item) => item.is_active !== false).length;
@@ -506,6 +905,33 @@ export default function MoneySuppliersPage() {
       eventPossibleMatchCount,
     0,
   );
+
+  const stockConnectedCount = suppliers.filter(
+    (supplier) =>
+      stockLinks[supplier.id]?.state ===
+      "connected",
+  ).length;
+
+  const stockPossibleMatchCount = suppliers.filter(
+    (supplier) =>
+      stockLinks[supplier.id]?.state ===
+      "possible_match",
+  ).length;
+
+  const stockNotConnectedCount = Math.max(
+    suppliers.length -
+      stockConnectedCount -
+      stockPossibleMatchCount,
+    0,
+  );
+
+  const connectedToBothCount = suppliers.filter(
+    (supplier) =>
+      eventLinks[supplier.id]?.state ===
+        "connected" &&
+      stockLinks[supplier.id]?.state ===
+        "connected",
+  ).length;
 
   const linkedEventContactIds = useMemo(() => {
     return new Set(
@@ -713,6 +1139,100 @@ export default function MoneySuppliersPage() {
     }
   }
 
+  async function loadStockConnections(
+    supplierRows: Supplier[],
+  ) {
+    setStockLinksLoading(true);
+    setStockLinksError(null);
+
+    try {
+      const response = await fetch(
+        STOCK_SUPPLIERS_ENDPOINT,
+        {
+          method: "GET",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
+
+      const raw = await response.text();
+      let payload:
+        | StockSuppliersResponse
+        | null = null;
+
+      if (raw) {
+        try {
+          payload =
+            JSON.parse(
+              raw,
+            ) as StockSuppliersResponse;
+        } catch {
+          throw new Error(
+            [
+              "The Stock Management suppliers API returned invalid JSON.",
+              `HTTP: ${response.status}`,
+              `Endpoint: ${STOCK_SUPPLIERS_ENDPOINT}`,
+              `Response: ${raw.slice(0, 1200)}`,
+            ].join("\n"),
+          );
+        }
+      }
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          [
+            payload?.error ||
+              "Stock Management supplier connections could not be loaded.",
+            payload?.code
+              ? `Code: ${payload.code}`
+              : "",
+            payload?.details
+              ? `Details: ${payload.details}`
+              : "",
+            payload?.hint
+              ? `Hint: ${payload.hint}`
+              : "",
+            `HTTP: ${response.status}`,
+            `Endpoint: ${STOCK_SUPPLIERS_ENDPOINT}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
+
+      const stockRows =
+        Array.isArray(payload.suppliers)
+          ? payload.suppliers
+          : [];
+
+      setStockSuppliers(stockRows);
+      setStockLinks(
+        buildStockSupplierLinks(
+          supplierRows,
+          stockRows,
+        ),
+      );
+    } catch (requestError) {
+      setStockSuppliers([]);
+      setStockLinks(
+        buildStockSupplierLinks(
+          supplierRows,
+          [],
+        ),
+      );
+      setStockLinksError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Stock Management supplier connections could not be loaded.",
+      );
+    } finally {
+      setStockLinksLoading(false);
+    }
+  }
+
   async function loadSuppliers() {
     setLoading(true);
     setError(null);
@@ -794,9 +1314,10 @@ export default function MoneySuppliersPage() {
        * - Money Management is in migration mode;
        * - the Money supplier API failed.
        */
-      await loadEventConnections(
-        supplierRows,
-      );
+      await Promise.all([
+        loadEventConnections(supplierRows),
+        loadStockConnections(supplierRows),
+      ]);
       setLoading(false);
     }
   }
@@ -946,8 +1467,8 @@ export default function MoneySuppliersPage() {
 
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
                     {easyMode
-                      ? "Add and manage supplier details used by Money Management and see whether each one is connected to the Event Hub contact used for the main event."
-                      : "View, add, edit and archive regular suppliers, connect them to Event Hub contacts used for the main event, and link payments through Money Management. Each supplier clearly shows whether the Event Hub relationship is connected, a possible match or not connected."}
+                      ? "Add and manage supplier details used by Money Management and see whether each one is connected to both Event Hub and Stock Management."
+                      : "View, add, edit and archive regular suppliers, connect them to Event Hub contacts, and connect them to Stock Management for inventory, orders and deliveries. Each supplier clearly shows its Event Hub and Stock Management connection state."}
                   </p>
                 </div>
               </div>
@@ -957,12 +1478,12 @@ export default function MoneySuppliersPage() {
               <button
                 type="button"
                 onClick={loadSuppliers}
-                disabled={loading || eventLinksLoading}
+                disabled={loading || eventLinksLoading || stockLinksLoading}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/20 disabled:opacity-60"
               >
                 <RefreshCcw
                   className={`h-4 w-4 ${
-                    loading || eventLinksLoading
+                    loading || eventLinksLoading || stockLinksLoading
                       ? "animate-spin"
                       : ""
                   }`}
@@ -976,6 +1497,15 @@ export default function MoneySuppliersPage() {
               >
                 <Building2 className="h-4 w-4" />
                 Open Event Hub contacts
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+
+              <Link
+                href={STOCK_SUPPLIERS_PATH}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-cyan-300/20 bg-cyan-500/10 px-4 py-3 text-sm font-black text-cyan-100 hover:bg-cyan-500/20"
+              >
+                <Boxes className="h-4 w-4" />
+                Open Stock suppliers
                 <ExternalLink className="h-3.5 w-3.5" />
               </Link>
 
@@ -1023,25 +1553,39 @@ export default function MoneySuppliersPage() {
                   Shared contact system
                 </p>
                 <h2 className="mt-1 text-xl font-black text-white">
-                  Connected to the Burton Pride Event Hub
+                  Connected to Event Hub and Stock Management
                 </h2>
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   Event Hub remains the main place for event contacts,
                   applications and relationship history. Money Management
                   remains the owner of supplier payments and financial records.
-                  This page shows whether each financial supplier is connected
-                  to the matching Event Hub contact.
+                  Stock Management owns inventory supplier profiles, item links,
+                  purchase orders, deliveries and supplier performance. This
+                  page shows whether each financial supplier is connected to
+                  both systems. Currently loaded: {eventContacts.length} Event
+                  Hub contacts and {stockSuppliers.length} Stock supplier
+                  profiles.
                 </p>
               </div>
             </div>
 
-            <Link
-              href={EVENT_HUB_CONTACTS_PATH}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-violet-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-violet-300"
-            >
-              Open Event Hub
-              <ExternalLink className="h-4 w-4" />
-            </Link>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Link
+                href={EVENT_HUB_CONTACTS_PATH}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-violet-400 px-4 py-3 text-sm font-black text-slate-950 hover:bg-violet-300"
+              >
+                Open Event Hub
+                <ExternalLink className="h-4 w-4" />
+              </Link>
+
+              <Link
+                href={STOCK_SUPPLIERS_PATH}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-300 px-4 py-3 text-sm font-black text-slate-950 hover:bg-cyan-200"
+              >
+                Open Stock Management
+                <Boxes className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -1092,7 +1636,7 @@ export default function MoneySuppliersPage() {
           </div>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
           <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 p-5">
             <p className="text-xs font-black uppercase tracking-wide text-emerald-100/80">
               Active suppliers
@@ -1129,6 +1673,42 @@ export default function MoneySuppliersPage() {
             </p>
           </div>
 
+          <div className="rounded-3xl border border-cyan-300/20 bg-cyan-500/10 p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-cyan-100/80">
+              Stock connected
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {stockConnectedCount}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-amber-100/80">
+              Possible Stock matches
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {stockPossibleMatchCount}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-white/50">
+              Not connected to Stock
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {stockNotConnectedCount}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-fuchsia-300/20 bg-fuchsia-500/10 p-5">
+            <p className="text-xs font-black uppercase tracking-wide text-fuchsia-100/80">
+              Connected to both
+            </p>
+            <p className="mt-2 text-3xl font-black text-white">
+              {connectedToBothCount}
+            </p>
+          </div>
+
           {!easyMode ? (
             <div className="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5">
               <p className="text-xs font-black uppercase tracking-wide text-sky-100/80">
@@ -1155,9 +1735,26 @@ export default function MoneySuppliersPage() {
 
         {eventLinksError ? (
           <div className="whitespace-pre-wrap rounded-3xl border border-amber-300/20 bg-amber-500/10 p-4 font-mono text-xs leading-6 text-amber-100">
-            Event Hub connection check failed:
+            Event Hub and Stock Management connections check failed:
             {"\n"}
             {eventLinksError}
+          </div>
+        ) : null}
+
+        {stockLinksLoading ? (
+          <div className="rounded-3xl border border-cyan-300/20 bg-cyan-500/10 p-4 text-sm font-bold text-cyan-100">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Checking Stock Management supplier connections...
+            </div>
+          </div>
+        ) : null}
+
+        {stockLinksError ? (
+          <div className="whitespace-pre-wrap rounded-3xl border border-amber-300/20 bg-amber-500/10 p-4 font-mono text-xs leading-6 text-amber-100">
+            Stock Management connection check failed:
+            {"\n"}
+            {stockLinksError}
           </div>
         ) : null}
 
@@ -1252,8 +1849,10 @@ export default function MoneySuppliersPage() {
                 These contacts are loaded directly from Event Hub, even when
                 Money Management currently has no suppliers. Each card states
                 whether the contact is already connected to a Money Management
-                supplier. Event Hub remains the main place to edit
-                event applications, event history and relationship details.
+                supplier. Money suppliers are then checked against Stock
+                Management so administrators can see the complete three-app
+                relationship. Event Hub remains the main place to edit event
+                applications, event history and relationship details.
               </p>
 
               <p className="mt-3 inline-flex rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 font-mono text-xs font-black text-violet-100">
@@ -1643,6 +2242,17 @@ export default function MoneySuppliersPage() {
                       compact={easyMode}
                     />
 
+                    <div className="mt-3">
+                      <StockManagementConnectionBadge
+                        link={
+                          stockLinks[
+                            supplier.id
+                          ]
+                        }
+                        compact={easyMode}
+                      />
+                    </div>
+
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Link
                         href={eventContactUrl(
@@ -1658,6 +2268,23 @@ export default function MoneySuppliersPage() {
                           ? "Open Event Hub contact"
                           : "Find Event Hub contact"}
                         <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+
+                      <Link
+                        href={stockSupplierUrl(
+                          supplier,
+                          stockLinks[
+                            supplier.id
+                          ],
+                        )}
+                        className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-100 hover:bg-cyan-500/20"
+                      >
+                        {stockLinks[
+                          supplier.id
+                        ]?.stockSupplierId
+                          ? "Open Stock supplier"
+                          : "Create or link Stock supplier"}
+                        <ShoppingCart className="h-3.5 w-3.5" />
                       </Link>
                     </div>
                   </div>
@@ -1742,9 +2369,10 @@ export default function MoneySuppliersPage() {
                   {editingSupplier ? "Edit Supplier / Contact" : "Add Supplier / Contact"}
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-white/60">
-                  Save the financial supplier here. The page will then check Event Hub
-                  for the matching main-event contact using the organisation,
-                  email, phone and website details.
+                  Save the financial supplier here. The page then checks
+                  Event Hub for the matching main-event contact and Stock
+                  Management for the matching inventory supplier profile using
+                  saved IDs, organisation details, email and phone.
                 </p>
 
                 {easyMode && (
@@ -1771,10 +2399,10 @@ export default function MoneySuppliersPage() {
                 Event Hub connection
               </p>
               <p className="mt-1 text-xs leading-5 text-violet-50/65">
-                Saving this supplier does not create a duplicate Event Hub
-                contact. After saving, the page searches for an existing
-                contact and clearly shows Connected, Possible match or Not
-                connected.
+                Saving this supplier does not create duplicate Event Hub or
+                Stock Management records. After saving, the page searches both
+                apps and clearly shows Connected, Possible match or Not
+                connected for each system.
               </p>
             </div>
 

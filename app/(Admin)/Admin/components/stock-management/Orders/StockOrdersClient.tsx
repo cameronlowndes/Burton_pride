@@ -1965,13 +1965,7 @@ export default function StockOrdersClient() {
                   Refunds
                   <ExternalLink className="h-3 w-3" />
                 </Link>
-                <Link
-                  href={MONEY_PERSONAL_FUNDS_URL}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2.5 text-[11px] font-black text-amber-100"
-                >
-                  Personal funds
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
+              
               </div>
             </div>
           </div>
