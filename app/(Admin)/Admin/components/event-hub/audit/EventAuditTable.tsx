@@ -26,8 +26,8 @@ function formatDate(value: string) {
   });
 }
 
-function title(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+function title(value?: string | null) {
+  return value?.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) ?? "";
 }
 
 function Source({ row }: { row: AuditLogRow }) {

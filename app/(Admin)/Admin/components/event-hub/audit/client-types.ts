@@ -3,9 +3,14 @@
  *
  * Keep this file beside the Event Audit client components that import:
  *   import type { ... } from "./client-types";
+ *
+ * This version includes backwards-compatible aliases so older Event Audit
+ * components can continue importing names such as AuditEventOption,
+ * AuditAdminOption and SavedView while the newer names remain available.
  */
 
 export type JsonPrimitive = string | number | boolean | null;
+
 export type JsonValue =
   | JsonPrimitive
   | JsonValue[]
@@ -27,9 +32,11 @@ export type AuditRiskLevel =
 export type AuditLogStatus =
   | "success"
   | "failed"
+  | "partial_success"
   | "warning"
   | "blocked"
   | "pending"
+  | "cancelled"
   | "reviewing"
   | "resolved"
   | "dismissed"
@@ -75,27 +82,32 @@ export type AuditRecordType =
 
 /**
  * One changed field recorded by the audit system.
- * Supports both snake_case and camelCase so the UI can safely consume either
- * database/API naming style while the project is being built.
+ *
+ * Both snake_case and camelCase names are supported so the UI can safely
+ * consume either database or API naming conventions.
  */
 export type AuditChangedField = {
   field?: string;
   field_name?: string;
   fieldName?: string;
   label?: string;
+
   old_value?: JsonValue;
   oldValue?: JsonValue;
   before?: JsonValue;
+
   new_value?: JsonValue;
   newValue?: JsonValue;
   after?: JsonValue;
+
   is_sensitive?: boolean;
   isSensitive?: boolean;
+
   [key: string]: unknown;
 };
 
 /**
- * The API may return changed fields as a list, a keyed object, or null.
+ * The API may return changed fields as a list, keyed object or null.
  */
 export type AuditChangedFields =
   | AuditChangedField[]
@@ -153,7 +165,9 @@ export type AuditLogRow = {
 
   updated_at?: Nullable<string>;
 
-  /** Allow harmless extra columns returned by Supabase/API joins. */
+  /**
+   * Allows harmless extra columns returned by Supabase queries and joins.
+   */
   [key: string]: unknown;
 };
 
@@ -222,6 +236,14 @@ export type AuditPermissions = {
   deleteSavedViews?: boolean;
   viewConfidentialNotes?: boolean;
   manageAuditSettings?: boolean;
+
+  /**
+   * Backwards-compatible permission property names used by older components.
+   * These are optional so newer API responses do not need to include them.
+   */
+  viewSecurity?: boolean;
+  viewIpAddresses?: boolean;
+  export?: boolean;
 };
 
 export type EventAuditOption = {
@@ -234,11 +256,27 @@ export type EventAuditEventOption = EventAuditOption & {
   date?: Nullable<string>;
   is_active?: boolean;
   is_archived?: boolean;
+
+  /**
+   * Optional legacy API fields.
+   */
+  id?: string;
+  event_name?: string;
+  event_year?: Nullable<number>;
+  event_date?: Nullable<string>;
 };
 
 export type EventAuditAdminOption = EventAuditOption & {
   email?: Nullable<string>;
   role?: Nullable<string>;
+
+  /**
+   * Optional legacy API fields.
+   */
+  admin_id?: string;
+  admin_name?: Nullable<string>;
+  admin_email?: Nullable<string>;
+  admin_role?: Nullable<string>;
 };
 
 export type AuditDateRange = {
@@ -295,6 +333,11 @@ export type AuditPagination = {
   pageSize: number;
   totalRows: number;
   totalPages: number;
+
+  /**
+   * Legacy pagination property used by some page components.
+   */
+  total?: number;
 };
 
 export type AuditSummary = {
@@ -306,6 +349,15 @@ export type AuditSummary = {
   openAlerts: number;
   highRisk: number;
   criticalRisk: number;
+
+  /**
+   * Optional legacy summary values retained for compatibility with older
+   * dashboard cards and earlier API responses.
+   */
+  activeAdmins?: number;
+  securityAlerts?: number;
+  documentsChanged?: number;
+  changesToday?: number;
 };
 
 export type AuditSavedView = {
@@ -324,13 +376,18 @@ export type AuditSavedView = {
 export type AuditListResponse = {
   ok: boolean;
   error?: string;
+
   logs: AuditLogRow[];
+
   summary?: Partial<AuditSummary>;
   pagination?: Partial<AuditPagination>;
   permissions?: Partial<AuditPermissions>;
+
   events?: EventAuditEventOption[];
   admins?: EventAuditAdminOption[];
   savedViews?: AuditSavedView[];
+
+  refreshedAt?: string;
 };
 
 export type AuditDetailsResponse = {
@@ -363,3 +420,9 @@ export type UpdateAuditAlertPayload = {
 export type RestoreAuditRecordPayload = {
   reason: string;
 };
+
+
+
+export type AuditEventOption = EventAuditEventOption;
+export type AuditAdminOption = EventAuditAdminOption;
+export type SavedView = AuditSavedView;

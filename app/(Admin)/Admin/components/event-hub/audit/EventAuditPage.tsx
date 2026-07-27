@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
-  AlertTriangle,
   BookmarkPlus,
   CheckCircle2,
   Download,
@@ -19,35 +18,47 @@ import {
 } from "lucide-react";
 
 import EventAuditDetailsDrawer from "./EventAuditDetailsDrawer";
-import EventAuditFiltersPanel, {
-  type FilterValues,
-} from "./EventAuditFiltersPanel";
+import EventAuditFiltersPanel from "./EventAuditFiltersPanel";
 import EventAuditSummaryCards from "./EventAuditSummaryCards";
 import EventAuditTable from "./EventAuditTable";
 import type {
-  AuditAdminOption,
-  AuditEventOption,
+  EventAuditAdminOption,
+  EventAuditEventOption,
   AuditLogRow,
   AuditPermissions,
   AuditSummary,
-  SavedView,
+  AuditSavedView,
 } from "./client-types";
 
 const API = "/api/admin/burton-pride-event-hub/audit-log";
 
-const EMPTY_PERMISSIONS: AuditPermissions = {
-  viewSecurity: false,
-  viewIpAddresses: false,
-  viewSensitiveChanges: false,
-  export: false,
-  manageAlerts: false,
-  addNotes: false,
-  restoreRecords: false,
+type FilterValues = {
+  area: string;
+  admin_id: string;
+  action: string;
+  status: string;
+  risk: string;
+  record_type: string;
+  date_from: string;
+  date_to: string;
+  security_only: string;
+  review_only: string;
 };
 
-function clean(value: unknown) {
-  return String(value ?? "").trim();
-}
+const EMPTY_PERMISSIONS: AuditPermissions = {
+  viewAuditLog: false,
+  viewAllEvents: false,
+  viewSecurityEvents: false,
+  viewSensitiveChanges: false,
+  addNotes: false,
+  manageAlerts: false,
+  restoreRecords: false,
+  exportAuditLog: false,
+  manageSavedViews: false,
+  deleteSavedViews: false,
+  viewConfidentialNotes: false,
+  manageAuditSettings: false,
+};
 
 function title(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -98,11 +109,11 @@ export default function EventAuditPage() {
   const [logs, setLogs] = useState<AuditLogRow[]>([]);
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [permissions, setPermissions] = useState<AuditPermissions>(EMPTY_PERMISSIONS);
-  const [events, setEvents] = useState<AuditEventOption[]>([]);
-  const [admins, setAdmins] = useState<AuditAdminOption[]>([]);
+  const [events, setEvents] = useState<EventAuditEventOption[]>([]);
+  const [admins, setAdmins] = useState<EventAuditAdminOption[]>([]);
   const [actions, setActions] = useState<Array<{ action: string; action_label: string }>>([]);
   const [areas, setAreas] = useState<string[]>([]);
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [savedViews, setSavedViews] = useState<AuditSavedView[]>([]);
   const [canViewAllEvents, setCanViewAllEvents] = useState(false);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -389,7 +400,7 @@ export default function EventAuditPage() {
               <button type="button" onClick={() => setRefreshNonce((value) => value + 1)} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3.5 py-2.5 text-sm font-black text-white/75 hover:bg-white/10 disabled:opacity-50">
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
               </button>
-              {permissions.export && (
+              {permissions.exportAuditLog && (
                 <button type="button" onClick={() => void exportAudit()} disabled={exporting} className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3.5 py-2.5 text-sm font-black text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50">
                   {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Export XLSX
                 </button>
@@ -402,7 +413,7 @@ export default function EventAuditPage() {
               <option value="current">Current active event</option>
               {canViewAllEvents && <option value="all">All events</option>}
               {canViewAllEvents && <option value="system">System-wide activity</option>}
-              {events.map((event) => <option key={event.id} value={event.id}>{event.event_name} {event.event_year}{event.is_active ? " · Active" : event.is_archived ? " · Archived" : ""}</option>)}
+              {events.map((event) => <option key={event.value} value={event.value}>{event.label}{event.year ? ` ${event.year}` : ""}{event.is_active ? " · Active" : event.is_archived ? " · Archived" : ""}</option>)}
             </select>
 
             <form onSubmit={submitSearch} className="flex min-w-0 overflow-hidden rounded-xl border border-white/10 bg-black/25 focus-within:border-cyan-300/40">
@@ -432,9 +443,9 @@ export default function EventAuditPage() {
           </div>
         )}
 
-        {summary?.securityAlerts && summary.securityAlerts > 0 ? (
+        {summary?.openAlerts && summary.openAlerts > 0 ? (
           <div className="flex flex-col gap-3 rounded-2xl border border-red-300/25 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-red-100" /><div><p className="font-black text-red-50">{summary.securityAlerts} unresolved security alert{summary.securityAlerts === 1 ? "" : "s"}</p><p className="mt-1 text-sm text-red-50/65">Review high-risk, critical or security-sensitive audit events.</p></div></div>
+            <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-red-100" /><div><p className="font-black text-red-50">{summary.openAlerts} unresolved security alert{summary.openAlerts === 1 ? "" : "s"}</p><p className="mt-1 text-sm text-red-50/65">Review high-risk, critical or security-sensitive audit events.</p></div></div>
             <button type="button" onClick={() => applySummaryFilter({ security_only: "true" })} className="rounded-xl bg-red-100 px-4 py-2.5 text-sm font-black text-red-950">Review alerts</button>
           </div>
         ) : null}
@@ -446,7 +457,7 @@ export default function EventAuditPage() {
             <SlidersHorizontal className="h-4 w-4 text-white/40" />
             {activeFilterEntries.map(([key, value]) => (
               <button key={`${key}-${value}`} type="button" onClick={() => removeFilter(key)} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-3 py-1.5 text-xs font-black text-white/65 hover:bg-white/10" title={`Remove ${key} filter`}>
-                {title(key)}: {key === "admin_id" ? admins.find((admin) => admin.admin_id === value)?.admin_name || value : title(value)} <X className="h-3.5 w-3.5" />
+                {title(key)}: {key === "admin_id" ? admins.find((admin) => admin.value === value)?.label || admins.find((admin) => admin.value === value)?.email || value : title(value)} <X className="h-3.5 w-3.5" />
               </button>
             ))}
             <button type="button" onClick={clearAllFilters} className="ml-auto rounded-lg px-3 py-1.5 text-xs font-black text-cyan-200 hover:bg-cyan-500/10">Clear filters</button>
@@ -472,7 +483,7 @@ export default function EventAuditPage() {
         />
       </div>
 
-      <EventAuditFiltersPanel open={filtersOpen} values={filterValues} areas={areas} admins={admins} actions={actions} canViewSecurity={permissions.viewSecurity} onClose={() => setFiltersOpen(false)} onApply={applyFilters} />
+      <EventAuditFiltersPanel open={filtersOpen} values={filterValues} areas={areas} admins={admins} actions={actions} canViewSecurity={permissions.viewSecurityEvents} onClose={() => setFiltersOpen(false)} onApply={applyFilters} />
 
       <EventAuditDetailsDrawer auditId={selectedAuditId} permissions={permissions} onClose={() => updateParams({ audit_id: null }, true)} onChanged={() => setRefreshNonce((value) => value + 1)} />
 
