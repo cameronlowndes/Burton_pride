@@ -18,6 +18,19 @@ const ALLOWED_SUPPLIER_USES = new Set([
   "mixed",
 ]);
 
+const PROFILE_EDITABLE_FIELDS = new Set([
+  "display_name",
+  "supplier_use",
+  "usual_delivery_days",
+  "minimum_order_value_pence",
+  "usual_delivery_cost_pence",
+  "stock_notes",
+  "is_active",
+  "needs_review",
+  "do_not_use",
+  "reason",
+]);
+
 type RouteContext = {
   params: Promise<{
     supplierId: string;
@@ -31,6 +44,7 @@ type AdminIdentity = {
   full_name?: string | null;
   role?: string | null;
   is_main_admin?: boolean | null;
+  permissions?: unknown;
 };
 
 type SupplierUpdateBody = {
@@ -43,10 +57,21 @@ type SupplierUpdateBody = {
   is_active?: unknown;
   needs_review?: unknown;
   do_not_use?: unknown;
+  reason?: unknown;
+
+  /*
+   * These fields are intentionally recognised but rejected by this route.
+   * Link changes must use the dedicated link/unlink APIs so they receive
+   * separate validation, permissions and audit events.
+   */
   event_record_type?: unknown;
   event_record_id?: unknown;
   money_supplier_id?: unknown;
+};
+
+type DeleteBody = {
   reason?: unknown;
+  permanent?: unknown;
 };
 
 type UnknownRow = Record<string, unknown>;
@@ -56,6 +81,19 @@ type ApiErrorLike = {
   details?: string;
   hint?: string;
   message?: string;
+};
+
+type AuditLogInput = {
+  admin: AdminIdentity;
+  action: string;
+  actionLabel: string;
+  summary: string;
+  supplierId: string;
+  beforeData?: UnknownRow | null;
+  afterData?: UnknownRow | null;
+  reason?: string | null;
+  httpMethod: "PATCH" | "DELETE";
+  riskLevel?: "low" | "medium" | "high" | "critical";
 };
 
 function cleanText(value: unknown) {
@@ -73,10 +111,7 @@ function isUuid(value: string) {
   );
 }
 
-function parseBoolean(
-  value: unknown,
-  fieldName: string,
-) {
+function parseBoolean(value: unknown, fieldName: string) {
   if (typeof value === "boolean") {
     return value;
   }
@@ -89,31 +124,29 @@ function parseBoolean(
     return false;
   }
 
-  throw new Error(
-    `${fieldName} must be true or false.`,
-  );
+  throw new Error(`${fieldName} must be true or false.`);
 }
 
 function parseNullableInteger(
   value: unknown,
   fieldName: string,
+  maximum?: number,
 ) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
+  if (value === undefined || value === null || value === "") {
     return null;
   }
 
   const parsed = Number(value);
 
-  if (
-    !Number.isInteger(parsed) ||
-    parsed < 0
-  ) {
+  if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(
       `${fieldName} must be a whole number of zero or more.`,
+    );
+  }
+
+  if (maximum !== undefined && parsed > maximum) {
+    throw new Error(
+      `${fieldName} must not be greater than ${maximum}.`,
     );
   }
 
@@ -124,22 +157,15 @@ function parseNullablePence(
   value: unknown,
   fieldName: string,
 ) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
+  if (value === undefined || value === null || value === "") {
     return null;
   }
 
   const parsed = Number(value);
 
-  if (
-    !Number.isInteger(parsed) ||
-    parsed < 0
-  ) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
     throw new Error(
-      `${fieldName} must be a non-negative amount in pence.`,
+      `${fieldName} must be a non-negative whole amount in pence.`,
     );
   }
 
@@ -147,10 +173,18 @@ function parseNullablePence(
 }
 
 function errorStatus(error: unknown) {
+  const source = error as ApiErrorLike;
+  const code = cleanText(source?.code).toUpperCase();
   const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : "";
+    error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (
+    code === "PGRST116" ||
+    message.includes("not found") ||
+    message.includes("does not exist")
+  ) {
+    return 404;
+  }
 
   if (
     message.includes("unauthorised") ||
@@ -170,17 +204,28 @@ function errorStatus(error: unknown) {
   }
 
   if (
-    message.includes("not found") ||
-    message.includes("does not exist")
+    code === "23503" ||
+    message.includes("foreign key") ||
+    message.includes("still linked") ||
+    message.includes("linked records")
   ) {
-    return 404;
+    return 409;
+  }
+
+  if (
+    code === "23505" ||
+    message.includes("already exists") ||
+    message.includes("duplicate")
+  ) {
+    return 409;
   }
 
   if (
     message.includes("required") ||
     message.includes("must be") ||
     message.includes("invalid") ||
-    message.includes("already exists")
+    message.includes("not allowed") ||
+    message.includes("unsupported")
   ) {
     return 400;
   }
@@ -203,20 +248,60 @@ function apiError(
         error instanceof Error && error.message
           ? error.message
           : fallback,
-      code:
-        source?.code ||
-        `STOCK_SUPPLIER_${status}`,
+      code: source?.code || `STOCK_SUPPLIER_${status}`,
       details:
         source?.details ||
         "The Stock Management supplier API could not complete the request.",
       hint:
         source?.hint ||
-        "Check the supplier ID, Supabase columns, administrator session and server logs.",
+        "Check the supplier ID, request fields, administrator permissions, Supabase columns and server logs.",
       endpoint,
       status,
     },
     { status },
   );
+}
+
+async function readJsonBody<T extends Record<string, unknown>>(
+  request: NextRequest,
+  {
+    allowEmpty = false,
+  }: {
+    allowEmpty?: boolean;
+  } = {},
+): Promise<T> {
+  const raw = await request.text();
+
+  if (!raw.trim()) {
+    if (allowEmpty) {
+      return {} as T;
+    }
+
+    throw new Error("A JSON request body is required.");
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error("The JSON request body must be an object.");
+    }
+
+    return parsed as T;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "The JSON request body must be an object."
+    ) {
+      throw error;
+    }
+
+    throw new Error("The request body contains invalid JSON.");
+  }
 }
 
 async function requireAdmin() {
@@ -234,16 +319,36 @@ async function requireAdmin() {
 
 function adminDisplayName(admin: AdminIdentity) {
   return (
-    admin.name ||
-    admin.full_name ||
-    admin.email ||
+    cleanText(admin.name) ||
+    cleanText(admin.full_name) ||
+    cleanText(admin.email) ||
     "Admin"
   );
 }
 
-async function getSupplierOrThrow(
-  supplierId: string,
-) {
+function isMainAdmin(admin: AdminIdentity) {
+  return (
+    admin.is_main_admin === true ||
+    cleanText(admin.role).toLowerCase() === "main_admin"
+  );
+}
+
+function assertNoUnsupportedFields(body: SupplierUpdateBody) {
+  const suppliedFields = Object.keys(body);
+  const unsupportedFields = suppliedFields.filter(
+    (field) => !PROFILE_EDITABLE_FIELDS.has(field),
+  );
+
+  if (unsupportedFields.length > 0) {
+    throw new Error(
+      `Unsupported field${unsupportedFields.length === 1 ? "" : "s"}: ${unsupportedFields.join(
+        ", ",
+      )}. Event Hub and Money Management links must be changed through their dedicated connection APIs.`,
+    );
+  }
+}
+
+async function getSupplierOrThrow(supplierId: string) {
   const { data, error } = await supabaseAdmin
     .from(STOCK_SUPPLIER_TABLE)
     .select("*")
@@ -263,6 +368,58 @@ async function getSupplierOrThrow(
   return data as UnknownRow;
 }
 
+function changedFields(
+  beforeData: UnknownRow,
+  afterData: UnknownRow,
+) {
+  return Object.keys(afterData).filter((key) => {
+    if (
+      key === "updated_at" ||
+      key === "updated_by" ||
+      key === "updated_by_name"
+    ) {
+      return false;
+    }
+
+    return JSON.stringify(beforeData[key]) !== JSON.stringify(afterData[key]);
+  });
+}
+
+function profileAuditAction(
+  beforeData: UnknownRow,
+  afterData: UnknownRow,
+) {
+  const fields = changedFields(beforeData, afterData);
+
+  if (
+    fields.includes("do_not_use") &&
+    afterData.do_not_use === true
+  ) {
+    return {
+      action: "supplier_marked_do_not_use",
+      actionLabel: "Supplier marked do not use",
+      riskLevel: "high" as const,
+    };
+  }
+
+  if (
+    fields.includes("is_active") &&
+    afterData.is_active === false
+  ) {
+    return {
+      action: "stock_supplier_profile_archived",
+      actionLabel: "Stock supplier archived",
+      riskLevel: "medium" as const,
+    };
+  }
+
+  return {
+    action: "stock_supplier_profile_updated",
+    actionLabel: "Stock supplier updated",
+    riskLevel: "low" as const,
+  };
+}
+
 async function writeAuditLog({
   admin,
   action,
@@ -273,45 +430,38 @@ async function writeAuditLog({
   afterData,
   reason,
   httpMethod,
-}: {
-  admin: AdminIdentity;
-  action: string;
-  actionLabel: string;
-  summary: string;
-  supplierId: string;
-  beforeData?: UnknownRow | null;
-  afterData?: UnknownRow | null;
-  reason?: string | null;
-  httpMethod: "PATCH" | "DELETE";
-}) {
-  try {
-    await supabaseAdmin
-      .from(AUDIT_LOG_TABLE)
-      .insert({
-        admin_id: admin.id || null,
-        admin_name: adminDisplayName(admin),
-        admin_email: admin.email || null,
-        admin_role: admin.role || null,
-        area: "stock_management",
-        action,
-        action_label: actionLabel,
-        status: "success",
-        risk_level:
-          httpMethod === "DELETE"
-            ? "high"
-            : "low",
-        summary,
-        reason: reason || null,
-        record_type: "stock_supplier",
-        record_id: supplierId,
-        before_data: beforeData || null,
-        after_data: afterData || null,
-        route:
-          `/api/admin/stockmanagement/suppliers/${supplierId}`,
-        http_method: httpMethod,
-      } as never);
-  } catch {
-    // Audit logging must not undo a successful supplier update.
+  riskLevel,
+}: AuditLogInput) {
+  const { error } = await supabaseAdmin
+    .from(AUDIT_LOG_TABLE)
+    .insert({
+      admin_id: admin.id || null,
+      admin_name: adminDisplayName(admin),
+      admin_email: admin.email || null,
+      admin_role: admin.role || null,
+      area: "stock_management",
+      action,
+      action_label: actionLabel,
+      status: "success",
+      risk_level:
+        riskLevel ||
+        (httpMethod === "DELETE" ? "high" : "low"),
+      summary,
+      reason: reason || null,
+      record_type: "stock_supplier",
+      record_id: supplierId,
+      before_data: beforeData || null,
+      after_data: afterData || null,
+      route: `/api/admin/stockmanagement/suppliers/${supplierId}`,
+      http_method: httpMethod,
+    } as never);
+
+  if (error) {
+    console.error("Stock supplier audit log failed", {
+      supplierId,
+      action,
+      auditError: error,
+    });
   }
 }
 
@@ -319,16 +469,12 @@ function buildUpdatePayload(
   body: SupplierUpdateBody,
   admin: AdminIdentity,
 ) {
-  const updatePayload: UnknownRow = {
-    updated_at: new Date().toISOString(),
-    updated_by: admin.id || null,
-    updated_by_name: adminDisplayName(admin),
-  };
+  assertNoUnsupportedFields(body);
+
+  const updatePayload: UnknownRow = {};
 
   if (body.display_name !== undefined) {
-    const displayName = cleanText(
-      body.display_name,
-    );
+    const displayName = cleanText(body.display_name);
 
     if (displayName.length < 2) {
       throw new Error(
@@ -336,20 +482,19 @@ function buildUpdatePayload(
       );
     }
 
-    updatePayload.display_name =
-      displayName;
+    if (displayName.length > 200) {
+      throw new Error(
+        "display_name must not contain more than 200 characters.",
+      );
+    }
+
+    updatePayload.display_name = displayName;
   }
 
   if (body.supplier_use !== undefined) {
-    const supplierUse = cleanText(
-      body.supplier_use,
-    );
+    const supplierUse = cleanText(body.supplier_use);
 
-    if (
-      !ALLOWED_SUPPLIER_USES.has(
-        supplierUse,
-      )
-    ) {
+    if (!ALLOWED_SUPPLIER_USES.has(supplierUse)) {
       throw new Error(
         `supplier_use is invalid. Allowed values: ${Array.from(
           ALLOWED_SUPPLIER_USES,
@@ -357,25 +502,19 @@ function buildUpdatePayload(
       );
     }
 
-    updatePayload.supplier_use =
-      supplierUse;
+    updatePayload.supplier_use = supplierUse;
   }
 
-  if (
-    body.usual_delivery_days !==
-    undefined
-  ) {
+  if (body.usual_delivery_days !== undefined) {
     updatePayload.usual_delivery_days =
       parseNullableInteger(
         body.usual_delivery_days,
         "usual_delivery_days",
+        3650,
       );
   }
 
-  if (
-    body.minimum_order_value_pence !==
-    undefined
-  ) {
+  if (body.minimum_order_value_pence !== undefined) {
     updatePayload.minimum_order_value_pence =
       parseNullablePence(
         body.minimum_order_value_pence,
@@ -383,10 +522,7 @@ function buildUpdatePayload(
       );
   }
 
-  if (
-    body.usual_delivery_cost_pence !==
-    undefined
-  ) {
+  if (body.usual_delivery_cost_pence !== undefined) {
     updatePayload.usual_delivery_cost_pence =
       parseNullablePence(
         body.usual_delivery_cost_pence,
@@ -395,83 +531,47 @@ function buildUpdatePayload(
   }
 
   if (body.stock_notes !== undefined) {
-    updatePayload.stock_notes =
-      nullableText(body.stock_notes);
+    const stockNotes = nullableText(body.stock_notes);
+
+    if (stockNotes && stockNotes.length > 10_000) {
+      throw new Error(
+        "stock_notes must not contain more than 10,000 characters.",
+      );
+    }
+
+    updatePayload.stock_notes = stockNotes;
   }
 
   if (body.is_active !== undefined) {
-    updatePayload.is_active =
-      parseBoolean(
-        body.is_active,
-        "is_active",
-      );
+    updatePayload.is_active = parseBoolean(
+      body.is_active,
+      "is_active",
+    );
   }
 
   if (body.needs_review !== undefined) {
-    updatePayload.needs_review =
-      parseBoolean(
-        body.needs_review,
-        "needs_review",
-      );
+    updatePayload.needs_review = parseBoolean(
+      body.needs_review,
+      "needs_review",
+    );
   }
 
   if (body.do_not_use !== undefined) {
-    updatePayload.do_not_use =
-      parseBoolean(
-        body.do_not_use,
-        "do_not_use",
-      );
-  }
-
-  if (
-    body.event_record_type !==
-    undefined
-  ) {
-    updatePayload.event_record_type =
-      nullableText(
-        body.event_record_type,
-      );
-  }
-
-  if (
-    body.event_record_id !== undefined
-  ) {
-    const eventRecordId = nullableText(
-      body.event_record_id,
+    updatePayload.do_not_use = parseBoolean(
+      body.do_not_use,
+      "do_not_use",
     );
-
-    if (
-      eventRecordId &&
-      !isUuid(eventRecordId)
-    ) {
-      throw new Error(
-        "event_record_id must be a valid UUID.",
-      );
-    }
-
-    updatePayload.event_record_id =
-      eventRecordId;
   }
 
-  if (
-    body.money_supplier_id !== undefined
-  ) {
-    const moneySupplierId = nullableText(
-      body.money_supplier_id,
+  if (Object.keys(updatePayload).length === 0) {
+    throw new Error(
+      "At least one editable supplier field must be supplied for update.",
     );
-
-    if (
-      moneySupplierId &&
-      !isUuid(moneySupplierId)
-    ) {
-      throw new Error(
-        "money_supplier_id must be a valid UUID.",
-      );
-    }
-
-    updatePayload.money_supplier_id =
-      moneySupplierId;
   }
+
+  updatePayload.updated_at = new Date().toISOString();
+  updatePayload.updated_by = admin.id || null;
+  updatePayload.updated_by_name = adminDisplayName(admin);
 
   return updatePayload;
 }
@@ -480,9 +580,7 @@ export async function GET(
   _request: NextRequest,
   context: RouteContext,
 ) {
-  const { supplierId } =
-    await context.params;
-
+  const { supplierId } = await context.params;
   const endpoint =
     `GET /api/admin/stockmanagement/suppliers/${supplierId}`;
 
@@ -495,15 +593,20 @@ export async function GET(
       );
     }
 
-    const supplier =
-      await getSupplierOrThrow(
-        supplierId,
-      );
+    const supplier = await getSupplierOrThrow(supplierId);
 
-    return NextResponse.json({
-      ok: true,
-      supplier,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        supplier,
+      },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
   } catch (error) {
     return apiError(
       error,
@@ -517,9 +620,7 @@ export async function PATCH(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const { supplierId } =
-    await context.params;
-
+  const { supplierId } = await context.params;
   const endpoint =
     `PATCH /api/admin/stockmanagement/suppliers/${supplierId}`;
 
@@ -532,22 +633,16 @@ export async function PATCH(
       );
     }
 
-    const beforeData =
-      await getSupplierOrThrow(
-        supplierId,
-      );
-
-    const body =
-      (await request.json()) as SupplierUpdateBody;
-
-    const updatePayload =
-      buildUpdatePayload(body, admin);
+    const beforeData = await getSupplierOrThrow(supplierId);
+    const body = await readJsonBody<SupplierUpdateBody>(request);
+    const updatePayload = buildUpdatePayload(body, admin);
 
     if (
-      Object.keys(updatePayload).length <= 3
+      updatePayload.do_not_use === true &&
+      !nullableText(body.reason)
     ) {
       throw new Error(
-        "At least one supplier field must be supplied for update.",
+        "A reason is required when marking a supplier as do not use.",
       );
     }
 
@@ -565,23 +660,30 @@ export async function PATCH(
       throw updateError;
     }
 
-    const afterData =
-      updatedData as UnknownRow;
+    const afterData = updatedData as UnknownRow;
+    const fields = changedFields(beforeData, afterData);
+
+    if (fields.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        message: "No supplier values changed.",
+        supplier: afterData,
+        changedFields: [],
+      });
+    }
+
+    const audit = profileAuditAction(beforeData, afterData);
 
     await writeAuditLog({
       admin,
-      action:
-        "stock_supplier_profile_updated",
-      actionLabel:
-        "Stock supplier updated",
-      summary: `Updated Stock Management supplier ${cleanText(
-        afterData.display_name,
-      ) || supplierId}.`,
+      ...audit,
+      summary: `Updated Stock Management supplier ${
+        cleanText(afterData.display_name) || supplierId
+      }. Changed fields: ${fields.join(", ")}.`,
       supplierId,
       beforeData,
       afterData,
-      reason:
-        nullableText(body.reason),
+      reason: nullableText(body.reason),
       httpMethod: "PATCH",
     });
 
@@ -590,6 +692,7 @@ export async function PATCH(
       message:
         "The Stock Management supplier profile was updated.",
       supplier: afterData,
+      changedFields: fields,
     });
   } catch (error) {
     return apiError(
@@ -604,9 +707,7 @@ export async function DELETE(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const { supplierId } =
-    await context.params;
-
+  const { supplierId } = await context.params;
   const endpoint =
     `DELETE /api/admin/stockmanagement/suppliers/${supplierId}`;
 
@@ -619,29 +720,12 @@ export async function DELETE(
       );
     }
 
-    const beforeData =
-      await getSupplierOrThrow(
-        supplierId,
-      );
+    const beforeData = await getSupplierOrThrow(supplierId);
+    const body = await readJsonBody<DeleteBody>(request, {
+      allowEmpty: true,
+    });
 
-    let body: {
-      reason?: unknown;
-      permanent?: unknown;
-    } = {};
-
-    try {
-      body =
-        (await request.json()) as {
-          reason?: unknown;
-          permanent?: unknown;
-        };
-    } catch {
-      body = {};
-    }
-
-    const reason = nullableText(
-      body.reason,
-    );
+    const reason = nullableText(body.reason);
 
     if (!reason || reason.length < 10) {
       throw new Error(
@@ -654,36 +738,48 @@ export async function DELETE(
       body.permanent === "true";
 
     if (permanent) {
-      if (!admin.is_main_admin) {
+      if (!isMainAdmin(admin)) {
         throw new Error(
           "Main admin permission is required to permanently delete a Stock Management supplier.",
         );
       }
 
-      const { error: deleteError } =
-        await supabaseAdmin
-          .from(STOCK_SUPPLIER_TABLE)
-          .delete()
-          .eq("id", supplierId);
+      const { error: deleteError } = await supabaseAdmin
+        .from(STOCK_SUPPLIER_TABLE)
+        .delete()
+        .eq("id", supplierId);
 
       if (deleteError) {
+        if (deleteError.code === "23503") {
+          throw Object.assign(
+            new Error(
+              "This supplier cannot be permanently deleted because linked stock items, orders, reviews, audit records or other supplier data still exist. Archive the supplier instead, or move/remove the linked records first.",
+            ),
+            {
+              code: deleteError.code,
+              details: deleteError.details,
+              hint:
+                "Use the supplier workspace to review item links, orders and connected records before permanent deletion.",
+            },
+          );
+        }
+
         throw deleteError;
       }
 
       await writeAuditLog({
         admin,
-        action:
-          "stock_supplier_profile_deleted",
-        actionLabel:
-          "Stock supplier permanently deleted",
-        summary: `Permanently deleted Stock Management supplier ${cleanText(
-          beforeData.display_name,
-        ) || supplierId}.`,
+        action: "stock_supplier_profile_deleted",
+        actionLabel: "Stock supplier permanently deleted",
+        summary: `Permanently deleted Stock Management supplier ${
+          cleanText(beforeData.display_name) || supplierId
+        }.`,
         supplierId,
         beforeData,
         afterData: null,
         reason,
         httpMethod: "DELETE",
+        riskLevel: "critical",
       });
 
       return NextResponse.json({
@@ -693,14 +789,21 @@ export async function DELETE(
       });
     }
 
+    if (beforeData.is_active === false) {
+      return NextResponse.json({
+        ok: true,
+        message:
+          "The Stock Management supplier is already archived.",
+        supplier: beforeData,
+      });
+    }
+
     const archivePayload: UnknownRow = {
       is_active: false,
       needs_review: true,
-      updated_at:
-        new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       updated_by: admin.id || null,
-      updated_by_name:
-        adminDisplayName(admin),
+      updated_by_name: adminDisplayName(admin),
     };
 
     const {
@@ -717,23 +820,21 @@ export async function DELETE(
       throw archiveError;
     }
 
-    const afterData =
-      archivedData as UnknownRow;
+    const afterData = archivedData as UnknownRow;
 
     await writeAuditLog({
       admin,
-      action:
-        "stock_supplier_profile_archived",
-      actionLabel:
-        "Stock supplier archived",
-      summary: `Archived Stock Management supplier ${cleanText(
-        afterData.display_name,
-      ) || supplierId}.`,
+      action: "stock_supplier_profile_archived",
+      actionLabel: "Stock supplier archived",
+      summary: `Archived Stock Management supplier ${
+        cleanText(afterData.display_name) || supplierId
+      }.`,
       supplierId,
       beforeData,
       afterData,
       reason,
       httpMethod: "DELETE",
+      riskLevel: "high",
     });
 
     return NextResponse.json({

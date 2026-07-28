@@ -1066,28 +1066,25 @@ export default function StockSuppliersPage() {
     setError("");
 
     try {
-      const response = await fetch(API, {
-        cache: "no-store",
-        credentials: "include",
-      });
-
-      const json =
-        (await response
-          .json()
-          .catch(() => ({}))) as SupplierListResponse;
-
-      if (!response.ok || !json.ok) {
-        throw await readApiError(
-          response,
-          json.error || "Failed to load Stock Management suppliers.",
-        );
-      }
+      const json = await requestJson<SupplierListResponse>(
+        API,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+        "Failed to load Stock Management suppliers.",
+      );
 
       const rows = Array.isArray(json.suppliers)
         ? json.suppliers
         : [];
 
       setSuppliers(rows);
+      setSelectedSupplier((current) =>
+        current
+          ? rows.find((row) => row.id === current.id) || null
+          : null,
+      );
       setEventContacts(
         Array.isArray(json.eventContacts)
           ? json.eventContacts
@@ -1106,6 +1103,7 @@ export default function StockSuppliersPage() {
       setSuppliers([]);
       setEventContacts([]);
       setSummary(EMPTY_SUMMARY);
+      setPermissions(EMPTY_PERMISSIONS);
     } finally {
       setLoading(false);
     }
@@ -1501,8 +1499,15 @@ export default function StockSuppliersPage() {
       );
 
       setWorkspaceNotice(successMessage);
+
+      const refreshedSupplier = suppliers.find(
+        (supplier) => supplier.id === selectedSupplier.id,
+      );
+
       await Promise.all([
-        loadSupplierWorkspace(selectedSupplier),
+        refreshedSupplier
+          ? loadSupplierWorkspace(refreshedSupplier)
+          : Promise.resolve(),
         loadSuppliers(),
         loadMoneySuppliers(),
       ]);
@@ -1515,8 +1520,75 @@ export default function StockSuppliersPage() {
     }
   }
 
+  function askActionReason(
+    actionLabel: string,
+    minimumLength = 10,
+  ) {
+    const reason = window.prompt(
+      `${actionLabel}\n\nEnter a reason of at least ${minimumLength} characters:`,
+      "",
+    );
+
+    if (reason === null) return null;
+
+    const cleaned = reason.trim();
+
+    if (cleaned.length < minimumLength) {
+      setWorkspaceError(
+        `A reason of at least ${minimumLength} characters is required.`,
+      );
+      return null;
+    }
+
+    return cleaned;
+  }
+
+  function confirmHighRiskAction(message: string) {
+    return window.confirm(message);
+  }
+
   async function saveProfileChanges() {
     if (!selectedSupplier || !profileEdit) return;
+
+    const minimumOrderValuePence = profileEdit.minimumOrderValue
+      ? parsePoundsToPence(profileEdit.minimumOrderValue)
+      : null;
+    const usualDeliveryCostPence = profileEdit.usualDeliveryCost
+      ? parsePoundsToPence(profileEdit.usualDeliveryCost)
+      : null;
+
+    if (
+      profileEdit.minimumOrderValue &&
+      minimumOrderValuePence === null
+    ) {
+      setWorkspaceError(
+        "Minimum order value must be a valid non-negative amount.",
+      );
+      return;
+    }
+
+    if (
+      profileEdit.usualDeliveryCost &&
+      usualDeliveryCostPence === null
+    ) {
+      setWorkspaceError(
+        "Usual delivery cost must be a valid non-negative amount.",
+      );
+      return;
+    }
+
+    let reason: string | null = null;
+
+    if (
+      profileEdit.doNotUse &&
+      !selectedSupplier.doNotUse
+    ) {
+      reason = askActionReason(
+        "Mark this supplier as do not use?",
+      );
+
+      if (!reason) return;
+    }
 
     await runWorkspaceAction(
       `${API}/${selectedSupplier.id}`,
@@ -1529,22 +1601,15 @@ export default function StockSuppliersPage() {
             ? Number(profileEdit.usualDeliveryDays)
             : null,
         minimum_order_value_pence:
-          profileEdit.minimumOrderValue
-            ? parsePoundsToPence(
-                profileEdit.minimumOrderValue,
-              )
-            : null,
+          minimumOrderValuePence,
         usual_delivery_cost_pence:
-          profileEdit.usualDeliveryCost
-            ? parsePoundsToPence(
-                profileEdit.usualDeliveryCost,
-              )
-            : null,
+          usualDeliveryCostPence,
         stock_notes:
           profileEdit.stockNotes.trim() || null,
         is_active: profileEdit.isActive,
         needs_review: profileEdit.needsReview,
         do_not_use: profileEdit.doNotUse,
+        reason,
       },
       "The Stock Management supplier profile was updated.",
     );
@@ -1757,42 +1822,31 @@ export default function StockSuppliersPage() {
     setNotice("");
 
     try {
-      const response = await fetch(API, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
+      await requestJson<Record<string, unknown>>(
+        API,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            display_name: form.displayName.trim(),
+            supplier_use: form.supplierUse,
+            usual_delivery_days: form.usualDeliveryDays
+              ? Number(form.usualDeliveryDays)
+              : null,
+            minimum_order_value_pence:
+              minimumOrderValuePence,
+            usual_delivery_cost_pence:
+              usualDeliveryCostPence,
+            stock_notes: form.stockNotes.trim() || null,
+            event_record_type:
+              form.eventRecordType.trim() || null,
+            event_record_id:
+              form.eventRecordId.trim() || null,
+            money_supplier_id:
+              form.moneySupplierId.trim() || null,
+          }),
         },
-        body: JSON.stringify({
-          display_name: form.displayName.trim(),
-          supplier_use: form.supplierUse,
-          usual_delivery_days: form.usualDeliveryDays
-            ? Number(form.usualDeliveryDays)
-            : null,
-          minimum_order_value_pence:
-            minimumOrderValuePence,
-          usual_delivery_cost_pence:
-            usualDeliveryCostPence,
-          stock_notes: form.stockNotes.trim() || null,
-          event_record_type:
-            form.eventRecordType.trim() || null,
-          event_record_id:
-            form.eventRecordId.trim() || null,
-          money_supplier_id:
-            form.moneySupplierId.trim() || null,
-        }),
-      });
-
-      const json = (await response
-        .json()
-        .catch(() => ({}))) as ApiErrorPayload;
-
-      if (!response.ok || !json.ok) {
-        throw await readApiError(
-          response,
-          json.error || "Supplier creation failed.",
-        );
-      }
+        "Supplier creation failed.",
+      );
 
       setAddOpen(false);
       setForm(EMPTY_FORM);
@@ -3351,14 +3405,19 @@ export default function StockSuppliersPage() {
                             <td className="px-4 py-3">
                               <button
                                 type="button"
-                                onClick={() =>
+                                onClick={() => {
+                                  const reason = askActionReason(
+                                    `Remove ${link.stockItemName} from this supplier?`,
+                                  );
+                                  if (!reason) return;
+
                                   void runWorkspaceAction(
                                     `${API}/${selectedSupplier.id}/item-links/${link.id}`,
                                     "DELETE",
-                                    {},
+                                    { reason },
                                     "The item supplier link was removed.",
-                                  )
-                                }
+                                  );
+                                }}
                                 className="rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100"
                               >
                                 Remove
@@ -3667,14 +3726,27 @@ export default function StockSuppliersPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    if (
+                                      !confirmHighRiskAction(
+                                        `Delete purchase order ${order.orderNumber}? This cannot be undone.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+
+                                    const reason = askActionReason(
+                                      `Delete purchase order ${order.orderNumber}?`,
+                                    );
+                                    if (!reason) return;
+
                                     void runWorkspaceAction(
                                       `${API}/${selectedSupplier.id}/orders/${order.id}`,
                                       "DELETE",
-                                      {},
+                                      { reason },
                                       "The purchase order was deleted.",
-                                    )
-                                  }
+                                    );
+                                  }}
                                   className="rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100"
                                 >
                                   Delete
@@ -4174,14 +4246,19 @@ export default function StockSuppliersPage() {
                           workspaceSaving ||
                           !selectedSupplier.eventHub.recordId
                         }
-                        onClick={() =>
+                        onClick={() => {
+                          const reason = askActionReason(
+                            "Unlink this Event Hub record? The Event Hub contact will not be deleted.",
+                          );
+                          if (!reason) return;
+
                           void runWorkspaceAction(
                             `${API}/${selectedSupplier.id}/connections/event-hub`,
                             "DELETE",
-                            {},
+                            { reason },
                             "The Event Hub connection was removed.",
-                          )
-                        }
+                          );
+                        }}
                         className="mt-4 rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-2.5 text-sm font-black text-red-100 disabled:opacity-50"
                       >
                         Unlink Event Hub record
@@ -4203,14 +4280,19 @@ export default function StockSuppliersPage() {
                           workspaceSaving ||
                           !selectedSupplier.moneyManagement.supplierId
                         }
-                        onClick={() =>
+                        onClick={() => {
+                          const reason = askActionReason(
+                            "Unlink this Money Management supplier? The financial supplier will not be deleted.",
+                          );
+                          if (!reason) return;
+
                           void runWorkspaceAction(
-                            `${API}/${selectedSupplier.id}/connections/money`,
+                            `${API}/${selectedSupplier.id}/connections/money-management`,
                             "DELETE",
-                            {},
+                            { reason },
                             "The Money Management connection was removed.",
-                          )
-                        }
+                          );
+                        }}
                         className="mt-4 rounded-xl border border-red-300/20 bg-red-500/10 px-4 py-2.5 text-sm font-black text-red-100 disabled:opacity-50"
                       >
                         Unlink Money supplier
@@ -4234,14 +4316,23 @@ export default function StockSuppliersPage() {
                     <button
                       type="button"
                       disabled={workspaceSaving}
-                      onClick={() =>
+                      onClick={() => {
+                        const reason = askActionReason(
+                          "Migrate this supplier to the central organisation model?",
+                        );
+                        if (!reason) return;
+
                         void runWorkspaceAction(
                           `${API}/${selectedSupplier.id}/organisation/migrate`,
                           "POST",
-                          {},
+                          {
+                            organisation_name:
+                              selectedSupplier.displayName,
+                            reason,
+                          },
                           "The supplier was migrated or linked to the central organisation record.",
-                        )
-                      }
+                        );
+                      }}
                       className="mt-4 rounded-xl bg-violet-300 px-4 py-2.5 text-sm font-black text-slate-950"
                     >
                       Migrate to central organisation
@@ -4272,17 +4363,37 @@ export default function StockSuppliersPage() {
                       disabled={
                         workspaceSaving || !mergeTargetId
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        const target = workspace.duplicateCandidates.find(
+                          (candidate) => candidate.id === mergeTargetId,
+                        );
+
+                        if (
+                          !confirmHighRiskAction(
+                            `Merge ${selectedSupplier.displayName} into ${
+                              target?.displayName || "the selected supplier"
+                            }? The current supplier profile will be permanently removed.`,
+                          )
+                        ) {
+                          return;
+                        }
+
+                        const reason = askActionReason(
+                          "Why are these supplier profiles being merged?",
+                        );
+                        if (!reason) return;
+
                         void runWorkspaceAction(
                           `${API}/${selectedSupplier.id}/merge`,
                           "POST",
                           {
-                            duplicate_supplier_id:
+                            target_supplier_id:
                               mergeTargetId,
+                            reason,
                           },
                           "The duplicate supplier records were merged.",
-                        )
-                      }
+                        );
+                      }}
                       className="mt-3 rounded-xl bg-amber-300 px-4 py-2.5 text-sm font-black text-slate-950 disabled:opacity-50"
                     >
                       Merge selected duplicate
@@ -4336,14 +4447,19 @@ export default function StockSuppliersPage() {
                       {workspace.activeOverride?.enabled ? (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            const reason = askActionReason(
+                              "Why is the main-admin override being removed?",
+                            );
+                            if (!reason) return;
+
                             void runWorkspaceAction(
                               `${API}/${selectedSupplier.id}/override`,
                               "DELETE",
-                              {},
+                              { reason },
                               "The main-admin override was removed.",
-                            )
-                          }
+                            );
+                          }}
                           className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-black"
                         >
                           Remove override
