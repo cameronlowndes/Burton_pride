@@ -178,6 +178,28 @@ type Notice = {
   message: string;
 };
 
+type StockAuditStatus =
+  | "success"
+  | "failed"
+  | "warning"
+  | "blocked";
+
+type StockAuditRisk =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+type StockAuditReportInput = {
+  action: string;
+  status?: StockAuditStatus;
+  risk?: StockAuditRisk;
+  recordId?: string | null;
+  recordType?: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+};
+
 type MoneyActionMode =
   | "approve"
   | "link_transaction"
@@ -219,6 +241,10 @@ const MONEY_BUDGETS_ENDPOINT =
   "/api/admin/money/budget?mode=options";
 const MONEY_TRANSACTIONS_ENDPOINT =
   "/api/admin/money/transactions?mode=options";
+const STOCK_AUDIT_REPORT_ENDPOINT =
+  "/api/admin/stockmanagement/audit-logs";
+const STOCK_ORDERS_ROUTE =
+  "/Admin/StockManagement/Orders";
 
 /*
  * Money Management remains the owner of budgets, transactions,
@@ -233,8 +259,6 @@ const MONEY_TRANSACTIONS_URL =
   "/Admin/MoneyManagement/TrackingMoney";
 const MONEY_REFUNDS_URL =
   "/Admin/MoneyManagement/TrackingMoney/Refunds";
-const MONEY_PERSONAL_FUNDS_URL =
-  "/Admin/MoneyManagement/TrackingMoney/PersonalFunds";
 
 const EMPTY_FORM: CreateForm = {
   title: "",
@@ -512,6 +536,80 @@ async function expectApiSuccess<T extends DetailedApiPayload>({
   }
 
   return payload;
+}
+
+function serialiseAuditError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: truncate(error.message, 2000),
+    };
+  }
+
+  if (typeof error === "string") {
+    return { message: truncate(error, 2000) };
+  }
+
+  return error ? { message: "Unknown client error" } : null;
+}
+
+async function reportStockAuditEvent({
+  action,
+  status = "success",
+  risk = "low",
+  recordId = null,
+  recordType = "stock_order",
+  metadata = {},
+  error,
+}: StockAuditReportInput) {
+  try {
+    const response = await fetch(STOCK_AUDIT_REPORT_ENDPOINT, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      keepalive: true,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        module: "stock_orders",
+        route: STOCK_ORDERS_ROUTE,
+        source: "CLIENT",
+        status,
+        risk,
+        record_type: recordType,
+        record_id: recordId,
+        metadata: {
+          app: "stock_control",
+          page: "orders",
+          ...metadata,
+          ...(error
+            ? { client_error: serialiseAuditError(error) }
+            : {}),
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const result = await readJson<DetailedApiPayload>(response);
+      console.error("Stock Control audit report failed", {
+        action,
+        status,
+        httpStatus: response.status,
+        payload: result.data,
+        rawText: result.text,
+      });
+    }
+  } catch (auditError) {
+    // Audit reporting must never stop the main Stock Orders action.
+    console.error("Stock Control audit request failed", {
+      action,
+      status,
+      auditError,
+    });
+  }
 }
 
 function makeDraftLine(item?: InventoryItem): DraftLine {
@@ -1004,8 +1102,33 @@ export default function StockOrdersClient() {
         } was created as a draft. It is clearly marked TEST and can now be used to test submit, approval, Money Management linking, ordering and cancellation.`,
       });
 
+      await reportStockAuditEvent({
+        action: "stock.order.test_created",
+        status: "success",
+        risk: "low",
+        recordId:
+          typeof result.order === "object" &&
+          result.order &&
+          "id" in result.order
+            ? String(result.order.id || "") || null
+            : null,
+        metadata: {
+          order_number: result.order?.orderNumber || null,
+          supplier_name: "TEST SUPPLIER — Do not purchase",
+          line_count: testLines.length,
+          is_test: true,
+        },
+      });
+
       await loadData();
     } catch (error) {
+      await reportStockAuditEvent({
+        action: "stock.order.test_create_failed",
+        status: "failed",
+        risk: "medium",
+        metadata: { is_test: true },
+        error,
+      });
       setNotice({
         tone: "error",
         title: "Test order could not be created",
@@ -1283,8 +1406,30 @@ export default function StockOrdersClient() {
           result.message ||
           `${order.orderNumber} was updated successfully.`,
       });
+
+      await reportStockAuditEvent({
+        action: "stock.order.updated",
+        status: "success",
+        risk: "medium",
+        recordId: order.id,
+        metadata: {
+          order_number: order.orderNumber,
+          supplier_name: form.supplierName.trim(),
+          line_count: form.lines.length,
+          estimated_total: formTotals.total,
+        },
+      });
+
       await loadData();
     } catch (error) {
+      await reportStockAuditEvent({
+        action: "stock.order.update_failed",
+        status: "failed",
+        risk: "medium",
+        recordId: order.id,
+        metadata: { order_number: order.orderNumber },
+        error,
+      });
       setNotice({
         tone: "error",
         title: "Order could not be updated",
@@ -1351,8 +1496,33 @@ export default function StockOrdersClient() {
           result.message ||
           "The draft order was created.",
       });
+
+      await reportStockAuditEvent({
+        action: "stock.order.created",
+        status: "success",
+        risk: "medium",
+        metadata: {
+          supplier_name: form.supplierName.trim(),
+          title: form.title.trim(),
+          line_count: form.lines.length,
+          estimated_total: formTotals.total,
+          money_budget_id: form.moneyBudgetId || null,
+        },
+      });
+
       await loadData();
     } catch (error) {
+      await reportStockAuditEvent({
+        action: "stock.order.create_failed",
+        status: "failed",
+        risk: "medium",
+        metadata: {
+          supplier_name: form.supplierName.trim() || null,
+          title: form.title.trim() || null,
+          line_count: form.lines.length,
+        },
+        error,
+      });
       setNotice({
         tone: "error",
         title: "Order could not be created",
@@ -1441,8 +1611,51 @@ export default function StockOrdersClient() {
           result.message ||
           "The order action was completed.",
       });
+
+      const auditActionByOrderAction: Record<string, string> = {
+        submit: "stock.order.submitted",
+        approve: "stock.order.approved",
+        place: "stock.order.placed",
+        link_transaction: order.moneyTransactionId
+          ? "stock.order.payment_link_changed"
+          : "stock.order.payment_linked",
+        cancel: "stock.order.cancelled",
+      };
+
+      await reportStockAuditEvent({
+        action:
+          auditActionByOrderAction[action] ||
+          `stock.order.${action}`,
+        status: "success",
+        risk:
+          action === "approve" || action === "cancel"
+            ? "high"
+            : "medium",
+        recordId: order.id,
+        metadata: {
+          order_number: order.orderNumber,
+          order_action: action,
+          supplier_name: order.supplierName || null,
+          ...extra,
+        },
+      });
+
       await loadData();
     } catch (error) {
+      await reportStockAuditEvent({
+        action: `stock.order.${action}_failed`,
+        status: "failed",
+        risk:
+          action === "approve" || action === "cancel"
+            ? "high"
+            : "medium",
+        recordId: order.id,
+        metadata: {
+          order_number: order.orderNumber,
+          order_action: action,
+        },
+        error,
+      });
       setNotice({
         tone: "error",
         title: "Order action failed",
@@ -1740,6 +1953,33 @@ export default function StockOrdersClient() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+
+    await reportStockAuditEvent({
+      action: "stock.order.exported",
+      status: "success",
+      risk: "low",
+      recordType: "stock_order_report",
+      metadata: {
+        export_format: "xlsx",
+        file_name: anchor.download,
+        row_count: orders.length,
+        search: query.trim() || null,
+        status_filter: status,
+        total_estimated_value: orders.reduce(
+          (total, order) =>
+            total + Number(order.estimatedTotal || 0),
+          0,
+        ),
+      },
+    });
+
+    setNotice({
+      tone: "success",
+      title: "Excel report exported",
+      message: `${orders.length} stock order${
+        orders.length === 1 ? "" : "s"
+      } were exported and recorded in the Stock Control audit log.`,
+    });
   }
 
   return (

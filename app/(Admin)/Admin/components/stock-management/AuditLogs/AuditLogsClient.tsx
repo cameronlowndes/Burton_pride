@@ -10,6 +10,7 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
+  Building2,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -22,6 +23,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  ShoppingCart,
   Users,
   X,
 } from "lucide-react";
@@ -108,7 +110,17 @@ type FilterAction = {
 
 type AuditResponse = {
   ok?: boolean;
-  logs?: AuditLog[];
+  logs?: Array<AuditLog & {
+    action?: string | null;
+    action_label?: string | null;
+    risk?: AuditRisk | null;
+    route?: string | null;
+    source?: string | null;
+    created_at?: string | null;
+    record_name?: string | null;
+    description?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }>;
   summary?: Summary;
   filterOptions?: {
     admins?: FilterAdmin[];
@@ -136,8 +148,239 @@ type Notice = {
   technical?: string[];
 };
 
+type AuditReportInput = {
+  action: string;
+  status?: "success" | "failed" | "warning" | "blocked";
+  risk?: AuditRisk;
+  recordType?: string;
+  recordId?: string | null;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+};
+
+
 const ENDPOINT =
   "/api/admin/stockmanagement/audit-logs";
+const AUDIT_PAGE_ROUTE =
+  "/Admin/StockManagement/AuditLogs";
+const SUPPLIER_MODULE = "stock_suppliers";
+
+function truncate(value: string, max = 2000) {
+  return value.length <= max
+    ? value
+    : `${value.slice(0, max)}…`;
+}
+
+function serialiseAuditError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: truncate(error.message),
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: truncate(error),
+    };
+  }
+
+  return error
+    ? {
+        name: "Error",
+        message: "Unknown audit client error",
+      }
+    : null;
+}
+
+async function reportAuditPageAction({
+  action,
+  status = "success",
+  risk = "low",
+  recordType = "audit_report",
+  recordId = null,
+  metadata = {},
+  error,
+}: AuditReportInput) {
+  try {
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      keepalive: true,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        module: "stock_audit",
+        route: AUDIT_PAGE_ROUTE,
+        source: "CLIENT",
+        status,
+        risk,
+        record_type: recordType,
+        record_id: recordId,
+        metadata: {
+          app: "stock_control",
+          page: "audit_logs",
+          ...metadata,
+          ...(error
+            ? {
+                client_error:
+                  serialiseAuditError(error),
+              }
+            : {}),
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const raw = await response.text().catch(() => "");
+
+      console.error("Audit page report failed", {
+        action,
+        status,
+        httpStatus: response.status,
+        response: raw.slice(0, 1000),
+      });
+    }
+  } catch (reportError) {
+    /*
+     * Reporting an export must never stop the export itself.
+     * Opening, searching, filtering and refreshing are intentionally
+     * not reported.
+     */
+    console.error("Audit page report request failed", {
+      action,
+      status,
+      reportError,
+    });
+  }
+}
+
+function normaliseAuditLog(
+  raw: NonNullable<AuditResponse["logs"]>[number],
+): AuditLog {
+  const metadata =
+    raw.metadata &&
+    typeof raw.metadata === "object"
+      ? raw.metadata
+      : null;
+
+  const actionKey =
+    clean(raw.action_key) ||
+    "unknown_action";
+
+  const actionLabel =
+    clean(raw.action_label) ||
+    actionKey
+      .replaceAll(".", " ")
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (character) =>
+        character.toUpperCase(),
+      );
+
+  const risk =
+    raw.risk_level ||
+    "low";
+
+  const occurredAt =
+    clean(raw.occurred_at) ||
+    clean(raw.created_at) ||
+    new Date(0).toISOString();
+
+  const pagePath =
+    clean(raw.page_path) ||
+    clean(raw.route) ||
+    null;
+
+  const recordName =
+    clean(raw.record_name) ||
+    clean(metadata?.supplier_name) ||
+    clean(metadata?.order_number) ||
+    clean(metadata?.stock_item_name) ||
+    null;
+
+  const description =
+    clean(raw.description) ||
+    clean(metadata?.summary) ||
+    clean(metadata?.message) ||
+    null;
+
+  return {
+    ...raw,
+    id:
+      clean(raw.id) ||
+      `${occurredAt}-${actionKey}-${Math.random()}`,
+    occurred_at: occurredAt,
+    action_key: actionKey,
+    action_label: actionLabel,
+    action_category:
+      clean(raw.action_category) ||
+      (actionKey.startsWith("stock.supplier")
+        ? "supplier"
+        : "change"),
+    module:
+      clean(raw.module) ||
+      (actionKey.startsWith("stock.supplier")
+        ? SUPPLIER_MODULE
+        : "stock_management"),
+    status: raw.status || "success",
+    risk_level: risk,
+    page_path: pagePath,
+    record_type:
+      clean(raw.record_type) ||
+      (actionKey.startsWith("stock.supplier")
+        ? "stock_supplier"
+        : null),
+    record_name: recordName,
+    description,
+    metadata,
+  } as AuditLog;
+}
+
+function supplierActionGroup(actionKey: string) {
+  const key = actionKey.toLowerCase();
+
+  if (key.includes("event_hub")) {
+    return "Event Hub connection";
+  }
+
+  if (
+    key.includes("money_management") ||
+    key.includes("money_manager")
+  ) {
+    return "Money Management connection";
+  }
+
+  if (key.includes("export")) {
+    return "Supplier export";
+  }
+
+  if (key.includes("order") || key.includes("delivery")) {
+    return "Supplier order";
+  }
+
+  if (key.includes("review")) {
+    return "Supplier review";
+  }
+
+  if (key.includes("compliance")) {
+    return "Supplier compliance";
+  }
+
+  if (key.includes("merge") || key.includes("duplicate")) {
+    return "Supplier duplicate management";
+  }
+
+  if (key.includes("delete")) {
+    return "Supplier deletion";
+  }
+
+  return "Supplier profile";
+}
 
 const EMPTY_SUMMARY: Summary = {
   totalActions: 0,
@@ -407,8 +650,11 @@ export default function AuditLogsClient() {
         return;
       }
 
-      const meaningfulLogs = (Array.isArray(data.logs) ? data.logs : [])
-        .filter(isMeaningfulAuditLog);
+      const meaningfulLogs = (
+        Array.isArray(data.logs)
+          ? data.logs.map(normaliseAuditLog)
+          : []
+      ).filter(isMeaningfulAuditLog);
 
       setLogs(meaningfulLogs);
       setSummary(buildSummary(meaningfulLogs));
@@ -517,19 +763,61 @@ export default function AuditLogsClient() {
     setExporting(true);
     setNotice(null);
 
+    const exportMetadata = {
+      export_format: "xlsx",
+      row_count: logs.length,
+      current_page: pagination.page,
+      page_size: pagination.pageSize,
+      total_filtered_rows: pagination.totalRows,
+      search: search.trim() || null,
+      module_filter: moduleFilter,
+      action_filter: actionFilter,
+      status_filter: statusFilter,
+      risk_filter: riskFilter,
+      admin_filter: adminFilter,
+      record_type_filter: recordTypeFilter,
+      date_preset: datePreset,
+      sort,
+      supplier_audit_row_count:
+        logs.filter(
+          (log) =>
+            log.module === SUPPLIER_MODULE ||
+            log.action_key.startsWith(
+              "stock.supplier",
+            ),
+        ).length,
+    };
+
     try {
       await exportAuditWorkbook({
         logs,
         generatedBy: null,
       });
 
+      await reportAuditPageAction({
+        action: "stock.audit.exported",
+        status: "success",
+        risk: "low",
+        recordType: "audit_report",
+        metadata: exportMetadata,
+      });
+
       setNotice({
         tone: "success",
         title: "Audit Excel report created",
         message:
-          "The current audit page was exported to a styled Excel workbook.",
+          "The current audit page was exported to a styled Excel workbook and the export was recorded in the audit log.",
       });
     } catch (caught) {
+      await reportAuditPageAction({
+        action: "stock.audit.export_failed",
+        status: "failed",
+        risk: "medium",
+        recordType: "audit_report",
+        metadata: exportMetadata,
+        error: caught,
+      });
+
       setNotice({
         tone: "error",
         title: "Audit export failed",
@@ -608,6 +896,42 @@ export default function AuditLogsClient() {
             </p>
           </div>
         </header>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-[1.75rem] border border-cyan-300/20 bg-cyan-500/10 p-5">
+            <div className="flex items-center gap-2 font-black text-cyan-100">
+              <Building2 className="h-5 w-5" />
+              Supplier changes
+            </div>
+            <p className="mt-2 text-sm leading-6 text-cyan-50/65">
+              Supplier creation, editing, archiving, deletion,
+              duplicate merges, compliance updates and review changes
+              are shown in this audit page.
+            </p>
+          </div>
+
+          <div className="rounded-[1.75rem] border border-pink-300/20 bg-pink-500/10 p-5">
+            <div className="flex items-center gap-2 font-black text-pink-100">
+              <Users className="h-5 w-5" />
+              Event Hub connections
+            </div>
+            <p className="mt-2 text-sm leading-6 text-pink-50/65">
+              Linking, changing or removing Event Hub supplier
+              connections appears as a separate supplier audit action.
+            </p>
+          </div>
+
+          <div className="rounded-[1.75rem] border border-emerald-300/20 bg-emerald-500/10 p-5">
+            <div className="flex items-center gap-2 font-black text-emerald-100">
+              <ShoppingCart className="h-5 w-5" />
+              Money and exports
+            </div>
+            <p className="mt-2 text-sm leading-6 text-emerald-50/65">
+              Money Management links, supplier orders, delivery
+              problems and Excel workbook exports are included.
+            </p>
+          </div>
+        </section>
 
         {notice ? (
           <div className="mt-6">
@@ -792,6 +1116,12 @@ export default function AuditLogsClient() {
                   ["stock_location", "Stock location"],
                   ["movement", "Movement"],
                   ["supplier", "Supplier"],
+                  ["stock_supplier", "Stock supplier"],
+                  ["stock_supplier_report", "Supplier report"],
+                  ["stock_supplier_order", "Supplier order"],
+                  ["stock_supplier_review", "Supplier review"],
+                  ["stock_supplier_compliance", "Supplier compliance"],
+                  ["stock_supplier_item_link", "Supplier item link"],
                   ["purchase_order", "Purchase order"],
                   ["setting", "Setting"],
                   ["sidebar_item", "Sidebar item"],
@@ -889,6 +1219,15 @@ export default function AuditLogsClient() {
                         <p className="mt-1 text-xs text-white/35">
                           {log.action_key}
                         </p>
+                        {log.action_key.startsWith(
+                          "stock.supplier",
+                        ) ? (
+                          <p className="mt-1 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-200/60">
+                            {supplierActionGroup(
+                              log.action_key,
+                            )}
+                          </p>
+                        ) : null}
                       </td>
 
                       <td className="px-5 py-4 align-top text-sm text-white/65">
@@ -1237,10 +1576,65 @@ function AuditDetailsModal({
             <Detail label="Destination" value={log.destination_location_name} />
           </DetailSection>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-3">
             <JsonPanel title="Before" value={log.old_values} />
             <JsonPanel title="After" value={log.new_values} />
+            <JsonPanel title="Metadata" value={log.metadata} />
           </div>
+
+          {log.action_key.startsWith(
+            "stock.supplier",
+          ) ? (
+            <DetailSection title="Supplier integration">
+              <Detail
+                label="Supplier action group"
+                value={supplierActionGroup(
+                  log.action_key,
+                )}
+              />
+              <Detail
+                label="Supplier ID"
+                value={
+                  log.record_id ||
+                  log.metadata?.supplier_id
+                }
+              />
+              <Detail
+                label="Supplier name"
+                value={
+                  log.record_name ||
+                  log.metadata?.supplier_name
+                }
+              />
+              <Detail
+                label="Event Hub record"
+                value={
+                  log.metadata?.event_record_id
+                }
+              />
+              <Detail
+                label="Money supplier"
+                value={
+                  log.metadata?.money_supplier_id
+                }
+              />
+              <Detail
+                label="Integration"
+                value={
+                  log.metadata?.integration ||
+                  log.metadata?.creation_source
+                }
+              />
+              <Detail
+                label="Export file"
+                value={log.metadata?.file_name}
+              />
+              <Detail
+                label="Rows exported"
+                value={log.metadata?.row_count}
+              />
+            </DetailSection>
+          ) : null}
 
           <DetailSection title="Request details">
             <Detail label="Request ID" value={log.request_id} />

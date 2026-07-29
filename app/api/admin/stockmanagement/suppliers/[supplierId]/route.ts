@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STOCK_SUPPLIER_TABLE = "stock_supplier_profiles";
+const EVENT_CONTACT_TABLE = "event_business_contacts";
 const AUDIT_LOG_TABLE = "admin_audit_logs";
 
 const ALLOWED_SUPPLIER_USES = new Set([
@@ -72,15 +74,26 @@ type SupplierUpdateBody = {
 type DeleteBody = {
   reason?: unknown;
   permanent?: unknown;
+  password?: unknown;
+  confirmation?: unknown;
 };
 
 type UnknownRow = Record<string, unknown>;
+type EventWarningState = {
+  connected: boolean;
+  eventRecordId: string | null;
+  doNotUse: boolean;
+  needsReview: boolean;
+  warningText: string | null;
+};
+
 
 type ApiErrorLike = {
   code?: string;
   details?: string;
   hint?: string;
   message?: string;
+  status?: number;
 };
 
 type AuditLogInput = {
@@ -94,6 +107,8 @@ type AuditLogInput = {
   reason?: string | null;
   httpMethod: "PATCH" | "DELETE";
   riskLevel?: "low" | "medium" | "high" | "critical";
+  status?: "success" | "failed" | "blocked";
+  error?: unknown;
 };
 
 function cleanText(value: unknown) {
@@ -104,6 +119,69 @@ function nullableText(value: unknown) {
   const cleaned = cleanText(value);
   return cleaned || null;
 }
+function databaseBoolean(value: unknown) {
+  if (value === true || value === 1) {
+    return true;
+  }
+
+  const normalised = cleanText(value).toLowerCase();
+
+  return [
+    "true",
+    "1",
+    "yes",
+    "y",
+    "blocked",
+    "do_not_use",
+    "do not use",
+    "do_not_invite",
+    "do not invite",
+  ].includes(normalised);
+}
+
+function eventContactIsBlocked(
+  row: UnknownRow | null,
+) {
+  if (!row) return false;
+
+  return databaseBoolean(
+    row.do_not_use ??
+      row.do_not_invite ??
+      row.is_do_not_use ??
+      row.is_blocked ??
+      row.blocked,
+  );
+}
+
+function eventContactNeedsReview(
+  row: UnknownRow | null,
+) {
+  if (!row) return false;
+
+  return (
+    databaseBoolean(
+      row.needs_review ??
+        row.requires_review ??
+        row.is_review_required,
+    ) ||
+    eventContactIsBlocked(row)
+  );
+}
+
+function eventWarningText(
+  state: EventWarningState,
+) {
+  if (state.doNotUse) {
+    return "Event Hub warning: this contact is marked Do not use / Do not invite. This warning is controlled by Event Hub and cannot be cleared in Stock Management while the Event Hub warning remains active.";
+  }
+
+  if (state.needsReview) {
+    return "Event Hub warning: this contact requires review. This warning is controlled by Event Hub.";
+  }
+
+  return null;
+}
+
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -174,6 +252,16 @@ function parseNullablePence(
 
 function errorStatus(error: unknown) {
   const source = error as ApiErrorLike;
+  const explicitStatus = Number(source?.status);
+
+  if (
+    Number.isInteger(explicitStatus) &&
+    explicitStatus >= 400 &&
+    explicitStatus <= 599
+  ) {
+    return explicitStatus;
+  }
+
   const code = cleanText(source?.code).toUpperCase();
   const message =
     error instanceof Error ? error.message.toLowerCase() : "";
@@ -198,7 +286,9 @@ function errorStatus(error: unknown) {
   if (
     message.includes("permission") ||
     message.includes("access denied") ||
-    message.includes("main admin")
+    message.includes("main admin") ||
+    code === "MAIN_ADMIN_REQUIRED" ||
+    code === "MAIN_ADMIN_PASSWORD_INCORRECT"
   ) {
     return 403;
   }
@@ -225,7 +315,8 @@ function errorStatus(error: unknown) {
     message.includes("must be") ||
     message.includes("invalid") ||
     message.includes("not allowed") ||
-    message.includes("unsupported")
+    message.includes("unsupported") ||
+    message.includes("confirmation")
   ) {
     return 400;
   }
@@ -367,6 +458,184 @@ async function getSupplierOrThrow(supplierId: string) {
 
   return data as UnknownRow;
 }
+async function getEventWarningState(
+  supplier: UnknownRow,
+): Promise<EventWarningState> {
+  const eventRecordId =
+    nullableText(supplier.event_record_id);
+
+  if (!eventRecordId) {
+    return {
+      connected: false,
+      eventRecordId: null,
+      doNotUse: false,
+      needsReview: false,
+      warningText: null,
+    };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from(EVENT_CONTACT_TABLE)
+    .select("*")
+    .eq("id", eventRecordId)
+    .maybeSingle();
+
+  if (error) {
+    throw Object.assign(
+      new Error(
+        "The linked Event Hub contact warning could not be checked.",
+      ),
+      {
+        status: 500,
+        code:
+          error.code ||
+          "EVENT_HUB_WARNING_LOOKUP_FAILED",
+        details: error.details || null,
+        hint:
+          error.hint ||
+          `Confirm public.${EVENT_CONTACT_TABLE} exists and contains the linked contact.`,
+      },
+    );
+  }
+
+  const row = data as UnknownRow | null;
+  const state: EventWarningState = {
+    connected: Boolean(row),
+    eventRecordId,
+    doNotUse: eventContactIsBlocked(row),
+    needsReview: eventContactNeedsReview(row),
+    warningText: null,
+  };
+
+  state.warningText = eventWarningText(state);
+
+  return state;
+}
+
+function appendEventWarningToNotes(
+  currentNotes: unknown,
+  warningText: string | null,
+) {
+  const existing = nullableText(currentNotes);
+
+  if (!warningText) {
+    return existing;
+  }
+
+  if (existing?.includes(warningText)) {
+    return existing;
+  }
+
+  return existing
+    ? `${existing}\n\n${warningText}`
+    : warningText;
+}
+
+async function synchroniseEventWarning({
+  supplier,
+  admin,
+  supplierId,
+  audit = true,
+}: {
+  supplier: UnknownRow;
+  admin: AdminIdentity;
+  supplierId: string;
+  audit?: boolean;
+}) {
+  const warning = await getEventWarningState(supplier);
+
+  if (!warning.connected) {
+    return {
+      supplier,
+      warning,
+      changed: false,
+    };
+  }
+
+  const desiredDoNotUse = warning.doNotUse;
+  const desiredNeedsReview = warning.needsReview;
+
+  const currentDoNotUse =
+    supplier.do_not_use === true;
+  const currentNeedsReview =
+    supplier.needs_review === true;
+
+  const currentNotes =
+    nullableText(supplier.stock_notes);
+  const desiredNotes = appendEventWarningToNotes(
+    currentNotes,
+    warning.warningText,
+  );
+
+  const changed =
+    currentDoNotUse !== desiredDoNotUse ||
+    currentNeedsReview !== desiredNeedsReview ||
+    currentNotes !== desiredNotes;
+
+  if (!changed) {
+    return {
+      supplier,
+      warning,
+      changed: false,
+    };
+  }
+
+  const updatePayload: UnknownRow = {
+    do_not_use: desiredDoNotUse,
+    needs_review: desiredNeedsReview,
+    stock_notes: desiredNotes,
+    updated_at: new Date().toISOString(),
+    updated_by: admin.id || null,
+    updated_by_name: adminDisplayName(admin),
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from(STOCK_SUPPLIER_TABLE)
+    .update(updatePayload as never)
+    .eq("id", supplierId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const updated = data as UnknownRow;
+
+  if (audit) {
+    await writeAuditLog({
+      admin,
+      action:
+        warning.doNotUse
+          ? "stock_supplier_event_warning_synced"
+          : "stock_supplier_event_review_synced",
+      actionLabel:
+        warning.doNotUse
+          ? "Event Hub do-not-use warning synchronised"
+          : "Event Hub review warning synchronised",
+      summary:
+        warning.doNotUse
+          ? `Synchronised Event Hub Do not use / Do not invite warning for supplier ${cleanText(updated.display_name) || supplierId}.`
+          : `Synchronised Event Hub Needs review warning for supplier ${cleanText(updated.display_name) || supplierId}.`,
+      supplierId,
+      beforeData: supplier,
+      afterData: updated,
+      reason:
+        "The linked Event Hub contact controls this warning.",
+      httpMethod: "PATCH",
+      riskLevel: warning.doNotUse
+        ? "high"
+        : "medium",
+      status: "success",
+    });
+  }
+
+  return {
+    supplier: updated,
+    warning,
+    changed: true,
+  };
+}
 
 function changedFields(
   beforeData: UnknownRow,
@@ -431,7 +700,11 @@ async function writeAuditLog({
   reason,
   httpMethod,
   riskLevel,
+  status = "success",
+  error: actionError,
 }: AuditLogInput) {
+  const source = actionError as ApiErrorLike;
+
   const { error } = await supabaseAdmin
     .from(AUDIT_LOG_TABLE)
     .insert({
@@ -440,9 +713,10 @@ async function writeAuditLog({
       admin_email: admin.email || null,
       admin_role: admin.role || null,
       area: "stock_management",
+      module: "stock_suppliers",
       action,
       action_label: actionLabel,
-      status: "success",
+      status,
       risk_level:
         riskLevel ||
         (httpMethod === "DELETE" ? "high" : "low"),
@@ -454,6 +728,11 @@ async function writeAuditLog({
       after_data: afterData || null,
       route: `/api/admin/stockmanagement/suppliers/${supplierId}`,
       http_method: httpMethod,
+      error_code: source?.code || null,
+      error_message:
+        actionError instanceof Error
+          ? actionError.message
+          : null,
     } as never);
 
   if (error) {
@@ -463,6 +742,102 @@ async function writeAuditLog({
       auditError: error,
     });
   }
+}
+
+async function verifyMainAdminPassword(
+  admin: AdminIdentity,
+  password: string,
+) {
+  if (!isMainAdmin(admin)) {
+    throw Object.assign(
+      new Error(
+        "Main admin permission is required to permanently delete a Stock Management supplier.",
+      ),
+      {
+        status: 403,
+        code: "MAIN_ADMIN_REQUIRED",
+      },
+    );
+  }
+
+  const email = cleanText(admin.email);
+
+  if (!email) {
+    throw Object.assign(
+      new Error(
+        "The signed-in main admin account does not have an email address.",
+      ),
+      {
+        status: 403,
+        code: "ADMIN_EMAIL_MISSING",
+      },
+    );
+  }
+
+  if (!password) {
+    throw Object.assign(
+      new Error(
+        "Enter the signed-in main admin password to permanently delete this supplier.",
+      ),
+      {
+        status: 400,
+        code: "MAIN_ADMIN_PASSWORD_REQUIRED",
+      },
+    );
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const publicKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !publicKey) {
+    throw Object.assign(
+      new Error(
+        "Supabase password verification is not configured on the server.",
+      ),
+      {
+        status: 500,
+        code: "SUPABASE_AUTH_CONFIG_MISSING",
+        hint:
+          "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
+    );
+  }
+
+  const verifier = createClient(
+    supabaseUrl,
+    publicKey,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    },
+  );
+
+  const { error } =
+    await verifier.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+  if (error) {
+    throw Object.assign(
+      new Error(
+        "The main admin password is incorrect.",
+      ),
+      {
+        status: 403,
+        code: "MAIN_ADMIN_PASSWORD_INCORRECT",
+        details:
+          "Supabase Auth rejected the supplied password.",
+      },
+    );
+  }
+
+  await verifier.auth.signOut();
 }
 
 function buildUpdatePayload(
@@ -585,7 +960,7 @@ export async function GET(
     `GET /api/admin/stockmanagement/suppliers/${supplierId}`;
 
   try {
-    await requireAdmin();
+    const admin = await requireAdmin();
 
     if (!isUuid(supplierId)) {
       throw new Error(
@@ -593,12 +968,23 @@ export async function GET(
       );
     }
 
-    const supplier = await getSupplierOrThrow(supplierId);
+    const supplier =
+      await getSupplierOrThrow(supplierId);
+
+    const synchronised =
+      await synchroniseEventWarning({
+        supplier,
+        admin,
+        supplierId,
+      });
 
     return NextResponse.json(
       {
         ok: true,
-        supplier,
+        supplier: synchronised.supplier,
+        eventHubWarning: synchronised.warning,
+        warningSynchronised:
+          synchronised.changed,
       },
       {
         status: 200,
@@ -633,13 +1019,91 @@ export async function PATCH(
       );
     }
 
-    const beforeData = await getSupplierOrThrow(supplierId);
-    const body = await readJsonBody<SupplierUpdateBody>(request);
-    const updatePayload = buildUpdatePayload(body, admin);
+    const loadedSupplier =
+      await getSupplierOrThrow(supplierId);
+
+    const preUpdateSync =
+      await synchroniseEventWarning({
+        supplier: loadedSupplier,
+        admin,
+        supplierId,
+      });
+
+    const beforeData =
+      preUpdateSync.supplier;
+    const eventWarning =
+      preUpdateSync.warning;
+
+    const body =
+      await readJsonBody<SupplierUpdateBody>(
+        request,
+      );
+    const updatePayload =
+      buildUpdatePayload(body, admin);
+
+    if (
+      eventWarning.doNotUse &&
+      updatePayload.do_not_use === false
+    ) {
+      throw Object.assign(
+        new Error(
+          "This supplier cannot be unblocked in Stock Management because the linked Event Hub contact is still marked Do not use / Do not invite.",
+        ),
+        {
+          status: 409,
+          code:
+            "EVENT_HUB_DO_NOT_USE_STILL_ACTIVE",
+          details:
+            "The warning is controlled by Event Hub.",
+          hint:
+            "Remove the Do not use / Do not invite warning in Event Hub first, then refresh this supplier.",
+        },
+      );
+    }
+
+    if (
+      eventWarning.needsReview &&
+      updatePayload.needs_review === false
+    ) {
+      throw Object.assign(
+        new Error(
+          "This supplier cannot have Needs review cleared because the linked Event Hub contact still requires review.",
+        ),
+        {
+          status: 409,
+          code:
+            "EVENT_HUB_REVIEW_STILL_ACTIVE",
+          details:
+            "The review warning is controlled by Event Hub.",
+          hint:
+            "Clear the review warning in Event Hub first, then refresh this supplier.",
+        },
+      );
+    }
+
+    if (eventWarning.doNotUse) {
+      updatePayload.do_not_use = true;
+      updatePayload.needs_review = true;
+      updatePayload.stock_notes =
+        appendEventWarningToNotes(
+          updatePayload.stock_notes ??
+            beforeData.stock_notes,
+          eventWarning.warningText,
+        );
+    } else if (eventWarning.needsReview) {
+      updatePayload.needs_review = true;
+      updatePayload.stock_notes =
+        appendEventWarningToNotes(
+          updatePayload.stock_notes ??
+            beforeData.stock_notes,
+          eventWarning.warningText,
+        );
+    }
 
     if (
       updatePayload.do_not_use === true &&
-      !nullableText(body.reason)
+      !nullableText(body.reason) &&
+      !eventWarning.doNotUse
     ) {
       throw new Error(
         "A reason is required when marking a supplier as do not use.",
@@ -693,6 +1157,7 @@ export async function PATCH(
         "The Stock Management supplier profile was updated.",
       supplier: afterData,
       changedFields: fields,
+      eventHubWarning: eventWarning,
     });
   } catch (error) {
     return apiError(
@@ -711,43 +1176,167 @@ export async function DELETE(
   const endpoint =
     `DELETE /api/admin/stockmanagement/suppliers/${supplierId}`;
 
+  let admin: AdminIdentity | null = null;
+  let beforeData: UnknownRow | null = null;
+  let reason: string | null = null;
+  let permanent = false;
+
   try {
-    const admin = await requireAdmin();
+    admin = await requireAdmin();
 
     if (!isUuid(supplierId)) {
-      throw new Error(
-        "supplierId must be a valid UUID.",
+      throw Object.assign(
+        new Error(
+          "supplierId must be a valid UUID.",
+        ),
+        {
+          status: 400,
+          code: "INVALID_SUPPLIER_ID",
+        },
       );
     }
 
-    const beforeData = await getSupplierOrThrow(supplierId);
-    const body = await readJsonBody<DeleteBody>(request, {
-      allowEmpty: true,
-    });
+    beforeData = await getSupplierOrThrow(supplierId);
 
-    const reason = nullableText(body.reason);
+    const body = await readJsonBody<DeleteBody>(
+      request,
+      {
+        allowEmpty: true,
+      },
+    );
+
+    reason = nullableText(body.reason);
 
     if (!reason || reason.length < 10) {
-      throw new Error(
-        "A deletion or archive reason of at least 10 characters is required.",
+      throw Object.assign(
+        new Error(
+          "A deletion or archive reason of at least 10 characters is required.",
+        ),
+        {
+          status: 400,
+          code: "DELETE_REASON_REQUIRED",
+        },
       );
     }
 
-    const permanent =
+    permanent =
       body.permanent === true ||
       body.permanent === "true";
 
     if (permanent) {
+      const expectedConfirmation =
+        cleanText(beforeData.display_name);
+
+      const confirmation =
+        cleanText(body.confirmation);
+
+      const password =
+        cleanText(body.password);
+
       if (!isMainAdmin(admin)) {
-        throw new Error(
-          "Main admin permission is required to permanently delete a Stock Management supplier.",
+        const blockedError = Object.assign(
+          new Error(
+            "Main admin permission is required to permanently delete a Stock Management supplier.",
+          ),
+          {
+            status: 403,
+            code: "MAIN_ADMIN_REQUIRED",
+          },
+        );
+
+        await writeAuditLog({
+          admin,
+          action: "stock_supplier_delete_blocked",
+          actionLabel:
+            "Stock supplier deletion blocked",
+          summary: `Blocked permanent deletion of Stock Management supplier ${
+            expectedConfirmation || supplierId
+          } because the signed-in administrator is not a main admin.`,
+          supplierId,
+          beforeData,
+          afterData: null,
+          reason,
+          httpMethod: "DELETE",
+          riskLevel: "critical",
+          status: "blocked",
+          error: blockedError,
+        });
+
+        throw blockedError;
+      }
+
+      if (!expectedConfirmation) {
+        throw Object.assign(
+          new Error(
+            "The supplier does not have a valid display name for deletion confirmation.",
+          ),
+          {
+            status: 409,
+            code: "SUPPLIER_CONFIRMATION_NAME_MISSING",
+          },
         );
       }
 
-      const { error: deleteError } = await supabaseAdmin
-        .from(STOCK_SUPPLIER_TABLE)
-        .delete()
-        .eq("id", supplierId);
+      if (confirmation !== expectedConfirmation) {
+        const blockedError = Object.assign(
+          new Error(
+            `Type the supplier name exactly: ${expectedConfirmation}`,
+          ),
+          {
+            status: 400,
+            code: "DELETE_CONFIRMATION_INCORRECT",
+          },
+        );
+
+        await writeAuditLog({
+          admin,
+          action: "stock_supplier_delete_blocked",
+          actionLabel:
+            "Stock supplier deletion blocked",
+          summary: `Blocked permanent deletion of Stock Management supplier ${expectedConfirmation} because the confirmation name was incorrect.`,
+          supplierId,
+          beforeData,
+          afterData: null,
+          reason,
+          httpMethod: "DELETE",
+          riskLevel: "critical",
+          status: "blocked",
+          error: blockedError,
+        });
+
+        throw blockedError;
+      }
+
+      try {
+        await verifyMainAdminPassword(
+          admin,
+          password,
+        );
+      } catch (passwordError) {
+        await writeAuditLog({
+          admin,
+          action: "stock_supplier_delete_blocked",
+          actionLabel:
+            "Stock supplier deletion blocked",
+          summary: `Blocked permanent deletion of Stock Management supplier ${expectedConfirmation} because main-admin password verification failed.`,
+          supplierId,
+          beforeData,
+          afterData: null,
+          reason,
+          httpMethod: "DELETE",
+          riskLevel: "critical",
+          status: "blocked",
+          error: passwordError,
+        });
+
+        throw passwordError;
+      }
+
+      const { error: deleteError } =
+        await supabaseAdmin
+          .from(STOCK_SUPPLIER_TABLE)
+          .delete()
+          .eq("id", supplierId);
 
       if (deleteError) {
         if (deleteError.code === "23503") {
@@ -756,6 +1345,7 @@ export async function DELETE(
               "This supplier cannot be permanently deleted because linked stock items, orders, reviews, audit records or other supplier data still exist. Archive the supplier instead, or move/remove the linked records first.",
             ),
             {
+              status: 409,
               code: deleteError.code,
               details: deleteError.details,
               hint:
@@ -769,23 +1359,25 @@ export async function DELETE(
 
       await writeAuditLog({
         admin,
-        action: "stock_supplier_profile_deleted",
-        actionLabel: "Stock supplier permanently deleted",
-        summary: `Permanently deleted Stock Management supplier ${
-          cleanText(beforeData.display_name) || supplierId
-        }.`,
+        action:
+          "stock_supplier_profile_deleted",
+        actionLabel:
+          "Stock supplier permanently deleted",
+        summary: `Permanently deleted Stock Management supplier ${expectedConfirmation}.`,
         supplierId,
         beforeData,
         afterData: null,
         reason,
         httpMethod: "DELETE",
         riskLevel: "critical",
+        status: "success",
       });
 
       return NextResponse.json({
         ok: true,
         message:
-          "The Stock Management supplier was permanently deleted.",
+          "The Stock Management supplier was permanently deleted. Linked Event Hub and Money Management source records were not deleted.",
+        deletedSupplierId: supplierId,
       });
     }
 
@@ -803,7 +1395,8 @@ export async function DELETE(
       needs_review: true,
       updated_at: new Date().toISOString(),
       updated_by: admin.id || null,
-      updated_by_name: adminDisplayName(admin),
+      updated_by_name:
+        adminDisplayName(admin),
     };
 
     const {
@@ -820,14 +1413,18 @@ export async function DELETE(
       throw archiveError;
     }
 
-    const afterData = archivedData as UnknownRow;
+    const afterData =
+      archivedData as UnknownRow;
 
     await writeAuditLog({
       admin,
-      action: "stock_supplier_profile_archived",
-      actionLabel: "Stock supplier archived",
+      action:
+        "stock_supplier_profile_archived",
+      actionLabel:
+        "Stock supplier archived",
       summary: `Archived Stock Management supplier ${
-        cleanText(afterData.display_name) || supplierId
+        cleanText(afterData.display_name) ||
+        supplierId
       }.`,
       supplierId,
       beforeData,
@@ -835,6 +1432,7 @@ export async function DELETE(
       reason,
       httpMethod: "DELETE",
       riskLevel: "high",
+      status: "success",
     });
 
     return NextResponse.json({
@@ -844,6 +1442,42 @@ export async function DELETE(
       supplier: afterData,
     });
   } catch (error) {
+    if (
+      admin &&
+      ![
+        "MAIN_ADMIN_REQUIRED",
+        "MAIN_ADMIN_PASSWORD_INCORRECT",
+        "DELETE_CONFIRMATION_INCORRECT",
+      ].includes(
+        cleanText(
+          (error as ApiErrorLike)?.code,
+        ),
+      )
+    ) {
+      await writeAuditLog({
+        admin,
+        action: permanent
+          ? "stock_supplier_delete_failed"
+          : "stock_supplier_archive_failed",
+        actionLabel: permanent
+          ? "Stock supplier deletion failed"
+          : "Stock supplier archive failed",
+        summary: permanent
+          ? "A permanent Stock Management supplier deletion failed."
+          : "A Stock Management supplier archive failed.",
+        supplierId,
+        beforeData,
+        afterData: null,
+        reason,
+        httpMethod: "DELETE",
+        riskLevel: permanent
+          ? "critical"
+          : "high",
+        status: "failed",
+        error,
+      });
+    }
+
     return apiError(
       error,
       endpoint,
@@ -851,3 +1485,4 @@ export async function DELETE(
     );
   }
 }
+

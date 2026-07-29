@@ -19,14 +19,18 @@ import {
   ContactRound,
   CreditCard,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileSpreadsheet,
   History,
   Filter,
   Link2,
   Loader2,
+  LockKeyhole,
   PackageCheck,
   PackagePlus,
+  Pencil,
   ReceiptText,
   Plus,
   Printer,
@@ -35,6 +39,7 @@ import {
   ShieldAlert,
   Star,
   ShoppingCart,
+  Trash2,
   TriangleAlert,
   Truck,
   Unlink,
@@ -43,6 +48,9 @@ import {
 } from "lucide-react";
 
 const API = "/api/admin/stockmanagement/suppliers";
+const INVENTORY_API = "/api/admin/stockmanagement/inventory";
+const STOCK_AUDIT_API = "/api/admin/stockmanagement/audit-logs";
+const STOCK_SUPPLIERS_ROUTE = "/Admin/StockManagement/Suppliers";
 
 const MONEY_SUPPLIERS_API =
   "/api/admin/money/suppliers?includeInactive=true";
@@ -60,6 +68,36 @@ type SupplierStatus =
   | "review"
   | "inactive"
   | "blocked";
+
+type SupplierAuditStatus =
+  | "success"
+  | "failed"
+  | "warning"
+  | "blocked";
+
+type SupplierAuditRisk =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+type SupplierAuditInput = {
+  action: string;
+  status?: SupplierAuditStatus;
+  risk?: SupplierAuditRisk;
+  supplierId?: string | null;
+  recordType?: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+};
+
+type WorkspaceAuditDescriptor = {
+  action: string;
+  failureAction?: string;
+  risk?: SupplierAuditRisk;
+  recordType?: string;
+  metadata?: Record<string, unknown>;
+};
 
 type EventHubConnection = {
   connected: boolean;
@@ -150,6 +188,43 @@ type EventHubContactOption = {
   isActive?: boolean;
 };
 
+type RawEventHubContact = Partial<EventHubContactOption> & {
+  id?: unknown;
+  record_type?: unknown;
+  contact_type?: unknown;
+
+  organisation_name?: unknown;
+  business_name?: unknown;
+  company_name?: unknown;
+  name?: unknown;
+
+  contact_name?: unknown;
+  email_address?: unknown;
+  telephone?: unknown;
+  mobile?: unknown;
+  website_url?: unknown;
+
+  do_not_use?: unknown;
+  do_not_invite?: unknown;
+  is_do_not_use?: unknown;
+  is_blocked?: unknown;
+  blocked?: unknown;
+  blocked_status?: unknown;
+  warning_status?: unknown;
+  status?: unknown;
+
+  needs_review?: unknown;
+  requires_review?: unknown;
+  is_review_required?: unknown;
+
+  linked_stock_supplier_id?: unknown;
+  linked_stock_supplier_name?: unknown;
+
+  event_name?: unknown;
+  event_year?: unknown;
+  is_active?: unknown;
+};
+
 
 type MoneySupplierOption = {
   id: string;
@@ -173,7 +248,7 @@ type SupplierListResponse = {
   ok?: boolean;
   error?: string;
   suppliers?: StockSupplierView[];
-  eventContacts?: EventHubContactOption[];
+  eventContacts?: RawEventHubContact[];
   summary?: Partial<SupplierSummary>;
   permissions?: Partial<SupplierPermissions>;
 };
@@ -189,6 +264,29 @@ type SupplierPermissions = {
   export: boolean;
 };
 
+type InventoryOption = {
+  id: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  reorderLevel?: number | null;
+  targetLevel?: number | null;
+  unitCost?: number | null;
+  category?: string | null;
+  location?: string | null;
+  isActive: boolean;
+};
+
+type InventoryResponse = {
+  ok?: boolean;
+  items?: InventoryOption[];
+  inventory?: InventoryOption[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+};
+
 type SupplierFormState = {
   displayName: string;
   supplierUse: SupplierUse;
@@ -198,7 +296,17 @@ type SupplierFormState = {
   stockNotes: string;
   eventRecordType: string;
   eventRecordId: string;
+  eventDoNotUse: boolean;
+  eventNeedsReview: boolean;
+  eventWarningAccepted: boolean;
   moneySupplierId: string;
+
+  stockItemId: string;
+  stockItemRole: "preferred" | "alternative";
+  stockItemSupplierSku: string;
+  stockItemUnitCost: string;
+  stockItemMinimumOrderQuantity: string;
+  stockItemLeadTimeDays: string;
 };
 
 
@@ -412,7 +520,17 @@ const EMPTY_FORM: SupplierFormState = {
   stockNotes: "",
   eventRecordType: "",
   eventRecordId: "",
+  eventDoNotUse: false,
+  eventNeedsReview: false,
+  eventWarningAccepted: false,
   moneySupplierId: "",
+
+  stockItemId: "",
+  stockItemRole: "preferred",
+  stockItemSupplierSku: "",
+  stockItemUnitCost: "",
+  stockItemMinimumOrderQuantity: "",
+  stockItemLeadTimeDays: "",
 };
 
 
@@ -501,6 +619,166 @@ function formatLabel(value: string) {
   return value
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function eventBoolean(value: unknown) {
+  if (value === true || value === 1) {
+    return true;
+  }
+
+  const normalised = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  return [
+    "true",
+    "1",
+    "yes",
+    "y",
+    "blocked",
+    "do_not_use",
+    "do not use",
+    "do-not-use",
+    "do_not_invite",
+    "do not invite",
+    "do-not-invite",
+    "review",
+    "needs_review",
+    "needs review",
+  ].includes(normalised);
+}
+
+function eventContactDoNotUse(
+  contact: RawEventHubContact,
+) {
+  const statusText = String(
+    contact.status ??
+      contact.blocked_status ??
+      contact.warning_status ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
+
+  return (
+    eventBoolean(contact.doNotInvite) ||
+    eventBoolean(contact.do_not_use) ||
+    eventBoolean(contact.do_not_invite) ||
+    eventBoolean(contact.is_do_not_use) ||
+    eventBoolean(contact.is_blocked) ||
+    eventBoolean(contact.blocked) ||
+    [
+      "blocked",
+      "do_not_use",
+      "do not use",
+      "do_not_invite",
+      "do not invite",
+    ].includes(statusText)
+  );
+}
+
+function eventContactNeedsReview(
+  contact: RawEventHubContact,
+) {
+  return (
+    eventContactDoNotUse(contact) ||
+    eventBoolean(contact.needsReview) ||
+    eventBoolean(contact.needs_review) ||
+    eventBoolean(contact.requires_review) ||
+    eventBoolean(contact.is_review_required)
+  );
+}
+
+function normaliseEventContact(
+  contact: RawEventHubContact,
+): EventHubContactOption {
+  return {
+    id: String(contact.id ?? ""),
+    recordType: String(
+      contact.recordType ??
+        contact.record_type ??
+        contact.contact_type ??
+        "business_contact",
+    ),
+    organisationName: String(
+      contact.organisationName ??
+        contact.organisation_name ??
+        contact.business_name ??
+        contact.company_name ??
+        contact.name ??
+        "Unnamed Event Hub contact",
+    ),
+    contactName:
+      contact.contactName !== undefined
+        ? String(contact.contactName || "") || null
+        : contact.contact_name !== undefined
+          ? String(contact.contact_name || "") || null
+          : null,
+    email:
+      contact.email !== undefined
+        ? String(contact.email || "") || null
+        : contact.email_address !== undefined
+          ? String(contact.email_address || "") || null
+          : null,
+    phone:
+      contact.phone !== undefined
+        ? String(contact.phone || "") || null
+        : contact.telephone !== undefined
+          ? String(contact.telephone || "") || null
+          : contact.mobile !== undefined
+            ? String(contact.mobile || "") || null
+            : null,
+    website:
+      contact.website !== undefined
+        ? String(contact.website || "") || null
+        : contact.website_url !== undefined
+          ? String(contact.website_url || "") || null
+          : null,
+    rating:
+      contact.rating !== undefined
+        ? String(contact.rating || "") || null
+        : null,
+    doNotInvite:
+      eventContactDoNotUse(contact),
+    needsReview:
+      eventContactNeedsReview(contact),
+    linkedStockSupplierId:
+      contact.linkedStockSupplierId !== undefined
+        ? String(contact.linkedStockSupplierId || "") || null
+        : contact.linked_stock_supplier_id !== undefined
+          ? String(contact.linked_stock_supplier_id || "") || null
+          : null,
+    linkedStockSupplierName:
+      contact.linkedStockSupplierName !== undefined
+        ? String(contact.linkedStockSupplierName || "") || null
+        : contact.linked_stock_supplier_name !== undefined
+          ? String(contact.linked_stock_supplier_name || "") || null
+          : null,
+    eventName:
+      contact.eventName !== undefined
+        ? String(contact.eventName || "") || null
+        : contact.event_name !== undefined
+          ? String(contact.event_name || "") || null
+          : null,
+    eventYear:
+      contact.eventYear !== undefined &&
+      Number.isFinite(Number(contact.eventYear))
+        ? Number(contact.eventYear)
+        : contact.event_year !== undefined &&
+            Number.isFinite(Number(contact.event_year))
+          ? Number(contact.event_year)
+          : null,
+    isActive:
+      contact.isActive !== undefined
+        ? contact.isActive !== false
+        : contact.is_active !== undefined
+          ? !["false", "0", "no"].includes(
+              String(contact.is_active)
+                .trim()
+                .toLowerCase(),
+            )
+          : true,
+  };
 }
 
 function supplierStatus(supplier: StockSupplierView): SupplierStatus {
@@ -711,6 +989,326 @@ function formatErrorForDisplay(error: unknown) {
   }
 }
 
+
+function serialiseSupplierAuditError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message.slice(0, 2000),
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      name: "Error",
+      message: error.slice(0, 2000),
+    };
+  }
+
+  return error
+    ? {
+        name: "Error",
+        message: "An unknown supplier action error occurred.",
+      }
+    : null;
+}
+
+async function reportSupplierAudit({
+  action,
+  status = "success",
+  risk = "low",
+  supplierId = null,
+  recordType = "stock_supplier",
+  metadata = {},
+  error,
+}: SupplierAuditInput) {
+  try {
+    const response = await fetch(STOCK_AUDIT_API, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      keepalive: true,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        module: "stock_suppliers",
+        route: STOCK_SUPPLIERS_ROUTE,
+        source: "CLIENT",
+        status,
+        risk,
+        record_type: recordType,
+        record_id: supplierId,
+        metadata: {
+          app: "stock_control",
+          page: "suppliers",
+          ...metadata,
+          ...(error
+            ? {
+                client_error:
+                  serialiseSupplierAuditError(error),
+              }
+            : {}),
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const raw = await response.text().catch(() => "");
+
+      console.error("Stock supplier audit report failed", {
+        action,
+        status,
+        httpStatus: response.status,
+        response: raw.slice(0, 1000),
+      });
+    }
+  } catch (auditError) {
+    /*
+     * Audit reporting must never stop the supplier action itself.
+     * The protected API routes remain the authoritative audit source.
+     */
+    console.error("Stock supplier audit request failed", {
+      action,
+      status,
+      auditError,
+    });
+  }
+}
+
+function workspaceAuditForAction(
+  endpoint: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body: Record<string, unknown>,
+): WorkspaceAuditDescriptor {
+  const path = endpoint.toLowerCase();
+
+  if (path.includes("/connections/event-hub")) {
+    return {
+      action:
+        method === "DELETE"
+          ? "stock.supplier.event_hub_unlinked"
+          : body.event_record_id
+            ? "stock.supplier.event_hub_linked"
+            : "stock.supplier.event_hub_link_changed",
+      failureAction:
+        method === "DELETE"
+          ? "stock.supplier.event_hub_unlink_failed"
+          : "stock.supplier.event_hub_link_failed",
+      risk: method === "DELETE" ? "high" : "medium",
+      metadata: {
+        integration: "event_hub",
+        event_record_type:
+          body.event_record_type || null,
+        event_record_id:
+          body.event_record_id || null,
+        reason: body.reason || null,
+      },
+    };
+  }
+
+  if (path.includes("/connections/money-management")) {
+    return {
+      action:
+        method === "DELETE"
+          ? "stock.supplier.money_management_unlinked"
+          : body.money_supplier_id
+            ? "stock.supplier.money_management_linked"
+            : "stock.supplier.money_management_link_changed",
+      failureAction:
+        method === "DELETE"
+          ? "stock.supplier.money_management_unlink_failed"
+          : "stock.supplier.money_management_link_failed",
+      risk: method === "DELETE" ? "high" : "medium",
+      metadata: {
+        integration: "money_management",
+        money_supplier_id:
+          body.money_supplier_id || null,
+        reason: body.reason || null,
+      },
+    };
+  }
+
+  if (path.includes("/orders")) {
+    const hasDeliveryProblem =
+      Number(body.missing_quantity || 0) > 0 ||
+      Number(body.damaged_quantity || 0) > 0 ||
+      body.refund_required === true ||
+      body.replacement_required === true;
+
+    return {
+      action:
+        method === "POST"
+          ? "stock.supplier.order_created"
+          : method === "DELETE"
+            ? "stock.supplier.order_cancelled"
+            : hasDeliveryProblem
+              ? "stock.supplier.delivery_problem_recorded"
+              : "stock.supplier.order_updated",
+      failureAction:
+        method === "POST"
+          ? "stock.supplier.order_create_failed"
+          : "stock.supplier.order_update_failed",
+      risk: hasDeliveryProblem ? "high" : "medium",
+      recordType: "stock_supplier_order",
+      metadata: {
+        order_id:
+          path.split("/orders/")[1] || null,
+        order_number: body.order_number || null,
+        order_status: body.status || null,
+        received_quantity:
+          body.received_quantity ?? null,
+        missing_quantity:
+          body.missing_quantity ?? null,
+        damaged_quantity:
+          body.damaged_quantity ?? null,
+        refund_required:
+          body.refund_required ?? false,
+        replacement_required:
+          body.replacement_required ?? false,
+        expected_delivery_date:
+          body.expected_delivery_date || null,
+      },
+    };
+  }
+
+  if (path.includes("/reviews")) {
+    return {
+      action:
+        method === "DELETE"
+          ? "stock.supplier.review_deleted"
+          : method === "PATCH"
+            ? "stock.supplier.review_updated"
+            : "stock.supplier.review_created",
+      failureAction:
+        "stock.supplier.review_action_failed",
+      risk: "medium",
+      recordType: "stock_supplier_review",
+      metadata: {
+        rating: body.rating || null,
+        delivery_rating:
+          body.delivery_rating ?? null,
+        quality_rating:
+          body.quality_rating ?? null,
+        communication_rating:
+          body.communication_rating ?? null,
+        value_rating:
+          body.value_rating ?? null,
+      },
+    };
+  }
+
+  if (path.includes("/compliance")) {
+    return {
+      action:
+        "stock.supplier.compliance_updated",
+      failureAction:
+        "stock.supplier.compliance_update_failed",
+      risk: "high",
+      recordType: "stock_supplier_compliance",
+      metadata: {
+        public_liability_status:
+          body.public_liability_status || null,
+        public_liability_expiry:
+          body.public_liability_expiry || null,
+        food_hygiene_status:
+          body.food_hygiene_status || null,
+        food_hygiene_rating:
+          body.food_hygiene_rating || null,
+      },
+    };
+  }
+
+  if (path.includes("/item-links")) {
+    return {
+      action:
+        method === "DELETE"
+          ? "stock.supplier.item_link_removed"
+          : method === "PATCH"
+            ? "stock.supplier.item_link_updated"
+            : "stock.supplier.item_link_created",
+      failureAction:
+        "stock.supplier.item_link_action_failed",
+      risk: "medium",
+      recordType: "stock_supplier_item_link",
+      metadata: {
+        stock_item_id:
+          body.stock_item_id || null,
+        supplier_role:
+          body.supplier_role || null,
+        supplier_sku:
+          body.supplier_sku || null,
+      },
+    };
+  }
+
+  if (path.includes("/organisation/migrate")) {
+    return {
+      action:
+        "stock.supplier.organisation_migrated",
+      failureAction:
+        "stock.supplier.organisation_migration_failed",
+      risk: "high",
+      metadata: {
+        organisation_name:
+          body.organisation_name || null,
+        reason: body.reason || null,
+      },
+    };
+  }
+
+  if (path.includes("/merge")) {
+    return {
+      action:
+        "stock.supplier.duplicate_merged",
+      failureAction:
+        "stock.supplier.duplicate_merge_failed",
+      risk: "high",
+      metadata: {
+        target_supplier_id:
+          body.target_supplier_id || null,
+        reason: body.reason || null,
+      },
+    };
+  }
+
+  if (path.includes("/override")) {
+    return {
+      action:
+        method === "DELETE"
+          ? "stock.supplier.override_removed"
+          : "stock.supplier.money_management_override_used",
+      failureAction:
+        "stock.supplier.override_action_failed",
+      risk: "critical",
+      metadata: {
+        reason: body.reason || null,
+        expires_at: body.expires_at || null,
+      },
+    };
+  }
+
+  return {
+    action:
+      method === "PATCH"
+        ? "stock.supplier.updated"
+        : method === "DELETE"
+          ? "stock.supplier.deleted"
+          : "stock.supplier.action_completed",
+    failureAction:
+      method === "PATCH"
+        ? "stock.supplier.update_failed"
+        : method === "DELETE"
+          ? "stock.supplier.delete_failed"
+          : "stock.supplier.action_failed",
+    risk: method === "DELETE" ? "critical" : "medium",
+    metadata: {
+      reason: body.reason || null,
+    },
+  };
+}
 
 function eventContactOptionLabel(
   contact: EventHubContactOption,
@@ -928,6 +1526,12 @@ export default function StockSuppliersPage() {
     useState(false);
   const [moneySuppliersError, setMoneySuppliersError] =
     useState("");
+  const [inventoryItems, setInventoryItems] =
+    useState<InventoryOption[]>([]);
+  const [inventoryLoading, setInventoryLoading] =
+    useState(false);
+  const [inventoryError, setInventoryError] =
+    useState("");
   const [eventContactSearch, setEventContactSearch] =
     useState("");
   const [showAllEventContacts, setShowAllEventContacts] =
@@ -955,6 +1559,21 @@ export default function StockSuppliersPage() {
     useState<StockSupplierView | null>(null);
   const [detailTab, setDetailTab] =
     useState<DetailTab>("overview");
+
+  const [deleteSupplier, setDeleteSupplier] =
+    useState<StockSupplierView | null>(null);
+  const [deletePassword, setDeletePassword] =
+    useState("");
+  const [deleteConfirmation, setDeleteConfirmation] =
+    useState("");
+  const [deleteReason, setDeleteReason] =
+    useState("");
+  const [showDeletePassword, setShowDeletePassword] =
+    useState(false);
+  const [deletingSupplier, setDeletingSupplier] =
+    useState(false);
+  const [deleteError, setDeleteError] =
+    useState("");
   const [workspace, setWorkspace] =
     useState<SupplierWorkspace>(EMPTY_WORKSPACE);
   const [workspaceLoading, setWorkspaceLoading] =
@@ -998,6 +1617,82 @@ export default function StockSuppliersPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] =
     useState<SupplierFormState>(EMPTY_FORM);
+
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    setInventoryError("");
+
+    try {
+      const response = await fetch(INVENTORY_API, {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      const raw = await response.text();
+      let payload: InventoryResponse = {};
+
+      if (raw) {
+        try {
+          payload = JSON.parse(raw) as InventoryResponse;
+        } catch {
+          throw new Error(
+            [
+              "Stock Management inventory returned invalid JSON.",
+              `HTTP ${response.status}`,
+              `Endpoint: ${INVENTORY_API}`,
+              `Response: ${raw.slice(0, 500)}`,
+            ].join("\n"),
+          );
+        }
+      }
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(
+          [
+            payload.error ||
+              "Inventory items could not be loaded.",
+            payload.code
+              ? `Code: ${payload.code}`
+              : "",
+            payload.details
+              ? `Details: ${payload.details}`
+              : "",
+            payload.hint
+              ? `Hint: ${payload.hint}`
+              : "",
+            `HTTP ${response.status}`,
+            `Endpoint: ${INVENTORY_API}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
+
+      const rows =
+        payload.items ||
+        payload.inventory ||
+        [];
+
+      setInventoryItems(
+        Array.isArray(rows)
+          ? rows.filter(
+              (item) => item.isActive !== false,
+            )
+          : [],
+      );
+    } catch (loadError) {
+      setInventoryItems([]);
+      setInventoryError(
+        formatErrorForDisplay(loadError),
+      );
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
 
   const loadMoneySuppliers = useCallback(async () => {
     setMoneySuppliersLoading(true);
@@ -1085,11 +1780,38 @@ export default function StockSuppliersPage() {
           ? rows.find((row) => row.id === current.id) || null
           : null,
       );
-      setEventContacts(
+      const normalisedEventContacts =
         Array.isArray(json.eventContacts)
           ? json.eventContacts
-          : [],
+              .map((contact) =>
+                normaliseEventContact(
+                  contact as RawEventHubContact,
+                ),
+              )
+              .filter((contact) =>
+                Boolean(contact.id),
+              )
+          : [];
+
+      setEventContacts(
+        normalisedEventContacts,
       );
+
+      if (process.env.NODE_ENV !== "production") {
+        console.table(
+          normalisedEventContacts.map(
+            (contact) => ({
+              id: contact.id,
+              organisation:
+                contact.organisationName,
+              doNotInvite:
+                contact.doNotInvite,
+              needsReview:
+                contact.needsReview,
+            }),
+          ),
+        );
+      }
       setSummary({
         ...buildSummary(rows),
         ...(json.summary || {}),
@@ -1113,8 +1835,13 @@ export default function StockSuppliersPage() {
     void Promise.all([
       loadSuppliers(),
       loadMoneySuppliers(),
+      loadInventory(),
     ]);
-  }, [loadMoneySuppliers, loadSuppliers]);
+  }, [
+    loadInventory,
+    loadMoneySuppliers,
+    loadSuppliers,
+  ]);
 
   const filteredEventContacts = useMemo(() => {
     const query = eventContactSearch.trim().toLowerCase();
@@ -1130,6 +1857,12 @@ export default function StockSuppliersPage() {
         contact.website,
         contact.recordType,
         contact.rating,
+        contact.doNotInvite
+          ? "do not use do not invite blocked"
+          : "",
+        contact.needsReview
+          ? "needs review"
+          : "",
       ]
         .filter(Boolean)
         .join(" ")
@@ -1304,10 +2037,14 @@ export default function StockSuppliersPage() {
       supplierUse: "mixed",
       eventRecordType: contact.recordType,
       eventRecordId: contact.id,
+      eventDoNotUse: contact.doNotInvite,
+      eventNeedsReview:
+        contact.needsReview || contact.doNotInvite,
+      eventWarningAccepted: false,
       stockNotes: contact.doNotInvite
-        ? "Event Hub warning: this contact is marked Do not invite. Review before ordering."
+        ? "Event Hub warning: this contact is marked Do not use / Do not invite. This warning was carried into Stock Management."
         : contact.needsReview
-          ? "Event Hub warning: this contact requires review."
+          ? "Event Hub warning: this contact requires review. This warning was carried into Stock Management."
           : "",
     });
     setAddOpen(true);
@@ -1338,6 +2075,9 @@ export default function StockSuppliersPage() {
         ...current,
         eventRecordId: "",
         eventRecordType: "",
+        eventDoNotUse: false,
+        eventNeedsReview: false,
+        eventWarningAccepted: false,
       }));
       return;
     }
@@ -1351,17 +2091,24 @@ export default function StockSuppliersPage() {
       eventRecordId: selected?.id || "",
       eventRecordType:
         selected?.recordType || "",
+      eventDoNotUse:
+        selected?.doNotInvite || false,
+      eventNeedsReview:
+        Boolean(
+          selected?.needsReview ||
+          selected?.doNotInvite,
+        ),
+      eventWarningAccepted: false,
       displayName:
         current.displayName ||
         selected?.organisationName ||
         "",
       stockNotes:
-        current.stockNotes ||
-        (selected?.doNotInvite
-          ? "Event Hub warning: this contact is marked Do not invite. Review before ordering."
+        selected?.doNotInvite
+          ? "Event Hub warning: this contact is marked Do not use / Do not invite. This warning was carried into Stock Management."
           : selected?.needsReview
-            ? "Event Hub warning: this contact requires review."
-            : ""),
+            ? "Event Hub warning: this contact requires review. This warning was carried into Stock Management."
+            : current.stockNotes,
     }));
   }
 
@@ -1379,6 +2126,24 @@ export default function StockSuppliersPage() {
         current.displayName ||
         selected?.supplier_name ||
         "",
+    }));
+  }
+
+  function selectInventoryItem(
+    stockItemId: string,
+  ) {
+    const selected = inventoryItems.find(
+      (item) => item.id === stockItemId,
+    );
+
+    setForm((current) => ({
+      ...current,
+      stockItemId: selected?.id || "",
+      stockItemUnitCost:
+        selected?.unitCost === null ||
+        selected?.unitCost === undefined
+          ? current.stockItemUnitCost
+          : String(selected.unitCost),
     }));
   }
 
@@ -1481,37 +2246,95 @@ export default function StockSuppliersPage() {
     method: "POST" | "PATCH" | "DELETE",
     body: Record<string, unknown>,
     successMessage: string,
+    auditOverride?: WorkspaceAuditDescriptor,
   ) {
     if (!selectedSupplier) return;
+
+    const audit =
+      auditOverride ||
+      workspaceAuditForAction(
+        endpoint,
+        method,
+        body,
+      );
 
     setWorkspaceSaving(true);
     setWorkspaceError("");
     setWorkspaceNotice("");
 
     try {
-      await requestJson<Record<string, unknown>>(
-        endpoint,
-        {
+      const result =
+        await requestJson<Record<string, unknown>>(
+          endpoint,
+          {
+            method,
+            body: JSON.stringify(body),
+          },
+          successMessage,
+        );
+
+      await reportSupplierAudit({
+        action: audit.action,
+        status: "success",
+        risk: audit.risk || "medium",
+        supplierId: selectedSupplier.id,
+        recordType:
+          audit.recordType || "stock_supplier",
+        metadata: {
+          supplier_name:
+            selectedSupplier.displayName,
+          endpoint,
           method,
-          body: JSON.stringify(body),
+          integration_event_hub:
+            selectedSupplier.eventHub.connected,
+          integration_money_management:
+            selectedSupplier.moneyManagement.connected,
+          ...audit.metadata,
+          response_record_id:
+            result.id ||
+            result.record_id ||
+            result.order_id ||
+            result.review_id ||
+            null,
         },
-        successMessage,
-      );
+      });
 
       setWorkspaceNotice(successMessage);
 
       const refreshedSupplier = suppliers.find(
-        (supplier) => supplier.id === selectedSupplier.id,
+        (supplier) =>
+          supplier.id === selectedSupplier.id,
       );
 
       await Promise.all([
         refreshedSupplier
-          ? loadSupplierWorkspace(refreshedSupplier)
+          ? loadSupplierWorkspace(
+              refreshedSupplier,
+            )
           : Promise.resolve(),
         loadSuppliers(),
         loadMoneySuppliers(),
       ]);
     } catch (actionError) {
+      await reportSupplierAudit({
+        action:
+          audit.failureAction ||
+          `${audit.action}_failed`,
+        status: "failed",
+        risk: audit.risk || "medium",
+        supplierId: selectedSupplier.id,
+        recordType:
+          audit.recordType || "stock_supplier",
+        metadata: {
+          supplier_name:
+            selectedSupplier.displayName,
+          endpoint,
+          method,
+          ...audit.metadata,
+        },
+        error: actionError,
+      });
+
       setWorkspaceError(
         formatErrorForDisplay(actionError),
       );
@@ -1612,6 +2435,41 @@ export default function StockSuppliersPage() {
         reason,
       },
       "The Stock Management supplier profile was updated.",
+      {
+        action:
+          profileEdit.doNotUse &&
+          !selectedSupplier.doNotUse
+            ? "stock.supplier.blocked"
+            : !profileEdit.isActive &&
+                selectedSupplier.isActive
+              ? "stock.supplier.archived"
+              : profileEdit.isActive &&
+                  !selectedSupplier.isActive
+                ? "stock.supplier.reactivated"
+                : "stock.supplier.updated",
+        failureAction:
+          "stock.supplier.update_failed",
+        risk:
+          profileEdit.doNotUse ||
+          !profileEdit.isActive
+            ? "high"
+            : "medium",
+        metadata: {
+          previous_name:
+            selectedSupplier.displayName,
+          new_name:
+            profileEdit.displayName.trim(),
+          supplier_use:
+            profileEdit.supplierUse,
+          is_active:
+            profileEdit.isActive,
+          needs_review:
+            profileEdit.needsReview,
+          do_not_use:
+            profileEdit.doNotUse,
+          reason,
+        },
+      },
     );
   }
 
@@ -1766,10 +2624,55 @@ export default function StockSuppliersPage() {
       link.remove();
       URL.revokeObjectURL(url);
 
+      await reportSupplierAudit({
+        action:
+          "stock.supplier.workspace_exported",
+        status: "success",
+        risk: "low",
+        supplierId: selectedSupplier.id,
+        recordType: "stock_supplier_report",
+        metadata: {
+          supplier_name:
+            selectedSupplier.displayName,
+          export_format: "xlsx",
+          file_name: link.download,
+          item_link_count:
+            workspace.itemLinks.length,
+          order_count:
+            workspace.orders.length,
+          review_count:
+            workspace.reviews.length,
+          historic_event_count:
+            workspace.historicEvents.length,
+          audit_history_count:
+            workspace.auditLogs.length,
+          includes_compliance: true,
+          includes_event_hub:
+            selectedSupplier.eventHub.connected,
+          includes_money_management:
+            selectedSupplier.moneyManagement.connected,
+        },
+      });
+
       setWorkspaceNotice(
         "The multi-sheet supplier workbook was downloaded.",
       );
     } catch (exportError) {
+      await reportSupplierAudit({
+        action:
+          "stock.supplier.workspace_export_failed",
+        status: "failed",
+        risk: "medium",
+        supplierId: selectedSupplier.id,
+        recordType: "stock_supplier_report",
+        metadata: {
+          supplier_name:
+            selectedSupplier.displayName,
+          export_format: "xlsx",
+        },
+        error: exportError,
+      });
+
       setWorkspaceError(
         formatErrorForDisplay(exportError),
       );
@@ -1818,44 +2721,381 @@ export default function StockSuppliersPage() {
       return;
     }
 
+    if (
+      form.eventDoNotUse &&
+      !form.eventWarningAccepted
+    ) {
+      setNotice(
+        "This Event Hub contact is marked Do not use / Do not invite. Tick the warning confirmation before creating the Stock Management supplier.",
+      );
+      return;
+    }
+
+    const stockItemUnitCostPence =
+      form.stockItemUnitCost
+        ? parsePoundsToPence(
+            form.stockItemUnitCost,
+          )
+        : null;
+
+    if (
+      form.stockItemUnitCost &&
+      stockItemUnitCostPence === null
+    ) {
+      setNotice(
+        "The inventory item unit cost must be a valid non-negative amount.",
+      );
+      return;
+    }
+
+    if (
+      form.stockItemMinimumOrderQuantity &&
+      (!Number.isInteger(
+        Number(
+          form.stockItemMinimumOrderQuantity,
+        ),
+      ) ||
+        Number(
+          form.stockItemMinimumOrderQuantity,
+        ) < 0)
+    ) {
+      setNotice(
+        "The inventory minimum order quantity must be a whole number of zero or more.",
+      );
+      return;
+    }
+
+    if (
+      form.stockItemLeadTimeDays &&
+      (!Number.isInteger(
+        Number(form.stockItemLeadTimeDays),
+      ) ||
+        Number(form.stockItemLeadTimeDays) < 0)
+    ) {
+      setNotice(
+        "The inventory lead time must be a whole number of zero or more.",
+      );
+      return;
+    }
+
     setCreating(true);
     setNotice("");
 
     try {
-      await requestJson<Record<string, unknown>>(
-        API,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            display_name: form.displayName.trim(),
-            supplier_use: form.supplierUse,
-            usual_delivery_days: form.usualDeliveryDays
-              ? Number(form.usualDeliveryDays)
+      const createPayload = {
+        display_name: form.displayName.trim(),
+        supplier_use: form.supplierUse,
+        usual_delivery_days:
+          form.usualDeliveryDays
+            ? Number(form.usualDeliveryDays)
+            : null,
+        minimum_order_value_pence:
+          minimumOrderValuePence,
+        usual_delivery_cost_pence:
+          usualDeliveryCostPence,
+        stock_notes:
+          form.stockNotes.trim() || null,
+        event_record_type:
+          form.eventRecordType.trim() || null,
+        event_record_id:
+          form.eventRecordId.trim() || null,
+        do_not_use:
+          form.eventDoNotUse,
+        needs_review:
+          form.eventNeedsReview,
+        money_supplier_id:
+          form.moneySupplierId.trim() || null,
+      };
+
+      const result =
+        await requestJson<Record<string, unknown>>(
+          API,
+          {
+            method: "POST",
+            body: JSON.stringify(createPayload),
+          },
+          "Supplier creation failed.",
+        );
+
+      const createdSupplier =
+        result.supplier &&
+        typeof result.supplier === "object"
+          ? (result.supplier as Record<
+              string,
+              unknown
+            >)
+          : null;
+
+      const createdSupplierId = String(
+        createdSupplier?.id ||
+          result.supplier_id ||
+          result.id ||
+          "",
+      ) || null;
+
+      const creationSource =
+        createPayload.event_record_id &&
+        createPayload.money_supplier_id
+          ? "event_hub_and_money_management"
+          : createPayload.event_record_id
+            ? "event_hub"
+            : createPayload.money_supplier_id
+              ? "money_management"
+              : "manual";
+
+      await reportSupplierAudit({
+        action:
+          creationSource === "event_hub"
+            ? "stock.supplier.created_from_event_hub"
+            : creationSource ===
+                "money_management"
+              ? "stock.supplier.created_from_money_management"
+              : creationSource ===
+                  "event_hub_and_money_management"
+                ? "stock.supplier.created_fully_connected"
+                : "stock.supplier.created",
+        status: "success",
+        risk: "medium",
+        supplierId: createdSupplierId,
+        metadata: {
+          supplier_name:
+            createPayload.display_name,
+          supplier_use:
+            createPayload.supplier_use,
+          creation_source: creationSource,
+          event_record_type:
+            createPayload.event_record_type,
+          event_record_id:
+            createPayload.event_record_id,
+          money_supplier_id:
+            createPayload.money_supplier_id,
+          connected_to_event_hub:
+            Boolean(
+              createPayload.event_record_id,
+            ),
+          event_do_not_use:
+            createPayload.do_not_use,
+          event_needs_review:
+            createPayload.needs_review,
+          event_warning_accepted:
+            form.eventWarningAccepted,
+          connected_to_money_management:
+            Boolean(
+              createPayload.money_supplier_id,
+            ),
+          usual_delivery_days:
+            createPayload.usual_delivery_days,
+          minimum_order_value_pence:
+            createPayload.minimum_order_value_pence,
+          usual_delivery_cost_pence:
+            createPayload.usual_delivery_cost_pence,
+          inventory_item_id:
+            form.stockItemId || null,
+          inventory_supplier_role:
+            form.stockItemId
+              ? form.stockItemRole
               : null,
-            minimum_order_value_pence:
-              minimumOrderValuePence,
-            usual_delivery_cost_pence:
-              usualDeliveryCostPence,
-            stock_notes: form.stockNotes.trim() || null,
-            event_record_type:
-              form.eventRecordType.trim() || null,
-            event_record_id:
-              form.eventRecordId.trim() || null,
-            money_supplier_id:
-              form.moneySupplierId.trim() || null,
-          }),
+          inventory_supplier_sku:
+            form.stockItemSupplierSku.trim() ||
+            null,
         },
-        "Supplier creation failed.",
-      );
+      });
+
+      if (
+        form.eventDoNotUse &&
+        createdSupplierId
+      ) {
+        await reportSupplierAudit({
+          action:
+            "stock.supplier.event_hub_warning_accepted",
+          status: "warning",
+          risk: "high",
+          supplierId:
+            createdSupplierId,
+          metadata: {
+            supplier_name:
+              createPayload.display_name,
+            event_record_id:
+              createPayload.event_record_id,
+            event_record_type:
+              createPayload.event_record_type,
+            event_do_not_use: true,
+            event_needs_review:
+              createPayload.needs_review,
+            warning_carried_into_stock_management:
+              true,
+          },
+        });
+      }
+
+      let inventoryLinkWarning = "";
+
+      if (
+        form.stockItemId &&
+        createdSupplierId
+      ) {
+        const selectedInventoryItem =
+          inventoryItems.find(
+            (item) =>
+              item.id === form.stockItemId,
+          );
+
+        const itemLinkPayload = {
+          stock_item_id:
+            form.stockItemId,
+          stock_item_name:
+            selectedInventoryItem?.name ||
+            null,
+          supplier_role:
+            form.stockItemRole,
+          supplier_sku:
+            form.stockItemSupplierSku.trim() ||
+            null,
+          unit_cost_pence:
+            stockItemUnitCostPence,
+          minimum_order_quantity:
+            form.stockItemMinimumOrderQuantity
+              ? Number(
+                  form.stockItemMinimumOrderQuantity,
+                )
+              : null,
+          lead_time_days:
+            form.stockItemLeadTimeDays
+              ? Number(
+                  form.stockItemLeadTimeDays,
+                )
+              : null,
+        };
+
+        try {
+          await requestJson<Record<string, unknown>>(
+            `${API}/${createdSupplierId}/item-links`,
+            {
+              method: "POST",
+              body: JSON.stringify(
+                itemLinkPayload,
+              ),
+            },
+            "The supplier was created, but the inventory item could not be linked.",
+          );
+
+          await reportSupplierAudit({
+            action:
+              "stock.supplier.item_link_created",
+            status: "success",
+            risk: "medium",
+            supplierId:
+              createdSupplierId,
+            recordType:
+              "stock_supplier_item_link",
+            metadata: {
+              supplier_name:
+                createPayload.display_name,
+              stock_item_id:
+                itemLinkPayload.stock_item_id,
+              stock_item_name:
+                itemLinkPayload.stock_item_name,
+              supplier_role:
+                itemLinkPayload.supplier_role,
+              supplier_sku:
+                itemLinkPayload.supplier_sku,
+              unit_cost_pence:
+                itemLinkPayload.unit_cost_pence,
+              minimum_order_quantity:
+                itemLinkPayload.minimum_order_quantity,
+              lead_time_days:
+                itemLinkPayload.lead_time_days,
+              created_during_supplier_setup:
+                true,
+            },
+          });
+        } catch (linkError) {
+          inventoryLinkWarning =
+            "\n\nThe supplier was created, but the selected inventory item could not be connected. Open the supplier details and add the item from the Stock Items tab.\n\n" +
+            formatErrorForDisplay(linkError);
+
+          await reportSupplierAudit({
+            action:
+              "stock.supplier.item_link_action_failed",
+            status: "failed",
+            risk: "medium",
+            supplierId:
+              createdSupplierId,
+            recordType:
+              "stock_supplier_item_link",
+            metadata: {
+              supplier_name:
+                createPayload.display_name,
+              stock_item_id:
+                itemLinkPayload.stock_item_id,
+              stock_item_name:
+                itemLinkPayload.stock_item_name,
+              supplier_role:
+                itemLinkPayload.supplier_role,
+              created_during_supplier_setup:
+                true,
+            },
+            error: linkError,
+          });
+        }
+      }
 
       setAddOpen(false);
       setForm(EMPTY_FORM);
       setNotice(
-        "The Stock Management supplier profile has been created.",
+        `The Stock Management supplier profile has been created.${
+          form.eventDoNotUse
+            ? " The Event Hub Do not use warning was carried into Stock Management."
+            : form.eventNeedsReview
+              ? " The Event Hub Needs review warning was carried into Stock Management."
+              : ""
+        }${
+          form.stockItemId && !inventoryLinkWarning
+            ? " The selected inventory item was connected to this supplier."
+            : ""
+        }${inventoryLinkWarning}`,
       );
 
-      await loadSuppliers();
+      await Promise.all([
+        loadSuppliers(),
+        loadInventory(),
+      ]);
     } catch (createError) {
+      await reportSupplierAudit({
+        action:
+          "stock.supplier.create_failed",
+        status: "failed",
+        risk: "medium",
+        metadata: {
+          supplier_name:
+            form.displayName.trim() || null,
+          supplier_use: form.supplierUse,
+          event_record_type:
+            form.eventRecordType.trim() || null,
+          event_record_id:
+            form.eventRecordId.trim() || null,
+          money_supplier_id:
+            form.moneySupplierId.trim() || null,
+          connected_to_event_hub:
+            Boolean(form.eventRecordId.trim()),
+          event_do_not_use:
+            form.eventDoNotUse,
+          event_needs_review:
+            form.eventNeedsReview,
+          event_warning_accepted:
+            form.eventWarningAccepted,
+          connected_to_money_management:
+            Boolean(form.moneySupplierId.trim()),
+          inventory_item_id:
+            form.stockItemId || null,
+          inventory_supplier_role:
+            form.stockItemId
+              ? form.stockItemRole
+              : null,
+        },
+        error: createError,
+      });
+
       setNotice(formatErrorForDisplay(createError));
     } finally {
       setCreating(false);
@@ -1903,10 +3143,59 @@ export default function StockSuppliersPage() {
 
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 
+      await reportSupplierAudit({
+        action: "stock.supplier.exported",
+        status: "success",
+        risk: "low",
+        recordType: "stock_supplier_report",
+        metadata: {
+          export_format: "xlsx",
+          file_name: link.download,
+          row_count:
+            filteredSuppliers.length,
+          total_supplier_count:
+            suppliers.length,
+          search: search.trim() || null,
+          connection_filter:
+            connectionFilter,
+          status_filter: statusFilter,
+          supplier_use_filter: useFilter,
+          event_hub_connected_count:
+            summary.connectedToEventHub,
+          money_management_connected_count:
+            summary.connectedToMoneyManagement,
+          fully_connected_count:
+            summary.fullyConnected,
+          open_order_count:
+            summary.openOrders,
+          overdue_delivery_count:
+            summary.overdueDeliveries,
+        },
+      });
+
       setNotice(
         "The connected supplier Excel workbook has been created.",
       );
     } catch (exportError) {
+      await reportSupplierAudit({
+        action:
+          "stock.supplier.export_failed",
+        status: "failed",
+        risk: "medium",
+        recordType: "stock_supplier_report",
+        metadata: {
+          export_format: "xlsx",
+          row_count:
+            filteredSuppliers.length,
+          search: search.trim() || null,
+          connection_filter:
+            connectionFilter,
+          status_filter: statusFilter,
+          supplier_use_filter: useFilter,
+        },
+        error: exportError,
+      });
+
       setNotice(formatErrorForDisplay(exportError));
     } finally {
       setExporting(false);
@@ -1915,6 +3204,189 @@ export default function StockSuppliersPage() {
 
   function printReport() {
     window.print();
+  }
+
+  function openSupplierEditor(
+    supplier: StockSupplierView,
+  ) {
+    setSelectedSupplier(supplier);
+    setDetailTab("admin");
+    setWorkspaceError("");
+    setWorkspaceNotice("");
+  }
+
+  function openSupplierDelete(
+    supplier: StockSupplierView,
+  ) {
+    setDeleteSupplier(supplier);
+    setDeletePassword("");
+    setDeleteConfirmation("");
+    setDeleteReason("");
+    setShowDeletePassword(false);
+    setDeleteError("");
+  }
+
+  function closeSupplierDelete() {
+    if (deletingSupplier) return;
+
+    setDeleteSupplier(null);
+    setDeletePassword("");
+    setDeleteConfirmation("");
+    setDeleteReason("");
+    setShowDeletePassword(false);
+    setDeleteError("");
+  }
+
+  async function permanentlyDeleteSupplier() {
+    if (!deleteSupplier || deletingSupplier) return;
+
+    const supplierName =
+      deleteSupplier.displayName.trim();
+
+    if (deleteReason.trim().length < 10) {
+      setDeleteError(
+        "Enter a deletion reason of at least 10 characters.",
+      );
+      return;
+    }
+
+    if (deleteConfirmation !== supplierName) {
+      setDeleteError(
+        `Type the supplier name exactly: ${supplierName}`,
+      );
+      return;
+    }
+
+    if (!deletePassword.trim()) {
+      setDeleteError(
+        "Enter the signed-in main admin password.",
+      );
+      return;
+    }
+
+    setDeletingSupplier(true);
+    setDeleteError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(
+        `${API}/${deleteSupplier.id}`,
+        {
+          method: "DELETE",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            permanent: true,
+            reason: deleteReason.trim(),
+            confirmation: deleteConfirmation,
+            password: deletePassword,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw await readApiError(
+          response,
+          "The supplier could not be permanently deleted.",
+        );
+      }
+
+      const payload = (await response
+        .json()
+        .catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        error?: string;
+        deletedSupplierId?: string;
+      };
+
+      if (payload.ok === false) {
+        throw new Error(
+          payload.error ||
+            "The supplier could not be permanently deleted.",
+        );
+      }
+
+      const deletedName =
+        deleteSupplier.displayName;
+      const deletedId =
+        deleteSupplier.id;
+
+      await reportSupplierAudit({
+        action: "stock.supplier.deleted",
+        status: "success",
+        risk: "critical",
+        supplierId: deletedId,
+        metadata: {
+          supplier_name: deletedName,
+          deletion_reason:
+            deleteReason.trim(),
+          had_event_hub_connection:
+            deleteSupplier.eventHub.connected,
+          event_record_id:
+            deleteSupplier.eventHub.recordId,
+          had_money_management_connection:
+            deleteSupplier.moneyManagement.connected,
+          money_supplier_id:
+            deleteSupplier.moneyManagement.supplierId,
+          open_order_count:
+            deleteSupplier.stockManagement.openOrderCount,
+          source_records_deleted: false,
+        },
+      });
+
+      setDeleteSupplier(null);
+      setDeletePassword("");
+      setDeleteConfirmation("");
+      setDeleteReason("");
+      setShowDeletePassword(false);
+
+      if (selectedSupplier?.id === deletedId) {
+        setSelectedSupplier(null);
+        setWorkspace(EMPTY_WORKSPACE);
+        setProfileEdit(null);
+      }
+
+      setNotice(
+        payload.message ||
+          `${deletedName} was permanently deleted from Stock Management.`,
+      );
+
+      await Promise.all([
+        loadSuppliers(),
+        loadMoneySuppliers(),
+      ]);
+    } catch (deleteRequestError) {
+      await reportSupplierAudit({
+        action: "stock.supplier.delete_failed",
+        status: "failed",
+        risk: "critical",
+        supplierId: deleteSupplier.id,
+        metadata: {
+          supplier_name:
+            deleteSupplier.displayName,
+          deletion_reason:
+            deleteReason.trim() || null,
+          confirmation_entered:
+            Boolean(deleteConfirmation),
+          password_entered:
+            Boolean(deletePassword),
+        },
+        error: deleteRequestError,
+      });
+
+      setDeleteError(
+        formatErrorForDisplay(
+          deleteRequestError,
+        ),
+      );
+    } finally {
+      setDeletingSupplier(false);
+    }
   }
 
   return (
@@ -1948,7 +3420,10 @@ export default function StockSuppliersPage() {
                   onClick={() => {
                     setForm(EMPTY_FORM);
                     setAddOpen(true);
-                    void loadMoneySuppliers();
+                    void Promise.all([
+                      loadMoneySuppliers(),
+                      loadInventory(),
+                    ]);
                   }}
                   className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-200"
                 >
@@ -1979,6 +3454,7 @@ export default function StockSuppliersPage() {
                   void Promise.all([
                     loadSuppliers(),
                     loadMoneySuppliers(),
+                    loadInventory(),
                   ])
                 }
                 disabled={loading}
@@ -2348,7 +3824,17 @@ export default function StockSuppliersPage() {
                         </p>
                       </div>
 
-                      {contact.linkedStockSupplierId ? (
+                      {contact.doNotInvite ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-300/25 bg-red-500/15 px-2 py-1 text-[10px] font-black text-red-50">
+                          <ShieldAlert className="h-3 w-3" />
+                          Do not use
+                        </span>
+                      ) : contact.needsReview ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300/25 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-50">
+                          <ShieldAlert className="h-3 w-3" />
+                          Needs review
+                        </span>
+                      ) : contact.linkedStockSupplierId ? (
                         <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-100">
                           <CheckCircle2 className="h-3 w-3" />
                           Linked
@@ -2383,10 +3869,28 @@ export default function StockSuppliersPage() {
                     </div>
 
                     {contact.doNotInvite || contact.needsReview ? (
-                      <div className="mt-3 rounded-xl border border-red-300/15 bg-red-500/10 p-2.5 text-xs font-bold text-red-100">
-                        {contact.doNotInvite
-                          ? "Warning: marked Do not invite in Event Hub."
-                          : "Warning: this Event Hub relationship needs review."}
+                      <div
+                        className={`mt-3 rounded-xl border p-2.5 text-xs font-bold ${
+                          contact.doNotInvite
+                            ? "border-red-300/25 bg-red-500/15 text-red-50"
+                            : "border-amber-300/20 bg-amber-500/10 text-amber-100"
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                          <div>
+                            <p className="font-black">
+                              {contact.doNotInvite
+                                ? "Do not use / Do not invite"
+                                : "Needs review"}
+                            </p>
+                            <p className="mt-1 leading-5 opacity-75">
+                              {contact.doNotInvite
+                                ? "Event Hub has marked this contact Do not use / Do not invite. The warning will carry into Stock Management and the new supplier will be blocked and marked Needs review."
+                                : "Event Hub has marked this contact Needs review. The new Stock Management supplier will also require review."}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     ) : null}
 
@@ -2405,10 +3909,20 @@ export default function StockSuppliersPage() {
                           onClick={() =>
                             useEventContactAsSupplier(contact)
                           }
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-pink-200 px-3 py-2 text-xs font-black text-pink-950 hover:bg-pink-100"
+                          className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black ${
+                            contact.doNotInvite
+                              ? "border border-red-300/25 bg-red-500/15 text-red-50 hover:bg-red-500/25"
+                              : "bg-pink-200 text-pink-950 hover:bg-pink-100"
+                          }`}
                         >
-                          <Link2 className="h-3.5 w-3.5" />
-                          Use as supplier
+                          {contact.doNotInvite ? (
+                            <ShieldAlert className="h-3.5 w-3.5" />
+                          ) : (
+                            <Link2 className="h-3.5 w-3.5" />
+                          )}
+                          {contact.doNotInvite
+                            ? "Review blocked contact"
+                            : "Use as supplier"}
                         </button>
                       ) : null}
 
@@ -2845,17 +4359,45 @@ export default function StockSuppliersPage() {
                         </td>
 
                         <td className="px-5 py-4">
-                          <div className="flex justify-end gap-2">
+                          <div className="flex flex-wrap justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => {
                                 setSelectedSupplier(supplier);
                                 setDetailTab("overview");
                               }}
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-2 text-xs font-black text-white/70 hover:bg-white/10"
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black text-white/70 hover:bg-white/10"
                             >
                               View details
                               <ArrowRight className="h-3.5 w-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openSupplierEditor(supplier)
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-blue-300/20 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 hover:bg-blue-500/20"
+                              title={
+                                permissions.edit
+                                  ? "Edit this supplier"
+                                  : "The API will check your permission before saving"
+                              }
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openSupplierDelete(supplier)
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20"
+                              title="Permanent deletion requires a main admin password"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
                             </button>
 
                             {supplier.eventHub.connected &&
@@ -2933,7 +4475,31 @@ export default function StockSuppliersPage() {
                 </button>
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDetailTab("admin")
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-blue-300/20 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-100 hover:bg-blue-500/20"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit supplier
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    openSupplierDelete(
+                      selectedSupplier,
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 hover:bg-red-500/20"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete supplier
+                </button>
+
                 {(
                   [
                     ["overview", "Overview"],
@@ -4532,6 +6098,224 @@ export default function StockSuppliersPage() {
         </div>
       ) : null}
 
+      {deleteSupplier ? (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center p-3 print:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Permanently delete supplier"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/90 backdrop-blur-md"
+            onClick={closeSupplierDelete}
+            aria-label="Close delete supplier window"
+          />
+
+          <div className="relative flex max-h-[94vh] w-full max-w-2xl flex-col overflow-hidden rounded-[30px] border border-red-300/20 bg-[#171020] shadow-2xl">
+            <header className="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-red-300/20 bg-red-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.15em] text-red-100">
+                  <LockKeyhole className="h-3.5 w-3.5" />
+                  Main admin confirmation
+                </div>
+
+                <h2 className="mt-3 text-2xl font-black">
+                  Delete {deleteSupplier.displayName}
+                </h2>
+
+                <p className="mt-2 text-sm leading-6 text-white/55">
+                  This permanently removes the Stock
+                  Management supplier profile. The original
+                  Event Hub contact and Money Management
+                  supplier are not deleted.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeSupplierDelete}
+                disabled={deletingSupplier}
+                className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 disabled:opacity-50"
+                aria-label="Close delete supplier window"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
+              <div className="rounded-2xl border border-red-300/25 bg-red-500/10 p-4">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0 text-red-100" />
+                  <div>
+                    <p className="font-black text-red-50">
+                      Permanent and audited action
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-red-50/65">
+                      The server checks the signed-in main
+                      admin password. The password is never
+                      stored in the supplier profile or audit
+                      metadata.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {deleteSupplier.stockManagement
+                .openOrderCount > 0 ? (
+                <div className="rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-50">
+                  This supplier currently has{" "}
+                  {
+                    deleteSupplier.stockManagement
+                      .openOrderCount
+                  }{" "}
+                  open order
+                  {deleteSupplier.stockManagement
+                    .openOrderCount === 1
+                    ? ""
+                    : "s"}
+                  . The API may block permanent deletion to
+                  protect the purchasing and financial audit
+                  trail. You can edit the supplier and turn
+                  Active off instead.
+                </div>
+              ) : null}
+
+              {deleteError ? (
+                <pre className="whitespace-pre-wrap break-words rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-xs leading-6 text-red-100">
+                  {deleteError}
+                </pre>
+              ) : null}
+
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-white/45">
+                  Deletion reason
+                </span>
+                <textarea
+                  value={deleteReason}
+                  onChange={(event) =>
+                    setDeleteReason(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="Explain why this supplier must be permanently deleted..."
+                  className="min-h-28 w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-red-300/40"
+                  maxLength={2000}
+                />
+                <span className="mt-1 block text-xs text-white/35">
+                  At least 10 characters.
+                </span>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-white/45">
+                  Type the supplier name exactly
+                </span>
+
+                <div className="mb-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-black text-white/80">
+                  {deleteSupplier.displayName}
+                </div>
+
+                <input
+                  value={deleteConfirmation}
+                  onChange={(event) =>
+                    setDeleteConfirmation(
+                      event.target.value,
+                    )
+                  }
+                  autoComplete="off"
+                  className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-red-300/40"
+                  placeholder={
+                    deleteSupplier.displayName
+                  }
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.12em] text-white/45">
+                  Main admin password
+                </span>
+
+                <div className="relative">
+                  <input
+                    type={
+                      showDeletePassword
+                        ? "text"
+                        : "password"
+                    }
+                    value={deletePassword}
+                    onChange={(event) =>
+                      setDeletePassword(
+                        event.target.value,
+                      )
+                    }
+                    autoComplete="current-password"
+                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 pr-12 text-sm text-white outline-none focus:border-red-300/40"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowDeletePassword(
+                        (current) => !current,
+                      )
+                    }
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-white/45 hover:bg-white/10 hover:text-white"
+                    aria-label={
+                      showDeletePassword
+                        ? "Hide password"
+                        : "Show password"
+                    }
+                  >
+                    {showDeletePassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <footer className="flex flex-col-reverse gap-3 border-t border-white/10 p-5 sm:flex-row sm:justify-end sm:p-6">
+              <button
+                type="button"
+                onClick={closeSupplierDelete}
+                disabled={deletingSupplier}
+                className="rounded-xl border border-white/10 px-5 py-3 text-sm font-black text-white/65 hover:bg-white/10 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void permanentlyDeleteSupplier()
+                }
+                disabled={
+                  deletingSupplier ||
+                  deleteReason.trim().length < 10 ||
+                  deleteConfirmation !==
+                    deleteSupplier.displayName ||
+                  !deletePassword.trim()
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-sm font-black text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deletingSupplier ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+
+                {deletingSupplier
+                  ? "Deleting supplier..."
+                  : "Permanently delete supplier"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
       {addOpen ? (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center p-4 print:hidden"
@@ -4557,9 +6341,10 @@ export default function StockSuppliersPage() {
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-white/50">
                   Create the Stock Management supplier profile, then
-                  choose existing Event Hub and Money Management records from
-                  simple dropdown menus. No UUID codes need to be copied or
-                  pasted, and the original records stay in their own apps.
+                  connect it to an existing inventory item, Event Hub contact
+                  and Money Management supplier using simple dropdown menus.
+                  No UUID codes need to be copied or pasted, and the original
+                  records stay in their own apps.
                 </p>
               </div>
 
@@ -4701,6 +6486,220 @@ export default function StockSuppliersPage() {
               </label>
             </div>
 
+            <div className="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-500/[0.07] p-4">
+              <h3 className="flex items-center gap-2 font-black text-cyan-100">
+                <Boxes className="h-4 w-4" />
+                Connect an inventory item
+              </h3>
+
+              <p className="mt-1 text-xs leading-5 text-cyan-50/60">
+                Choose an item already saved in Stock Management.
+                When the supplier is created, the item will be
+                connected automatically as a preferred or
+                alternative supplier.
+              </p>
+
+              <label className="mt-3 block">
+                <span className="mb-1.5 block text-xs font-black text-white/55">
+                  Inventory item
+                </span>
+
+                <select
+                  value={form.stockItemId}
+                  onChange={(event) =>
+                    selectInventoryItem(
+                      event.target.value,
+                    )
+                  }
+                  disabled={inventoryLoading}
+                  className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-3 text-sm font-semibold text-white outline-none focus:border-cyan-300/40 disabled:opacity-60"
+                >
+                  <option value="">
+                    {inventoryLoading
+                      ? "Loading inventory items..."
+                      : "Do not connect an inventory item"}
+                  </option>
+
+                  {inventoryItems.map((item) => (
+                    <option
+                      key={item.id}
+                      value={item.id}
+                    >
+                      {item.name} · SKU {item.sku}
+                      {" · "}
+                      {item.quantity} in stock
+                      {item.category
+                        ? ` · ${item.category}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {inventoryError ? (
+                <pre className="mt-3 whitespace-pre-wrap break-words rounded-xl border border-amber-300/15 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100">
+                  {inventoryError}
+                </pre>
+              ) : null}
+
+              {form.stockItemId ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className="mb-1.5 block text-xs font-black text-white/55">
+                      Supplier role
+                    </span>
+                    <select
+                      value={form.stockItemRole}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          stockItemRole:
+                            event.target
+                              .value as
+                              | "preferred"
+                              | "alternative",
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-3 text-sm font-semibold text-white outline-none"
+                    >
+                      <option value="preferred">
+                        Preferred supplier
+                      </option>
+                      <option value="alternative">
+                        Alternative supplier
+                      </option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span className="mb-1.5 block text-xs font-black text-white/55">
+                      Supplier SKU or product code
+                    </span>
+                    <input
+                      value={
+                        form.stockItemSupplierSku
+                      }
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          stockItemSupplierSku:
+                            event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm font-semibold text-white outline-none"
+                      placeholder="Optional supplier code"
+                    />
+                  </label>
+
+                  <label>
+                    <span className="mb-1.5 block text-xs font-black text-white/55">
+                      Unit cost from this supplier (£)
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={
+                        form.stockItemUnitCost
+                      }
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          stockItemUnitCost:
+                            event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm font-semibold text-white outline-none"
+                      placeholder="0.00"
+                    />
+                  </label>
+
+                  <label>
+                    <span className="mb-1.5 block text-xs font-black text-white/55">
+                      Minimum order quantity
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={
+                        form.stockItemMinimumOrderQuantity
+                      }
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          stockItemMinimumOrderQuantity:
+                            event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm font-semibold text-white outline-none"
+                      placeholder="Optional"
+                    />
+                  </label>
+
+                  <label className="sm:col-span-2">
+                    <span className="mb-1.5 block text-xs font-black text-white/55">
+                      Lead time for this item (days)
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={
+                        form.stockItemLeadTimeDays
+                      }
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          stockItemLeadTimeDays:
+                            event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm font-semibold text-white outline-none"
+                      placeholder={
+                        form.usualDeliveryDays ||
+                        "Optional"
+                      }
+                    />
+                  </label>
+
+                  <div className="sm:col-span-2 rounded-xl border border-cyan-300/10 bg-black/20 p-3 text-xs leading-5 text-white/60">
+                    {(() => {
+                      const selected =
+                        inventoryItems.find(
+                          (item) =>
+                            item.id ===
+                            form.stockItemId,
+                        );
+
+                      return selected ? (
+                        <>
+                          <p>
+                            <span className="font-black text-white/75">
+                              Selected item:
+                            </span>{" "}
+                            {selected.name}
+                          </p>
+                          <p>
+                            <span className="font-black text-white/75">
+                              SKU:
+                            </span>{" "}
+                            {selected.sku}
+                          </p>
+                          <p>
+                            <span className="font-black text-white/75">
+                              Current quantity:
+                            </span>{" "}
+                            {selected.quantity}
+                          </p>
+                        </>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
             <div className="mt-5 rounded-2xl border border-pink-300/15 bg-pink-500/[0.07] p-4">
               <h3 className="flex items-center gap-2 font-black text-pink-100">
                 <Users className="h-4 w-4" />
@@ -4750,6 +6749,75 @@ export default function StockSuppliersPage() {
                     </span>{" "}
                     {formatLabel(form.eventRecordType)}
                   </p>
+                </div>
+              ) : null}
+
+              {form.eventRecordId &&
+              (form.eventDoNotUse ||
+                form.eventNeedsReview) ? (
+                <div
+                  className={`mt-4 rounded-2xl border p-4 ${
+                    form.eventDoNotUse
+                      ? "border-red-300/25 bg-red-500/15"
+                      : "border-amber-300/20 bg-amber-500/10"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldAlert
+                      className={`mt-0.5 h-5 w-5 shrink-0 ${
+                        form.eventDoNotUse
+                          ? "text-red-100"
+                          : "text-amber-100"
+                      }`}
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={`font-black ${
+                          form.eventDoNotUse
+                            ? "text-red-50"
+                            : "text-amber-50"
+                        }`}
+                      >
+                        {form.eventDoNotUse
+                          ? "Event Hub says: Do not use / Do not invite"
+                          : "Event Hub says: Needs review"}
+                      </p>
+
+                      <p className="mt-1 text-xs leading-5 text-white/65">
+                        {form.eventDoNotUse
+                          ? "This warning will be copied into Stock Management. The supplier will be marked Do not use and Needs review."
+                          : "This supplier will be marked Needs review in Stock Management."}
+                      </p>
+
+                      {form.eventDoNotUse ? (
+                        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-red-300/15 bg-black/20 p-3">
+                          <input
+                            type="checkbox"
+                            checked={
+                              form.eventWarningAccepted
+                            }
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                eventWarningAccepted:
+                                  event.target.checked,
+                              }))
+                            }
+                            className="mt-0.5 h-4 w-4 accent-red-400"
+                          />
+
+                          <span className="text-xs font-bold leading-5 text-red-50/80">
+                            I understand this contact is
+                            marked Do not use / Do not
+                            invite in Event Hub. Create the
+                            Stock Management supplier with
+                            the warning carried over.
+                          </span>
+                        </label>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -4835,7 +6903,11 @@ export default function StockSuppliersPage() {
 
               <button
                 type="submit"
-                disabled={creating}
+                disabled={
+                    creating ||
+                    (form.eventDoNotUse &&
+                      !form.eventWarningAccepted)
+                  }
                 className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-5 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-200 disabled:opacity-50"
               >
                 {creating ? (
