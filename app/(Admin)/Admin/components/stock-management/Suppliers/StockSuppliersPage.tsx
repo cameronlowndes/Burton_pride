@@ -12,6 +12,7 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowRight,
+  Ban,
   Boxes,
   Building2,
   CheckCircle2,
@@ -49,6 +50,8 @@ import {
 
 const API = "/api/admin/stockmanagement/suppliers";
 const INVENTORY_API = "/api/admin/stockmanagement/inventory";
+const EVENT_HUB_CONTACTS_API =
+  "/api/admin/burton-pride-event-hub/contacts";
 const STOCK_AUDIT_API = "/api/admin/stockmanagement/audit-logs";
 const STOCK_SUPPLIERS_ROUTE = "/Admin/StockManagement/Suppliers";
 
@@ -212,6 +215,7 @@ type RawEventHubContact = Partial<EventHubContactOption> & {
   blocked_status?: unknown;
   warning_status?: unknown;
   status?: unknown;
+  working_rating?: unknown;
 
   needs_review?: unknown;
   requires_review?: unknown;
@@ -225,6 +229,30 @@ type RawEventHubContact = Partial<EventHubContactOption> & {
   is_active?: unknown;
 };
 
+
+type DirectEventHubContact = {
+  id: string;
+  business_name: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  service_type?: string | null;
+  working_rating?:
+    | "good"
+    | "ok"
+    | "do_not_invite"
+    | null;
+  is_active?: boolean | null;
+};
+
+type DirectEventHubContactsResponse = {
+  ok?: boolean;
+  contacts?: DirectEventHubContact[];
+  error?: string;
+  code?: string;
+  details?: string | null;
+};
 
 type MoneySupplierOption = {
   id: string;
@@ -648,33 +676,55 @@ function eventBoolean(value: unknown) {
   ].includes(normalised);
 }
 
+function normaliseEventRating(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("-", "_")
+    .replace(/\s+/g, "_");
+}
+
 function eventContactDoNotUse(
   contact: RawEventHubContact,
 ) {
-  const statusText = String(
-    contact.status ??
-      contact.blocked_status ??
-      contact.warning_status ??
-      "",
-  )
-    .trim()
-    .toLowerCase();
+  /*
+   * Exact Event Hub Contacts-page rule:
+   * working_rating === "do_not_invite"
+   */
+  if (
+    normaliseEventRating(
+      contact.working_rating,
+    ) === "do_not_invite"
+  ) {
+    return true;
+  }
 
-  return (
-    eventBoolean(contact.doNotInvite) ||
-    eventBoolean(contact.do_not_use) ||
-    eventBoolean(contact.do_not_invite) ||
-    eventBoolean(contact.is_do_not_use) ||
-    eventBoolean(contact.is_blocked) ||
-    eventBoolean(contact.blocked) ||
-    [
+  return [
+    contact.doNotInvite,
+    contact.do_not_use,
+    contact.do_not_invite,
+    contact.is_do_not_use,
+    contact.is_blocked,
+    contact.blocked,
+    contact.status,
+    contact.blocked_status,
+    contact.warning_status,
+    contact.rating,
+  ].some((value) => {
+    if (value === true || value === 1) {
+      return true;
+    }
+
+    return [
       "blocked",
       "do_not_use",
-      "do not use",
       "do_not_invite",
-      "do not invite",
-    ].includes(statusText)
-  );
+      "not_invited",
+      "never_use",
+    ].includes(
+      normaliseEventRating(value),
+    );
+  });
 }
 
 function eventContactNeedsReview(
@@ -682,6 +732,9 @@ function eventContactNeedsReview(
 ) {
   return (
     eventContactDoNotUse(contact) ||
+    normaliseEventRating(
+      contact.working_rating,
+    ) === "ok" ||
     eventBoolean(contact.needsReview) ||
     eventBoolean(contact.needs_review) ||
     eventBoolean(contact.requires_review) ||
@@ -735,9 +788,13 @@ function normaliseEventContact(
           ? String(contact.website_url || "") || null
           : null,
     rating:
-      contact.rating !== undefined
-        ? String(contact.rating || "") || null
-        : null,
+      contact.working_rating !== undefined
+        ? String(
+            contact.working_rating || "",
+          ) || null
+        : contact.rating !== undefined
+          ? String(contact.rating || "") || null
+          : null,
     doNotInvite:
       eventContactDoNotUse(contact),
     needsReview:
@@ -1384,6 +1441,77 @@ function normaliseMatchValue(value: unknown) {
     .replace(/[^a-z0-9@.+]/g, "");
 }
 
+function mergeWorkingRatings(
+  stockContacts: EventHubContactOption[],
+  directContacts: DirectEventHubContact[],
+) {
+  return stockContacts.map((stockContact) => {
+    const directContact =
+      directContacts.find(
+        (contact) =>
+          contact.id === stockContact.id,
+      ) ||
+      directContacts.find((contact) => {
+        const stockEmail =
+          normaliseMatchValue(
+            stockContact.email,
+          );
+        const directEmail =
+          normaliseMatchValue(
+            contact.email,
+          );
+
+        return (
+          Boolean(stockEmail) &&
+          stockEmail === directEmail
+        );
+      }) ||
+      directContacts.find((contact) => {
+        const stockName =
+          normaliseMatchValue(
+            stockContact.organisationName,
+          );
+        const directName =
+          normaliseMatchValue(
+            contact.business_name,
+          );
+
+        return (
+          Boolean(stockName) &&
+          stockName === directName
+        );
+      });
+
+    if (!directContact) {
+      return stockContact;
+    }
+
+    const workingRating =
+      directContact.working_rating || null;
+
+    return {
+      ...stockContact,
+      rating:
+        workingRating ||
+        stockContact.rating,
+      doNotInvite:
+        workingRating ===
+          "do_not_invite" ||
+        stockContact.doNotInvite,
+      needsReview:
+        workingRating ===
+          "do_not_invite" ||
+        workingRating === "ok" ||
+        stockContact.needsReview,
+      isActive:
+        directContact.is_active !== false,
+      recordType:
+        directContact.service_type ||
+        stockContact.recordType,
+    };
+  });
+}
+
 function calculatePossibleDuplicate(
   form: SupplierFormState,
   suppliers: StockSupplierView[],
@@ -1756,6 +1884,65 @@ export default function StockSuppliersPage() {
     }
   }, []);
 
+  const loadDirectEventContacts =
+    useCallback(async () => {
+      try {
+        const response = await fetch(
+          EVENT_HUB_CONTACTS_API,
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "include",
+            headers: {
+              Accept: "application/json",
+            },
+          },
+        );
+
+        const raw = await response.text();
+        let payload:
+          DirectEventHubContactsResponse = {};
+
+        if (raw) {
+          payload = JSON.parse(
+            raw,
+          ) as DirectEventHubContactsResponse;
+        }
+
+        if (!response.ok || payload.ok === false) {
+          throw new Error(
+            [
+              payload.error ||
+                "Event Hub contacts could not be loaded.",
+              payload.code
+                ? `Code: ${payload.code}`
+                : "",
+              payload.details
+                ? `Details: ${payload.details}`
+                : "",
+              `HTTP ${response.status}`,
+              `Endpoint: ${EVENT_HUB_CONTACTS_API}`,
+            ]
+              .filter(Boolean)
+              .join("\n"),
+          );
+        }
+
+        const rows =
+          Array.isArray(payload.contacts)
+            ? payload.contacts
+            : [];
+
+        return rows;
+      } catch (error) {
+        console.error(
+          "Direct Event Hub working_rating lookup failed",
+          error,
+        );
+        return [];
+      }
+    }, []);
+
   const loadSuppliers = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -1793,13 +1980,22 @@ export default function StockSuppliersPage() {
               )
           : [];
 
+      const directRows =
+        await loadDirectEventContacts();
+
+      const mergedEventContacts =
+        mergeWorkingRatings(
+          normalisedEventContacts,
+          directRows,
+        );
+
       setEventContacts(
-        normalisedEventContacts,
+        mergedEventContacts,
       );
 
       if (process.env.NODE_ENV !== "production") {
         console.table(
-          normalisedEventContacts.map(
+          mergedEventContacts.map(
             (contact) => ({
               id: contact.id,
               organisation:
@@ -1829,7 +2025,9 @@ export default function StockSuppliersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [
+    loadDirectEventContacts,
+  ]);
 
   useEffect(() => {
     void Promise.all([
@@ -2042,7 +2240,7 @@ export default function StockSuppliersPage() {
         contact.needsReview || contact.doNotInvite,
       eventWarningAccepted: false,
       stockNotes: contact.doNotInvite
-        ? "Event Hub warning: this contact is marked Do not use / Do not invite. This warning was carried into Stock Management."
+        ? "Do not invite this contact. Review the saved Event Hub notes before using this supplier. Invitation email and checklist actions are blocked. Stock Control status: Do not use."
         : contact.needsReview
           ? "Event Hub warning: this contact requires review. This warning was carried into Stock Management."
           : "",
@@ -2105,7 +2303,7 @@ export default function StockSuppliersPage() {
         "",
       stockNotes:
         selected?.doNotInvite
-          ? "Event Hub warning: this contact is marked Do not use / Do not invite. This warning was carried into Stock Management."
+          ? "Do not invite this contact. Review the saved Event Hub notes before using this supplier. Invitation email and checklist actions are blocked. Stock Control status: Do not use."
           : selected?.needsReview
             ? "Event Hub warning: this contact requires review. This warning was carried into Stock Management."
             : current.stockNotes,
@@ -3808,97 +4006,183 @@ export default function StockSuppliersPage() {
             </div>
           ) : (
             <>
-              <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid gap-5 p-5 sm:grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
                 {filteredEventContacts.map((contact) => (
                   <article
                     key={`${contact.recordType}-${contact.id}`}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                    className={`rounded-3xl border p-5 sm:p-6 ${
+                      contact.doNotInvite
+                        ? "border-red-300/35 bg-red-500/10 shadow-[0_18px_50px_rgba(127,29,29,0.18)]"
+                        : contact.needsReview
+                          ? "border-amber-300/25 bg-amber-500/10"
+                          : contact.linkedStockSupplierId
+                            ? "border-emerald-300/20 bg-emerald-500/10"
+                            : "border-violet-300/15 bg-black/25"
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h3 className="truncate font-black text-white">
-                          {contact.organisationName}
+                        <h3 className="break-words text-xl font-black text-white">
+                          {contact.organisationName ||
+                            contact.contactName ||
+                            "Unnamed Event Hub contact"}
                         </h3>
-                        <p className="mt-1 text-xs font-bold text-pink-100/70">
-                          {formatLabel(contact.recordType)}
-                        </p>
+
+                        {contact.contactName &&
+                        contact.contactName !==
+                          contact.organisationName ? (
+                          <p className="mt-1 text-sm text-white/60">
+                            {contact.contactName}
+                          </p>
+                        ) : null}
                       </div>
 
-                      {contact.doNotInvite ? (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-300/25 bg-red-500/15 px-2 py-1 text-[10px] font-black text-red-50">
-                          <ShieldAlert className="h-3 w-3" />
-                          Do not use
-                        </span>
-                      ) : contact.needsReview ? (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300/25 bg-amber-500/15 px-2 py-1 text-[10px] font-black text-amber-50">
-                          <ShieldAlert className="h-3 w-3" />
-                          Needs review
-                        </span>
-                      ) : contact.linkedStockSupplierId ? (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-100">
-                          <CheckCircle2 className="h-3 w-3" />
-                          Linked
-                        </span>
-                      ) : (
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-1 text-[10px] font-black text-amber-100">
-                          <Unlink className="h-3 w-3" />
-                          Not linked
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-3 space-y-1.5 text-xs text-white/55">
-                      <p>
-                        <span className="font-black text-white/70">
-                          Contact:
-                        </span>{" "}
-                        {contact.contactName || "Not recorded"}
-                      </p>
-                      <p className="break-all">
-                        <span className="font-black text-white/70">
-                          Email:
-                        </span>{" "}
-                        {contact.email || "Not recorded"}
-                      </p>
-                      <p>
-                        <span className="font-black text-white/70">
-                          Phone:
-                        </span>{" "}
-                        {contact.phone || "Not recorded"}
-                      </p>
-                    </div>
-
-                    {contact.doNotInvite || contact.needsReview ? (
-                      <div
-                        className={`mt-3 rounded-xl border p-2.5 text-xs font-bold ${
+                      <span
+                        className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-black ring-1 ${
                           contact.doNotInvite
-                            ? "border-red-300/25 bg-red-500/15 text-red-50"
-                            : "border-amber-300/20 bg-amber-500/10 text-amber-100"
+                            ? "bg-red-500/20 text-red-100 ring-red-300/30"
+                            : contact.linkedStockSupplierId
+                              ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20"
+                              : "bg-white/10 text-white/50 ring-white/10"
                         }`}
                       >
-                        <div className="flex items-start gap-2">
-                          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                          <div>
-                            <p className="font-black">
-                              {contact.doNotInvite
-                                ? "Do not use / Do not invite"
-                                : "Needs review"}
-                            </p>
-                            <p className="mt-1 leading-5 opacity-75">
-                              {contact.doNotInvite
-                                ? "Event Hub has marked this contact Do not use / Do not invite. The warning will carry into Stock Management and the new supplier will be blocked and marked Needs review."
-                                : "Event Hub has marked this contact Needs review. The new Stock Management supplier will also require review."}
-                            </p>
-                          </div>
+                        {contact.doNotInvite
+                          ? "Do not use"
+                          : contact.linkedStockSupplierId
+                            ? "Connected"
+                            : "Not connected"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-sm">
+                      {contact.email ? (
+                        <a
+                          href={`mailto:${contact.email}`}
+                          className="block break-all rounded-xl bg-white/[0.05] p-3 text-cyan-100 hover:bg-white/[0.09]"
+                        >
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Email
+                          </span>
+                          {contact.email}
+                        </a>
+                      ) : (
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Email
+                          </span>
+                          <span className="text-white/45">
+                            Not recorded
+                          </span>
                         </div>
+                      )}
+
+                      {contact.phone ? (
+                        <a
+                          href={`tel:${contact.phone}`}
+                          className="block rounded-xl bg-white/[0.05] p-3 text-cyan-100 hover:bg-white/[0.09]"
+                        >
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Phone
+                          </span>
+                          {contact.phone}
+                        </a>
+                      ) : (
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <span className="mb-1 block text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Phone
+                          </span>
+                          <span className="text-white/45">
+                            Not recorded
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Event
+                          </p>
+                          <p className="mt-1 text-white/75">
+                            {[
+                              contact.eventName,
+                              contact.eventYear,
+                            ]
+                              .filter(Boolean)
+                              .join(" ") ||
+                              "Not recorded"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl bg-white/[0.05] p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-white/35">
+                            Rating
+                          </p>
+                          <p
+                            className={`mt-1 font-bold ${
+                              contact.doNotInvite
+                                ? "text-red-100"
+                                : contact.needsReview
+                                  ? "text-amber-100"
+                                  : "text-white/75"
+                            }`}
+                          >
+                            {contact.rating ===
+                            "do_not_invite"
+                              ? "Do not invite"
+                              : contact.rating === "ok"
+                                ? "Okay"
+                                : contact.rating === "good"
+                                  ? "Good to work with"
+                                  : "Not recorded"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-100 ring-1 ring-violet-300/20">
+                        {formatLabel(contact.recordType)}
+                      </span>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-black ring-1 ${
+                          contact.isActive === false
+                            ? "bg-white/10 text-white/45 ring-white/10"
+                            : "bg-emerald-500/10 text-emerald-100 ring-emerald-300/20"
+                        }`}
+                      >
+                        {contact.isActive === false
+                          ? "Inactive Event contact"
+                          : "Active Event contact"}
+                      </span>
+
+                      {contact.needsReview &&
+                      !contact.doNotInvite ? (
+                        <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-100 ring-1 ring-amber-300/20">
+                          Needs review
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {contact.doNotInvite ? (
+                      <div className="mt-3 rounded-xl border border-red-300/30 bg-red-500/15 p-3 text-xs font-black text-red-100">
+                        Event Hub warning: Do not invite
                       </div>
                     ) : null}
 
                     <div className="mt-4 flex flex-wrap gap-2 print:hidden">
+                      <Link
+                        href={`/Admin/EventHub/Contacts?contact_id=${contact.id}`}
+                        className="inline-flex items-center gap-2 rounded-xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-100 hover:bg-violet-500/20"
+                      >
+                        Open Event contact
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+
                       {contact.linkedStockSupplierId ? (
                         <Link
                           href={`/Admin/StockManagement/Suppliers/${contact.linkedStockSupplierId}`}
-                          className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/20"
+                          className="inline-flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 hover:bg-emerald-500/20"
                         >
                           Open linked supplier
                           <ArrowRight className="h-3.5 w-3.5" />
@@ -3909,30 +4193,18 @@ export default function StockSuppliersPage() {
                           onClick={() =>
                             useEventContactAsSupplier(contact)
                           }
-                          className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-black ${
+                          className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black ${
                             contact.doNotInvite
-                              ? "border border-red-300/25 bg-red-500/15 text-red-50 hover:bg-red-500/25"
-                              : "bg-pink-200 text-pink-950 hover:bg-pink-100"
+                              ? "border-red-300/30 bg-red-500/15 text-red-100 hover:bg-red-500/25"
+                              : "border-cyan-300/20 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
                           }`}
                         >
-                          {contact.doNotInvite ? (
-                            <ShieldAlert className="h-3.5 w-3.5" />
-                          ) : (
-                            <Link2 className="h-3.5 w-3.5" />
-                          )}
+                          <Link2 className="h-3.5 w-3.5" />
                           {contact.doNotInvite
-                            ? "Review blocked contact"
-                            : "Use as supplier"}
+                            ? "Review and create supplier"
+                            : "Find matching supplier"}
                         </button>
                       ) : null}
-
-                      <Link
-                        href={`/Admin/EventHub/Contacts?contact_id=${contact.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-2 text-xs font-black text-white/65 hover:bg-white/10"
-                      >
-                        Event Hub record
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </Link>
                     </div>
                   </article>
                 ))}

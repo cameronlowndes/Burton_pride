@@ -85,6 +85,17 @@ type EventWarningState = {
   doNotUse: boolean;
   needsReview: boolean;
   warningText: string | null;
+
+  /*
+   * Explicit display information for the Stock Control page.
+   * A linked Event Hub Do-not-invite record should always render red.
+   */
+  severity: "none" | "review" | "blocked";
+  colour: "default" | "amber" | "red";
+  badgeLabel: string | null;
+  heading: string | null;
+  sourceField: string | null;
+  sourceValue: string | null;
 };
 
 
@@ -119,12 +130,20 @@ function nullableText(value: unknown) {
   const cleaned = cleanText(value);
   return cleaned || null;
 }
+function normaliseDatabaseValue(value: unknown) {
+  return cleanText(value)
+    .toLowerCase()
+    .replaceAll("-", "_")
+    .replace(/\s+/g, "_");
+}
+
 function databaseBoolean(value: unknown) {
   if (value === true || value === 1) {
     return true;
   }
 
-  const normalised = cleanText(value).toLowerCase();
+  const normalised =
+    normaliseDatabaseValue(value);
 
   return [
     "true",
@@ -133,10 +152,106 @@ function databaseBoolean(value: unknown) {
     "y",
     "blocked",
     "do_not_use",
-    "do not use",
     "do_not_invite",
-    "do not invite",
+    "not_invited",
+    "never_use",
+    "needs_review",
+    "review",
   ].includes(normalised);
+}
+
+const EVENT_BLOCKED_VALUES = new Set([
+  "blocked",
+  "do_not_use",
+  "do_not_invite",
+  "not_invited",
+  "never_use",
+  "blacklisted",
+]);
+
+const EVENT_REVIEW_VALUES = new Set([
+  "needs_review",
+  "review",
+  "review_required",
+  "requires_review",
+]);
+
+function eventWarningCandidates(
+  row: UnknownRow | null,
+) {
+  if (!row) {
+    return [] as Array<{
+      field: string;
+      rawValue: unknown;
+      normalisedValue: string;
+    }>;
+  }
+
+  const fields = [
+    "do_not_use",
+    "do_not_invite",
+    "is_do_not_use",
+    "is_blocked",
+    "blocked",
+    "blocked_status",
+    "warning_status",
+    "status",
+    "rating",
+    "relationship_rating",
+    "contact_rating",
+    "invite_status",
+    "supplier_status",
+    "needs_review",
+    "requires_review",
+    "is_review_required",
+  ];
+
+  return fields.map((field) => ({
+    field,
+    rawValue: row[field],
+    normalisedValue:
+      normaliseDatabaseValue(row[field]),
+  }));
+}
+
+function findEventBlockedSource(
+  row: UnknownRow | null,
+) {
+  return (
+    eventWarningCandidates(row).find(
+      ({ rawValue, normalisedValue }) =>
+        databaseBoolean(rawValue) &&
+        (
+          EVENT_BLOCKED_VALUES.has(
+            normalisedValue,
+          ) ||
+          normalisedValue === "true" ||
+          normalisedValue === "1" ||
+          normalisedValue === "yes" ||
+          normalisedValue === "y"
+        ),
+    ) || null
+  );
+}
+
+function findEventReviewSource(
+  row: UnknownRow | null,
+) {
+  return (
+    eventWarningCandidates(row).find(
+      ({ rawValue, normalisedValue }) =>
+        databaseBoolean(rawValue) &&
+        (
+          EVENT_REVIEW_VALUES.has(
+            normalisedValue,
+          ) ||
+          normalisedValue === "true" ||
+          normalisedValue === "1" ||
+          normalisedValue === "yes" ||
+          normalisedValue === "y"
+        ),
+    ) || null
+  );
 }
 
 function eventContactIsBlocked(
@@ -144,13 +259,23 @@ function eventContactIsBlocked(
 ) {
   if (!row) return false;
 
-  return databaseBoolean(
-    row.do_not_use ??
-      row.do_not_invite ??
-      row.is_do_not_use ??
-      row.is_blocked ??
-      row.blocked,
-  );
+  const directBooleanFields = [
+    row.do_not_use,
+    row.do_not_invite,
+    row.is_do_not_use,
+    row.is_blocked,
+    row.blocked,
+  ];
+
+  if (
+    directBooleanFields.some(
+      (value) => value === true || value === 1,
+    )
+  ) {
+    return true;
+  }
+
+  return Boolean(findEventBlockedSource(row));
 }
 
 function eventContactNeedsReview(
@@ -159,12 +284,8 @@ function eventContactNeedsReview(
   if (!row) return false;
 
   return (
-    databaseBoolean(
-      row.needs_review ??
-        row.requires_review ??
-        row.is_review_required,
-    ) ||
-    eventContactIsBlocked(row)
+    eventContactIsBlocked(row) ||
+    Boolean(findEventReviewSource(row))
   );
 }
 
@@ -172,14 +293,78 @@ function eventWarningText(
   state: EventWarningState,
 ) {
   if (state.doNotUse) {
-    return "Event Hub warning: this contact is marked Do not use / Do not invite. This warning is controlled by Event Hub and cannot be cleared in Stock Management while the Event Hub warning remains active.";
+    return "Do not invite this contact. Event Hub has blocked invitation and checklist actions. Review the saved Event Hub notes before creating orders, linking stock items or using this supplier.";
   }
 
   if (state.needsReview) {
-    return "Event Hub warning: this contact requires review. This warning is controlled by Event Hub.";
+    return "This Event Hub contact requires review before it is used in Stock Management.";
   }
 
   return null;
+}
+
+
+function buildEventWarningState({
+  connected,
+  eventRecordId,
+  row,
+}: {
+  connected: boolean;
+  eventRecordId: string | null;
+  row: UnknownRow | null;
+}): EventWarningState {
+  const blockedSource =
+    findEventBlockedSource(row);
+  const reviewSource =
+    findEventReviewSource(row);
+
+  const doNotUse =
+    eventContactIsBlocked(row);
+  const needsReview =
+    eventContactNeedsReview(row);
+
+  const state: EventWarningState = {
+    connected,
+    eventRecordId,
+    doNotUse,
+    needsReview,
+    warningText: null,
+    severity: doNotUse
+      ? "blocked"
+      : needsReview
+        ? "review"
+        : "none",
+    colour: doNotUse
+      ? "red"
+      : needsReview
+        ? "amber"
+        : "default",
+    badgeLabel: doNotUse
+      ? "Do not use"
+      : needsReview
+        ? "Needs review"
+        : null,
+    heading: doNotUse
+      ? "Do not invite this contact"
+      : needsReview
+        ? "Review this contact"
+        : null,
+    sourceField:
+      blockedSource?.field ||
+      reviewSource?.field ||
+      null,
+    sourceValue:
+      blockedSource
+        ? cleanText(blockedSource.rawValue)
+        : reviewSource
+          ? cleanText(reviewSource.rawValue)
+          : null,
+  };
+
+  state.warningText =
+    eventWarningText(state);
+
+  return state;
 }
 
 
@@ -465,13 +650,11 @@ async function getEventWarningState(
     nullableText(supplier.event_record_id);
 
   if (!eventRecordId) {
-    return {
+    return buildEventWarningState({
       connected: false,
       eventRecordId: null,
-      doNotUse: false,
-      needsReview: false,
-      warningText: null,
-    };
+      row: null,
+    });
   }
 
   const { data, error } = await supabaseAdmin
@@ -499,17 +682,12 @@ async function getEventWarningState(
   }
 
   const row = data as UnknownRow | null;
-  const state: EventWarningState = {
+
+  return buildEventWarningState({
     connected: Boolean(row),
     eventRecordId,
-    doNotUse: eventContactIsBlocked(row),
-    needsReview: eventContactNeedsReview(row),
-    warningText: null,
-  };
-
-  state.warningText = eventWarningText(state);
-
-  return state;
+    row,
+  });
 }
 
 function appendEventWarningToNotes(
@@ -621,7 +799,9 @@ async function synchroniseEventWarning({
       beforeData: supplier,
       afterData: updated,
       reason:
-        "The linked Event Hub contact controls this warning.",
+        warning.sourceField
+          ? `The linked Event Hub contact controls this warning through ${warning.sourceField}=${warning.sourceValue || "true"}.`
+          : "The linked Event Hub contact controls this warning.",
       httpMethod: "PATCH",
       riskLevel: warning.doNotUse
         ? "high"
@@ -985,6 +1165,31 @@ export async function GET(
         eventHubWarning: synchronised.warning,
         warningSynchronised:
           synchronised.changed,
+
+        /*
+         * The page can use this object directly:
+         * eventHubPresentation.isRed === true means the
+         * card, badge, warning panel and action button
+         * should use the red blocked style.
+         */
+        eventHubPresentation: {
+          isRed:
+            synchronised.warning.colour === "red",
+          colour:
+            synchronised.warning.colour,
+          severity:
+            synchronised.warning.severity,
+          badgeLabel:
+            synchronised.warning.badgeLabel,
+          heading:
+            synchronised.warning.heading,
+          message:
+            synchronised.warning.warningText,
+          sourceField:
+            synchronised.warning.sourceField,
+          sourceValue:
+            synchronised.warning.sourceValue,
+        },
       },
       {
         status: 200,
@@ -1158,6 +1363,20 @@ export async function PATCH(
       supplier: afterData,
       changedFields: fields,
       eventHubWarning: eventWarning,
+      eventHubPresentation: {
+        isRed:
+          eventWarning.colour === "red",
+        colour: eventWarning.colour,
+        severity: eventWarning.severity,
+        badgeLabel:
+          eventWarning.badgeLabel,
+        heading: eventWarning.heading,
+        message: eventWarning.warningText,
+        sourceField:
+          eventWarning.sourceField,
+        sourceValue:
+          eventWarning.sourceValue,
+      },
     });
   } catch (error) {
     return apiError(
