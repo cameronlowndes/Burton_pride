@@ -16,6 +16,8 @@ import {
   FileSpreadsheet,
   FileText,
   Filter,
+  CreditCard,
+  HandCoins,
   Mail,
   Layers3,
   Loader2,
@@ -44,8 +46,8 @@ import type {
 import {
   EASY_MODE_STORAGE_KEY,
   actionClass,
-  actionIcon,
-  actionLabel,
+  actionIcon as baseActionIcon,
+  actionLabel as baseActionLabel,
   actionOptions,
   cleanFieldName,
   copyToClipboard,
@@ -55,7 +57,7 @@ import {
   getActorEmailDisplay,
   getActorUniqueKey,
   getActorUserIdDisplay,
-  getAuditArea,
+  getAuditArea as getBaseAuditArea,
   getAuditComment,
   getAuditCommentUpdatedBy,
   getAuditMoneyDisplay,
@@ -77,6 +79,100 @@ import {
 } from "@/lib/money/audit_logs/audit-log-utils";
 import { InfoCard, RawDataCard, StatCard } from "../../../components/money/AduitLogs/AuditLogCards";
 import AuditRiskRulesPanel from "../../../components/money/AduitLogs/AuditRiskRulesPanel";
+
+const DIRECT_DEBIT_ACTION_OPTIONS = [
+  { value: "money.direct_debit.created", label: "Direct Debit created" },
+  { value: "money.direct_debit.updated", label: "Direct Debit updated" },
+  { value: "money.direct_debit.paused", label: "Direct Debit paused" },
+  { value: "money.direct_debit.resumed", label: "Direct Debit resumed" },
+  {
+    value: "money.direct_debit.payment_posted",
+    label: "Direct Debit payment made",
+  },
+  {
+    value: "money.direct_debit.invoice_uploaded",
+    label: "Direct Debit invoice uploaded",
+  },
+  {
+    value: "money.direct_debit.payment_undone",
+    label: "Direct Debit payment undone",
+  },
+  {
+    value: "money.direct_debit.person_reimbursed",
+    label: "Personal Direct Debit reimbursed",
+  },
+  {
+    value: "money.direct_debit.cancelled",
+    label: "Direct Debit cancelled",
+  },
+];
+
+const allActionOptions = [
+  ...actionOptions,
+  ...DIRECT_DEBIT_ACTION_OPTIONS.filter(
+    (directDebitOption) =>
+      !actionOptions.some(
+        (existingOption) => existingOption.value === directDebitOption.value,
+      ),
+  ),
+];
+
+function isDirectDebitAuditLog(log: MoneyAuditLog) {
+  const action = String(log.action || "").toLowerCase();
+  const moduleName = String(
+    (log as any)?.module || (log as any)?.metadata?.module || "",
+  ).toLowerCase();
+  const area = String(
+    (log as any)?.area || (log as any)?.metadata?.area || "",
+  ).toLowerCase();
+
+  return (
+    action.startsWith("money.direct_debit.") ||
+    moduleName === "direct_debits" ||
+    moduleName === "direct_debit" ||
+    area.includes("direct debit")
+  );
+}
+
+function getAuditArea(log: MoneyAuditLog) {
+  if (isDirectDebitAuditLog(log)) {
+    return "Direct Debits";
+  }
+
+  return getBaseAuditArea(log);
+}
+
+function actionLabel(action: string, log?: MoneyAuditLog) {
+  const directDebitLabels: Record<string, string> = {
+    "money.direct_debit.created": "Direct Debit created",
+    "money.direct_debit.updated": "Direct Debit updated",
+    "money.direct_debit.paused": "Direct Debit paused",
+    "money.direct_debit.resumed": "Direct Debit resumed",
+    "money.direct_debit.payment_posted": "Direct Debit payment made",
+    "money.direct_debit.invoice_uploaded": "Direct Debit invoice uploaded",
+    "money.direct_debit.payment_undone": "Direct Debit payment undone",
+    "money.direct_debit.person_reimbursed":
+      "Personal Direct Debit reimbursed",
+    "money.direct_debit.cancelled": "Direct Debit cancelled",
+  };
+
+  return directDebitLabels[action] || baseActionLabel(action, log);
+}
+
+function actionIcon(action: string, log?: MoneyAuditLog) {
+  if (
+    action === "money.direct_debit.payment_posted" ||
+    action === "money.direct_debit.person_reimbursed"
+  ) {
+    return HandCoins;
+  }
+
+  if (action.startsWith("money.direct_debit.")) {
+    return CreditCard;
+  }
+
+  return baseActionIcon(action, log);
+}
 
 /**
  * Some older audit rows saved "Unknown admin" as the actor name even though
@@ -266,7 +362,7 @@ export default function MoneyAuditLogsPage() {
         data = { rawResponse: text };
       }
 
-      if (!res.ok || !data.ok) {
+      if (!res.ok || (!data.ok && !data.success)) {
         throw {
           message: data.error || "Failed to load audit logs",
           details: data,
@@ -337,6 +433,10 @@ export default function MoneyAuditLogsPage() {
           !isCheckedAuditLog(log) &&
           !isUncheckedAuditLog(log),
       );
+    }
+
+    if (selectedAction.startsWith("money.direct_debit.")) {
+      rows = rows.filter((log) => log.action === selectedAction);
     }
 
     if (selectedYear !== "all") {
@@ -451,6 +551,10 @@ export default function MoneyAuditLogsPage() {
           log.action === "refund_permanently_deleted"),
     ).length;
 
+    const directDebitLogs = logs.filter((log) =>
+      isDirectDebitAuditLog(log),
+    );
+
     return {
       total: logs.length,
       visible: filteredLogs.length,
@@ -485,6 +589,28 @@ export default function MoneyAuditLogsPage() {
       budgetPlanning: logs.filter((log) => isBudgetPlanningAuditLog(log)).length,
       automated: logs.filter((log) => isWebsiteGeneratedLog(log)).length,
       highRisk: logs.filter((log) => getRiskLevel(log, riskRules) === "High").length,
+      directDebits: directDebitLogs.length,
+      directDebitCreated: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.created",
+      ).length,
+      directDebitUpdated: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.updated",
+      ).length,
+      directDebitPayments: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.payment_posted",
+      ).length,
+      directDebitInvoices: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.invoice_uploaded",
+      ).length,
+      directDebitUndone: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.payment_undone",
+      ).length,
+      directDebitReimbursements: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.person_reimbursed",
+      ).length,
+      directDebitCancelled: directDebitLogs.filter(
+        (log) => log.action === "money.direct_debit.cancelled",
+      ).length,
       comments: logs.filter((log) => Boolean(getAuditComment(log))).length,
       uniqueUsers: new Set(
         logs
@@ -744,7 +870,7 @@ export default function MoneyAuditLogsPage() {
         data = { rawResponse: text };
       }
 
-      if (!res.ok || !data.ok) {
+      if (!res.ok || (!data.ok && !data.success)) {
         throw new Error(data.error || "Failed to save audit log comment");
       }
 
@@ -799,7 +925,7 @@ export default function MoneyAuditLogsPage() {
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   {easyMode
                     ? "A simple view of the most important money tracker audit logs. Use Full Mode when you need advanced filters, detailed statistics, JSON export, or raw technical data."
-                    : "View every money tracker action, including creates, edits, checks, hidden soft-deletes, saving target changes, budget tracker updates, restore actions, selected-year deletes, delete-all actions, refund tracker actions, permanent refund deletions, personal funds paid-back changes, and main-admin comments explaining why changes were made."}
+                    : "View every money tracker action, including creates, edits, checks, hidden soft-deletes, saving target changes, budget tracker updates, restore actions, selected-year deletes, delete-all actions, refund tracker actions, permanent refund deletions, personal funds paid-back changes, Direct Debit plans, payments, invoices, undo actions, repayments, cancellations, and main-admin comments explaining why changes were made."}
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -961,6 +1087,22 @@ export default function MoneyAuditLogsPage() {
           <StatCard label="Deleted" value={stats.deleted} tone="red" />
           <StatCard label="Saving Targets" value={stats.savingTargets} tone="sky" />
           <StatCard label="Budget Logs" value={stats.budgetPlanning} tone="purple" />
+          <StatCard label="Direct Debit Logs" value={stats.directDebits} tone="pink" />
+          <StatCard
+            label="Direct Debit Payments"
+            value={stats.directDebitPayments}
+            tone="emerald"
+          />
+          <StatCard
+            label="Direct Debit Repaid"
+            value={stats.directDebitReimbursements}
+            tone="cyan"
+          />
+          <StatCard
+            label="Direct Debit Undone"
+            value={stats.directDebitUndone}
+            tone="orange"
+          />
           <StatCard label="Paid Back" value={stats.paidBack} tone="pink" />
           <StatCard label="Refund Logs" value={stats.refundLogs} tone="cyan" />
           <StatCard
@@ -1017,6 +1159,47 @@ export default function MoneyAuditLogsPage() {
               Tracks budget updates, budget item soft-deletes and restore actions.
             </p>
           </div>
+
+          <div className="rounded-3xl border border-pink-300/20 bg-pink-500/10 p-5 lg:col-span-3">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-pink-500/15 px-3 py-2 text-xs font-black uppercase tracking-wide text-pink-100 ring-1 ring-pink-300/20">
+              <CreditCard className="h-4 w-4" />
+              Direct Debit activity
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-3xl font-black text-white">
+                  {stats.directDebits}
+                </p>
+                <p className="mt-1 text-xs font-bold text-pink-100/65">
+                  Total Direct Debit logs
+                </p>
+              </div>
+              <div>
+                <p className="text-3xl font-black text-white">
+                  {stats.directDebitPayments}
+                </p>
+                <p className="mt-1 text-xs font-bold text-pink-100/65">
+                  Payments made
+                </p>
+              </div>
+              <div>
+                <p className="text-3xl font-black text-white">
+                  {stats.directDebitReimbursements}
+                </p>
+                <p className="mt-1 text-xs font-bold text-pink-100/65">
+                  Personal repayments
+                </p>
+              </div>
+              <div>
+                <p className="text-3xl font-black text-white">
+                  {stats.directDebitUndone}
+                </p>
+                <p className="mt-1 text-xs font-bold text-pink-100/65">
+                  Payments undone
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
           </>
         )}
@@ -1062,7 +1245,7 @@ export default function MoneyAuditLogsPage() {
                 onChange={(e) => setSelectedAction(e.target.value)}
                 className="rounded-2xl bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none ring-1 ring-white/10 focus:ring-purple-300/40"
               >
-                {actionOptions.map((item) => (
+                {allActionOptions.map((item) => (
                   <option
                     key={item.value}
                     className="bg-[#11111f] text-white"
@@ -1205,7 +1388,7 @@ export default function MoneyAuditLogsPage() {
                 </button>
               ))}
 
-              {actionOptions.slice(0, 6).map((item) => (
+              {allActionOptions.slice(0, 6).map((item) => (
                 <button
                   key={item.value}
                   type="button"
@@ -1279,6 +1462,15 @@ export default function MoneyAuditLogsPage() {
             >
               <BarChart3 className="h-4 w-4" />
               Budget logs
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedArea("Direct Debits")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500/10 px-4 py-2 text-xs font-bold text-pink-100 ring-1 ring-pink-300/20 hover:bg-pink-500/20"
+            >
+              <CreditCard className="h-4 w-4" />
+              Direct Debit logs
             </button>
 
             <button
@@ -1622,7 +1814,7 @@ export default function MoneyAuditLogsPage() {
             <strong>Action:</strong>{" "}
             {selectedAction === "all"
               ? "All actions"
-              : actionOptions.find((item) => item.value === selectedAction)
+              : allActionOptions.find((item) => item.value === selectedAction)
                   ?.label || actionLabel(selectedAction)}
           </span>
           <span>

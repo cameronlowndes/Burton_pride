@@ -7,10 +7,13 @@ import {
   Banknote,
   CalendarDays,
   Building2,
+  CreditCard,
   FileText,
   PlusCircle,
   Loader2,
   Repeat,
+  ShieldCheck,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -108,6 +111,9 @@ const defaultBudgetItems: BudgetItem[] = [
 ];
 
 const RECEIPT_DUE_DEFAULT_DAYS = 7;
+const DIRECT_DEBIT_DEFAULT_MONTHS = 12;
+const DIRECT_DEBIT_MIN_MONTHS = 2;
+const DIRECT_DEBIT_MAX_MONTHS = 60;
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 type ReceiptDueFormFields = FormState & {
@@ -213,6 +219,84 @@ function supplierContactLine(supplier?: SupplierContact | null) {
     .filter(Boolean);
 
   return parts.join(" · ");
+}
+
+type DirectDebitAccountSource = "organisation" | "personal";
+
+type DirectDebitFormFields = FormState & {
+  directDebitAccountSource?: DirectDebitAccountSource | null;
+  direct_debit_account_source?: DirectDebitAccountSource | null;
+  directDebitAccountHolder?: string | null;
+  direct_debit_account_holder?: string | null;
+  directDebitReference?: string | null;
+  direct_debit_reference?: string | null;
+  directDebitPlanNote?: string | null;
+  direct_debit_plan_note?: string | null;
+};
+
+function getDirectDebitAccountSource(form: FormState): DirectDebitAccountSource {
+  const item = form as DirectDebitFormFields;
+
+  return (
+    item.directDebitAccountSource ||
+    item.direct_debit_account_source ||
+    (form.isPersonalFunds ? "personal" : "organisation")
+  );
+}
+
+function getDirectDebitAccountHolder(form: FormState) {
+  const item = form as DirectDebitFormFields;
+
+  return (
+    item.directDebitAccountHolder ||
+    item.direct_debit_account_holder ||
+    form.personalFundsName ||
+    ""
+  );
+}
+
+function getDirectDebitReference(form: FormState) {
+  const item = form as DirectDebitFormFields;
+
+  return item.directDebitReference || item.direct_debit_reference || "";
+}
+
+function getDirectDebitPlanNote(form: FormState) {
+  const item = form as DirectDebitFormFields;
+
+  return item.directDebitPlanNote || item.direct_debit_plan_note || "";
+}
+
+function setDirectDebitDetails(
+  prev: FormState,
+  values: {
+    accountSource?: DirectDebitAccountSource;
+    accountHolder?: string;
+    reference?: string;
+    planNote?: string;
+  },
+) {
+  const accountSource =
+    values.accountSource || getDirectDebitAccountSource(prev);
+  const accountHolder =
+    values.accountHolder ?? getDirectDebitAccountHolder(prev);
+  const reference = values.reference ?? getDirectDebitReference(prev);
+  const planNote = values.planNote ?? getDirectDebitPlanNote(prev);
+  const usesPersonalAccount = accountSource === "personal";
+
+  return {
+    ...prev,
+    directDebitAccountSource: accountSource,
+    direct_debit_account_source: accountSource,
+    directDebitAccountHolder: accountHolder,
+    direct_debit_account_holder: accountHolder,
+    directDebitReference: reference,
+    direct_debit_reference: reference,
+    directDebitPlanNote: planNote,
+    direct_debit_plan_note: planNote,
+    isPersonalFunds: usesPersonalAccount,
+    personalFundsName: usesPersonalAccount ? accountHolder : "",
+  } as FormState;
 }
 
 type BudgetFormFields = FormState & {
@@ -554,8 +638,25 @@ export default function MoneyTransactionForm({
     form.transactionDate,
     RECEIPT_DUE_DEFAULT_DAYS,
   );
+  const isDirectDebit = form.paymentMethod === "Direct Debit";
+  const directDebitAccountSource = getDirectDebitAccountSource(form);
+  const directDebitAccountHolder = getDirectDebitAccountHolder(form);
+  const directDebitReference = getDirectDebitReference(form);
+  const directDebitPlanNote = getDirectDebitPlanNote(form);
+  const directDebitUsesPersonalAccount =
+    isDirectDebit && directDebitAccountSource === "personal";
+  const directDebitPaymentCount = Math.min(
+    DIRECT_DEBIT_MAX_MONTHS,
+    Math.max(
+      DIRECT_DEBIT_MIN_MONTHS,
+      Number(form.repeatCount || DIRECT_DEBIT_DEFAULT_MONTHS) ||
+        DIRECT_DEBIT_DEFAULT_MONTHS,
+    ),
+  );
   const isPersonalFundsPayment =
-    form.paymentMethod === "Personal Funds" || Boolean(form.isPersonalFunds);
+    form.paymentMethod === "Personal Funds" ||
+    directDebitUsesPersonalAccount ||
+    Boolean(form.isPersonalFunds);
 
   const hasAdvancedValues = Boolean(
     form.sponsorId ||
@@ -565,6 +666,9 @@ export default function MoneyTransactionForm({
     (form.financeNoteStatus && form.financeNoteStatus !== "none") ||
     form.financeNote?.trim() ||
     form.isRepeating ||
+    isDirectDebit ||
+    directDebitReference ||
+    directDebitPlanNote ||
     selectedReceiptDueDate,
   );
 
@@ -582,6 +686,40 @@ export default function MoneyTransactionForm({
 
     setForm((prev) => clearBudgetOnForm(prev));
   }, [form.type, selectedBudgetCategory, selectedBudgetLabel, setForm]);
+
+  useEffect(() => {
+    if (!isDirectDebit || editingTransaction) {
+      return;
+    }
+
+    setForm((prev) => {
+      const nextCount = String(
+        Math.min(
+          DIRECT_DEBIT_MAX_MONTHS,
+          Math.max(
+            DIRECT_DEBIT_MIN_MONTHS,
+            Number(prev.repeatCount || DIRECT_DEBIT_DEFAULT_MONTHS) ||
+              DIRECT_DEBIT_DEFAULT_MONTHS,
+          ),
+        ),
+      );
+
+      if (
+        prev.isRepeating &&
+        prev.repeatFrequency === "monthly" &&
+        prev.repeatCount === nextCount
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        isRepeating: true,
+        repeatFrequency: "monthly",
+        repeatCount: nextCount,
+      };
+    });
+  }, [editingTransaction, isDirectDebit, setForm]);
 
   const loanMode = getLoanMode(form.category);
   const isLoanRepayment = isLoanFunding && loanMode === "Loan Repayment";
@@ -789,6 +927,18 @@ export default function MoneyTransactionForm({
             is_repeating: Boolean(form.isRepeating),
             repeat_frequency: form.isRepeating ? form.repeatFrequency : null,
             repeat_count: form.isRepeating ? form.repeatCount : null,
+            direct_debit_account_source: isDirectDebit
+              ? directDebitAccountSource
+              : null,
+            direct_debit_account_holder: isDirectDebit
+              ? directDebitAccountHolder || null
+              : null,
+            direct_debit_reference: isDirectDebit
+              ? directDebitReference || null
+              : null,
+            direct_debit_plan_note: isDirectDebit
+              ? directDebitPlanNote || null
+              : null,
           },
         }),
       });
@@ -802,6 +952,32 @@ export default function MoneyTransactionForm({
 
     setDuplicateWarning(null);
     setDuplicateError(null);
+
+    if (isDirectDebit && !editingTransaction) {
+      if (!form.transactionDate) {
+        setDuplicateError(
+          "Choose the first Direct Debit collection date before saving.",
+        );
+        return;
+      }
+
+      if (
+        directDebitUsesPersonalAccount &&
+        !directDebitAccountHolder.trim()
+      ) {
+        setDuplicateError(
+          "Enter the name of the person whose account pays this Direct Debit.",
+        );
+        return;
+      }
+
+      if (directDebitPaymentCount < DIRECT_DEBIT_MIN_MONTHS) {
+        setDuplicateError(
+          `A monthly Direct Debit plan must contain at least ${DIRECT_DEBIT_MIN_MONTHS} payments.`,
+        );
+        return;
+      }
+    }
 
     if (!saveAnywayRef.current) {
       try {
@@ -908,8 +1084,9 @@ export default function MoneyTransactionForm({
     setForm((prev) => {
       const nextIsItemDonation = method === "Item Donation";
       const nextIsPersonalFunds = method === "Personal Funds";
+      const nextIsDirectDebit = method === "Direct Debit";
 
-      return {
+      const nextForm = {
         ...prev,
         paymentMethod: method,
         sponsorId:
@@ -987,7 +1164,24 @@ export default function MoneyTransactionForm({
         personalFundsName:
           nextIsItemDonation || isLoanFunding ? "" : prev.personalFundsName,
         sponsorshipNote: nextIsItemDonation ? "" : prev.sponsorshipNote,
-      };
+        isRepeating: nextIsDirectDebit
+          ? true
+          : nextIsItemDonation || nextIsPersonalFunds
+            ? false
+            : prev.isRepeating,
+        repeatFrequency: nextIsDirectDebit
+          ? "monthly"
+          : prev.repeatFrequency,
+        repeatCount: nextIsDirectDebit
+          ? prev.repeatCount || String(DIRECT_DEBIT_DEFAULT_MONTHS)
+          : prev.repeatCount,
+      } as FormState;
+
+      return nextIsDirectDebit
+        ? setDirectDebitDetails(nextForm, {
+            accountSource: getDirectDebitAccountSource(prev),
+          })
+        : nextForm;
     });
   }
 
@@ -1751,6 +1945,189 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
+          {isDirectDebit && !isItemDonation && (
+            <div className="rounded-2xl border border-indigo-300/25 bg-indigo-500/10 p-4 ring-1 ring-indigo-300/10">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-500/20 text-indigo-100 ring-1 ring-indigo-300/20">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-base font-black text-white">
+                    Monthly Direct Debit plan
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-indigo-100/70">
+                    Direct Debits are locked to once per month. The transaction
+                    date is the first collection date, and each later payment is
+                    created monthly on the same schedule.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) =>
+                      setDirectDebitDetails(prev, {
+                        accountSource: "organisation",
+                        accountHolder: "",
+                      }),
+                    )
+                  }
+                  className={`rounded-2xl p-4 text-left ring-1 transition ${
+                    directDebitAccountSource === "organisation"
+                      ? "bg-indigo-500 text-white ring-indigo-200/60"
+                      : "bg-black/20 text-indigo-50 ring-indigo-300/20 hover:bg-indigo-500/15"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-black">
+                    <Building2 className="h-4 w-4" />
+                    Burton Pride account
+                  </span>
+                  <span className="mt-1 block text-xs opacity-75">
+                    The monthly payment leaves Burton Pride’s own bank account.
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) =>
+                      setDirectDebitDetails(prev, {
+                        accountSource: "personal",
+                      }),
+                    )
+                  }
+                  className={`rounded-2xl p-4 text-left ring-1 transition ${
+                    directDebitAccountSource === "personal"
+                      ? "bg-sky-500 text-black ring-sky-200/60"
+                      : "bg-black/20 text-sky-50 ring-sky-300/20 hover:bg-sky-500/15"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 font-black">
+                    <UserRound className="h-4 w-4" />
+                    Personal account
+                  </span>
+                  <span className="mt-1 block text-xs opacity-75">
+                    A person pays first and Burton Pride may need to repay them.
+                  </span>
+                </button>
+              </div>
+
+              {directDebitUsesPersonalAccount && (
+                <div className="mt-4 rounded-2xl border border-sky-300/20 bg-sky-500/10 p-3">
+                  <label className="mb-2 block text-sm font-black text-sky-100">
+                    Person whose account is charged
+                  </label>
+                  <input
+                    value={directDebitAccountHolder}
+                    onChange={(event) =>
+                      setForm((prev) =>
+                        setDirectDebitDetails(prev, {
+                          accountSource: "personal",
+                          accountHolder: event.target.value,
+                        }),
+                      )
+                    }
+                    placeholder="Example: Cameron Lowndes"
+                    className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-sky-300/20 placeholder:text-white/35 focus:ring-sky-300/50"
+                  />
+                  <p className="mt-2 text-xs leading-5 text-sky-100/70">
+                    Each monthly payment is recorded as personal funds and does
+                    not reduce Burton Pride’s bank balance until that person is
+                    marked as paid back.
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-black text-indigo-100/80">
+                    Number of monthly payments
+                  </label>
+                  <input
+                    type="number"
+                    min={DIRECT_DEBIT_MIN_MONTHS}
+                    max={DIRECT_DEBIT_MAX_MONTHS}
+                    step="1"
+                    value={directDebitPaymentCount}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        isRepeating: true,
+                        repeatFrequency: "monthly",
+                        repeatCount: String(
+                          Math.min(
+                            DIRECT_DEBIT_MAX_MONTHS,
+                            Math.max(
+                              DIRECT_DEBIT_MIN_MONTHS,
+                              Number(event.target.value || 0),
+                            ),
+                          ),
+                        ),
+                      }))
+                    }
+                    className="w-full rounded-xl bg-black/25 p-3 text-sm font-bold text-white outline-none ring-1 ring-indigo-300/20 focus:ring-indigo-300/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-black text-indigo-100/80">
+                    Direct Debit reference
+                  </label>
+                  <input
+                    value={directDebitReference}
+                    onChange={(event) =>
+                      setForm((prev) =>
+                        setDirectDebitDetails(prev, {
+                          reference: event.target.value,
+                        }),
+                      )
+                    }
+                    placeholder="Mandate, supplier or account reference"
+                    className="w-full rounded-xl bg-black/25 p-3 text-sm font-bold text-white outline-none ring-1 ring-indigo-300/20 placeholder:text-white/35 focus:ring-indigo-300/50"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <label className="mb-1 block text-xs font-black text-indigo-100/80">
+                  Plan note
+                </label>
+                <textarea
+                  value={directDebitPlanNote}
+                  onChange={(event) =>
+                    setForm((prev) =>
+                      setDirectDebitDetails(prev, {
+                        planNote: event.target.value,
+                      }),
+                    )
+                  }
+                  placeholder="Example: Website hosting, collected monthly until renewed"
+                  className="min-h-20 w-full rounded-xl bg-black/25 p-3 text-sm text-white outline-none ring-1 ring-indigo-300/20 placeholder:text-white/35 focus:ring-indigo-300/50"
+                />
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-xs leading-5 text-emerald-100">
+                <p className="flex items-center gap-2 font-black text-white">
+                  <ShieldCheck className="h-4 w-4" />
+                  Monthly protection is on
+                </p>
+                <p className="mt-1">
+                  This plan will create {directDebitPaymentCount} separate
+                  monthly payments, beginning on {formatDate(form.transactionDate)}.
+                  Weekly and yearly frequencies are disabled for Direct Debit.
+                </p>
+                {directDebitUsesPersonalAccount && (
+                  <p className="mt-2 font-bold text-sky-100">
+                    Paid from personal account: {directDebitAccountHolder || "name required"}.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {!easyMode && (
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2069,7 +2446,10 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {!easyMode && showFullAccountingDetails && !editingTransaction && (
+          {!easyMode &&
+            showFullAccountingDetails &&
+            !editingTransaction &&
+            !isDirectDebit && (
             <div className="rounded-xl border border-purple-300/20 bg-purple-500/10 p-3">
               <label className="flex items-start gap-3">
                 <input
@@ -2184,7 +2564,10 @@ export default function MoneyTransactionForm({
             </div>
           )}
 
-          {form.type === "expense" && !form.sponsorId && !isItemDonation && (
+          {form.type === "expense" &&
+            !form.sponsorId &&
+            !isItemDonation &&
+            !isDirectDebit && (
             <label className="flex items-start gap-3 rounded-xl border border-sky-300/20 bg-sky-500/10 p-3">
               <input
                 type="checkbox"
@@ -2225,7 +2608,7 @@ export default function MoneyTransactionForm({
             </label>
           )}
 
-          {form.isPersonalFunds && !form.sponsorId && (
+          {form.isPersonalFunds && !form.sponsorId && !isDirectDebit && (
             <input
               value={form.personalFundsName}
               onChange={(event) =>
@@ -2612,14 +2995,18 @@ export default function MoneyTransactionForm({
               : saving
                 ? editingTransaction
                   ? "Updating..."
-                  : form.isRepeating
-                    ? "Creating repeating payments..."
-                    : "Saving..."
+                  : isDirectDebit
+                    ? "Creating monthly Direct Debit plan..."
+                    : form.isRepeating
+                      ? "Creating repeating payments..."
+                      : "Saving..."
                 : editingTransaction
                   ? "Update Transaction"
-                  : form.isRepeating
-                    ? "Create Repeating Payments"
-                    : isItemDonation
+                  : isDirectDebit
+                    ? "Create Monthly Direct Debit Plan"
+                    : form.isRepeating
+                      ? "Create Repeating Payments"
+                      : isItemDonation
                       ? "Save Item Donation"
                       : isLoanFunding
                         ? isLoanRepayment

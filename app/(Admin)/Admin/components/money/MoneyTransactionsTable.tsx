@@ -30,6 +30,7 @@ import {
   Pencil,
   Printer,
   RefreshCcw,
+  Repeat2,
   Search,
   ShieldAlert,
   SlidersHorizontal,
@@ -171,6 +172,7 @@ type SortKey =
   | "stockOrder"
   | "funding"
   | "payment"
+  | "directDebit"
   | "checked"
   | "bank"
   | "receipt"
@@ -189,6 +191,9 @@ type QuickFilter =
   | "personal_unpaid"
   | "funding"
   | "stock_orders"
+  | "direct_debits"
+  | "direct_debit_personal"
+  | "direct_debit_unmatched"
   | "refunds";
 
 type ColumnKey =
@@ -207,6 +212,7 @@ type ColumnKey =
   | "paidBy"
   | "repayment"
   | "payment"
+  | "directDebit"
   | "bank"
   | "receipt"
   | "finance"
@@ -296,6 +302,7 @@ const paymentMethodFilterOptions = [
   "Card Machine",
   "Personal Funds",
   "Item Donation",
+  "Direct Debit",
   "Other Types",
 ];
 
@@ -332,6 +339,7 @@ const columnOptions: { key: ColumnKey; label: string; locked?: boolean }[] = [
   { key: "paidBy", label: "Paid By" },
   { key: "repayment", label: "Repayment" },
   { key: "payment", label: "Payment" },
+  { key: "directDebit", label: "Direct Debit" },
   { key: "bank", label: "Bank Match" },
   { key: "receipt", label: "Receipt" },
   { key: "finance", label: "Finance Note" },
@@ -359,6 +367,7 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   repayment: false,
 
   payment: true,
+  directDebit: true,
   bank: true,
   receipt: false,
   finance: false,
@@ -382,6 +391,7 @@ const easyModeVisibleColumns: Record<ColumnKey, boolean> = {
   paidBy: false,
   repayment: false,
   payment: true,
+  directDebit: true,
   bank: false,
   receipt: false,
   finance: false,
@@ -841,6 +851,218 @@ function supplierBadgeClass(category?: string | null) {
   return "bg-violet-500/20 text-violet-100 ring-violet-300/20";
 }
 
+type DirectDebitTransactionFields = Transaction & {
+  direct_debit_plan_id?: string | null;
+  directDebitPlanId?: string | null;
+  direct_debit_occurrence_id?: string | null;
+  directDebitOccurrenceId?: string | null;
+  direct_debit_account_source?: "organisation" | "personal" | string | null;
+  directDebitAccountSource?: "organisation" | "personal" | string | null;
+  direct_debit_account_holder?: string | null;
+  directDebitAccountHolder?: string | null;
+  direct_debit_reference?: string | null;
+  directDebitReference?: string | null;
+  direct_debit_plan_note?: string | null;
+  directDebitPlanNote?: string | null;
+  direct_debit_payment_number?: number | null;
+  directDebitPaymentNumber?: number | null;
+  direct_debit_total_payments?: number | null;
+  directDebitTotalPayments?: number | null;
+  direct_debit_occurrence_status?: string | null;
+  directDebitOccurrenceStatus?: string | null;
+  reimbursement_status?: string | null;
+  reimbursementStatus?: string | null;
+  reimbursement_id?: string | null;
+  reimbursementId?: string | null;
+};
+
+function getDirectDebitInfo(item: Transaction) {
+  const row = item as DirectDebitTransactionFields;
+  const planId = cleanText(row.direct_debit_plan_id || row.directDebitPlanId);
+  const occurrenceId = cleanText(
+    row.direct_debit_occurrence_id || row.directDebitOccurrenceId,
+  );
+  const accountSource = cleanText(
+    row.direct_debit_account_source || row.directDebitAccountSource,
+  ).toLowerCase();
+  const accountHolder = cleanText(
+    row.direct_debit_account_holder || row.directDebitAccountHolder,
+  );
+  const reference = cleanText(
+    row.direct_debit_reference || row.directDebitReference,
+  );
+  const planNote = cleanText(
+    row.direct_debit_plan_note || row.directDebitPlanNote,
+  );
+  const paymentNumber = numberValue(
+    row.direct_debit_payment_number || row.directDebitPaymentNumber,
+  );
+  const totalPayments = numberValue(
+    row.direct_debit_total_payments || row.directDebitTotalPayments,
+  );
+  const occurrenceStatus = cleanText(
+    row.direct_debit_occurrence_status || row.directDebitOccurrenceStatus,
+  ).toLowerCase();
+  const reimbursementStatus = cleanText(
+    row.reimbursement_status || row.reimbursementStatus,
+  ).toLowerCase();
+  const reimbursementId = cleanText(
+    row.reimbursement_id || row.reimbursementId,
+  );
+  const isDirectDebit = Boolean(
+    planId || occurrenceId || item.payment_method === "Direct Debit",
+  );
+  const isPersonalAccount = accountSource === "personal";
+  const isOrganisationAccount =
+    isDirectDebit && !isPersonalAccount;
+  const reimbursementOutstanding =
+    isPersonalAccount &&
+    !item.personal_funds_repaid &&
+    !["reimbursed", "paid", "completed"].includes(reimbursementStatus);
+
+  return {
+    isDirectDebit,
+    planId,
+    occurrenceId,
+    accountSource: isPersonalAccount ? "personal" : "organisation",
+    accountHolder,
+    reference,
+    planNote,
+    paymentNumber,
+    totalPayments,
+    occurrenceStatus: occurrenceStatus || "posted",
+    reimbursementStatus:
+      reimbursementStatus ||
+      (isPersonalAccount
+        ? item.personal_funds_repaid
+          ? "reimbursed"
+          : "awaiting_reimbursement"
+        : "not_required"),
+    reimbursementId,
+    isPersonalAccount,
+    isOrganisationAccount,
+    reimbursementOutstanding,
+  };
+}
+
+function isDirectDebitTransaction(item: Transaction) {
+  return getDirectDebitInfo(item).isDirectDebit;
+}
+
+function directDebitStatusLabel(status?: string | null) {
+  const clean = cleanText(status).toLowerCase();
+  if (clean === "scheduled") return "Scheduled";
+  if (clean === "posted") return "Posted";
+  if (clean === "paid") return "Paid";
+  if (clean === "failed") return "Failed";
+  if (clean === "skipped") return "Skipped";
+  if (clean === "cancelled") return "Cancelled";
+  return clean ? humaniseBudgetValue(clean) : "Posted";
+}
+
+function directDebitStatusClass(status?: string | null) {
+  const clean = cleanText(status).toLowerCase();
+  if (clean === "paid" || clean === "posted")
+    return "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20";
+  if (clean === "scheduled")
+    return "bg-sky-500/15 text-sky-100 ring-sky-300/20";
+  if (clean === "failed")
+    return "bg-red-500/15 text-red-100 ring-red-300/20";
+  if (clean === "skipped")
+    return "bg-amber-500/15 text-amber-100 ring-amber-300/20";
+  return "bg-white/10 text-white/60 ring-white/10";
+}
+
+function DirectDebitBadge({
+  item,
+  compact = false,
+}: {
+  item: Transaction;
+  compact?: boolean;
+}) {
+  const directDebit = getDirectDebitInfo(item);
+  if (!directDebit.isDirectDebit) {
+    return <span className="text-white/40">Not a Direct Debit</span>;
+  }
+
+  const paymentProgress = directDebit.paymentNumber
+    ? directDebit.totalPayments
+      ? `${directDebit.paymentNumber} of ${directDebit.totalPayments}`
+      : `Payment ${directDebit.paymentNumber}`
+    : "Monthly payment";
+
+  return (
+    <div className="min-w-[190px] space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className="bg-fuchsia-500/15 text-fuchsia-100 ring-fuchsia-300/20">
+          <Repeat2 className="mr-1 h-3 w-3" /> Direct Debit
+        </Badge>
+        <Badge className={directDebitStatusClass(directDebit.occurrenceStatus)}>
+          {directDebitStatusLabel(directDebit.occurrenceStatus)}
+        </Badge>
+      </div>
+
+      <p className="text-[11px] font-bold text-white/60">{paymentProgress}</p>
+
+      {!compact && (
+        <div className="space-y-1 text-[11px] leading-5 text-white/50">
+          <p>
+            Paid from: {directDebit.isPersonalAccount
+              ? directDebit.accountHolder || "Personal account"
+              : "Burton Pride account"}
+          </p>
+          {directDebit.reference && <p>Reference: {directDebit.reference}</p>}
+        </div>
+      )}
+
+      {directDebit.planId && (
+        <Link
+          href={`/Admin/MoneyManagement/DirectDebits/${encodeURIComponent(
+            directDebit.planId,
+          )}`}
+          className="inline-flex items-center gap-1 rounded-lg bg-fuchsia-500/20 px-2.5 py-1.5 text-[11px] font-black text-fuchsia-100 ring-1 ring-fuchsia-300/20 hover:bg-fuchsia-500/30"
+        >
+          <Link2 className="h-3 w-3" /> Open plan
+        </Link>
+      )}
+
+      {directDebit.reimbursementOutstanding && (
+        <p className="rounded-lg bg-orange-500/10 px-2 py-1 text-[11px] font-black text-orange-100 ring-1 ring-orange-300/20">
+          Personal reimbursement due
+        </p>
+      )}
+    </div>
+  );
+}
+
+function getDirectDebitSearchText(item: Transaction) {
+  const directDebit = getDirectDebitInfo(item);
+  if (!directDebit.isDirectDebit) return "not direct debit";
+
+  return [
+    "direct debit monthly recurring payment",
+    directDebit.planId,
+    directDebit.occurrenceId,
+    directDebit.reference,
+    directDebit.accountSource,
+    directDebit.accountHolder,
+    directDebit.occurrenceStatus,
+    directDebit.reimbursementStatus,
+    directDebit.reimbursementOutstanding
+      ? "personal reimbursement due awaiting reimbursement"
+      : "reimbursement complete not required",
+    directDebit.paymentNumber
+      ? `payment ${directDebit.paymentNumber}`
+      : "",
+    directDebit.totalPayments
+      ? `of ${directDebit.totalPayments}`
+      : "open ended",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function bankReconciliationLabel(status?: string | null) {
   if (status === "matched") return "Matched";
   if (status === "needs_review") return "Needs review";
@@ -1249,6 +1471,7 @@ function trackingRowSortText(row: TrackingRow, sortKey: SortKey) {
     if (sortKey === "type") return item.type;
     if (sortKey === "funding") return item.sponsor_name;
     if (sortKey === "payment") return item.payment_method;
+    if (sortKey === "directDebit") return getDirectDebitSearchText(item);
     if (sortKey === "checked") return item.checked_at ? "checked" : "unchecked";
     if (sortKey === "bank")
       return item.bank_reconciliation_status || "unmatched";
@@ -1265,6 +1488,7 @@ function trackingRowSortText(row: TrackingRow, sortKey: SortKey) {
   if (sortKey === "title") return refund.title;
   if (sortKey === "type") return refundTypeLabel(refund);
   if (sortKey === "payment") return "refund";
+  if (sortKey === "directDebit") return "not direct debit";
   if (sortKey === "checked") return refund.status;
   if (sortKey === "bank") return "refund";
   if (sortKey === "receipt") return "refund";
@@ -1287,6 +1511,7 @@ function getRowSearchText(item: Transaction) {
     item.description,
     item.type === "income" ? "money in income" : "money out expense",
     item.payment_method,
+    getDirectDebitSearchText(item),
     item.sponsor_name,
     item.sponsorship_note,
     getSupplierName(item),
@@ -1519,6 +1744,19 @@ function transactionMatchesQuickFilter(
     return isPersonalFundsTransaction(item) && !item.personal_funds_repaid;
   if (quickFilter === "funding") return isSponsorshipTransaction(item);
   if (quickFilter === "stock_orders") return true;
+  if (quickFilter === "direct_debits") return isDirectDebitTransaction(item);
+  if (quickFilter === "direct_debit_personal") {
+    const directDebit = getDirectDebitInfo(item);
+    return directDebit.isDirectDebit && directDebit.isPersonalAccount;
+  }
+  if (quickFilter === "direct_debit_unmatched") {
+    return (
+      isDirectDebitTransaction(item) &&
+      (!item.bank_reconciliation_status ||
+        item.bank_reconciliation_status === "unmatched" ||
+        item.bank_reconciliation_status === "needs_review")
+    );
+  }
   if (quickFilter === "refunds") return false;
   return true;
 }
@@ -1533,6 +1771,14 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     "Budget",
     "Budget Reason",
     "Payment Method",
+    "Direct Debit Plan ID",
+    "Direct Debit Occurrence ID",
+    "Direct Debit Payment",
+    "Direct Debit Account",
+    "Direct Debit Account Holder",
+    "Direct Debit Reference",
+    "Direct Debit Status",
+    "Reimbursement Status",
     "Funding",
     "Supplier",
     "Supplier Category",
@@ -1552,6 +1798,24 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     getTransactionBudgetInfo(item).label,
     getTransactionBudgetInfo(item).detail,
     item.payment_method || "",
+    getDirectDebitInfo(item).planId,
+    getDirectDebitInfo(item).occurrenceId,
+    getDirectDebitInfo(item).isDirectDebit
+      ? getDirectDebitInfo(item).totalPayments
+        ? `${getDirectDebitInfo(item).paymentNumber || ""} of ${getDirectDebitInfo(item).totalPayments}`
+        : `Payment ${getDirectDebitInfo(item).paymentNumber || ""}`.trim()
+      : "",
+    getDirectDebitInfo(item).isDirectDebit
+      ? getDirectDebitInfo(item).accountSource
+      : "",
+    getDirectDebitInfo(item).accountHolder,
+    getDirectDebitInfo(item).reference,
+    getDirectDebitInfo(item).isDirectDebit
+      ? directDebitStatusLabel(getDirectDebitInfo(item).occurrenceStatus)
+      : "",
+    getDirectDebitInfo(item).isDirectDebit
+      ? getDirectDebitInfo(item).reimbursementStatus
+      : "",
     item.sponsor_name || "",
     getSupplierName(item),
     getSupplierCategory(item),
@@ -1654,6 +1918,33 @@ function WarningBadges({
       >
         <AlertTriangle className="h-3 w-3" />
         Payback due
+      </span>,
+    );
+  }
+
+  const directDebit = getDirectDebitInfo(item);
+
+  if (directDebit.isDirectDebit) {
+    badges.push(
+      <span
+        key="direct-debit"
+        className="inline-flex items-center gap-1 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-2 py-1 text-[11px] font-black text-fuchsia-100"
+      >
+        <Repeat2 className="h-3 w-3" />
+        Direct Debit
+        {directDebit.paymentNumber ? ` · ${directDebit.paymentNumber}${directDebit.totalPayments ? `/${directDebit.totalPayments}` : ""}` : ""}
+      </span>,
+    );
+  }
+
+  if (directDebit.reimbursementOutstanding) {
+    badges.push(
+      <span
+        key="direct-debit-reimbursement"
+        className="inline-flex items-center gap-1 rounded-xl border border-orange-300/20 bg-orange-500/10 px-2 py-1 text-[11px] font-black text-orange-100"
+      >
+        <AlertTriangle className="h-3 w-3" />
+        Direct Debit reimbursement due
       </span>,
     );
   }
@@ -2479,6 +2770,8 @@ export default function MoneyTransactionsTable({
         result = compareText(a.sponsor_name, b.sponsor_name);
       if (sortKey === "payment")
         result = compareText(a.payment_method, b.payment_method);
+      if (sortKey === "directDebit")
+        result = compareText(getDirectDebitSearchText(a), getDirectDebitSearchText(b));
       if (sortKey === "checked")
         result = Number(Boolean(a.checked_at)) - Number(Boolean(b.checked_at));
       if (sortKey === "bank")
@@ -3007,6 +3300,14 @@ export default function MoneyTransactionsTable({
               {hasFunding ? "Funding Money" : item.payment_method || "None"}
             </strong>
           </div>
+          {isDirectDebitTransaction(item) && (
+            <div className="sm:col-span-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 p-3">
+              <p className="mb-2 text-xs font-black uppercase tracking-wide text-fuchsia-100/70">
+                Direct Debit
+              </p>
+              <DirectDebitBadge item={item} />
+            </div>
+          )}
           <div className="sm:col-span-2">
             Budget:{" "}
             <strong className="text-white">
@@ -3843,6 +4144,18 @@ export default function MoneyTransactionsTable({
 
               <button
                 type="button"
+                onClick={() => showEasyModePayments("all", "direct_debits")}
+                className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
+                  quickFilter === "direct_debits"
+                    ? "bg-fuchsia-100 text-black ring-fuchsia-100"
+                    : "bg-fuchsia-500/10 text-fuchsia-100 ring-fuchsia-300/20 hover:bg-fuchsia-500/20"
+                }`}
+              >
+                Direct Debits
+              </button>
+
+              <button
+                type="button"
                 onClick={() => showEasyModePayments("all", "refunds")}
                 className={`rounded-2xl px-4 py-4 text-left text-sm font-black ring-1 transition ${
                   quickFilter === "refunds"
@@ -4003,6 +4316,15 @@ export default function MoneyTransactionsTable({
                   </option>
                   <option className="bg-[#11111f] text-white" value="funding">
                     Funding linked
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="direct_debits">
+                    Direct Debits only
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="direct_debit_personal">
+                    Personal-account Direct Debits
+                  </option>
+                  <option className="bg-[#11111f] text-white" value="direct_debit_unmatched">
+                    Direct Debits needing bank match
                   </option>
                   <option className="bg-[#11111f] text-white" value="refunds">
                     Refunds only
@@ -4437,7 +4759,7 @@ export default function MoneyTransactionsTable({
               title="Hold and drag left or right to move across the table"
             >
               <table
-                className="w-full min-w-[1775px] text-sm"
+                className="w-full min-w-[2160px] table-auto text-sm"
               >
                 <thead className="bg-white/10 text-white/60">
                   <tr>
@@ -4533,6 +4855,15 @@ export default function MoneyTransactionsTable({
                         onSort={handleSort}
                       />
                     </ColumnHeader>
+                    <ColumnHeader column="directDebit" className="p-3 text-left">
+                      <SortButton
+                        label="Direct Debit"
+                        sortKey="directDebit"
+                        activeSortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSort={handleSort}
+                      />
+                    </ColumnHeader>
                     <ColumnHeader column="bank" className="p-3 text-left">
                       <SortButton
                         label="Bank"
@@ -4571,7 +4902,7 @@ export default function MoneyTransactionsTable({
                     </ColumnHeader>
                     <ColumnHeader
                       column="actions"
-                      className="sticky right-0 z-10 bg-[#242435] p-3 text-right shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                      className="sticky right-0 z-20 w-[156px] min-w-[156px] whitespace-nowrap bg-[#242435] p-3 text-center shadow-[-12px_0_18px_rgba(0,0,0,0.45)]"
                     >
                       Action
                     </ColumnHeader>
@@ -4728,6 +5059,10 @@ export default function MoneyTransactionsTable({
                             Refund
                           </ColumnCell>
 
+                          <ColumnCell column="directDebit" className="p-3 align-top">
+                            <span className="text-white/40">Not applicable</span>
+                          </ColumnCell>
+
                           <ColumnCell column="bank" className="p-3 align-top">
                             <span className="text-white/40">
                               Managed in Refund Tracker
@@ -4776,11 +5111,11 @@ export default function MoneyTransactionsTable({
 
                           <ColumnCell
                             column="actions"
-                            className="sticky right-0 z-10 bg-[#101a24] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                            className="sticky right-0 z-20 w-[156px] min-w-[156px] bg-[#101a24] p-3 text-center align-top shadow-[-12px_0_18px_rgba(0,0,0,0.45)]"
                           >
                             <Link
                               href="/admin/money/refunds"
-                              className="inline-flex items-center justify-center rounded-xl bg-cyan-500/15 p-2 text-cyan-100 transition hover:bg-cyan-500/25"
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-100 transition hover:bg-cyan-500/25"
                               title="Open Refund Tracker"
                             >
                               <Eye className="h-4 w-4" />
@@ -5116,6 +5451,13 @@ export default function MoneyTransactionsTable({
                         </ColumnCell>
 
                         <ColumnCell
+                          column="directDebit"
+                          className="min-w-[220px] p-3 align-top"
+                        >
+                          <DirectDebitBadge item={item} compact />
+                        </ColumnCell>
+
+                        <ColumnCell
                           column="bank"
                           className="min-w-[230px] p-3 align-top"
                         >
@@ -5393,14 +5735,14 @@ export default function MoneyTransactionsTable({
 
                         <ColumnCell
                           column="actions"
-                          className="sticky right-0 z-10 bg-[#11111f] p-3 text-right align-top shadow-[-12px_0_18px_rgba(0,0,0,0.35)]"
+                          className="sticky right-0 z-20 w-[156px] min-w-[156px] bg-[#11111f] p-3 text-center align-top shadow-[-12px_0_18px_rgba(0,0,0,0.45)]"
                         >
-                          <div className="inline-flex items-center justify-end gap-2">
+                          <div className="flex min-w-[132px] flex-nowrap items-center justify-center gap-2">
                             <button
                               type="button"
                               disabled={paymentActionsLocked}
                               onClick={() => setDetailsItem(item)}
-                              className="inline-flex items-center justify-center rounded-xl bg-white/10 p-2 text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                               title={paymentActionLockReason || "View details"}
                             >
                               <Eye className="h-4 w-4" />
@@ -5413,7 +5755,7 @@ export default function MoneyTransactionsTable({
                                   onEditTransaction(item),
                                 )
                               }
-                              className="inline-flex items-center justify-center rounded-xl bg-sky-500/15 p-2 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
                               title={
                                 paymentActionLockReason || "Edit transaction"
                               }
@@ -5428,7 +5770,7 @@ export default function MoneyTransactionsTable({
                                   onHideTransaction(item.id),
                                 )
                               }
-                              className="inline-flex items-center justify-center rounded-xl bg-red-500/15 p-2 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-200 hover:bg-red-500/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/25 disabled:ring-white/5 disabled:opacity-60 disabled:grayscale disabled:hover:bg-white/5"
                               title={
                                 paymentActionLockReason || "Hide transaction"
                               }
@@ -5551,6 +5893,27 @@ export default function MoneyTransactionsTable({
                 </p>
               </div>
             </div>
+
+            {isDirectDebitTransaction(detailsItem) && (
+              <div className="mt-4 rounded-2xl border border-fuchsia-300/20 bg-fuchsia-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <Repeat2 className="h-5 w-5 text-fuchsia-100" />
+                  <p className="font-black text-fuchsia-50">Direct Debit payment</p>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-fuchsia-50/60">
+                  This transaction was posted from a monthly Direct Debit occurrence.
+                  Change future payments from the Direct Debit plan rather than editing historic paid months.
+                </p>
+                <div className="mt-3">
+                  <DirectDebitBadge item={detailsItem} />
+                </div>
+                {getDirectDebitInfo(detailsItem).planNote && (
+                  <p className="mt-3 whitespace-pre-wrap rounded-xl bg-black/20 p-3 text-xs leading-5 text-fuchsia-100/75">
+                    {getDirectDebitInfo(detailsItem).planNote}
+                  </p>
+                )}
+              </div>
+            )}
 
             {isTransactionLocked(detailsItem) && (
               <div className="mt-4 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">

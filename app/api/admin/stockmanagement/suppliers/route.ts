@@ -16,6 +16,34 @@ const STOCK_ORDERS_TABLE = "stock_orders";
 const MONEY_TRANSACTIONS_TABLE = "money_transactions";
 const AUDIT_LOG_TABLE = "admin_audit_logs";
 
+type StockSupplierRating =
+  | "not_recorded"
+  | "excellent"
+  | "good"
+  | "ok"
+  | "poor"
+  | "do_not_use";
+
+const STOCK_SUPPLIER_RATINGS = new Set<StockSupplierRating>([
+  "not_recorded",
+  "excellent",
+  "good",
+  "ok",
+  "poor",
+  "do_not_use",
+]);
+
+const DEFAULT_RATING_SCORE: Record<
+  Exclude<StockSupplierRating, "not_recorded">,
+  number
+> = {
+  excellent: 5,
+  good: 4,
+  ok: 3,
+  poor: 2,
+  do_not_use: 1,
+};
+
 const ALLOWED_SUPPLIER_USES = new Set([
   "stock",
   "service",
@@ -50,6 +78,13 @@ type StockSupplierProfileRow = UnknownRow & {
   minimum_order_value_pence?: number | null;
   usual_delivery_cost_pence?: number | null;
   stock_notes?: string | null;
+  stock_rating?: StockSupplierRating | null;
+  stock_rating_score?: number | null;
+  stock_rating_notes?: string | null;
+  stock_rating_updated_at?: string | null;
+  stock_rating_updated_by?: string | null;
+  stock_rating_updated_by_name?: string | null;
+  stock_rating_updated_by_email?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -64,6 +99,9 @@ type CreateSupplierBody = {
   event_record_type?: unknown;
   event_record_id?: unknown;
   money_supplier_id?: unknown;
+  stock_rating?: unknown;
+  stock_rating_score?: unknown;
+  stock_rating_notes?: unknown;
 };
 
 type OptionalQueryResult<T> = {
@@ -142,6 +180,67 @@ function nullableNonNegativeMoney(
   }
 
   return parsed;
+}
+
+
+function optionalLimitedText(
+  value: unknown,
+  maximumLength = 5000,
+) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const cleaned = text(value);
+  return cleaned
+    ? cleaned.slice(0, maximumLength)
+    : null;
+}
+
+function parseStockSupplierRating(
+  value: unknown,
+): StockSupplierRating {
+  const rating = (
+    text(value) || "not_recorded"
+  ) as StockSupplierRating;
+
+  if (!STOCK_SUPPLIER_RATINGS.has(rating)) {
+    throw new Error(
+      "stock_rating must be not_recorded, excellent, good, ok, poor or do_not_use.",
+    );
+  }
+
+  return rating;
+}
+
+function parseStockSupplierRatingScore(
+  value: unknown,
+  rating: StockSupplierRating,
+) {
+  if (rating === "not_recorded") {
+    return null;
+  }
+
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return DEFAULT_RATING_SCORE[rating];
+  }
+
+  const score = Number(value);
+
+  if (
+    !Number.isInteger(score) ||
+    score < 1 ||
+    score > 5
+  ) {
+    throw new Error(
+      "stock_rating_score must be a whole number from 1 to 5.",
+    );
+  }
+
+  return score;
 }
 
 function isUuid(value: string) {
@@ -788,6 +887,21 @@ function buildSupplierView(
     stockNotes:
       nullableText(profile.stock_notes),
 
+    stockRating:
+      profile.stock_rating || "not_recorded",
+    stockRatingScore:
+      profile.stock_rating_score ?? null,
+    stockRatingNotes:
+      nullableText(profile.stock_rating_notes),
+    stockRatingUpdatedAt:
+      nullableText(
+        profile.stock_rating_updated_at,
+      ),
+    stockRatingUpdatedByName:
+      nullableText(
+        profile.stock_rating_updated_by_name,
+      ),
+
     createdAt:
       nullableText(profile.created_at),
     updatedAt:
@@ -1161,6 +1275,23 @@ export async function POST(
         "usual_delivery_cost_pence",
       );
 
+    const stockRating =
+      parseStockSupplierRating(
+        body.stock_rating,
+      );
+
+    const stockRatingScore =
+      parseStockSupplierRatingScore(
+        body.stock_rating_score,
+        stockRating,
+      );
+
+    const stockRatingNotes =
+      optionalLimitedText(
+        body.stock_rating_notes,
+        5000,
+      );
+
     const duplicateQuery = supabaseAdmin
       .from(STOCK_SUPPLIER_TABLE)
       .select("id, display_name")
@@ -1194,8 +1325,6 @@ export async function POST(
       display_name: displayName,
       supplier_use: supplierUse,
       is_active: true,
-      needs_review: false,
-      do_not_use: false,
       usual_delivery_days:
         usualDeliveryDays,
       minimum_order_value_pence:
@@ -1205,6 +1334,35 @@ export async function POST(
       stock_notes: nullableText(
         body.stock_notes,
       ),
+      stock_rating: stockRating,
+      stock_rating_score:
+        stockRatingScore,
+      stock_rating_notes:
+        stockRatingNotes ?? null,
+      stock_rating_updated_at:
+        stockRating === "not_recorded"
+          ? null
+          : now,
+      stock_rating_updated_by:
+        stockRating === "not_recorded"
+          ? null
+          : admin.id || null,
+      stock_rating_updated_by_name:
+        stockRating === "not_recorded"
+          ? null
+          : admin.name ||
+            admin.full_name ||
+            admin.email ||
+            "Admin",
+      stock_rating_updated_by_email:
+        stockRating === "not_recorded"
+          ? null
+          : admin.email || null,
+      needs_review:
+        stockRating === "poor" ||
+        stockRating === "do_not_use",
+      do_not_use:
+        stockRating === "do_not_use",
       created_at: now,
       created_by: admin.id || null,
       created_by_name:
@@ -1239,9 +1397,14 @@ export async function POST(
       admin,
       action:
         "stock_supplier_profile_created",
-      summary: `Created Stock Management supplier profile for ${displayName}.`,
+      summary: `Created Stock Management supplier profile for ${displayName} with Stock Control rating ${stockRating}.`,
       recordId: created.id,
-      afterData: created,
+      afterData: {
+        ...created,
+        stock_rating: stockRating,
+        stock_rating_score:
+          stockRatingScore,
+      },
     });
 
     return NextResponse.json(

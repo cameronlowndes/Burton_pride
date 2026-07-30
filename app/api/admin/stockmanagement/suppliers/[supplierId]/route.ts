@@ -20,6 +20,24 @@ const ALLOWED_SUPPLIER_USES = new Set([
   "mixed",
 ]);
 
+const ALLOWED_STOCK_RATINGS = new Set([
+  "not_rated",
+  "excellent",
+  "good",
+  "okay",
+  "poor",
+  "do_not_use",
+]);
+
+const STOCK_RATING_DEFAULT_SCORES: Record<string, number | null> = {
+  not_rated: null,
+  excellent: 5,
+  good: 4,
+  okay: 3,
+  poor: 2,
+  do_not_use: 1,
+};
+
 const PROFILE_EDITABLE_FIELDS = new Set([
   "display_name",
   "supplier_use",
@@ -30,6 +48,9 @@ const PROFILE_EDITABLE_FIELDS = new Set([
   "is_active",
   "needs_review",
   "do_not_use",
+  "stock_rating",
+  "stock_rating_score",
+  "stock_rating_notes",
   "reason",
 ]);
 
@@ -59,6 +80,9 @@ type SupplierUpdateBody = {
   is_active?: unknown;
   needs_review?: unknown;
   do_not_use?: unknown;
+  stock_rating?: unknown;
+  stock_rating_score?: unknown;
+  stock_rating_notes?: unknown;
   reason?: unknown;
 
   /*
@@ -433,6 +457,58 @@ function parseNullablePence(
   }
 
   return parsed;
+}
+
+function parseStockRating(value: unknown) {
+  const rating = cleanText(value)
+    .toLowerCase()
+    .replaceAll("-", "_")
+    .replace(/\s+/g, "_");
+
+  if (!ALLOWED_STOCK_RATINGS.has(rating)) {
+    throw new Error(
+      `stock_rating is invalid. Allowed values: ${Array.from(
+        ALLOWED_STOCK_RATINGS,
+      ).join(", ")}.`,
+    );
+  }
+
+  return rating;
+}
+
+function parseNullableRatingScore(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > 5
+  ) {
+    throw new Error(
+      "stock_rating_score must be a whole number between 1 and 5.",
+    );
+  }
+
+  return parsed;
+}
+
+function effectiveStockRatingScore(
+  rating: string,
+  suppliedScore: number | null,
+) {
+  if (rating === "not_rated") {
+    return null;
+  }
+
+  return (
+    suppliedScore ??
+    STOCK_RATING_DEFAULT_SCORES[rating] ??
+    null
+  );
 }
 
 function errorStatus(error: unknown) {
@@ -841,6 +917,35 @@ function profileAuditAction(
   const fields = changedFields(beforeData, afterData);
 
   if (
+    fields.includes("stock_rating") ||
+    fields.includes("stock_rating_score") ||
+    fields.includes("stock_rating_notes")
+  ) {
+    const rating = cleanText(afterData.stock_rating) || "not_rated";
+
+    return {
+      action:
+        rating === "do_not_use"
+          ? "stock_supplier_rating_blocked"
+          : rating === "poor"
+            ? "stock_supplier_rating_review_required"
+            : "stock_supplier_rating_updated",
+      actionLabel:
+        rating === "do_not_use"
+          ? "Stock supplier rated do not use"
+          : rating === "poor"
+            ? "Stock supplier rated poor"
+            : "Stock supplier rating updated",
+      riskLevel:
+        rating === "do_not_use"
+          ? "high" as const
+          : rating === "poor"
+            ? "medium" as const
+            : "low" as const,
+    };
+  }
+
+  if (
     fields.includes("do_not_use") &&
     afterData.do_not_use === true
   ) {
@@ -1118,6 +1223,84 @@ function buildUpdatePayload(
     );
   }
 
+  const ratingWasSupplied =
+    body.stock_rating !== undefined;
+  const scoreWasSupplied =
+    body.stock_rating_score !== undefined;
+  const notesWereSupplied =
+    body.stock_rating_notes !== undefined;
+
+  if (
+    ratingWasSupplied ||
+    scoreWasSupplied ||
+    notesWereSupplied
+  ) {
+    const rating = ratingWasSupplied
+      ? parseStockRating(body.stock_rating)
+      : null;
+
+    const suppliedScore = scoreWasSupplied
+      ? parseNullableRatingScore(
+          body.stock_rating_score,
+        )
+      : null;
+
+    if (ratingWasSupplied && rating) {
+      updatePayload.stock_rating = rating;
+      updatePayload.stock_rating_score =
+        effectiveStockRatingScore(
+          rating,
+          suppliedScore,
+        );
+
+      if (rating === "poor") {
+        updatePayload.needs_review = true;
+      }
+
+      if (rating === "do_not_use") {
+        updatePayload.do_not_use = true;
+        updatePayload.needs_review = true;
+      }
+
+      if (
+        rating === "not_rated" &&
+        suppliedScore !== null
+      ) {
+        throw new Error(
+          "stock_rating_score must be empty when stock_rating is not_rated.",
+        );
+      }
+    } else if (scoreWasSupplied) {
+      updatePayload.stock_rating_score =
+        suppliedScore;
+    }
+
+    if (notesWereSupplied) {
+      const ratingNotes = nullableText(
+        body.stock_rating_notes,
+      );
+
+      if (
+        ratingNotes &&
+        ratingNotes.length > 5_000
+      ) {
+        throw new Error(
+          "stock_rating_notes must not contain more than 5,000 characters.",
+        );
+      }
+
+      updatePayload.stock_rating_notes =
+        ratingNotes;
+    }
+
+    updatePayload.stock_rating_updated_at =
+      new Date().toISOString();
+    updatePayload.stock_rating_updated_by =
+      admin.id || null;
+    updatePayload.stock_rating_updated_by_name =
+      adminDisplayName(admin);
+  }
+
   if (Object.keys(updatePayload).length === 0) {
     throw new Error(
       "At least one editable supplier field must be supplied for update.",
@@ -1172,6 +1355,37 @@ export async function GET(
          * card, badge, warning panel and action button
          * should use the red blocked style.
          */
+        stockRating: {
+          rating:
+            nullableText(
+              synchronised.supplier.stock_rating,
+            ) || "not_rated",
+          score:
+            synchronised.supplier
+              .stock_rating_score ?? null,
+          notes:
+            nullableText(
+              synchronised.supplier
+                .stock_rating_notes,
+            ),
+          updatedAt:
+            nullableText(
+              synchronised.supplier
+                .stock_rating_updated_at,
+            ),
+          updatedByName:
+            nullableText(
+              synchronised.supplier
+                .stock_rating_updated_by_name,
+            ),
+          isPoor:
+            synchronised.supplier
+              .stock_rating === "poor",
+          isDoNotUse:
+            synchronised.supplier
+              .stock_rating === "do_not_use",
+        },
+
         eventHubPresentation: {
           isRed:
             synchronised.warning.colour === "red",
@@ -1306,7 +1520,10 @@ export async function PATCH(
     }
 
     if (
-      updatePayload.do_not_use === true &&
+      (
+        updatePayload.do_not_use === true ||
+        updatePayload.stock_rating === "do_not_use"
+      ) &&
       !nullableText(body.reason) &&
       !eventWarning.doNotUse
     ) {
@@ -1362,6 +1579,30 @@ export async function PATCH(
         "The Stock Management supplier profile was updated.",
       supplier: afterData,
       changedFields: fields,
+      stockRating: {
+        rating:
+          nullableText(afterData.stock_rating) ||
+          "not_rated",
+        score:
+          afterData.stock_rating_score ?? null,
+        notes:
+          nullableText(
+            afterData.stock_rating_notes,
+          ),
+        updatedAt:
+          nullableText(
+            afterData.stock_rating_updated_at,
+          ),
+        updatedByName:
+          nullableText(
+            afterData.stock_rating_updated_by_name,
+          ),
+        isPoor:
+          afterData.stock_rating === "poor",
+        isDoNotUse:
+          afterData.stock_rating ===
+          "do_not_use",
+      },
       eventHubWarning: eventWarning,
       eventHubPresentation: {
         isRed:

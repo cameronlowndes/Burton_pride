@@ -72,6 +72,14 @@ type SupplierStatus =
   | "inactive"
   | "blocked";
 
+type StockSupplierRating =
+  | "not_recorded"
+  | "excellent"
+  | "good"
+  | "ok"
+  | "poor"
+  | "do_not_use";
+
 type SupplierAuditStatus =
   | "success"
   | "failed"
@@ -152,6 +160,11 @@ type StockSupplierView = {
   minimumOrderValuePence?: number | null;
   usualDeliveryCostPence?: number | null;
   stockNotes?: string | null;
+  stockRating: StockSupplierRating;
+  stockRatingScore: number | null;
+  stockRatingNotes: string | null;
+  stockRatingUpdatedAt: string | null;
+  stockRatingUpdatedByName: string | null;
 
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -329,6 +342,17 @@ type SupplierFormState = {
   eventWarningAccepted: boolean;
   moneySupplierId: string;
 
+  stockRating: StockSupplierRating;
+  stockRatingScore: string;
+  stockRatingNotes: string;
+  stockNeedsReview: boolean;
+  ratingWarningAccepted: boolean;
+  createInitialReview: boolean;
+  reviewDeliveryRating: string;
+  reviewQualityRating: string;
+  reviewCommunicationRating: string;
+  reviewValueRating: string;
+
   stockItemId: string;
   stockItemRole: "preferred" | "alternative";
   stockItemSupplierSku: string;
@@ -480,6 +504,9 @@ type ProfileEditState = {
   isActive: boolean;
   needsReview: boolean;
   doNotUse: boolean;
+  stockRating: StockSupplierRating;
+  stockRatingScore: string;
+  stockRatingNotes: string;
 };
 
 type OrderFormState = {
@@ -552,6 +579,17 @@ const EMPTY_FORM: SupplierFormState = {
   eventNeedsReview: false,
   eventWarningAccepted: false,
   moneySupplierId: "",
+
+  stockRating: "not_recorded",
+  stockRatingScore: "",
+  stockRatingNotes: "",
+  stockNeedsReview: false,
+  ratingWarningAccepted: false,
+  createInitialReview: false,
+  reviewDeliveryRating: "",
+  reviewQualityRating: "",
+  reviewCommunicationRating: "",
+  reviewValueRating: "",
 
   stockItemId: "",
   stockItemRole: "preferred",
@@ -839,11 +877,20 @@ function normaliseEventContact(
 }
 
 function supplierStatus(supplier: StockSupplierView): SupplierStatus {
-  if (supplier.doNotUse || supplier.moneyManagement.doNotUse) {
+  if (
+    supplier.doNotUse ||
+    supplier.moneyManagement.doNotUse ||
+    supplier.stockRating === "do_not_use"
+  ) {
     return "blocked";
   }
 
-  if (supplier.needsReview || supplier.eventHub.requiresReview) {
+  if (
+    supplier.needsReview ||
+    supplier.eventHub.requiresReview ||
+    supplier.stockRating === "poor" ||
+    supplier.stockRating === "ok"
+  ) {
     return "review";
   }
 
@@ -865,6 +912,100 @@ function statusClasses(status: SupplierStatus) {
     default:
       return "border-white/10 bg-white/[0.06] text-white/60";
   }
+}
+
+function stockRatingClasses(rating: StockSupplierRating) {
+  switch (rating) {
+    case "excellent":
+      return "border-emerald-300/30 bg-emerald-500/15 text-emerald-50";
+    case "good":
+      return "border-green-300/25 bg-green-500/10 text-green-100";
+    case "ok":
+      return "border-amber-300/25 bg-amber-500/10 text-amber-100";
+    case "poor":
+      return "border-orange-300/30 bg-orange-500/15 text-orange-100";
+    case "do_not_use":
+      return "border-red-300/35 bg-red-500/20 text-red-50";
+    default:
+      return "border-white/10 bg-white/[0.06] text-white/55";
+  }
+}
+
+function stockRatingLabel(rating: StockSupplierRating) {
+  switch (rating) {
+    case "excellent":
+      return "Excellent";
+    case "good":
+      return "Good";
+    case "ok":
+      return "Okay";
+    case "poor":
+      return "Poor";
+    case "do_not_use":
+      return "Do not use";
+    default:
+      return "Not rated";
+  }
+}
+
+function ratingScoreFromValue(
+  rating: StockSupplierRating,
+  score: number | null | undefined,
+) {
+  const hasSavedScore =
+    score !== null &&
+    score !== undefined &&
+    Number.isFinite(Number(score));
+
+  if (hasSavedScore) {
+    return Math.min(
+      5,
+      Math.max(1, Math.round(Number(score))),
+    );
+  }
+
+  return {
+    excellent: 5,
+    good: 4,
+    ok: 3,
+    poor: 2,
+    do_not_use: 1,
+    not_recorded: 0,
+  }[rating];
+}
+
+function StockRatingBadge({
+  rating,
+  score,
+  compact = false,
+}: {
+  rating: StockSupplierRating;
+  score?: number | null;
+  compact?: boolean;
+}) {
+  const starCount = ratingScoreFromValue(rating, score);
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-black ${stockRatingClasses(
+        rating,
+      )}`}
+    >
+      <span className="inline-flex" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => (
+          <Star
+            key={index}
+            className={`h-3.5 w-3.5 ${
+              index < starCount
+                ? "fill-current"
+                : "opacity-25"
+            }`}
+          />
+        ))}
+      </span>
+      {!compact ? stockRatingLabel(rating) : null}
+    </span>
+  );
 }
 
 function connectionClasses(connected: boolean) {
@@ -1681,6 +1822,7 @@ export default function StockSuppliersPage() {
   const [statusFilter, setStatusFilter] =
     useState("all");
   const [useFilter, setUseFilter] = useState("all");
+  const [ratingFilter, setRatingFilter] = useState("all");
   const [showFilters, setShowFilters] =
     useState(false);
   const [selectedSupplier, setSelectedSupplier] =
@@ -1958,7 +2100,19 @@ export default function StockSuppliersPage() {
       );
 
       const rows = Array.isArray(json.suppliers)
-        ? json.suppliers
+        ? json.suppliers.map((supplier) => ({
+            ...supplier,
+            stockRating:
+              supplier.stockRating || "not_recorded",
+            stockRatingScore:
+              supplier.stockRatingScore ?? null,
+            stockRatingNotes:
+              supplier.stockRatingNotes ?? null,
+            stockRatingUpdatedAt:
+              supplier.stockRatingUpdatedAt ?? null,
+            stockRatingUpdatedByName:
+              supplier.stockRatingUpdatedByName ?? null,
+          }))
         : [];
 
       setSuppliers(rows);
@@ -2133,6 +2287,9 @@ export default function StockSuppliersPage() {
         supplier.moneyManagement.supplierName,
         supplier.moneyManagement.accountReference,
         supplier.stockNotes,
+        supplier.stockRating,
+        supplier.stockRatingNotes,
+        supplier.stockRatingUpdatedByName,
       ]
         .filter(Boolean)
         .join(" ")
@@ -2216,11 +2373,19 @@ export default function StockSuppliersPage() {
         return false;
       }
 
+      if (
+        ratingFilter !== "all" &&
+        supplier.stockRating !== ratingFilter
+      ) {
+        return false;
+      }
+
       return true;
     });
   }, [
     connectionFilter,
     search,
+    ratingFilter,
     statusFilter,
     suppliers,
     useFilter,
@@ -2239,6 +2404,24 @@ export default function StockSuppliersPage() {
       eventNeedsReview:
         contact.needsReview || contact.doNotInvite,
       eventWarningAccepted: false,
+      stockRating: contact.doNotInvite
+        ? "do_not_use"
+        : contact.needsReview
+          ? "ok"
+          : "not_recorded",
+      stockRatingScore: contact.doNotInvite
+        ? "1"
+        : contact.needsReview
+          ? "3"
+          : "",
+      stockNeedsReview:
+        contact.needsReview || contact.doNotInvite,
+      ratingWarningAccepted: false,
+      stockRatingNotes: contact.doNotInvite
+        ? "Event Hub marks this contact Do not use / Do not invite."
+        : contact.needsReview
+          ? "Event Hub marks this contact as requiring review."
+          : "",
       stockNotes: contact.doNotInvite
         ? "Do not invite this contact. Review the saved Event Hub notes before using this supplier. Invitation email and checklist actions are blocked. Stock Control status: Do not use."
         : contact.needsReview
@@ -2297,6 +2480,27 @@ export default function StockSuppliersPage() {
           selected?.doNotInvite,
         ),
       eventWarningAccepted: false,
+      stockRating: selected?.doNotInvite
+        ? "do_not_use"
+        : selected?.needsReview
+          ? "ok"
+          : current.stockRating,
+      stockRatingScore: selected?.doNotInvite
+        ? "1"
+        : selected?.needsReview
+          ? "3"
+          : current.stockRatingScore,
+      stockNeedsReview: Boolean(
+        selected?.needsReview ||
+        selected?.doNotInvite ||
+        current.stockNeedsReview,
+      ),
+      ratingWarningAccepted: false,
+      stockRatingNotes: selected?.doNotInvite
+        ? "Event Hub marks this contact Do not use / Do not invite."
+        : selected?.needsReview
+          ? "Event Hub marks this contact as requiring review."
+          : current.stockRatingNotes,
       displayName:
         current.displayName ||
         selected?.organisationName ||
@@ -2399,6 +2603,15 @@ export default function StockSuppliersPage() {
           isActive: supplier.isActive,
           needsReview: supplier.needsReview,
           doNotUse: supplier.doNotUse,
+          stockRating:
+            supplier.stockRating || "not_recorded",
+          stockRatingScore:
+            supplier.stockRatingScore === null ||
+            supplier.stockRatingScore === undefined
+              ? ""
+              : String(supplier.stockRatingScore),
+          stockRatingNotes:
+            supplier.stockRatingNotes || "",
         });
         setComplianceForm({
           publicLiabilityStatus:
@@ -2598,11 +2811,24 @@ export default function StockSuppliersPage() {
       return;
     }
 
+    if (
+      profileEdit.stockRatingScore &&
+      (Number(profileEdit.stockRatingScore) < 1 ||
+        Number(profileEdit.stockRatingScore) > 5)
+    ) {
+      setWorkspaceError(
+        "Stock rating score must be between 1 and 5.",
+      );
+      return;
+    }
+
     let reason: string | null = null;
 
     if (
-      profileEdit.doNotUse &&
-      !selectedSupplier.doNotUse
+      (profileEdit.doNotUse &&
+        !selectedSupplier.doNotUse) ||
+      (profileEdit.stockRating === "do_not_use" &&
+        selectedSupplier.stockRating !== "do_not_use")
     ) {
       reason = askActionReason(
         "Mark this supplier as do not use?",
@@ -2630,6 +2856,18 @@ export default function StockSuppliersPage() {
         is_active: profileEdit.isActive,
         needs_review: profileEdit.needsReview,
         do_not_use: profileEdit.doNotUse,
+        stock_rating: profileEdit.stockRating,
+        stock_rating_score:
+          profileEdit.stockRating === "not_recorded"
+            ? null
+            : profileEdit.stockRatingScore
+              ? Number(profileEdit.stockRatingScore)
+              : ratingScoreFromValue(
+                  profileEdit.stockRating,
+                  null,
+                ),
+        stock_rating_notes:
+          profileEdit.stockRatingNotes.trim() || null,
         reason,
       },
       "The Stock Management supplier profile was updated.",
@@ -2665,6 +2903,10 @@ export default function StockSuppliersPage() {
             profileEdit.needsReview,
           do_not_use:
             profileEdit.doNotUse,
+          stock_rating:
+            profileEdit.stockRating,
+          stock_rating_score:
+            profileEdit.stockRatingScore || null,
           reason,
         },
       },
@@ -2976,6 +3218,63 @@ export default function StockSuppliersPage() {
       return;
     }
 
+    if (
+      form.stockRating !== "not_recorded" &&
+      (
+        !Number.isInteger(Number(form.stockRatingScore)) ||
+        Number(form.stockRatingScore) < 1 ||
+        Number(form.stockRatingScore) > 5
+      )
+    ) {
+      setNotice(
+        "Choose a Stock Control rating score between 1 and 5.",
+      );
+      return;
+    }
+
+    if (
+      (form.stockRating === "poor" ||
+        form.stockRating === "do_not_use") &&
+      form.stockRatingNotes.trim().length < 10
+    ) {
+      setNotice(
+        "Add review notes of at least 10 characters when the rating is Poor or Do not use.",
+      );
+      return;
+    }
+
+    if (
+      form.stockRating === "do_not_use" &&
+      !form.ratingWarningAccepted
+    ) {
+      setNotice(
+        "Tick the Stock Control Do not use confirmation before creating this supplier.",
+      );
+      return;
+    }
+
+    const detailedReviewScores = [
+      form.reviewDeliveryRating,
+      form.reviewQualityRating,
+      form.reviewCommunicationRating,
+      form.reviewValueRating,
+    ].filter(Boolean);
+
+    if (
+      form.createInitialReview &&
+      detailedReviewScores.some(
+        (value) =>
+          !Number.isInteger(Number(value)) ||
+          Number(value) < 1 ||
+          Number(value) > 5,
+      )
+    ) {
+      setNotice(
+        "Every detailed review score must be a whole number between 1 and 5.",
+      );
+      return;
+    }
+
     setCreating(true);
     setNotice("");
 
@@ -2993,14 +3292,26 @@ export default function StockSuppliersPage() {
           usualDeliveryCostPence,
         stock_notes:
           form.stockNotes.trim() || null,
+        stock_rating: form.stockRating,
+        stock_rating_score:
+          form.stockRating === "not_recorded"
+            ? null
+            : Number(form.stockRatingScore),
+        stock_rating_notes:
+          form.stockRatingNotes.trim() || null,
         event_record_type:
           form.eventRecordType.trim() || null,
         event_record_id:
           form.eventRecordId.trim() || null,
         do_not_use:
-          form.eventDoNotUse,
+          form.eventDoNotUse ||
+          form.stockRating === "do_not_use",
         needs_review:
-          form.eventNeedsReview,
+          form.eventNeedsReview ||
+          form.stockNeedsReview ||
+          form.stockRating === "ok" ||
+          form.stockRating === "poor" ||
+          form.stockRating === "do_not_use",
         money_supplier_id:
           form.moneySupplierId.trim() || null,
       };
@@ -3089,6 +3400,13 @@ export default function StockSuppliersPage() {
             createPayload.usual_delivery_cost_pence,
           inventory_item_id:
             form.stockItemId || null,
+          stock_rating: form.stockRating,
+          stock_rating_score:
+            form.stockRatingScore || null,
+          stock_needs_review:
+            form.stockNeedsReview,
+          create_initial_review:
+            form.createInitialReview,
           inventory_supplier_role:
             form.stockItemId
               ? form.stockItemRole
@@ -3238,6 +3556,69 @@ export default function StockSuppliersPage() {
         }
       }
 
+      let initialReviewWarning = "";
+
+      if (
+        form.createInitialReview &&
+        createdSupplierId
+      ) {
+        try {
+          await requestJson<Record<string, unknown>>(
+            `${API}/${createdSupplierId}/reviews`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                rating: form.stockRating,
+                delivery_rating:
+                  form.reviewDeliveryRating
+                    ? Number(form.reviewDeliveryRating)
+                    : null,
+                quality_rating:
+                  form.reviewQualityRating
+                    ? Number(form.reviewQualityRating)
+                    : null,
+                communication_rating:
+                  form.reviewCommunicationRating
+                    ? Number(form.reviewCommunicationRating)
+                    : null,
+                value_rating:
+                  form.reviewValueRating
+                    ? Number(form.reviewValueRating)
+                    : null,
+                notes:
+                  form.stockRatingNotes.trim() || null,
+              }),
+            },
+            "The supplier was created, but the first review could not be saved.",
+          );
+
+          await reportSupplierAudit({
+            action: "stock.supplier.review_created",
+            status: "success",
+            risk:
+              form.stockRating === "do_not_use"
+                ? "high"
+                : form.stockRating === "poor"
+                  ? "medium"
+                  : "low",
+            supplierId: createdSupplierId,
+            recordType: "stock_supplier_review",
+            metadata: {
+              supplier_name:
+                createPayload.display_name,
+              rating: form.stockRating,
+              rating_score:
+                createPayload.stock_rating_score,
+              created_during_supplier_setup: true,
+            },
+          });
+        } catch (reviewError) {
+          initialReviewWarning =
+            "\n\nThe supplier was created, but the first detailed review could not be saved. Open the supplier Review History tab and add it again.\n\n" +
+            formatErrorForDisplay(reviewError);
+        }
+      }
+
       setAddOpen(false);
       setForm(EMPTY_FORM);
       setNotice(
@@ -3251,7 +3632,11 @@ export default function StockSuppliersPage() {
           form.stockItemId && !inventoryLinkWarning
             ? " The selected inventory item was connected to this supplier."
             : ""
-        }${inventoryLinkWarning}`,
+        }${
+          form.createInitialReview && !initialReviewWarning
+            ? " The first Stock Control review was saved."
+            : ""
+        }${inventoryLinkWarning}${initialReviewWarning}`,
       );
 
       await Promise.all([
@@ -3358,6 +3743,7 @@ export default function StockSuppliersPage() {
             connectionFilter,
           status_filter: statusFilter,
           supplier_use_filter: useFilter,
+          stock_rating_filter: ratingFilter,
           event_hub_connected_count:
             summary.connectedToEventHub,
           money_management_connected_count:
@@ -3390,6 +3776,7 @@ export default function StockSuppliersPage() {
             connectionFilter,
           status_filter: statusFilter,
           supplier_use_filter: useFilter,
+          stock_rating_filter: ratingFilter,
         },
         error: exportError,
       });
@@ -3844,7 +4231,7 @@ export default function StockSuppliersPage() {
           </div>
 
           {showFilters ? (
-            <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:grid-cols-2 xl:grid-cols-4">
               <label>
                 <span className="mb-1.5 block text-xs font-black text-white/55">
                   Connections
@@ -3931,6 +4318,27 @@ export default function StockSuppliersPage() {
                   <option value="performer">Performer</option>
                   <option value="venue">Venue</option>
                   <option value="mixed">Mixed</option>
+                </select>
+              </label>
+
+              <label>
+                <span className="mb-1.5 block text-xs font-black text-white/55">
+                  Stock rating
+                </span>
+                <select
+                  value={ratingFilter}
+                  onChange={(event) =>
+                    setRatingFilter(event.target.value)
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-2.5 text-sm font-semibold text-white outline-none"
+                >
+                  <option value="all">All ratings</option>
+                  <option value="excellent">Excellent</option>
+                  <option value="good">Good</option>
+                  <option value="ok">Okay</option>
+                  <option value="poor">Poor</option>
+                  <option value="do_not_use">Do not use</option>
+                  <option value="not_recorded">Not rated</option>
                 </select>
               </label>
             </div>
@@ -4456,6 +4864,7 @@ export default function StockSuppliersPage() {
                     <th className="px-4 py-3">Last event</th>
                     <th className="px-4 py-3">Last order</th>
                     <th className="px-4 py-3">Money spent</th>
+                    <th className="px-4 py-3">Stock rating</th>
                     <th className="px-4 py-3">Performance</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-5 py-3 text-right">
@@ -4485,12 +4894,23 @@ export default function StockSuppliersPage() {
                         .missingReceiptCount > 0
                         ? `${supplier.moneyManagement.missingReceiptCount} missing receipt`
                         : null,
+                      supplier.stockRating === "poor"
+                        ? "Poor Stock rating"
+                        : null,
+                      supplier.stockRating === "do_not_use"
+                        ? "Stock rating: do not use"
+                        : null,
                     ].filter(Boolean);
 
                     return (
                       <tr
                         key={supplier.id}
-                        className="align-top hover:bg-white/[0.035]"
+                        className={`align-top hover:bg-white/[0.035] ${
+                          supplier.stockRating === "do_not_use" ||
+                          supplier.stockRating === "poor"
+                            ? "bg-red-500/[0.06]"
+                            : ""
+                        }`}
                       >
                         <td className="px-5 py-4">
                           <Link
@@ -4596,6 +5016,18 @@ export default function StockSuppliersPage() {
                             }{" "}
                             transactions
                           </p>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <StockRatingBadge
+                            rating={supplier.stockRating || "not_recorded"}
+                            score={supplier.stockRatingScore}
+                          />
+                          {supplier.stockRatingNotes ? (
+                            <p className="mt-2 max-w-56 line-clamp-2 text-xs text-white/45">
+                              {supplier.stockRatingNotes}
+                            </p>
+                          ) : null}
                         </td>
 
                         <td className="px-4 py-4">
@@ -4885,6 +5317,40 @@ export default function StockSuppliersPage() {
                           .openOrderCount
                       }{" "}
                       open orders
+                    </p>
+                  </div>
+
+                  <div className={`rounded-2xl border p-4 lg:col-span-2 ${stockRatingClasses(
+                    selectedSupplier.stockRating || "not_recorded",
+                  )}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide opacity-70">
+                          Stock Control rating
+                        </p>
+                        <p className="mt-2 text-lg font-black">
+                          {stockRatingLabel(
+                            selectedSupplier.stockRating || "not_recorded",
+                          )}
+                        </p>
+                      </div>
+                      <StockRatingBadge
+                        rating={selectedSupplier.stockRating || "not_recorded"}
+                        score={selectedSupplier.stockRatingScore}
+                        compact
+                      />
+                    </div>
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 opacity-80">
+                      {selectedSupplier.stockRatingNotes ||
+                        "No Stock Control rating notes recorded."}
+                    </p>
+                    <p className="mt-3 text-xs opacity-55">
+                      Last updated: {formatDate(
+                        selectedSupplier.stockRatingUpdatedAt,
+                      )}
+                      {selectedSupplier.stockRatingUpdatedByName
+                        ? ` by ${selectedSupplier.stockRatingUpdatedByName}`
+                        : ""}
                     </p>
                   </div>
 
@@ -5986,6 +6452,74 @@ export default function StockSuppliersPage() {
                           placeholder="Usual delivery cost (£)"
                           className="rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm outline-none"
                         />
+                        <select
+                          value={profileEdit.stockRating}
+                          onChange={(event) =>
+                            setProfileEdit((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    stockRating:
+                                      event.target.value as StockSupplierRating,
+                                    stockRatingScore:
+                                      String(
+                                        ratingScoreFromValue(
+                                          event.target.value as StockSupplierRating,
+                                          null,
+                                        ) || "",
+                                      ),
+                                  }
+                                : current,
+                            )
+                          }
+                          className={`rounded-xl border px-3 py-3 text-sm font-black ${stockRatingClasses(
+                            profileEdit.stockRating,
+                          )}`}
+                        >
+                          <option value="not_recorded">Not rated</option>
+                          <option value="excellent">Excellent</option>
+                          <option value="good">Good</option>
+                          <option value="ok">Okay</option>
+                          <option value="poor">Poor</option>
+                          <option value="do_not_use">Do not use</option>
+                        </select>
+                        <input
+                          value={profileEdit.stockRatingScore}
+                          onChange={(event) =>
+                            setProfileEdit((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    stockRatingScore:
+                                      event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          type="number"
+                          min="1"
+                          max="5"
+                          placeholder="Stock rating score 1-5"
+                          disabled={profileEdit.stockRating === "not_recorded"}
+                          className="rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm outline-none disabled:opacity-40"
+                        />
+                        <textarea
+                          value={profileEdit.stockRatingNotes}
+                          onChange={(event) =>
+                            setProfileEdit((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    stockRatingNotes:
+                                      event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          placeholder="Why this Stock Control rating was given"
+                          className="min-h-24 rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm outline-none md:col-span-2"
+                        />
+
                         <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3 text-sm">
                           <input
                             type="checkbox"
@@ -7145,6 +7679,244 @@ export default function StockSuppliersPage() {
               ) : null}
             </div>
 
+            <div
+              className={`mt-4 rounded-2xl border p-4 ${
+                form.stockRating === "do_not_use"
+                  ? "border-red-300/25 bg-red-500/[0.12]"
+                  : form.stockRating === "poor"
+                    ? "border-orange-300/25 bg-orange-500/[0.10]"
+                    : "border-amber-300/20 bg-amber-500/[0.07]"
+              }`}
+            >
+              <h3 className="flex items-center gap-2 font-black text-amber-50">
+                <Star className="h-4 w-4" />
+                Set up Stock Control review
+              </h3>
+
+              <p className="mt-1 text-xs leading-5 text-white/60">
+                Set the supplier rating now so the supplier card, filters and
+                ordering warnings are correct from the moment it is created.
+              </p>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label>
+                  <span className="mb-1.5 block text-xs font-black text-white/55">
+                    Overall Stock Control rating
+                  </span>
+                  <select
+                    value={form.stockRating}
+                    onChange={(event) => {
+                      const rating =
+                        event.target.value as StockSupplierRating;
+                      const score = ratingScoreFromValue(rating, null);
+
+                      setForm((current) => ({
+                        ...current,
+                        stockRating: rating,
+                        stockRatingScore:
+                          rating === "not_recorded"
+                            ? ""
+                            : String(score),
+                        stockNeedsReview:
+                          rating === "ok" ||
+                          rating === "poor" ||
+                          rating === "do_not_use"
+                            ? true
+                            : current.stockNeedsReview,
+                        ratingWarningAccepted:
+                          rating === "do_not_use"
+                            ? false
+                            : current.ratingWarningAccepted,
+                      }));
+                    }}
+                    className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-3 text-sm font-semibold text-white outline-none focus:border-amber-300/40"
+                  >
+                    <option value="not_recorded">Not rated yet</option>
+                    <option value="excellent">Excellent — 5 stars</option>
+                    <option value="good">Good — 4 stars</option>
+                    <option value="ok">Okay — 3 stars</option>
+                    <option value="poor">Poor — 2 stars</option>
+                    <option value="do_not_use">Do not use — 1 star</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span className="mb-1.5 block text-xs font-black text-white/55">
+                    Star score — updates automatically
+                  </span>
+                  <select
+                    value={form.stockRatingScore}
+                    disabled={
+                      form.stockRating === "not_recorded"
+                    }
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        stockRatingScore:
+                          event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-3 text-sm font-semibold text-white outline-none focus:border-amber-300/40 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <option value="">Choose score</option>
+                    <option value="5">★★★★★ — 5</option>
+                    <option value="4">★★★★☆ — 4</option>
+                    <option value="3">★★★☆☆ — 3</option>
+                    <option value="2">★★☆☆☆ — 2</option>
+                    <option value="1">★☆☆☆☆ — 1</option>
+                  </select>
+                </label>
+              </div>
+
+              {form.stockRating !== "not_recorded" ? (
+                <div className="mt-3">
+                  <StockRatingBadge
+                    rating={form.stockRating}
+                    score={Number(form.stockRatingScore) || null}
+                  />
+                </div>
+              ) : null}
+
+              <label className="mt-4 block">
+                <span className="mb-1.5 block text-xs font-black text-white/55">
+                  Review notes
+                </span>
+                <textarea
+                  rows={3}
+                  value={form.stockRatingNotes}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      stockRatingNotes: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm font-semibold text-white outline-none focus:border-amber-300/40"
+                  placeholder="Explain delivery, quality, communication, value or why this supplier needs review..."
+                />
+              </label>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                  <input
+                    type="checkbox"
+                    checked={form.stockNeedsReview}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        stockNeedsReview:
+                          event.target.checked,
+                      }))
+                    }
+                    className="mt-0.5 h-4 w-4 accent-amber-400"
+                  />
+                  <span>
+                    <span className="block text-sm font-black text-white/80">
+                      Mark as Needs review
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-white/45">
+                      Shows an amber warning before ordering.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                  <input
+                    type="checkbox"
+                    checked={form.createInitialReview}
+                    disabled={form.stockRating === "not_recorded"}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        createInitialReview:
+                          event.target.checked,
+                      }))
+                    }
+                    className="mt-0.5 h-4 w-4 accent-cyan-400"
+                  />
+                  <span>
+                    <span className="block text-sm font-black text-white/80">
+                      Save first review in history
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-white/45">
+                      Creates a dated review entry after the supplier is saved.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              {form.createInitialReview ? (
+                <div className="mt-4 rounded-xl border border-cyan-300/15 bg-cyan-500/[0.06] p-4">
+                  <p className="text-sm font-black text-cyan-100">
+                    Detailed first review scores
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-white/45">
+                    Optional. Leave a score blank when it has not been checked yet.
+                  </p>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {[
+                      ["Delivery", "reviewDeliveryRating"],
+                      ["Quality", "reviewQualityRating"],
+                      ["Communication", "reviewCommunicationRating"],
+                      ["Value for money", "reviewValueRating"],
+                    ].map(([label, field]) => (
+                      <label key={field}>
+                        <span className="mb-1.5 block text-xs font-black text-white/55">
+                          {label}
+                        </span>
+                        <select
+                          value={
+                            form[
+                              field as
+                                | "reviewDeliveryRating"
+                                | "reviewQualityRating"
+                                | "reviewCommunicationRating"
+                                | "reviewValueRating"
+                            ]
+                          }
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              [field]: event.target.value,
+                            }))
+                          }
+                          className="w-full rounded-xl border border-white/10 bg-[#171020] px-3 py-2.5 text-sm font-semibold text-white outline-none"
+                        >
+                          <option value="">Not checked</option>
+                          <option value="5">5 — Excellent</option>
+                          <option value="4">4 — Good</option>
+                          <option value="3">3 — Okay</option>
+                          <option value="2">2 — Poor</option>
+                          <option value="1">1 — Very poor</option>
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {form.stockRating === "do_not_use" ? (
+                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-red-300/20 bg-red-500/10 p-4">
+                  <input
+                    type="checkbox"
+                    checked={form.ratingWarningAccepted}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        ratingWarningAccepted:
+                          event.target.checked,
+                      }))
+                    }
+                    className="mt-0.5 h-4 w-4 accent-red-400"
+                  />
+                  <span className="text-xs font-bold leading-5 text-red-50/80">
+                    I understand this rating will mark the supplier Do not use,
+                    Needs review and show a red warning across Stock Control.
+                  </span>
+                </label>
+              ) : null}
+            </div>
+
             <label className="mt-4 block">
               <span className="mb-1.5 block text-xs font-black text-white/55">
                 Stock Management notes
@@ -7178,7 +7950,9 @@ export default function StockSuppliersPage() {
                 disabled={
                     creating ||
                     (form.eventDoNotUse &&
-                      !form.eventWarningAccepted)
+                      !form.eventWarningAccepted) ||
+                    (form.stockRating === "do_not_use" &&
+                      !form.ratingWarningAccepted)
                   }
                 className="inline-flex items-center gap-2 rounded-xl bg-cyan-300 px-5 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-200 disabled:opacity-50"
               >
