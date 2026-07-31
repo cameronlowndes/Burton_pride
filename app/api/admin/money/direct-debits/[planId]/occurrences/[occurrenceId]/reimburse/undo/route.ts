@@ -27,6 +27,13 @@ type AdminIdentity = {
   role: string | null;
 };
 
+type DatabaseErrorLike = {
+  message?: string | null;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+};
+
 function json(
   body: JsonRecord,
   status = 200,
@@ -60,14 +67,21 @@ function isUuid(value: string): boolean {
 }
 
 function asBoolean(value: unknown): boolean {
-  return (
-    value === true ||
-    value === "true" ||
-    value === 1 ||
-    value === "1" ||
-    value === "yes" ||
-    value === "on"
-  );
+  if (typeof value === "boolean") return value;
+
+  const normalised = cleanText(value).toLowerCase();
+
+  return ["true", "1", "yes", "on"].includes(normalised);
+}
+
+function asSafePence(value: unknown): number {
+  const parsed = Number(value ?? 0);
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+
+  return Math.round(parsed);
 }
 
 async function readBody(
@@ -89,14 +103,17 @@ function getAdminIdentity(
       request.cookies.get("burton_admin_id")?.value?.trim() ||
       request.headers.get("x-admin-id")?.trim() ||
       null,
+
     name:
       request.cookies.get("burton_admin_name")?.value?.trim() ||
       request.headers.get("x-admin-name")?.trim() ||
       null,
+
     email:
       request.cookies.get("burton_admin_email")?.value?.trim() ||
       request.headers.get("x-admin-email")?.trim() ||
       null,
+
     role:
       request.cookies.get("burton_admin_role")?.value?.trim() ||
       request.headers.get("x-admin-role")?.trim() ||
@@ -107,7 +124,8 @@ function getAdminIdentity(
 function getRequestIp(
   request: NextRequest,
 ): string | null {
-  const forwardedFor = request.headers.get("x-forwarded-for");
+  const forwardedFor =
+    request.headers.get("x-forwarded-for");
 
   if (forwardedFor) {
     return forwardedFor.split(",")[0]?.trim() || null;
@@ -121,19 +139,17 @@ function getRequestIp(
 }
 
 function databaseError(
-  error: {
-    message?: string | null;
-    code?: string | null;
-    details?: string | null;
-    hint?: string | null;
-  },
+  error: DatabaseErrorLike,
   fallback: string,
   status = 500,
 ) {
   const code = cleanText(error.code);
+
   let resolvedStatus = status;
 
-  if (code === "23505") resolvedStatus = 409;
+  if (code === "23505") {
+    resolvedStatus = 409;
+  }
 
   if (
     code === "23503" ||
@@ -153,7 +169,7 @@ function databaseError(
       hint:
         cleanText(error.hint) ||
         (code === "PGRST204" || code === "42703"
-          ? "Check that the reimbursement and Personal Funds columns exist, then reload the Supabase schema cache."
+          ? "Check that the Direct Debit reimbursement columns exist, then reload the Supabase schema cache."
           : null),
       endpoint:
         "/api/admin/money/direct-debits/[planId]/occurrences/[occurrenceId]/reimburse/undo",
@@ -172,6 +188,7 @@ async function writeAuditLog(args: {
   amountPence: number;
   reason: string;
   repaymentTransactionDeleted: boolean;
+  alreadyUndone: boolean;
   status: "success" | "failed";
   errorMessage?: string;
 }): Promise<void> {
@@ -180,14 +197,17 @@ async function writeAuditLog(args: {
       args.status === "success"
         ? "money.direct_debit.person_reimbursement_undone"
         : "money.direct_debit.person_reimbursement_undo_failed",
+
     action_label:
       args.status === "success"
         ? "Personal Direct Debit repayment undone"
         : "Personal Direct Debit repayment undo failed",
+
     module: "money_management",
     area: "direct_debits",
     status: args.status,
     risk_level: "high",
+
     admin_id: args.admin.id,
     admin_name:
       args.admin.name ||
@@ -195,29 +215,38 @@ async function writeAuditLog(args: {
       "Unknown admin",
     admin_email: args.admin.email,
     admin_role: args.admin.role,
-    record_type: "money_direct_debit_occurrence",
+
+    record_type:
+      "money_direct_debit_occurrence",
     record_id: args.occurrenceId,
+
     description:
       args.status === "success"
         ? `Undid a Direct Debit personal repayment of £${(
             args.amountPence / 100
           ).toFixed(2)}.`
         : "Failed to undo a Direct Debit personal repayment.",
+
     metadata: {
       plan_id: args.planId,
       occurrence_id: args.occurrenceId,
-      original_transaction_id: args.originalTransactionId,
-      repayment_transaction_id: args.repaymentTransactionId,
+      original_transaction_id:
+        args.originalTransactionId,
+      repayment_transaction_id:
+        args.repaymentTransactionId,
       amount_pence: args.amountPence,
       reason: args.reason,
       repayment_transaction_deleted:
         args.repaymentTransactionDeleted,
+      already_undone: args.alreadyUndone,
       error_message: args.errorMessage || null,
       request_method: args.request.method,
       request_path: args.request.nextUrl.pathname,
     },
+
     ip_address: getRequestIp(args.request),
-    user_agent: args.request.headers.get("user-agent"),
+    user_agent:
+      args.request.headers.get("user-agent"),
     created_at: new Date().toISOString(),
   };
 
@@ -237,11 +266,77 @@ async function writeAuditLog(args: {
   }
 }
 
+async function restoreOccurrenceToReimbursed(args: {
+  occurrenceId: string;
+  planId: string;
+  repaymentTransactionId: string | null;
+  occurrence: JsonRecord;
+  now: string;
+}) {
+  await supabaseAdmin
+    .from(OCCURRENCES_TABLE)
+    .update({
+      reimbursement_status: "reimbursed",
+      reimbursement_transaction_id:
+        args.repaymentTransactionId,
+      reimbursement_payment_method:
+        args.occurrence.reimbursement_payment_method ??
+        null,
+      reimbursement_amount_pence:
+        args.occurrence.reimbursement_amount_pence ??
+        args.occurrence.amount_pence ??
+        null,
+      reimbursement_notes:
+        args.occurrence.reimbursement_notes ?? null,
+      reimbursed_at:
+        args.occurrence.reimbursed_at ?? args.now,
+      reimbursement_recorded_by:
+        args.occurrence.reimbursement_recorded_by ??
+        null,
+      updated_at: args.now,
+    })
+    .eq("id", args.occurrenceId)
+    .eq("plan_id", args.planId);
+}
+
+async function restoreOriginalTransactionToReimbursed(args: {
+  originalTransactionId: string | null;
+  occurrence: JsonRecord;
+  now: string;
+}) {
+  if (
+    !args.originalTransactionId ||
+    !isUuid(args.originalTransactionId)
+  ) {
+    return;
+  }
+
+  /*
+   * Do not write reimbursement_id here.
+   *
+   * money_transactions.reimbursement_id belongs to the separate
+   * money_personal_fund_reimbursements foreign key and cannot contain another
+   * money_transactions ID.
+   */
+  await supabaseAdmin
+    .from(TRANSACTIONS_TABLE)
+    .update({
+      personal_funds_repaid: true,
+      personal_funds_repaid_at:
+        args.occurrence.reimbursed_at ?? args.now,
+      reimbursement_status: "reimbursed",
+      updated_at: args.now,
+    })
+    .eq("id", args.originalTransactionId);
+}
+
 export async function POST(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const { planId, occurrenceId } = await context.params;
+  const { planId, occurrenceId } =
+    await context.params;
+
   const admin = getAdminIdentity(request);
 
   if (!isUuid(planId)) {
@@ -249,7 +344,8 @@ export async function POST(
       {
         success: false,
         error: "INVALID_PLAN_ID",
-        message: "The Direct Debit plan ID is invalid.",
+        message:
+          "The Direct Debit plan ID is invalid.",
         field: "planId",
       },
       400,
@@ -261,7 +357,8 @@ export async function POST(
       {
         success: false,
         error: "INVALID_OCCURRENCE_ID",
-        message: "The Direct Debit occurrence ID is invalid.",
+        message:
+          "The Direct Debit occurrence ID is invalid.",
         field: "occurrenceId",
       },
       400,
@@ -269,11 +366,15 @@ export async function POST(
   }
 
   const body = await readBody(request);
+
   const reason = cleanText(body.reason);
+
   const deleteRepaymentTransaction =
     body.delete_repayment_transaction === undefined
       ? true
-      : asBoolean(body.delete_repayment_transaction);
+      : asBoolean(
+          body.delete_repayment_transaction,
+        );
 
   if (!reason) {
     return json(
@@ -288,19 +389,43 @@ export async function POST(
     );
   }
 
-  const {
-    data: plan,
-    error: planError,
-  } = await supabaseAdmin
-    .from(PLANS_TABLE)
-    .select("id,title,account_source,account_holder")
-    .eq("id", planId)
-    .maybeSingle();
+  const [
+    {
+      data: plan,
+      error: planError,
+    },
+    {
+      data: occurrence,
+      error: occurrenceError,
+    },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from(PLANS_TABLE)
+      .select(
+        "id,title,account_source,account_holder",
+      )
+      .eq("id", planId)
+      .maybeSingle(),
+
+    supabaseAdmin
+      .from(OCCURRENCES_TABLE)
+      .select("*")
+      .eq("id", occurrenceId)
+      .eq("plan_id", planId)
+      .maybeSingle(),
+  ]);
 
   if (planError) {
     return databaseError(
       planError,
       "The Direct Debit plan could not be loaded.",
+    );
+  }
+
+  if (occurrenceError) {
+    return databaseError(
+      occurrenceError,
+      "The Direct Debit payment could not be loaded.",
     );
   }
 
@@ -316,35 +441,6 @@ export async function POST(
     );
   }
 
-  if (cleanText(plan.account_source) !== "personal") {
-    return json(
-      {
-        success: false,
-        error: "NOT_PERSONAL_DIRECT_DEBIT",
-        message:
-          "Only a Direct Debit paid from a personal account can have its repayment undone.",
-      },
-      409,
-    );
-  }
-
-  const {
-    data: occurrence,
-    error: occurrenceError,
-  } = await supabaseAdmin
-    .from(OCCURRENCES_TABLE)
-    .select("*")
-    .eq("id", occurrenceId)
-    .eq("plan_id", planId)
-    .maybeSingle();
-
-  if (occurrenceError) {
-    return databaseError(
-      occurrenceError,
-      "The Direct Debit payment could not be loaded.",
-    );
-  }
-
   if (!occurrence) {
     return json(
       {
@@ -357,9 +453,109 @@ export async function POST(
     );
   }
 
-  const reimbursementStatus = cleanText(
-    occurrence.reimbursement_status,
-  ).toLowerCase();
+  const planRow = plan as JsonRecord;
+  const occurrenceRow = occurrence as JsonRecord;
+
+  if (
+    cleanText(
+      planRow.account_source,
+    ).toLowerCase() !== "personal"
+  ) {
+    return json(
+      {
+        success: false,
+        error: "NOT_PERSONAL_DIRECT_DEBIT",
+        message:
+          "Only a Direct Debit paid from a personal account can have its repayment undone.",
+      },
+      409,
+    );
+  }
+
+  const reimbursementStatus =
+    cleanText(
+      occurrenceRow.reimbursement_status,
+    ).toLowerCase();
+
+  const originalTransactionId =
+    cleanText(
+      occurrenceRow.transaction_id,
+    ) || null;
+
+  const repaymentTransactionId =
+    cleanText(
+      occurrenceRow.reimbursement_transaction_id,
+    ) || null;
+
+  const amountPence = asSafePence(
+    occurrenceRow.reimbursement_amount_pence ??
+      occurrenceRow.amount_pence,
+  );
+
+  /*
+   * Idempotent recovery:
+   *
+   * A previous request may have cleared the occurrence but failed afterwards.
+   * Treat that as already undone rather than returning HTTP 409.
+   */
+  if (
+    reimbursementStatus !== "reimbursed" &&
+    !repaymentTransactionId
+  ) {
+    if (
+      originalTransactionId &&
+      isUuid(originalTransactionId)
+    ) {
+      const {
+        error: originalResetError,
+      } = await supabaseAdmin
+        .from(TRANSACTIONS_TABLE)
+        .update({
+          personal_funds_repaid: false,
+          personal_funds_repaid_at: null,
+          reimbursement_status:
+            "awaiting_reimbursement",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", originalTransactionId);
+
+      if (originalResetError) {
+        return databaseError(
+          originalResetError,
+          "The repayment was already undone, but the original Money Tracker transaction could not be reset.",
+        );
+      }
+    }
+
+    await writeAuditLog({
+      request,
+      admin,
+      planId,
+      occurrenceId,
+      originalTransactionId,
+      repaymentTransactionId,
+      amountPence,
+      reason,
+      repaymentTransactionDeleted: false,
+      alreadyUndone: true,
+      status: "success",
+    });
+
+    return json({
+      success: true,
+      already_undone: true,
+      message:
+        "The personal repayment had already been undone.",
+      plan_id: planId,
+      occurrence_id: occurrenceId,
+      original_transaction_id:
+        originalTransactionId,
+      repayment_transaction_id:
+        repaymentTransactionId,
+      repayment_transaction_deleted: false,
+      occurrence: occurrenceRow,
+    });
+  }
 
   if (reimbursementStatus !== "reimbursed") {
     return json(
@@ -368,111 +564,38 @@ export async function POST(
         error: "REPAYMENT_NOT_RECORDED",
         message:
           "This Direct Debit payment is not currently marked as reimbursed.",
-        occurrence,
+        occurrence: occurrenceRow,
       },
       409,
     );
   }
 
-  const originalTransactionId = cleanText(
-    occurrence.transaction_id,
-  ) || null;
-
-  const repaymentTransactionId = cleanText(
-    occurrence.reimbursement_transaction_id,
-  ) || null;
-
-  const amountPence = Number(
-    occurrence.reimbursement_amount_pence ||
-      occurrence.amount_pence ||
-      0,
-  );
-
   const now = new Date().toISOString();
+
   let repaymentTransactionDeleted = false;
+  let occurrenceWasCleared = false;
+  let originalTransactionWasReset = false;
 
   try {
     /*
-     * First restore the original Personal Funds transaction so the Money
-     * Tracker immediately shows repayment due again.
+     * Step 1: clear the occurrence link first.
+     *
+     * This is essential because reimbursement_transaction_id may have a
+     * foreign key to the repayment transaction. Deleting the transaction
+     * before clearing this link can fail with code 23503.
      */
-    if (originalTransactionId && isUuid(originalTransactionId)) {
-      const {
-        error: originalTransactionError,
-      } = await supabaseAdmin
-        .from(TRANSACTIONS_TABLE)
-        .update({
-          personal_funds_repaid: false,
-          personal_funds_repaid_at: null,
-          reimbursement_status: "awaiting_reimbursement",
-          reimbursement_id: null,
-          updated_at: now,
-        })
-        .eq("id", originalTransactionId);
-
-      if (originalTransactionError) {
-        return databaseError(
-          originalTransactionError,
-          "The linked Money Tracker transaction could not be returned to awaiting repayment.",
-        );
-      }
-    }
-
-    /*
-     * Remove the separate repayment transaction when it is a real linked
-     * Money Transaction UUID and the admin selected that option.
-     */
-    if (
-      deleteRepaymentTransaction &&
-      repaymentTransactionId &&
-      isUuid(repaymentTransactionId)
-    ) {
-      const {
-        error: deleteTransactionError,
-      } = await supabaseAdmin
-        .from(TRANSACTIONS_TABLE)
-        .delete()
-        .eq("id", repaymentTransactionId);
-
-      if (deleteTransactionError) {
-        /*
-         * Restore the original transaction before returning, preventing the
-         * Money Tracker and occurrence from disagreeing.
-         */
-        if (originalTransactionId && isUuid(originalTransactionId)) {
-          await supabaseAdmin
-            .from(TRANSACTIONS_TABLE)
-            .update({
-              personal_funds_repaid: true,
-              personal_funds_repaid_at:
-                occurrence.reimbursed_at || now,
-              reimbursement_status: "reimbursed",
-              reimbursement_id: repaymentTransactionId,
-              updated_at: now,
-            })
-            .eq("id", originalTransactionId);
-        }
-
-        return databaseError(
-          deleteTransactionError,
-          "The linked repayment transaction could not be removed.",
-        );
-      }
-
-      repaymentTransactionDeleted = true;
-    }
-
     const {
       data: updatedOccurrence,
       error: updateOccurrenceError,
     } = await supabaseAdmin
       .from(OCCURRENCES_TABLE)
       .update({
-        reimbursement_status: "awaiting_reimbursement",
+        reimbursement_status:
+          "awaiting_reimbursement",
         reimbursement_transaction_id: null,
         reimbursement_payment_method: null,
         reimbursement_amount_pence: null,
-        reimbursement_notes: null,
+        reimbursement_notes: reason,
         reimbursed_at: null,
         reimbursement_recorded_by: null,
         updated_at: now,
@@ -483,27 +606,200 @@ export async function POST(
       .single();
 
     if (updateOccurrenceError) {
-      /*
-       * Best-effort restoration if clearing the occurrence fails.
-       */
-      if (originalTransactionId && isUuid(originalTransactionId)) {
-        await supabaseAdmin
-          .from(TRANSACTIONS_TABLE)
-          .update({
-            personal_funds_repaid: true,
-            personal_funds_repaid_at:
-              occurrence.reimbursed_at || now,
-            reimbursement_status: "reimbursed",
-            reimbursement_id: repaymentTransactionId,
-            updated_at: now,
-          })
-          .eq("id", originalTransactionId);
-      }
-
       return databaseError(
         updateOccurrenceError,
-        "The repayment could not be undone on the Direct Debit payment.",
+        "The repayment could not be reset on the Direct Debit payment.",
       );
+    }
+
+    occurrenceWasCleared = true;
+
+    /*
+     * Step 2: restore the original personal-funds transaction to awaiting
+     * repayment.
+     *
+     * reimbursement_id is deliberately not touched because it belongs to
+     * money_personal_fund_reimbursements, not money_transactions.
+     */
+    if (
+      originalTransactionId &&
+      isUuid(originalTransactionId)
+    ) {
+      const {
+        error: originalTransactionError,
+      } = await supabaseAdmin
+        .from(TRANSACTIONS_TABLE)
+        .update({
+          personal_funds_repaid: false,
+          personal_funds_repaid_at: null,
+          reimbursement_status:
+            "awaiting_reimbursement",
+          updated_at: now,
+        })
+        .eq("id", originalTransactionId);
+
+      if (originalTransactionError) {
+        await restoreOccurrenceToReimbursed({
+          occurrenceId,
+          planId,
+          repaymentTransactionId,
+          occurrence: occurrenceRow,
+          now,
+        });
+
+        return databaseError(
+          originalTransactionError,
+          "The Direct Debit repayment was reset, but the original Money Tracker transaction could not be returned to awaiting repayment.",
+        );
+      }
+
+      originalTransactionWasReset = true;
+    }
+
+    /*
+     * Step 3: remove received-payment proof attachments from the original
+     * Personal Funds transaction. These are identified by the prefix used by
+     * the reimbursement route.
+     */
+    if (
+      originalTransactionId &&
+      isUuid(originalTransactionId)
+    ) {
+      const {
+        data: repaymentProofAttachments,
+        error: proofLookupError,
+      } = await supabaseAdmin
+        .from("money_transaction_attachments")
+        .select("id,file_url,file_name")
+        .eq("transaction_id", originalTransactionId)
+        .ilike("file_name", "Repayment proof - %");
+
+      if (proofLookupError) {
+        await restoreOriginalTransactionToReimbursed({
+          originalTransactionId,
+          occurrence: occurrenceRow,
+          now,
+        });
+
+        await restoreOccurrenceToReimbursed({
+          occurrenceId,
+          planId,
+          repaymentTransactionId,
+          occurrence: occurrenceRow,
+          now,
+        });
+
+        return databaseError(
+          proofLookupError,
+          "The repayment was reset, but its received-payment proof could not be loaded for removal.",
+        );
+      }
+
+      if (
+        Array.isArray(repaymentProofAttachments) &&
+        repaymentProofAttachments.length > 0
+      ) {
+        const attachmentIds = repaymentProofAttachments
+          .map((attachment) => cleanText(attachment.id))
+          .filter(Boolean);
+
+        if (attachmentIds.length > 0) {
+          const {
+            error: proofDeleteError,
+          } = await supabaseAdmin
+            .from("money_transaction_attachments")
+            .delete()
+            .in("id", attachmentIds);
+
+          if (proofDeleteError) {
+            await restoreOriginalTransactionToReimbursed({
+              originalTransactionId,
+              occurrence: occurrenceRow,
+              now,
+            });
+
+            await restoreOccurrenceToReimbursed({
+              occurrenceId,
+              planId,
+              repaymentTransactionId,
+              occurrence: occurrenceRow,
+              now,
+            });
+
+            return databaseError(
+              proofDeleteError,
+              "The repayment was reset, but its received-payment proof attachment could not be removed.",
+            );
+          }
+        }
+
+        const storagePaths = repaymentProofAttachments
+          .map((attachment) => {
+            const fileUrl = cleanText(attachment.file_url);
+            const marker = "/money-invoices/";
+
+            if (!fileUrl.includes(marker)) return "";
+
+            return decodeURIComponent(
+              fileUrl.split(marker)[1] || "",
+            );
+          })
+          .filter(Boolean);
+
+        if (storagePaths.length > 0) {
+          await supabaseAdmin.storage
+            .from("money-invoices")
+            .remove(storagePaths);
+        }
+      }
+    }
+
+    /*
+     * Step 4: delete the separate Burton Pride repayment transaction only
+     * after all links to it have been released.
+     */
+    if (
+      deleteRepaymentTransaction &&
+      repaymentTransactionId &&
+      isUuid(repaymentTransactionId)
+    ) {
+      const {
+        data: deletedRows,
+        error: deleteTransactionError,
+      } = await supabaseAdmin
+        .from(TRANSACTIONS_TABLE)
+        .delete()
+        .eq("id", repaymentTransactionId)
+        .select("id");
+
+      if (deleteTransactionError) {
+        if (originalTransactionWasReset) {
+          await restoreOriginalTransactionToReimbursed({
+            originalTransactionId,
+            occurrence: occurrenceRow,
+            now,
+          });
+        }
+
+        if (occurrenceWasCleared) {
+          await restoreOccurrenceToReimbursed({
+            occurrenceId,
+            planId,
+            repaymentTransactionId,
+            occurrence: occurrenceRow,
+            now,
+          });
+        }
+
+        return databaseError(
+          deleteTransactionError,
+          "The repayment was reset, but the linked Burton Pride repayment transaction could not be removed.",
+        );
+      }
+
+      repaymentTransactionDeleted =
+        Array.isArray(deletedRows) &&
+        deletedRows.length > 0;
     }
 
     await writeAuditLog({
@@ -516,28 +812,53 @@ export async function POST(
       amountPence,
       reason,
       repaymentTransactionDeleted,
+      alreadyUndone: false,
       status: "success",
     });
 
     return json({
       success: true,
+
       message:
-        `The £${(amountPence / 100).toFixed(
-          2,
-        )} repayment was undone and is awaiting repayment again.`,
+        deleteRepaymentTransaction
+          ? `The £${(
+              amountPence / 100
+            ).toFixed(
+              2,
+            )} repayment was undone and its linked Burton Pride repayment transaction was removed.`
+          : `The £${(
+              amountPence / 100
+            ).toFixed(
+              2,
+            )} repayment was undone and is awaiting repayment again.`,
+
       plan_id: planId,
       occurrence_id: occurrenceId,
-      original_transaction_id: originalTransactionId,
-      repayment_transaction_id: repaymentTransactionId,
+
+      original_transaction_id:
+        originalTransactionId,
+
+      repayment_transaction_id:
+        repaymentTransactionId,
+
       repayment_transaction_deleted:
         repaymentTransactionDeleted,
+
       reason,
       occurrence: updatedOccurrence,
+
       reimbursement: {
         status: "awaiting_reimbursement",
         amount_pence: amountPence,
         amount: amountPence / 100,
       },
+
+      next_action: {
+        can_undo_direct_debit_payment: true,
+        message:
+          "The personal repayment has been removed. The original Direct Debit payment can now be undone.",
+      },
+
       endpoint:
         "/api/admin/money/direct-debits/[planId]/occurrences/[occurrenceId]/reimburse/undo",
     });
@@ -545,7 +866,10 @@ export async function POST(
     const message =
       error instanceof Error
         ? error.message
-        : "An unknown server error occurred.";
+        : isRecord(error)
+          ? cleanText(error.message) ||
+            "An unknown server error occurred."
+          : "An unknown server error occurred.";
 
     console.error(
       "Direct Debit repayment undo failed",
@@ -555,6 +879,28 @@ export async function POST(
         error,
       },
     );
+
+    /*
+     * Best-effort recovery if an unexpected error happened after state was
+     * changed.
+     */
+    if (originalTransactionWasReset) {
+      await restoreOriginalTransactionToReimbursed({
+        originalTransactionId,
+        occurrence: occurrenceRow,
+        now,
+      });
+    }
+
+    if (occurrenceWasCleared) {
+      await restoreOccurrenceToReimbursed({
+        occurrenceId,
+        planId,
+        repaymentTransactionId,
+        occurrence: occurrenceRow,
+        now,
+      });
+    }
 
     await writeAuditLog({
       request,
@@ -566,9 +912,17 @@ export async function POST(
       amountPence,
       reason,
       repaymentTransactionDeleted,
+      alreadyUndone: false,
       status: "failed",
       errorMessage: message,
     });
+
+    if (isRecord(error)) {
+      return databaseError(
+        error as DatabaseErrorLike,
+        "The Direct Debit repayment could not be undone.",
+      );
+    }
 
     return json(
       {
@@ -577,8 +931,8 @@ export async function POST(
         message:
           "The Direct Debit repayment could not be undone.",
         reason: message,
-        planId,
-        occurrenceId,
+        plan_id: planId,
+        occurrence_id: occurrenceId,
       },
       500,
     );

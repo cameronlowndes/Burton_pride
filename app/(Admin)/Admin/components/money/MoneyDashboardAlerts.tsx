@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Banknote,
@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 
+import type { LucideIcon } from "lucide-react";
 import type { Transaction } from "@/lib/money/types";
 
 type SponsorBreakdown = {
@@ -45,10 +46,17 @@ type FailedCsvRow = {
   error?: string | null;
   reason?: string | null;
   message?: string | null;
-  raw?: any;
+  raw?: unknown;
 };
 
 type MoneyFilter = "all" | "income" | "expense" | "sponsorship" | "personal";
+
+export type MoneyAlertFilter =
+  | "unchecked"
+  | "missing_receipt"
+  | "receipt_overdue"
+  | "personal_funds_unpaid"
+  | "bank_unreconciled";
 
 type AlertKey =
   | "unchecked"
@@ -66,6 +74,7 @@ type Props = {
   failedCsvRows?: FailedCsvRow[];
   onSetFilter?: (filter: MoneyFilter) => void;
   onSetSearchTerm?: (term: string) => void;
+  onSetAlertFilter?: (filter: MoneyAlertFilter | null) => void;
 
   /**
    * Receipt expiry/check reminder.
@@ -88,57 +97,65 @@ type DashboardAlert = {
   message: string;
   count: number;
   tone: "red" | "amber" | "sky" | "purple" | "emerald";
-  icon: any;
+  icon: LucideIcon;
   actionLabel: string;
   filter: MoneyFilter;
   searchTerm: string;
+  alertFilter?: MoneyAlertFilter;
+  canFilterTransactions: boolean;
 };
 
 const DEFAULT_RECEIPT_REMINDER_DAYS = 7;
 
-function money(value: number | null | undefined) {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format((Number(value) || 0) / 100);
-}
-
 function cleanText(value: unknown) {
-  return String(value || "").trim();
-}
-
-function getDetailedErrorMessage(error: unknown) {
-  if (!error) {
-    return "Unknown error: no error details were returned.";
-  }
-
-  if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "Unknown error: could not read error details.";
-  }
+  return value === null || value === undefined ? "" : String(value).trim();
 }
 
 function lower(value: unknown) {
   return cleanText(value).toLowerCase();
 }
 
+function finiteNumber(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function money(value: unknown) {
+  const pence = Number(value);
+  if (!Number.isFinite(pence)) return "Invalid amount";
+
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(pence / 100);
+}
+
+function readBoolean(value: unknown) {
+  if (value === true || value === 1) return true;
+  const normalised = lower(value);
+  return normalised === "true" || normalised === "1" || normalised === "yes";
+}
+
+function parseDate(value: unknown) {
+  const text = cleanText(value);
+  if (!text) return null;
+
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function safeDate(value: unknown) {
-  const cleanValue = cleanText(value);
-
-  if (!cleanValue) return "No date";
-
-  const date = new Date(cleanValue);
-
-  if (Number.isNaN(date.getTime())) return cleanValue;
+  const text = cleanText(value);
+  if (!text) return "No date";
+  const date = parseDate(text);
+  if (!date) return text;
 
   return date.toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -148,13 +165,10 @@ function safeDate(value: unknown) {
 }
 
 function safeDateTime(value: unknown) {
-  const cleanValue = cleanText(value);
-
-  if (!cleanValue) return "No date";
-
-  const date = new Date(cleanValue);
-
-  if (Number.isNaN(date.getTime())) return cleanValue;
+  const text = cleanText(value);
+  if (!text) return "No date";
+  const date = parseDate(text);
+  if (!date) return text;
 
   return date.toLocaleString("en-GB", {
     day: "2-digit",
@@ -165,254 +179,56 @@ function safeDateTime(value: unknown) {
   });
 }
 
-function transactionId(transaction: Transaction) {
-  return cleanText((transaction as any).id);
+function getDetailedErrorMessage(error: unknown) {
+  if (!error) return "Unknown error: no error details were returned.";
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  try { return JSON.stringify(error, null, 2); }
+  catch { return "Unknown error: could not read error details."; }
 }
 
-function transactionYear(transaction: Transaction) {
-  const dateValue =
-    (transaction as any).transaction_date ||
-    (transaction as any).date ||
-    transaction.created_at ||
-    "";
-
-  const date = new Date(String(dateValue));
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return String(date.getFullYear());
-}
-
-function transactionDate(transaction: Transaction) {
-  return (
-    (transaction as any).transaction_date ||
-    (transaction as any).date ||
-    transaction.created_at ||
-    ""
-  );
-}
-
-function transactionCreatedAt(transaction: Transaction) {
-  return (transaction as any).created_at || transactionDate(transaction);
-}
-
+type DashboardTransaction = Transaction & Record<string, unknown>;
+function tx(transaction: Transaction) { return transaction as DashboardTransaction; }
+function transactionId(transaction: Transaction) { return cleanText(tx(transaction).id); }
+function transactionDate(transaction: Transaction) { return tx(transaction).transaction_date || tx(transaction).date || transaction.created_at || ""; }
+function transactionCreatedAt(transaction: Transaction) { return tx(transaction).created_at || transactionDate(transaction); }
+function transactionYear(transaction: Transaction) { const date = parseDate(transactionDate(transaction)); return date ? String(date.getFullYear()) : ""; }
 function transactionAgeDays(transaction: Transaction) {
-  const rawDate = transactionDate(transaction) || transactionCreatedAt(transaction);
-
-  if (!rawDate) return 0;
-
-  const date = new Date(String(rawDate));
-
-  if (Number.isNaN(date.getTime())) return 0;
-
+  const date = parseDate(transactionDate(transaction) || transactionCreatedAt(transaction));
+  if (!date) return 0;
   const now = new Date();
-
-  return Math.max(
-    0,
-    Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
-  );
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86_400_000));
 }
-
-function receiptDueDate(transaction: Transaction, receiptReminderDays: number) {
-  const rawDate = transactionDate(transaction) || transactionCreatedAt(transaction);
-
-  if (!rawDate) return "";
-
-  const date = new Date(String(rawDate));
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  date.setDate(date.getDate() + receiptReminderDays);
-
-  return date.toISOString();
-}
-
-function receiptOverdueDays(transaction: Transaction, receiptReminderDays: number) {
-  return Math.max(0, transactionAgeDays(transaction) - receiptReminderDays);
-}
-
-function isForSelectedYear(transaction: Transaction, selectedYear: string) {
-  if (!selectedYear || selectedYear === "all") return true;
-
-  const year = transactionYear(transaction);
-  return !year || year === selectedYear;
-}
-
-function isExpense(transaction: Transaction) {
-  return lower(transaction.type) === "expense";
-}
-
-function isDeleted(transaction: Transaction) {
-  return Boolean((transaction as any).deleted_at);
-}
-
-function isPersonalFunds(transaction: Transaction) {
-  return (
-    Boolean((transaction as any).is_personal_funds) ||
-    Boolean((transaction as any).isPersonalFunds) ||
-    lower(transaction.payment_method) === "personal funds"
-  );
-}
-
-function isPersonalFundsPaidBack(transaction: Transaction) {
-  return (
-    Boolean((transaction as any).personal_funds_repaid) ||
-    Boolean((transaction as any).personalFundsRepaid)
-  );
-}
-
-function hasReceipt(transaction: Transaction) {
-  const attachments = Array.isArray((transaction as any).attachments)
-    ? (transaction as any).attachments
-    : [];
-
-  return Boolean(
-    attachments.length > 0 ||
-      cleanText((transaction as any).invoice_image_url) ||
-      cleanText((transaction as any).receipt_url) ||
-      cleanText((transaction as any).receiptUrl) ||
-      cleanText((transaction as any).invoice_url) ||
-      cleanText((transaction as any).invoiceUrl)
-  );
-}
-
-function isChecked(transaction: Transaction) {
-  return Boolean(
-    (transaction as any).checked_at ||
-      (transaction as any).checked_by ||
-      (transaction as any).checked === true ||
-      (transaction as any).is_checked === true
-  );
-}
-
-function checkedBy(transaction: Transaction) {
-  return (
-    cleanText((transaction as any).checked_by_name) ||
-    cleanText((transaction as any).checked_by) ||
-    cleanText((transaction as any).checked_by_email) ||
-    "Unknown admin"
-  );
-}
-
-function checkedStatusLabel(transaction: Transaction, localChecked: boolean) {
-  if (localChecked) return "Checked just now";
-  if (!isChecked(transaction)) return "Not checked";
-
-  return `Checked by ${checkedBy(transaction)}`;
-}
-
-function bankStatus(transaction: Transaction) {
-  return lower(
-    (transaction as any).bank_reconciliation_status ||
-      (transaction as any).bankReconciliationStatus ||
-      (transaction as any).bank_status ||
-      (transaction as any).bankStatus
-  );
-}
-
-function bankStatusLabel(transaction: Transaction) {
-  return (
-    cleanText(
-      (transaction as any).bank_reconciliation_status ||
-        (transaction as any).bankReconciliationStatus ||
-        (transaction as any).bank_status ||
-        (transaction as any).bankStatus
-    ) || "Unmatched"
-  );
-}
-
-function isUnreconciled(transaction: Transaction) {
-  const status = bankStatus(transaction);
-
-  if (!status) return true;
-
-  return (
-    status === "unmatched" ||
-    status === "unreconciled" ||
-    status.includes("unreconciled") ||
-    status.includes("pending") ||
-    status.includes("query") ||
-    status.includes("not matched") ||
-    status.includes("not_matched") ||
-    status.includes("missing") ||
-    status === "todo" ||
-    status === "to_do"
-  );
-}
-
-function sponsorName(item: SponsorBreakdown) {
-  return (
-    cleanText(item.sponsor_name) ||
-    cleanText(item.sponsorName) ||
-    cleanText(item.name) ||
-    "Funding record"
-  );
-}
-
-function receivedPence(item: SponsorBreakdown) {
-  return Number(
-    item.received_pence ??
-      item.receivedPence ??
-      item.received_amount_pence ??
-      0
-  );
-}
-
-function spentPence(item: SponsorBreakdown) {
-  return Number(
-    item.spent_pence ?? item.spentPence ?? item.spent_amount_pence ?? 0
-  );
-}
-
-function remainingPence(item: SponsorBreakdown) {
-  const explicit = item.remaining_pence ?? item.remainingPence;
-
-  if (explicit !== undefined && explicit !== null) return Number(explicit);
-
-  return receivedPence(item) - spentPence(item);
-}
-
-function transactionTitle(transaction: Transaction) {
-  return cleanText((transaction as any).title) || "Untitled transaction";
-}
-
-function transactionReference(transaction: Transaction) {
-  return cleanText((transaction as any).transaction_reference) || "No reference";
-}
-
-function transactionAmount(transaction: Transaction) {
-  return money(Number((transaction as any).amount_pence || 0));
-}
-
-function transactionPayment(transaction: Transaction) {
-  return cleanText((transaction as any).payment_method) || "No payment method";
-}
-
-function transactionFunding(transaction: Transaction) {
-  return (
-    cleanText((transaction as any).sponsor_name) ||
-    cleanText((transaction as any).funding_name) ||
-    cleanText((transaction as any).grant_name) ||
-    "No funding record"
-  );
-}
-
-function receiptReminderStatus(
-  transaction: Transaction,
-  receiptReminderDays: number
-) {
-  const ageDays = transactionAgeDays(transaction);
-  const dueDate = receiptDueDate(transaction, receiptReminderDays);
-  const overdueBy = receiptOverdueDays(transaction, receiptReminderDays);
-
-  return {
-    ageDays,
-    dueDate,
-    overdueBy,
-    isOverdue: ageDays >= receiptReminderDays,
-  };
-}
-
+function receiptDueDate(transaction: Transaction, days: number) { const date=parseDate(transactionDate(transaction)||transactionCreatedAt(transaction)); if(!date)return ""; date.setDate(date.getDate()+days); return date.toISOString(); }
+function receiptOverdueDays(transaction: Transaction, days: number) { return Math.max(0, transactionAgeDays(transaction)-days); }
+function isForSelectedYear(transaction: Transaction, selectedYear: string) { if(!selectedYear||selectedYear==="all")return true; return transactionYear(transaction)===selectedYear; }
+function isExpense(transaction: Transaction) { return lower(transaction.type)==="expense"; }
+function isDeleted(transaction: Transaction) { return cleanText(tx(transaction).deleted_at).length>0; }
+function isPersonalFunds(transaction: Transaction) { return readBoolean(tx(transaction).is_personal_funds)||readBoolean(tx(transaction).isPersonalFunds)||lower(transaction.payment_method)==="personal funds"; }
+function isPersonalFundsPaidBack(transaction: Transaction) { return readBoolean(tx(transaction).personal_funds_repaid)||readBoolean(tx(transaction).personalFundsRepaid); }
+function hasUsableAttachment(value: unknown) { if(!Array.isArray(value))return false; return value.some((a)=>{ if(typeof a==="string")return cleanText(a).length>0; if(!a||typeof a!=="object")return false; const r=a as Record<string,unknown>; return Boolean(cleanText(r.url)||cleanText(r.path)||cleanText(r.storage_path)||cleanText(r.public_url)); }); }
+function hasReceipt(transaction: Transaction) { const r=tx(transaction); return Boolean(hasUsableAttachment(r.attachments)||cleanText(r.invoice_image_url)||cleanText(r.receipt_url)||cleanText(r.receiptUrl)||cleanText(r.invoice_url)||cleanText(r.invoiceUrl)); }
+function isChecked(transaction: Transaction) { const r=tx(transaction); return Boolean(cleanText(r.checked_at)||cleanText(r.checked_by)||readBoolean(r.checked)||readBoolean(r.is_checked)); }
+function checkedBy(transaction: Transaction) { const r=tx(transaction); return cleanText(r.checked_by_name)||cleanText(r.checked_by)||cleanText(r.checked_by_email)||"Unknown admin"; }
+function checkedStatusLabel(transaction: Transaction, localChecked:boolean) { if(localChecked)return "Checked just now"; if(!isChecked(transaction))return "Not checked"; return `Checked by ${checkedBy(transaction)}`; }
+function bankStatus(transaction: Transaction) { const r=tx(transaction); return lower(r.bank_reconciliation_status||r.bankReconciliationStatus||r.bank_status||r.bankStatus); }
+function bankStatusLabel(transaction: Transaction) { const r=tx(transaction); return cleanText(r.bank_reconciliation_status||r.bankReconciliationStatus||r.bank_status||r.bankStatus)||"Unmatched"; }
+function requiresBankReconciliation(transaction: Transaction) { const r=tx(transaction); if(readBoolean(r.requires_bank_reconciliation)||cleanText(r.bank_transaction_id))return true; const method=lower(transaction.payment_method); return ["bank","card","direct debit","standing order","bacs","stripe","paypal"].some((v)=>method.includes(v)); }
+function isUnreconciled(transaction: Transaction) { if(!requiresBankReconciliation(transaction))return false; const status=bankStatus(transaction); if(!status)return true; if(["matched","reconciled","complete","completed"].includes(status))return false; return ["unmatched","unreconciled","pending","query","not matched","not_matched","missing","todo","to_do"].some((v)=>status===v||status.includes(v)); }
+function sponsorName(item:SponsorBreakdown) { return cleanText(item.sponsor_name)||cleanText(item.sponsorName)||cleanText(item.name)||"Funding record"; }
+function receivedPence(item:SponsorBreakdown) { return finiteNumber(item.received_pence??item.receivedPence??item.received_amount_pence,0); }
+function spentPence(item:SponsorBreakdown) { return finiteNumber(item.spent_pence??item.spentPence??item.spent_amount_pence,0); }
+function remainingPence(item:SponsorBreakdown) { const explicit=item.remaining_pence??item.remainingPence; return explicit===undefined||explicit===null ? receivedPence(item)-spentPence(item) : finiteNumber(explicit,0); }
+function transactionTitle(transaction:Transaction) { return cleanText(tx(transaction).title)||"Untitled transaction"; }
+function transactionReference(transaction:Transaction) { return cleanText(tx(transaction).transaction_reference)||"No reference"; }
+function transactionAmount(transaction:Transaction) { return money(tx(transaction).amount_pence); }
+function transactionPayment(transaction:Transaction) { return cleanText(transaction.payment_method)||"No payment method"; }
+function transactionFunding(transaction:Transaction) { const r=tx(transaction); return cleanText(r.sponsor_name)||cleanText(r.funding_name)||cleanText(r.grant_name)||"No funding record"; }
+function transactionTypeLabel(transaction:Transaction) { const type=lower(transaction.type); if(type==="income")return "Money In"; if(type==="expense")return "Money Out"; if(type==="transfer")return "Transfer"; return cleanText(transaction.type)||"Unknown type"; }
+function receiptReminderStatus(transaction:Transaction, days:number) { const ageDays=transactionAgeDays(transaction); const dueDate=receiptDueDate(transaction,days); const overdueBy=receiptOverdueDays(transaction,days); return {ageDays,dueDate,overdueBy,isOverdue:ageDays>days}; }
+function normaliseReceiptReminderDays(value:unknown) { const parsed=Number(value); return Number.isFinite(parsed)?Math.max(1,Math.floor(parsed)):DEFAULT_RECEIPT_REMINDER_DAYS; }
 function toneClasses(tone: DashboardAlert["tone"]) {
   if (tone === "red") {
     return {
@@ -562,7 +378,7 @@ function TransactionCard({
   localChecked?: boolean;
   onMarkChecked: () => void | Promise<void>;
 }) {
-  const type = lower((transaction as any).type);
+  const type = lower(transaction.type);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
@@ -593,7 +409,7 @@ function TransactionCard({
 
         <DetailLine
           label="Type"
-          value={type === "income" ? "Money In" : "Money Out"}
+          value={transactionTypeLabel(transaction)}
         />
 
         <DetailLine label="Payment" value={transactionPayment(transaction)} />
@@ -606,9 +422,9 @@ function TransactionCard({
         />
       </div>
 
-      {cleanText((transaction as any).description) && (
+      {cleanText(tx(transaction).description) && (
         <div className="mt-3 rounded-xl bg-white/5 p-3 text-sm leading-6 text-white/60">
-          {(transaction as any).description}
+          {cleanText(tx(transaction).description)}
         </div>
       )}
 
@@ -671,13 +487,13 @@ function FailedCsvCard({ row, index }: { row: FailedCsvRow; index: number }) {
         </div>
       </div>
 
-      {row.raw && (
+      {row.raw != null ? (
         <pre className="mt-3 max-h-48 overflow-auto rounded-xl bg-black/40 p-3 text-xs text-white/60">
           {typeof row.raw === "string"
             ? row.raw
             : JSON.stringify(row.raw, null, 2)}
         </pre>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -703,21 +519,50 @@ export default function MoneyDashboardAlerts({
   failedCsvRows = [],
   onSetFilter,
   onSetSearchTerm,
+  onSetAlertFilter,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
   onMarkTransactionChecked,
 }: Props) {
   const [openAlertKey, setOpenAlertKey] = useState<AlertKey | null>(null);
-  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkingIds, setCheckingIds] = useState<Set<string>>(() => new Set());
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const [localCheckedIds, setLocalCheckedIds] = useState<Set<string>>(
     () => new Set()
   );
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const receiptReminderDaysSafe = Math.max(
-    1,
-    Number(receiptReminderDays || DEFAULT_RECEIPT_REMINDER_DAYS)
-  );
+  const receiptReminderDaysSafe = normaliseReceiptReminderDays(receiptReminderDays);
+
+  useEffect(() => {
+    if (!openAlertKey) return;
+    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenAlertKey(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [openAlertKey]);
+
+  useEffect(() => {
+    setLocalCheckedIds((previous) => {
+      const next = new Set(previous);
+      for (const transaction of transactions) {
+        const id = transactionId(transaction);
+        if (id && isChecked(transaction)) next.delete(id);
+      }
+      return next.size === previous.size ? previous : next;
+    });
+  }, [transactions]);
 
   const activeTransactions = useMemo(() => {
     return transactions
@@ -757,9 +602,8 @@ export default function MoneyDashboardAlerts({
       });
   }, [missingReceiptExpenses, receiptReminderDaysSafe]);
 
-  const oldestOverdueReceiptDays = overdueReceiptExpenses.reduce(
-    (highest, transaction) =>
-      Math.max(highest, transactionAgeDays(transaction)),
+  const longestReceiptOverdueDays = overdueReceiptExpenses.reduce(
+    (highest, transaction) => Math.max(highest, receiptOverdueDays(transaction, receiptReminderDaysSafe)),
     0
   );
 
@@ -784,7 +628,7 @@ export default function MoneyDashboardAlerts({
   );
 
   const unpaidPersonalFundsTotal = unpaidPersonalFunds.reduce(
-    (sum, item) => sum + Number((item as any).amount_pence || 0),
+    (sum, item) => sum + finiteNumber(tx(item).amount_pence, 0),
     0
   );
 
@@ -806,7 +650,7 @@ Reference: ${reference}`
     try {
       setErrorMessage(null);
       setSuccessMessage(null);
-      setCheckingId(id);
+      setCheckingIds((previous) => { const next = new Set(previous); next.add(id); return next; });
 
       await onMarkTransactionChecked(transaction);
 
@@ -817,7 +661,7 @@ Reference: ${reference}`
       });
 
       setSuccessMessage(
-        `Transaction marked as checked: ${title}. The database has been updated and the audit log will show who did it.`
+        `Transaction marked as checked: ${title}.`
       );
     } catch (error) {
       console.error("Floating window mark checked failed:", error);
@@ -835,13 +679,18 @@ Error details:
 ${details}`
       );
     } finally {
-      setCheckingId(null);
+      setCheckingIds((previous) => { const next = new Set(previous); next.delete(id); return next; });
     }
   }
 
-  function applyAlertFilter(filter: MoneyFilter, search: string) {
-    onSetFilter?.(filter);
-    onSetSearchTerm?.(search);
+  function applyAlertFilter(alert: DashboardAlert) {
+    onSetFilter?.(alert.filter);
+    if (onSetAlertFilter && alert.alertFilter) {
+      onSetAlertFilter(alert.alertFilter);
+      onSetSearchTerm?.("");
+    } else {
+      onSetSearchTerm?.(alert.searchTerm);
+    }
     setOpenAlertKey(null);
     scrollToTransactions();
   }
@@ -860,6 +709,8 @@ ${details}`
       actionLabel: "Show unchecked",
       filter: "all",
       searchTerm: "unchecked",
+      alertFilter: "unchecked",
+      canFilterTransactions: true,
     },
     {
       key: "missing-receipts",
@@ -874,6 +725,8 @@ ${details}`
       actionLabel: "Show missing receipts",
       filter: "expense",
       searchTerm: "missing receipt",
+      alertFilter: "missing_receipt",
+      canFilterTransactions: true,
     },
     {
       key: "receipt-overdue",
@@ -884,9 +737,9 @@ ${details}`
               overdueReceiptExpenses.length === 1 ? "" : "s"
             } still have no receipt after ${receiptReminderDaysSafe} day${
               receiptReminderDaysSafe === 1 ? "" : "s"
-            }. Oldest is ${oldestOverdueReceiptDays} day${
-              oldestOverdueReceiptDays === 1 ? "" : "s"
-            } old.`
+            }. Longest overdue is ${longestReceiptOverdueDays} day${
+              longestReceiptOverdueDays === 1 ? "" : "s"
+            }.`
           : `No missing receipts older than ${receiptReminderDaysSafe} day${
               receiptReminderDaysSafe === 1 ? "" : "s"
             }.`,
@@ -896,6 +749,8 @@ ${details}`
       actionLabel: "Show overdue receipts",
       filter: "expense",
       searchTerm: "receipt overdue",
+      alertFilter: "receipt_overdue",
+      canFilterTransactions: true,
     },
     {
       key: "personal-funds",
@@ -910,6 +765,8 @@ ${details}`
       actionLabel: "Show unpaid personal funds",
       filter: "personal",
       searchTerm: "unpaid personal funds",
+      alertFilter: "personal_funds_unpaid",
+      canFilterTransactions: true,
     },
     {
       key: "overspent-funding",
@@ -925,7 +782,8 @@ ${details}`
       icon: Banknote,
       actionLabel: "Show overspent funding",
       filter: "sponsorship",
-      searchTerm: "overspent funding",
+      searchTerm: "",
+      canFilterTransactions: false,
     },
     {
       key: "failed-csv",
@@ -939,7 +797,8 @@ ${details}`
       icon: UploadCloud,
       actionLabel: "Review imports",
       filter: "all",
-      searchTerm: "failed csv",
+      searchTerm: "",
+      canFilterTransactions: false,
     },
     {
       key: "bank-reconciliation",
@@ -954,6 +813,8 @@ ${details}`
       actionLabel: "Show unreconciled",
       filter: "all",
       searchTerm: "unreconciled bank",
+      alertFilter: "bank_unreconciled",
+      canFilterTransactions: true,
     },
   ];
 
@@ -969,7 +830,7 @@ ${details}`
       <TransactionCard
         key={id || transactionReference(transaction)}
         transaction={transaction}
-        checking={checkingId === id}
+        checking={checkingIds.has(id)}
         localChecked={localChecked}
         onMarkChecked={() => markTransactionCheckedFromModal(transaction)}
         extra={extra}
@@ -1076,7 +937,7 @@ ${details}`
             <DetailLine
               label="Paid by"
               value={
-                cleanText((transaction as any).personal_funds_name) ||
+                cleanText(tx(transaction).personal_funds_name) ||
                 "No name saved"
               }
             />
@@ -1130,7 +991,7 @@ ${details}`
             <DetailLine
               label="Bank note"
               value={
-                cleanText((transaction as any).bank_reconciliation_note) ||
+                cleanText(tx(transaction).bank_reconciliation_note) ||
                 "No bank note"
               }
             />
@@ -1291,8 +1152,8 @@ ${details}`
       </section>
 
       {openAlert && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-6">
-          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#10101f] shadow-2xl shadow-black">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenAlertKey(null); }}>
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#10101f] shadow-2xl shadow-black" role="dialog" aria-modal="true" aria-labelledby="money-alert-dialog-title" aria-describedby="money-alert-dialog-description">
             <div className="border-b border-white/10 bg-white/[0.04] p-4 sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -1301,24 +1162,25 @@ ${details}`
                       toneClasses(openAlert.tone).modalTitle
                     }`}
                   >
-                    <openAlert.icon className="h-4 w-4" />
+                    {(() => { const OpenAlertIcon = openAlert.icon; return <OpenAlertIcon className="h-4 w-4" />; })()}
                     {openAlert.count} item{openAlert.count === 1 ? "" : "s"}
                   </div>
 
-                  <h3 className="mt-3 break-words text-2xl font-black text-white">
+                  <h3 id="money-alert-dialog-title" className="mt-3 break-words text-2xl font-black text-white">
                     {openAlert.title}
                   </h3>
 
-                  <p className="mt-2 text-sm leading-6 text-white/60">
+                  <p id="money-alert-dialog-description" className="mt-2 text-sm leading-6 text-white/60">
                     {openAlert.message}
                   </p>
                 </div>
 
                 <button
+                  ref={closeButtonRef}
                   type="button"
                   onClick={() => setOpenAlertKey(null)}
+                  aria-label="Close alert window"
                   className="rounded-2xl bg-white/10 p-3 text-white hover:bg-white/20"
-                  title="Close"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -1347,12 +1209,12 @@ ${details}`
                 <button
                   type="button"
                   onClick={() =>
-                    applyAlertFilter(openAlert.filter, openAlert.searchTerm)
+                    applyAlertFilter(openAlert)
                   }
-                  disabled={openAlert.count === 0}
+                  disabled={openAlert.count === 0 || !openAlert.canFilterTransactions}
                   className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-black text-black hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Filter transaction table
+                  {openAlert.canFilterTransactions ? "Filter transaction table" : "Shown in this window"}
                 </button>
 
                 <button
@@ -1363,7 +1225,7 @@ ${details}`
                   Close window
                 </button>
 
-                {checkingId && (
+                {checkingIds.size > 0 && (
                   <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-100 ring-1 ring-emerald-300/20">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Saving check...

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -21,6 +21,33 @@ import {
 } from "lucide-react";
 
 import type { Transaction } from "@/lib/money/types";
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function safeNonNegativePence(value: unknown): number {
+  return Math.max(0, Math.round(safeNumber(value)));
+}
+
+function readBoolean(value: unknown): boolean {
+  if (value === true || value === 1 || value === "1") return true;
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "true" || text === "yes";
+}
 
 type BudgetItem = {
   id?: string | null;
@@ -90,7 +117,7 @@ type Props = {
 
   /**
    * Optional: pass these from the parent page if you already have the signed-in admin.
-   * The audit route should still verify the Clerk user server-side, but this lets the
+   * The audit route should still verify the Supabase admin session server-side, but this lets the
    * Budget Planning UI show who is editing before Save is pressed.
    */
   currentAdminName?: string | null;
@@ -126,20 +153,20 @@ const KEYWORDS: Record<string, string[]> = {
   other: [],
 };
 
-function money(value: number) {
+function money(value: unknown) {
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "GBP",
-  }).format((Number(value) || 0) / 100);
+  }).format(safeNumber(value) / 100);
 }
 
-function penceToInput(value: number) {
-  return ((Number(value) || 0) / 100).toFixed(2);
+function penceToInput(value: unknown) {
+  return (safeNumber(value) / 100).toFixed(2);
 }
 
 function inputToPence(value: string) {
-  const amount = Number(String(value || "0").replace(/,/g, ""));
-  if (!Number.isFinite(amount)) return 0;
+  const amount = Number(String(value ?? "0").replace(/[,£\s]/g, ""));
+  if (!Number.isFinite(amount) || amount < 0) return 0;
   return Math.round(amount * 100);
 }
 
@@ -171,7 +198,7 @@ function parseBudgetHiddenMeta(notes?: string | null): BudgetHiddenMeta {
     const manualActualPence = Number(parsed.manualActualPence ?? 0);
 
     return {
-      manualActualEnabled: Boolean(parsed.manualActualEnabled),
+      manualActualEnabled: readBoolean(parsed.manualActualEnabled),
       manualActualPence: Number.isFinite(manualActualPence)
         ? manualActualPence
         : null,
@@ -717,22 +744,24 @@ function budgetEditorDisplayEmail(
   return getBudgetItemEditor(item, currentEditor).email;
 }
 
-function getEditorFromPayload(payload: any): BudgetEditor | null {
+function getEditorFromPayload(payload: unknown): BudgetEditor | null {
+  if (!isRecord(payload)) return null;
   if (!payload) return null;
 
-  const user =
+  const userCandidate =
     payload.user ||
     payload.currentUser ||
     payload.admin ||
     payload.profile ||
     payload.me ||
     payload;
+  const user = isRecord(userCandidate) ? userCandidate : payload;
 
   const email =
     cleanEditorValue(user.email) ||
     cleanEditorValue(user.emailAddress) ||
-    cleanEditorValue(user.primaryEmailAddress?.emailAddress) ||
-    cleanEditorValue(user.emailAddresses?.[0]?.emailAddress) ||
+    cleanEditorValue(isRecord(user.primaryEmailAddress) ? user.primaryEmailAddress.emailAddress : null) ||
+    cleanEditorValue(Array.isArray(user.emailAddresses) && isRecord(user.emailAddresses[0]) ? user.emailAddresses[0].emailAddress : null) ||
     cleanEditorValue(payload.email) ||
     cleanEditorValue(payload.emailAddress);
 
@@ -852,7 +881,10 @@ async function createBudgetAuditLog(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
+      credentials: "same-origin",
+      cache: "no-store",
       body: JSON.stringify({
         action: "budget_update",
         transactionId: null,
@@ -925,10 +957,10 @@ async function createBudgetAuditLog(
     return {
       ok: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
-      error?.message ||
-      "Audit log failed because the request could not be completed.";
+      errorMessage(error,
+      "Audit log failed because the request could not be completed.");
 
     console.error("Failed to save budget audit log:", error);
 
@@ -1004,8 +1036,8 @@ function buildSavingTargetChangedFields(
     string,
     {
       label: string;
-      before: any;
-      after: any;
+      before: unknown;
+      after: unknown;
     }
   > = {};
 
@@ -1051,7 +1083,7 @@ async function createSavingTargetAuditLog({
   beforeTarget: SavingTargetState | null;
   afterTarget: SavingTargetState | null;
   editor: BudgetEditor | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): Promise<SavingTargetAuditLogResult> {
   const beforeData = savingTargetAuditSnapshot(beforeTarget);
   const afterData = savingTargetAuditSnapshot(afterTarget);
@@ -1066,7 +1098,10 @@ async function createSavingTargetAuditLog({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
+      credentials: "same-origin",
+      cache: "no-store",
       body: JSON.stringify({
         action,
         transactionId: targetId,
@@ -1131,10 +1166,10 @@ async function createSavingTargetAuditLog({
     return {
       ok: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
-      error?.message ||
-      "Saving target audit log failed because the request could not be completed.";
+      errorMessage(error,
+      "Saving target audit log failed because the request could not be completed.");
 
     console.error("Failed to save saving target audit log:", error);
 
@@ -1207,11 +1242,12 @@ function savingTargetToApiPayload(
 async function parseSavingTargetResponse(response: Response) {
   const rawText = await response.text().catch(() => "");
 
-  let payload: any = null;
+  let payload: UnknownRecord | null = null;
 
   if (rawText) {
     try {
-      payload = JSON.parse(rawText);
+      const parsed = JSON.parse(rawText) as unknown;
+      payload = isRecord(parsed) ? parsed : null;
     } catch {
       payload = null;
     }
@@ -1261,7 +1297,7 @@ async function parseSavingTargetResponse(response: Response) {
         "",
         "What to check:",
         "• Make sure you are signed in as an admin.",
-        "• Check Clerk/admin permissions for this route.",
+        "• Check the Supabase admin session and permissions for this route.",
       );
     }
 
@@ -1277,7 +1313,7 @@ async function parseSavingTargetResponse(response: Response) {
 
     const error = new Error(helpLines.join("\n")) as Error & {
       status?: number;
-      payload?: any;
+      payload?: unknown;
     };
 
     error.status = response.status;
@@ -1293,11 +1329,12 @@ async function parseSavingTargetResponse(response: Response) {
 async function parseDeletedItemsResponse(response: Response) {
   const rawText = await response.text().catch(() => "");
 
-  let payload: any = null;
+  let payload: UnknownRecord | null = null;
 
   if (rawText) {
     try {
-      payload = JSON.parse(rawText);
+      const parsed = JSON.parse(rawText) as unknown;
+      payload = isRecord(parsed) ? parsed : null;
     } catch {
       payload = null;
     }
@@ -1374,7 +1411,10 @@ async function saveSavingTargetToDatabase(
       method: creating ? "POST" : "PATCH",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
+      credentials: "same-origin",
+      cache: "no-store",
       body: JSON.stringify(
         creating
           ? {
@@ -1387,14 +1427,11 @@ async function saveSavingTargetToDatabase(
 
     const payload = await parseSavingTargetResponse(response);
 
-    return payload?.target ? apiRowToSavingTarget(payload.target) : target;
-  } catch (error: any) {
-    /**
-     * If this target ID came from old browser/local data, Supabase will not
-     * have that row. Instead of showing a red 404 forever, save it again as a
-     * new database target.
-     */
-    if (!creating && error?.status === 404) {
+    return payload?.target && isRecord(payload.target)
+      ? apiRowToSavingTarget(payload.target as SavingTargetApiRow)
+      : target;
+  } catch (error: unknown) {
+    if (!creating && isRecord(error) && error.status === 404) {
       const response = await fetch("/api/admin/money/saving-targets", {
         method: "POST",
         headers: {
@@ -1408,7 +1445,9 @@ async function saveSavingTargetToDatabase(
 
       const payload = await parseSavingTargetResponse(response);
 
-      return payload?.target ? apiRowToSavingTarget(payload.target) : target;
+      return payload?.target && isRecord(payload.target)
+        ? apiRowToSavingTarget(payload.target as SavingTargetApiRow)
+        : target;
     }
 
     throw error;
@@ -1452,11 +1491,11 @@ function BudgetIdBadge({
       <button
         type="button"
         onClick={() => void copyBudgetId(id, onCopyError)}
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-white/60 transition hover:bg-white/[0.12] hover:text-white"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-white/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/[0.12] hover:text-white"
         aria-label="Copy budget ID"
         title="Copy budget ID"
       >
-        <Copy className="h-3.5 w-3.5" />
+        <Copy aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -1464,8 +1503,8 @@ function BudgetIdBadge({
 
 export default function MoneyBudgetPlanning({
   selectedYear,
-  budgetItems,
-  transactions,
+  budgetItems = [],
+  transactions = [],
   savingBudget,
   onSaveBudget,
   currentAdminName = null,
@@ -1532,7 +1571,7 @@ export default function MoneyBudgetPlanning({
           `/api/admin/money/saving-targets?year=${encodeURIComponent(
             selectedYear,
           )}`,
-          { cache: "no-store" },
+          { cache: "no-store", credentials: "same-origin", headers: { Accept: "application/json" } },
         );
 
         const payload = await parseSavingTargetResponse(response);
@@ -1550,13 +1589,13 @@ export default function MoneyBudgetPlanning({
         setSavingTargets(nextTargets);
         setSelectedSavingTargetId(nextTargets[0]?.id || "");
         setNewSavingTargetName("");
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (cancelled) return;
 
         setSavingTargets([normaliseSavingTarget(null)]);
         setSelectedSavingTargetId("");
         setSavingTargetError(
-          error?.message || "Could not load saving targets from the database.",
+          errorMessage(error, "Could not load saving targets from the database."),
         );
       } finally {
         if (!cancelled) {
@@ -1922,9 +1961,9 @@ export default function MoneyBudgetPlanning({
           `Saving target saved, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSavingTargetError(
-        error?.message || "Could not save the selected saving target.",
+        errorMessage(error, "Could not save the selected saving target."),
       );
     } finally {
       setSavingTargetSaving(false);
@@ -1978,9 +2017,9 @@ export default function MoneyBudgetPlanning({
           `Saving target cleared, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSavingTargetError(
-        error?.message || "Could not clear the selected saving target.",
+        errorMessage(error, "Could not clear the selected saving target."),
       );
     } finally {
       setSavingTargetSaving(false);
@@ -2026,7 +2065,7 @@ export default function MoneyBudgetPlanning({
 
       const payload = await parseSavingTargetResponse(response);
       const savedTarget = payload?.target
-        ? apiRowToSavingTarget(payload.target)
+        ? apiRowToSavingTarget(payload.target as SavingTargetApiRow)
         : newTarget;
 
       const auditResult = await createSavingTargetAuditLog({
@@ -2062,9 +2101,9 @@ export default function MoneyBudgetPlanning({
           `Saving target created, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSavingTargetError(
-        error?.message || "Could not add the new saving target.",
+        errorMessage(error, "Could not add the new saving target."),
       );
     } finally {
       setSavingTargetSaving(false);
@@ -2136,8 +2175,8 @@ export default function MoneyBudgetPlanning({
       );
 
       const payload = await parseSavingTargetResponse(response);
-      const afterTarget = payload?.target
-        ? apiRowToSavingTarget(payload.target)
+      const afterTarget = payload?.target && isRecord(payload.target)
+        ? apiRowToSavingTarget(payload.target as SavingTargetApiRow)
         : null;
 
       const auditResult = await createSavingTargetAuditLog({
@@ -2169,9 +2208,9 @@ export default function MoneyBudgetPlanning({
           `Saving target soft deleted, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSavingTargetError(
-        error?.message || "Could not remove the selected saving target.",
+        errorMessage(error, "Could not remove the selected saving target."),
       );
     } finally {
       setSavingTargetSaving(false);
@@ -2232,9 +2271,9 @@ export default function MoneyBudgetPlanning({
           `Monthly saving update saved, but audit log failed.\n\n${getSavingTargetAuditErrorMessage(auditResult)}`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setSavingTargetError(
-        error?.message || "Could not save the monthly saving update.",
+        errorMessage(error, "Could not save the monthly saving update."),
       );
     } finally {
       setSavingTargetSaving(false);
@@ -2375,9 +2414,9 @@ export default function MoneyBudgetPlanning({
 
       removeBudgetAreaFromDraft(item.category_key);
       setDeleteBudgetAreaPopup(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setAuditLogError(
-        error?.message || "Could not soft delete the budget tracker item.",
+        errorMessage(error, "Could not soft delete the budget tracker item."),
       );
     } finally {
       setDeletingBudgetArea(false);
@@ -2400,10 +2439,11 @@ export default function MoneyBudgetPlanning({
 
     try {
       await onSaveBudget(afterItems);
-    } catch (error: any) {
-      const message =
-        error?.message ||
-        "Budget could not be saved. Please check the console/server logs.";
+    } catch (error: unknown) {
+      const message = errorMessage(
+        error,
+        "Budget could not be saved. Please check the console/server logs.",
+      );
 
       setAuditLogError(message);
       console.error("Failed to save budget:", error);
@@ -2441,7 +2481,7 @@ export default function MoneyBudgetPlanning({
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-emerald-100">
-                  <Sparkles className="h-4 w-4" />
+                  <Sparkles aria-hidden="true" className="h-4 w-4" />
                   Super Easy Mode
                 </div>
 
@@ -2460,7 +2500,7 @@ export default function MoneyBudgetPlanning({
               <button
                 type="button"
                 onClick={() => setSuperEasyMode(false)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-emerald-100"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-100"
               >
                 Show Full Mode
               </button>
@@ -2515,9 +2555,9 @@ export default function MoneyBudgetPlanning({
                 <button
                   type="button"
                   onClick={startSuperEasyEditing}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white transition hover:bg-pink-400"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-5 py-3 text-sm font-black text-white transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-pink-400"
                 >
-                  <Edit3 className="h-4 w-4" />
+                  <Edit3 aria-hidden="true" className="h-4 w-4" />
                   Change Budget Amounts
                 </button>
               ) : (
@@ -2526,9 +2566,9 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={cancelEditing}
                     disabled={savingBudget}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <X className="h-4 w-4" />
+                    <X aria-hidden="true" className="h-4 w-4" />
                     Cancel
                   </button>
 
@@ -2536,9 +2576,9 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={saveBudget}
                     disabled={savingBudget}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Save className="h-4 w-4" />
+                    <Save aria-hidden="true" className="h-4 w-4" />
                     {savingBudget ? "Saving..." : "Save Budget"}
                   </button>
                 </div>
@@ -2548,7 +2588,7 @@ export default function MoneyBudgetPlanning({
             {auditLogError ? (
               <div className="mt-4 rounded-2xl border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
                 <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <AlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
                   <p className="whitespace-pre-wrap break-words leading-6">
                     {auditLogError}
                   </p>
@@ -2559,7 +2599,7 @@ export default function MoneyBudgetPlanning({
             <div className="mt-4 rounded-2xl border border-emerald-300/25 bg-emerald-500/10 p-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-100 ring-1 ring-emerald-300/20">
-                  <Plus className="h-5 w-5" />
+                  <Plus aria-hidden="true" className="h-5 w-5" />
                 </div>
 
                 <div className="min-w-0 flex-1">
@@ -2596,9 +2636,9 @@ export default function MoneyBudgetPlanning({
                   type="button"
                   onClick={addBudgetArea}
                   disabled={savingBudget}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus aria-hidden="true" className="h-4 w-4" />
                   Add Budget Area
                 </button>
               </div>
@@ -2632,7 +2672,7 @@ export default function MoneyBudgetPlanning({
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <Banknote className="h-4 w-4 text-white/45" />
+                        <Banknote aria-hidden="true" className="h-4 w-4 text-white/45" />
                         <p className="font-black text-white">
                           {item.category_label}
                         </p>
@@ -2760,7 +2800,7 @@ export default function MoneyBudgetPlanning({
                 setSuperEasyMode(false);
                 setIsOpen(true);
               }}
-              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/20"
+              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20"
             >
               Open advanced budget settings
             </button>
@@ -2770,7 +2810,7 @@ export default function MoneyBudgetPlanning({
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100">
-                  <Target className="h-4 w-4" />
+                  <Target aria-hidden="true" className="h-4 w-4" />
                   Simple saving target
                 </div>
                 <h3 className="mt-3 text-xl font-black text-white">
@@ -2785,9 +2825,9 @@ export default function MoneyBudgetPlanning({
                 type="button"
                 onClick={saveSelectedSavingTarget}
                 disabled={savingTargetSaving || savingTargetLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-5 py-3 text-sm font-black text-black transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-5 py-3 text-sm font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Save className="h-4 w-4" />
+                <Save aria-hidden="true" className="h-4 w-4" />
                 {savingTargetSaving ? "Saving..." : "Save Target"}
               </button>
             </div>
@@ -2896,9 +2936,9 @@ export default function MoneyBudgetPlanning({
                   savingTargetSaving ||
                   savingTargetLoading
                 }
-                className="inline-flex min-h-[92px] items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-4 text-base font-black text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex min-h-[92px] items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-4 text-base font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Calculator className="h-5 w-5" />
+                <Calculator aria-hidden="true" className="h-5 w-5" />
                 Add One Month Saved
               </button>
             </div>
@@ -2906,7 +2946,7 @@ export default function MoneyBudgetPlanning({
             <button
               type="button"
               onClick={() => setSuperEasyMode(false)}
-              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition hover:bg-white/20"
+              className="mt-4 w-full rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20"
             >
               Manage more saving targets in Full Mode
             </button>
@@ -2917,7 +2957,7 @@ export default function MoneyBudgetPlanning({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100">
-            <PiggyBank className="h-4 w-4" />
+            <PiggyBank aria-hidden="true" className="h-4 w-4" />
             Budget planning
           </div>
 
@@ -2949,25 +2989,25 @@ export default function MoneyBudgetPlanning({
           <button
             type="button"
             onClick={() => setSuperEasyMode(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400"
           >
-            <Sparkles className="h-4 w-4" />
+            <Sparkles aria-hidden="true" className="h-4 w-4" />
             Use Super Easy Mode
           </button>
 
           <button
             type="button"
             onClick={() => setIsOpen((prev) => !prev)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20"
           >
             {isOpen ? (
               <>
-                <ChevronUp className="h-4 w-4" />
+                <ChevronUp aria-hidden="true" className="h-4 w-4" />
                 Hide details
               </>
             ) : (
               <>
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown aria-hidden="true" className="h-4 w-4" />
                 Show details
               </>
             )}
@@ -2977,9 +3017,9 @@ export default function MoneyBudgetPlanning({
             <button
               type="button"
               onClick={startEditing}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-4 py-3 text-sm font-black text-white hover:bg-pink-400"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-pink-500 px-4 py-3 text-sm font-black text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-pink-400"
             >
-              <Edit3 className="h-4 w-4" />
+              <Edit3 aria-hidden="true" className="h-4 w-4" />
               Edit budget
             </button>
           )}
@@ -3038,7 +3078,7 @@ export default function MoneyBudgetPlanning({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-black/20 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100">
-              <Target className="h-4 w-4" />
+              <Target aria-hidden="true" className="h-4 w-4" />
               Saving target planner
             </div>
 
@@ -3056,9 +3096,9 @@ export default function MoneyBudgetPlanning({
           <div className="flex flex-wrap gap-2">
             <Link
               href="/Admin/MoneyManagement/TrackingMoney/BudgetPlanning/Delete"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-red-500/25"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 aria-hidden="true" className="h-4 w-4" />
               View deleted items
             </Link>
 
@@ -3066,9 +3106,9 @@ export default function MoneyBudgetPlanning({
               type="button"
               onClick={clearSavingTarget}
               disabled={savingTargetSaving || savingTargetLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <X className="h-4 w-4" />
+              <X aria-hidden="true" className="h-4 w-4" />
               Clear selected target
             </button>
           </div>
@@ -3084,7 +3124,7 @@ export default function MoneyBudgetPlanning({
           >
             {savingTargetError ? (
               <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <AlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
                 <div className="min-w-0">
                   <p className="font-black text-white">Saving target error</p>
                   <p className="mt-2 whitespace-pre-wrap break-words leading-6 text-red-100/90">
@@ -3130,9 +3170,9 @@ export default function MoneyBudgetPlanning({
               type="button"
               onClick={addSavingTarget}
               disabled={savingTargetSaving || savingTargetLoading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Plus className="h-4 w-4" />
+              <Plus aria-hidden="true" className="h-4 w-4" />
               Add target
             </button>
           </div>
@@ -3156,7 +3196,7 @@ export default function MoneyBudgetPlanning({
                 className={`rounded-2xl border p-4 text-left transition ${
                   active
                     ? "border-sky-300/40 bg-sky-400/15 ring-2 ring-sky-300/30"
-                    : "border-white/10 bg-black/20 hover:bg-white/10"
+                    : "border-white/10 bg-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/10"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -3205,9 +3245,9 @@ export default function MoneyBudgetPlanning({
             type="button"
             onClick={() => openDeleteSavingTargetPopup(selectedSavingTarget)}
             disabled={savingTargetSaving || savingTargetLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-black text-red-100 ring-1 ring-red-300/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 aria-hidden="true" className="h-4 w-4" />
             Delete selected target
           </button>
         </div>
@@ -3221,9 +3261,9 @@ export default function MoneyBudgetPlanning({
             type="button"
             onClick={saveSelectedSavingTarget}
             disabled={savingTargetSaving || savingTargetLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Save className="h-4 w-4" />
+            <Save aria-hidden="true" className="h-4 w-4" />
             {savingTargetSaving ? "Saving target..." : "Save selected target"}
           </button>
         </div>
@@ -3404,9 +3444,9 @@ export default function MoneyBudgetPlanning({
                 savingTargetSaving ||
                 savingTargetLoading
               }
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-sky-400 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Calculator className="h-4 w-4" />
+              <Calculator aria-hidden="true" className="h-4 w-4" />
               Add one month saved
             </button>
           </div>
@@ -3456,9 +3496,9 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={addBudgetArea}
                     disabled={savingBudget}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Plus aria-hidden="true" className="h-4 w-4" />
                     Add budget area
                   </button>
                 </div>
@@ -3473,7 +3513,7 @@ export default function MoneyBudgetPlanning({
               {auditLogError && (
                 <div className="rounded-2xl border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <AlertTriangle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" />
 
                     <div className="min-w-0">
                       <p className="font-black text-white">
@@ -3499,9 +3539,9 @@ export default function MoneyBudgetPlanning({
                   type="button"
                   onClick={saveBudget}
                   disabled={savingBudget}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-black text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Save className="h-4 w-4" />
+                  <Save aria-hidden="true" className="h-4 w-4" />
                   {savingBudget ? "Saving..." : "Save budget"}
                 </button>
 
@@ -3509,9 +3549,9 @@ export default function MoneyBudgetPlanning({
                   type="button"
                   onClick={cancelEditing}
                   disabled={savingBudget}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-black text-white ring-1 ring-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <X className="h-4 w-4" />
+                  <X aria-hidden="true" className="h-4 w-4" />
                   Cancel
                 </button>
               </div>
@@ -3545,7 +3585,7 @@ export default function MoneyBudgetPlanning({
                       <tr key={item.category_key} className="bg-black/10">
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <Banknote className="h-4 w-4 text-white/45" />
+                            <Banknote aria-hidden="true" className="h-4 w-4 text-white/45" />
 
                             {editing && customBudgetArea ? (
                               <input
@@ -3760,9 +3800,9 @@ export default function MoneyBudgetPlanning({
                                 type="button"
                                 onClick={() => openDeleteBudgetAreaPopup(item)}
                                 disabled={savingBudget}
-                                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                                 Remove
                               </button>
                             ) : (
@@ -3782,7 +3822,7 @@ export default function MoneyBudgetPlanning({
 
           {hasOverBudgetRows && (
             <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
-              <CheckCircle2 className="mb-2 h-5 w-5" />
+              <CheckCircle2 aria-hidden="true" className="mb-2 h-5 w-5" />
               Some cost areas are over budget. Check the rows marked in red
               before approving more spending.
             </div>
@@ -3795,10 +3835,10 @@ export default function MoneyBudgetPlanning({
 
       {deleteBudgetAreaPopup && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
+          <div role="dialog" aria-modal="true" tabIndex={-1} className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-200 ring-1 ring-red-300/30">
-                <Trash2 className="h-6 w-6" />
+                <Trash2 aria-hidden="true" className="h-6 w-6" />
               </div>
 
               <div className="min-w-0 flex-1">
@@ -3857,7 +3897,7 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={closeDeleteBudgetAreaPopup}
                     disabled={deletingBudgetArea}
-                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -3866,9 +3906,9 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={confirmSoftDeleteBudgetArea}
                     disabled={deletingBudgetArea}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 aria-hidden="true" className="h-4 w-4" />
                     {deletingBudgetArea
                       ? "Soft deleting..."
                       : "Yes, soft delete budget area"}
@@ -3882,10 +3922,10 @@ export default function MoneyBudgetPlanning({
 
       {deleteSavingTargetPopup && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
+          <div role="dialog" aria-modal="true" tabIndex={-1} className="w-full max-w-xl rounded-3xl border border-red-300/30 bg-[#11111f] p-5 text-white shadow-2xl shadow-black/50">
             <div className="flex items-start gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-200 ring-1 ring-red-300/30">
-                <Trash2 className="h-6 w-6" />
+                <Trash2 aria-hidden="true" className="h-6 w-6" />
               </div>
 
               <div className="min-w-0 flex-1">
@@ -3939,7 +3979,7 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={closeDeleteSavingTargetPopup}
                     disabled={savingTargetSaving}
-                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -3948,9 +3988,9 @@ export default function MoneyBudgetPlanning({
                     type="button"
                     onClick={confirmSoftDeleteSavingTarget}
                     disabled={savingTargetSaving}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 aria-hidden="true" className="h-4 w-4" />
                     {savingTargetSaving
                       ? "Soft deleting..."
                       : "Yes, soft delete target"}

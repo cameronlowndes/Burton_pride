@@ -1,7 +1,15 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-import { RotateCcw, Trash2, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type SetStateAction,
+} from "react";
+import { Loader2, Trash2, X } from "lucide-react";
 
 import type {
   LoanInterestFormState,
@@ -48,6 +56,8 @@ type SupplierFormState = {
   isActive: boolean;
 };
 
+type AsyncAction = () => void | Promise<void>;
+
 type MoneyPageModalsProps = {
   sponsorFormOpen: boolean;
   editingSponsor: Sponsor | null;
@@ -55,7 +65,7 @@ type MoneyPageModalsProps = {
   setSponsorForm: Dispatch<SetStateAction<SponsorFormState>>;
   savingSponsor: boolean;
   onCloseSponsorForm: () => void;
-  onSaveSponsor: () => Promise<void>;
+  onSaveSponsor: AsyncAction;
 
   supplierFormOpen?: boolean;
   editingSupplier?: SupplierContact | null;
@@ -63,12 +73,12 @@ type MoneyPageModalsProps = {
   setSupplierForm?: Dispatch<SetStateAction<SupplierFormState>>;
   savingSupplier?: boolean;
   onCloseSupplierForm?: () => void;
-  onSaveSupplier?: () => Promise<void>;
+  onSaveSupplier?: AsyncAction;
 
   deleteSupplierId?: string | null;
   deletingSupplier?: boolean;
   setDeleteSupplierId?: Dispatch<SetStateAction<string | null>>;
-  onDeleteSupplier?: () => Promise<void>;
+  onDeleteSupplier?: AsyncAction;
 
   deleteYearOpen: boolean;
   selectedYear: string;
@@ -77,23 +87,23 @@ type MoneyPageModalsProps = {
   deleteYearPassword: string;
   setDeleteYearPassword: Dispatch<SetStateAction<string>>;
   onCloseDeleteYear: () => void;
-  onDeleteYear: () => Promise<void>;
+  onDeleteYear: AsyncAction;
 
   deleteSponsorId: string | null;
   deletingSponsor: boolean;
   setDeleteSponsorId: Dispatch<SetStateAction<string | null>>;
-  onDeleteSponsor: () => Promise<void>;
+  onDeleteSponsor: AsyncAction;
 
   deleteId: string | null;
   deleting: boolean;
   setDeleteId: Dispatch<SetStateAction<string | null>>;
-  onHidePayment: () => Promise<void>;
+  onHidePayment: AsyncAction;
 
   deleteRefundId?: string | null;
   deleteRefundTitle?: string | null;
   deletingRefund?: boolean;
   setDeleteRefundId?: Dispatch<SetStateAction<string | null>>;
-  onHideRefund?: () => Promise<void>;
+  onHideRefund?: AsyncAction;
 
   deleteAllOpen: boolean;
   transactionsLength: number;
@@ -101,21 +111,21 @@ type MoneyPageModalsProps = {
   deleteAllPassword: string;
   setDeleteAllPassword: Dispatch<SetStateAction<string>>;
   onCloseDeleteAll: () => void;
-  onDeleteAll: () => Promise<void>;
+  onDeleteAll: AsyncAction;
 
   loanRepaymentSponsor: LoanActionFunding | null;
   loanRepaymentForm: LoanRepaymentFormState;
   setLoanRepaymentForm: Dispatch<SetStateAction<LoanRepaymentFormState>>;
   savingLoanRepayment: boolean;
   onCloseLoanRepayment: () => void;
-  onSaveLoanRepayment: () => Promise<void>;
+  onSaveLoanRepayment: AsyncAction;
 
   loanInterestSponsor: LoanActionFunding | null;
   loanInterestForm: LoanInterestFormState;
   setLoanInterestForm: Dispatch<SetStateAction<LoanInterestFormState>>;
   savingLoanInterest: boolean;
   onCloseLoanInterest: () => void;
-  onSaveLoanInterest: () => Promise<void>;
+  onSaveLoanInterest: AsyncAction;
 };
 
 type RefundSoftDeleteModalProps = {
@@ -123,8 +133,25 @@ type RefundSoftDeleteModalProps = {
   refundTitle?: string | null;
   deleting?: boolean;
   onClose: () => void;
-  onConfirm?: () => Promise<void>;
+  onConfirm?: AsyncAction;
 };
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+
+  return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter(
+    (element) =>
+      !element.hasAttribute("hidden") &&
+      element.getAttribute("aria-hidden") !== "true",
+  );
+}
 
 function RefundSoftDeleteModal({
   refundId,
@@ -133,44 +160,167 @@ function RefundSoftDeleteModal({
   onClose,
   onConfirm,
 }: RefundSoftDeleteModalProps) {
-  if (!refundId) return null;
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const submittingRef = useRef(false);
+
+  const open = Boolean(refundId);
+
+  const safeClose = useCallback(() => {
+    if (!deleting) {
+      onClose();
+    }
+  }, [deleting, onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      submittingRef.current = false;
+      return;
+    }
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusTimer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        safeClose();
+        return;
+      }
+
+      if (event.key !== "Tab" || !dialogRef.current) {
+        return;
+      }
+
+      const focusableElements = getFocusableElements(dialogRef.current);
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocusRef.current?.focus();
+    };
+  }, [open, safeClose]);
+
+  async function handleConfirm() {
+    if (!onConfirm || deleting || submittingRef.current) {
+      return;
+    }
+
+    submittingRef.current = true;
+
+    try {
+      await onConfirm();
+    } finally {
+      submittingRef.current = false;
+    }
+  }
+
+  function handleBackdropMouseDown(
+    event: React.MouseEvent<HTMLDivElement>,
+  ) {
+    if (event.target === event.currentTarget) {
+      safeClose();
+    }
+  }
+
+  function handleDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Enter" && event.target === event.currentTarget) {
+      event.preventDefault();
+    }
+  }
+
+  if (!open) {
+    return null;
+  }
+
+  const cleanedTitle = String(refundTitle ?? "").trim();
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
-      <section className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#10101f] shadow-2xl shadow-black/50">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-black/75 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={handleBackdropMouseDown}
+    >
+      <section
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#10101f] shadow-2xl shadow-black/50 outline-none"
+      >
         <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
-          <div className="flex items-start gap-3">
+          <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 text-rose-200">
-              <Trash2 className="h-5 w-5" />
+              <Trash2 className="h-5 w-5" aria-hidden="true" />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-black uppercase tracking-wide text-rose-300">
                 Refund Tracker
               </p>
 
-              <h2 className="mt-1 text-lg font-black text-white">
+              <h2
+                id={titleId}
+                className="mt-1 break-words text-lg font-black text-white"
+              >
                 Move refund to Deleted Refunds?
               </h2>
             </div>
           </div>
 
           <button
+            ref={closeButtonRef}
             type="button"
-            onClick={onClose}
+            onClick={safeClose}
             disabled={deleting}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Close refund deletion popup"
+            className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Close refund deletion window"
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
 
         <div className="px-5 py-5">
-          <p className="text-sm leading-6 text-white/70">
+          <p id={descriptionId} className="text-sm leading-6 text-white/70">
             Move{" "}
-            <strong className="text-white">
-              {refundTitle || "this refund"}
+            <strong className="break-words text-white">
+              {cleanedTitle || "this refund"}
             </strong>{" "}
             to Deleted Refunds?
           </p>
@@ -184,20 +334,29 @@ function RefundSoftDeleteModal({
           <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={onClose}
+              onClick={safeClose}
               disabled={deleting}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-black text-white/70 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Keep refund
             </button>
 
             <button
               type="button"
-              onClick={() => void onConfirm?.()}
+              onClick={() => void handleConfirm()}
               disabled={deleting || !onConfirm}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2 text-xs font-black text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-busy={deleting}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-rose-500 px-4 py-2 text-xs font-black text-white transition hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <RotateCcw className={`h-4 w-4 ${deleting ? "animate-spin" : ""}`} />
+              {deleting ? (
+                <Loader2
+                  className="h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              )}
+
               {deleting ? "Moving refund..." : "Move to Deleted Refunds"}
             </button>
           </div>
@@ -276,6 +435,30 @@ export default function MoneyPageModals({
   onCloseLoanInterest,
   onSaveLoanInterest,
 }: MoneyPageModalsProps) {
+  const closeSupplierDelete = useCallback(() => {
+    if (!deletingSupplier) {
+      setDeleteSupplierId?.(null);
+    }
+  }, [deletingSupplier, setDeleteSupplierId]);
+
+  const closeSponsorDelete = useCallback(() => {
+    if (!deletingSponsor) {
+      setDeleteSponsorId(null);
+    }
+  }, [deletingSponsor, setDeleteSponsorId]);
+
+  const closePaymentDelete = useCallback(() => {
+    if (!deleting) {
+      setDeleteId(null);
+    }
+  }, [deleting, setDeleteId]);
+
+  const closeRefundDelete = useCallback(() => {
+    if (!deletingRefund) {
+      setDeleteRefundId?.(null);
+    }
+  }, [deletingRefund, setDeleteRefundId]);
+
   return (
     <>
       <MoneyModals
@@ -296,11 +479,11 @@ export default function MoneyPageModals({
         deleteSupplierId={deleteSupplierId}
         setDeleteSupplierId={setDeleteSupplierId}
         deletingSupplier={deletingSupplier}
-        onCloseDeleteSupplier={() => setDeleteSupplierId?.(null)}
+        onCloseDeleteSupplier={closeSupplierDelete}
         onDeleteSupplier={onDeleteSupplier}
         deleteYearOpen={deleteYearOpen}
         selectedYear={selectedYear}
-        yearTransactionsLength={yearTransactionsLength}
+        yearTransactionsLength={Math.max(0, yearTransactionsLength)}
         deletingYear={deletingYear}
         deleteYearPassword={deleteYearPassword}
         setDeleteYearPassword={setDeleteYearPassword}
@@ -308,14 +491,14 @@ export default function MoneyPageModals({
         onDeleteYear={onDeleteYear}
         deleteSponsorId={deleteSponsorId}
         deletingSponsor={deletingSponsor}
-        onCloseDeleteSponsor={() => setDeleteSponsorId(null)}
+        onCloseDeleteSponsor={closeSponsorDelete}
         onDeleteSponsor={onDeleteSponsor}
         deleteId={deleteId}
         deleting={deleting}
-        onCloseHidePayment={() => setDeleteId(null)}
+        onCloseHidePayment={closePaymentDelete}
         onHidePayment={onHidePayment}
         deleteAllOpen={deleteAllOpen}
-        transactionsLength={transactionsLength}
+        transactionsLength={Math.max(0, transactionsLength)}
         deletingAll={deletingAll}
         deleteAllPassword={deleteAllPassword}
         setDeleteAllPassword={setDeleteAllPassword}
@@ -339,7 +522,7 @@ export default function MoneyPageModals({
         refundId={deleteRefundId}
         refundTitle={deleteRefundTitle}
         deleting={deletingRefund}
-        onClose={() => setDeleteRefundId?.(null)}
+        onClose={closeRefundDelete}
         onConfirm={onHideRefund}
       />
     </>

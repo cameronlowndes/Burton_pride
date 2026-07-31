@@ -140,11 +140,11 @@ type MoneyTransactionsTableProps = {
   ) => void | Promise<void>;
 
   /**
-   * Reloads the Money Tracker transaction source.
+   * Reloads the Money Tracker transaction source only when the admin presses
+   * the Refresh table button.
    *
-   * Pass the same transaction-loading function used by the main Money
-   * Management page. The table calls it after a Direct Debit repayment event,
-   * when the tab regains focus, and during a lightweight background sync.
+   * Do not connect this to window focus, visibility events, polling,
+   * router.refresh or window.location.reload.
    */
   onRefreshTransactions?: () => void | Promise<void>;
 
@@ -770,11 +770,17 @@ function budgetBadgeClass(item: Transaction) {
 function BudgetBadge({
   item,
   showReason = true,
+  personalFundsRepaidOverride = false,
 }: {
   item: Transaction;
   showReason?: boolean;
+  personalFundsRepaidOverride?: boolean;
 }) {
-  const budgetInfo = getTransactionBudgetInfo(item);
+  const budgetInfo = getTransactionBudgetInfo(
+    personalFundsRepaidOverride
+      ? ({ ...item, personal_funds_repaid: true } as Transaction)
+      : item,
+  );
 
   return (
     <div className="space-y-1">
@@ -883,7 +889,37 @@ type DirectDebitTransactionFields = Transaction & {
   reimbursementStatus?: string | null;
   reimbursement_id?: string | null;
   reimbursementId?: string | null;
+  category?: string | null;
+  transaction_reference?: string | null;
+  personal_funds_repaid?: boolean | null;
+  personalFundsRepaid?: boolean | null;
 };
+
+function isDirectDebitRepaymentTransaction(item: Transaction) {
+  const row = item as DirectDebitTransactionFields;
+
+  const category = cleanText(row.category).toLowerCase();
+  const reference = cleanText(row.transaction_reference).toUpperCase();
+  const title = cleanText(item.title).toLowerCase();
+
+  return (
+    category === "personal funds repayment" ||
+    reference.startsWith("DD-REPAY-") ||
+    title.startsWith("repayment to ")
+  );
+}
+
+function directDebitRepaymentLinkKey(item: Transaction) {
+  const row = item as DirectDebitTransactionFields;
+  const planId = cleanText(row.direct_debit_plan_id || row.directDebitPlanId);
+  const paymentNumber = numberValue(
+    row.direct_debit_payment_number || row.directDebitPaymentNumber,
+  );
+
+  if (!planId) return "";
+
+  return `${planId}:${paymentNumber || 0}`;
+}
 
 function getDirectDebitInfo(item: Transaction) {
   const row = item as DirectDebitTransactionFields;
@@ -918,10 +954,12 @@ function getDirectDebitInfo(item: Transaction) {
   const reimbursementId = cleanText(
     row.reimbursement_id || row.reimbursementId,
   );
+  const isRepaymentTransaction = isDirectDebitRepaymentTransaction(item);
   const isDirectDebit = Boolean(
     planId || occurrenceId || item.payment_method === "Direct Debit",
   );
-  const isPersonalAccount = accountSource === "personal";
+  const isPersonalAccount =
+    !isRepaymentTransaction && accountSource === "personal";
   const isOrganisationAccount =
     isDirectDebit && !isPersonalAccount;
   const reimbursementOutstanding =
@@ -951,6 +989,11 @@ function getDirectDebitInfo(item: Transaction) {
     isPersonalAccount,
     isOrganisationAccount,
     reimbursementOutstanding,
+    isRepaymentTransaction,
+    repaymentComplete:
+      isRepaymentTransaction ||
+      Boolean(item.personal_funds_repaid) ||
+      ["reimbursed", "paid", "completed"].includes(reimbursementStatus),
   };
 }
 
@@ -985,11 +1028,15 @@ function directDebitStatusClass(status?: string | null) {
 function DirectDebitBadge({
   item,
   compact = false,
+  repaymentSettled = false,
 }: {
   item: Transaction;
   compact?: boolean;
+  repaymentSettled?: boolean;
 }) {
   const directDebit = getDirectDebitInfo(item);
+  const reimbursementOutstanding =
+    directDebit.reimbursementOutstanding && !repaymentSettled;
   if (!directDebit.isDirectDebit) {
     return <span className="text-white/40">Not a Direct Debit</span>;
   }
@@ -1035,11 +1082,37 @@ function DirectDebitBadge({
         </Link>
       )}
 
-      {directDebit.reimbursementOutstanding && (
+      {reimbursementOutstanding ? (
         <p className="rounded-lg bg-orange-500/10 px-2 py-1 text-[11px] font-black text-orange-100 ring-1 ring-orange-300/20">
           Personal reimbursement due
         </p>
-      )}
+      ) : directDebit.isPersonalAccount &&
+        (directDebit.repaymentComplete || repaymentSettled) ? (
+        <div className="space-y-1 rounded-lg bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-100 ring-1 ring-emerald-300/20">
+          <p className="font-black">Repaid by Burton Pride</p>
+          <p className="font-semibold text-emerald-100/65">
+            The repayment is linked to this personal-funds Direct Debit payment.
+          </p>
+        </div>
+      ) : null}
+
+      {hasRepaymentProof(item) ? (
+        <div className="rounded-lg bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-100 ring-1 ring-emerald-300/20">
+          <p className="font-black">Payment received proof saved</p>
+          <p className="mt-0.5 font-semibold text-emerald-100/65">
+            {getRepaymentProofFiles(item).length} proof file
+            {getRepaymentProofFiles(item).length === 1 ? "" : "s"} attached.
+          </p>
+        </div>
+      ) : directDebit.isPersonalAccount &&
+        (directDebit.repaymentComplete || repaymentSettled) ? (
+        <div className="rounded-lg bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-100 ring-1 ring-amber-300/20">
+          <p className="font-black">Repayment proof missing</p>
+          <p className="mt-0.5 font-semibold text-amber-100/65">
+            Add the picture showing that the person received the payment.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1115,6 +1188,12 @@ function formatFileSize(size?: number | null) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function attachmentTypeLabel(file: TransactionAttachment) {
+  return isRepaymentProofAttachment(file)
+    ? "Repayment proof"
+    : "Receipt / invoice";
+}
+
 function getTransactionFiles(item: Transaction): TransactionAttachment[] {
   const attachments = item.attachments || [];
 
@@ -1137,9 +1216,34 @@ function getTransactionFiles(item: Transaction): TransactionAttachment[] {
   return [];
 }
 
+function isRepaymentProofAttachment(file: TransactionAttachment) {
+  const fileName = cleanText(file.file_name).toLowerCase();
+
+  return (
+    fileName.startsWith("repayment proof - ") ||
+    fileName.includes("repayment-proof") ||
+    fileName.includes("payment received proof")
+  );
+}
+
+function getRepaymentProofFiles(item: Transaction) {
+  return getTransactionFiles(item).filter(isRepaymentProofAttachment);
+}
+
+function getNormalReceiptFiles(item: Transaction) {
+  return getTransactionFiles(item).filter(
+    (file) => !isRepaymentProofAttachment(file),
+  );
+}
+
+function hasRepaymentProof(item: Transaction) {
+  return getRepaymentProofFiles(item).length > 0;
+}
+
 function hasMissingReceiptWarning(item: Transaction) {
-  const files = getTransactionFiles(item);
-  return item.type === "expense" && files.length === 0;
+  const receiptFiles = getNormalReceiptFiles(item);
+
+  return item.type === "expense" && receiptFiles.length === 0;
 }
 
 function normaliseText(value?: string | null) {
@@ -1548,6 +1652,9 @@ function getRowSearchText(item: Transaction) {
       ? RECEIPT_OVERDUE_SEARCH_WORDS
       : "receipt not overdue",
     files.map((file) => file.file_name).join(" "),
+    hasRepaymentProof(item)
+      ? "repayment proof uploaded payment received proof personal funds repayment evidence"
+      : "no repayment proof",
     String(item.amount_pence || ""),
     money(item.amount_pence),
   ]
@@ -1795,6 +1902,7 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     "Bank Status",
     "Finance Status",
     "Receipt Status",
+    "Repayment Proof",
     "Checked",
   ];
 
@@ -1836,6 +1944,11 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
       : hasMissingReceiptWarning(item)
         ? "Missing receipt"
         : "Receipt uploaded",
+    hasRepaymentProof(item)
+      ? getRepaymentProofFiles(item)
+          .map((file) => file.file_name)
+          .join("; ")
+      : "No repayment proof",
     item.checked_at
       ? `Checked by ${getCheckedByDisplayName(item)}`
       : "Not checked",
@@ -1877,13 +1990,26 @@ function Badge({
 function WarningBadges({
   item,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
+  repaymentSettled = false,
 }: {
   item: Transaction;
   receiptReminderDays?: number;
+  repaymentSettled?: boolean;
 }) {
   const badges: ReactNode[] = [];
+  const repaymentProofFiles = getRepaymentProofFiles(item);
 
-  if (!item.checked_at) {
+  /*
+   * Once Burton Pride has repaid this personal Direct Debit, remove the
+   * worrying/action-required badges. Keep only neutral information such as the
+   * Direct Debit progress badge.
+   */
+  const suppressActionWarnings =
+    repaymentSettled &&
+    isPersonalFundsTransaction(item) &&
+    getDirectDebitInfo(item).isDirectDebit;
+
+  if (!suppressActionWarnings && !item.checked_at) {
     badges.push(
       <span
         key="unchecked"
@@ -1895,7 +2021,7 @@ function WarningBadges({
     );
   }
 
-  if (isReceiptOverdue(item, receiptReminderDays)) {
+  if (!suppressActionWarnings && isReceiptOverdue(item, receiptReminderDays)) {
     badges.push(
       <span
         key="receipt-overdue"
@@ -1906,7 +2032,7 @@ function WarningBadges({
         Receipt overdue · {transactionAgeDays(item)} days
       </span>,
     );
-  } else if (hasMissingReceiptWarning(item)) {
+  } else if (!suppressActionWarnings && hasMissingReceiptWarning(item)) {
     badges.push(
       <span
         key="receipt"
@@ -1919,7 +2045,11 @@ function WarningBadges({
     );
   }
 
-  if (isPersonalFundsTransaction(item) && !item.personal_funds_repaid) {
+  if (
+    !suppressActionWarnings &&
+    isPersonalFundsTransaction(item) &&
+    !item.personal_funds_repaid
+  ) {
     badges.push(
       <span
         key="personal"
@@ -1932,6 +2062,21 @@ function WarningBadges({
   }
 
   const directDebit = getDirectDebitInfo(item);
+
+  if (repaymentProofFiles.length > 0) {
+    badges.push(
+      <span
+        key="repayment-proof"
+        className="inline-flex items-center gap-1 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[11px] font-black text-emerald-100"
+        title={repaymentProofFiles
+          .map((file) => file.file_name)
+          .join(", ")}
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        Repayment proof uploaded
+      </span>,
+    );
+  }
 
   if (directDebit.isDirectDebit) {
     badges.push(
@@ -1946,7 +2091,7 @@ function WarningBadges({
     );
   }
 
-  if (directDebit.reimbursementOutstanding) {
+  if (!suppressActionWarnings && directDebit.reimbursementOutstanding) {
     badges.push(
       <span
         key="direct-debit-reimbursement"
@@ -1958,7 +2103,11 @@ function WarningBadges({
     );
   }
 
-  if (item.finance_note_status && item.finance_note_status !== "none") {
+  if (
+    !suppressActionWarnings &&
+    item.finance_note_status &&
+    item.finance_note_status !== "none"
+  ) {
     badges.push(
       <span
         key="finance"
@@ -2109,118 +2258,75 @@ export default function MoneyTransactionsTable({
     useState(false);
   const [linkedStockOrdersError, setLinkedStockOrdersError] =
     useState("");
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
-  /**
-   * Keep Direct Debit repayment information connected to the main Money
-   * Tracker transaction source.
-   *
-   * The reimbursement page should dispatch:
-   *
-   * window.dispatchEvent(
-   *   new CustomEvent("money:direct-debit-reimbursed", {
-   *     detail: { planId, occurrenceId, transactionId },
-   *   }),
-   * );
-   *
-   * The immediate event refresh removes "Personal reimbursement due" without
-   * requiring a manual page reload. Focus and interval refreshes protect
-   * against changes made in another tab or by another admin.
-   */
-  useEffect(() => {
-    if (!onRefreshTransactions) return;
+  const linkedDirectDebitRepaymentKeys = useMemo(
+    () =>
+      new Set(
+        transactions
+          .filter(isDirectDebitRepaymentTransaction)
+          .map(directDebitRepaymentLinkKey)
+          .filter(Boolean),
+      ),
+    [transactions],
+  );
 
-    const refreshTransactionsCallback = onRefreshTransactions;
-    let cancelled = false;
-    let refreshing = false;
+  function isDirectDebitRepaymentSettled(item: Transaction) {
+    const directDebit = getDirectDebitInfo(item);
+    const linkKey = directDebitRepaymentLinkKey(item);
+    const hasLinkedRepayment =
+      Boolean(linkKey) && linkedDirectDebitRepaymentKeys.has(linkKey);
 
-    async function refreshTransactions() {
-      if (cancelled || refreshing) return;
-
-      refreshing = true;
-
-      try {
-        await refreshTransactionsCallback();
-      } catch (error) {
-        console.error("Money Tracker live refresh failed", error);
-      } finally {
-        refreshing = false;
-      }
-    }
-
-    function handleDirectDebitReimbursed() {
-      void refreshTransactions();
-    }
-
-    function handleMoneyTrackerChanged() {
-      void refreshTransactions();
-    }
-
-    function handleWindowFocus() {
-      void refreshTransactions();
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === "visible") {
-        void refreshTransactions();
-      }
-    }
-
-    window.addEventListener(
-      "money:direct-debit-reimbursed",
-      handleDirectDebitReimbursed,
+    return (
+      directDebit.isPersonalAccount &&
+      (Boolean(item.personal_funds_repaid) ||
+        directDebit.repaymentComplete ||
+        hasLinkedRepayment)
     );
-    window.addEventListener(
-      "money:transactions-changed",
-      handleMoneyTrackerChanged,
-    );
-    window.addEventListener("focus", handleWindowFocus);
-    document.addEventListener(
-      "visibilitychange",
-      handleVisibilityChange,
-    );
+  }
 
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refreshTransactions();
-      }
-    }, 30000);
+  async function refreshTableManually() {
+    if (manualRefreshing) return;
 
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener(
-        "money:direct-debit-reimbursed",
-        handleDirectDebitReimbursed,
-      );
-      window.removeEventListener(
-        "money:transactions-changed",
-        handleMoneyTrackerChanged,
-      );
-      window.removeEventListener("focus", handleWindowFocus);
-      document.removeEventListener(
-        "visibilitychange",
-        handleVisibilityChange,
-      );
-    };
-  }, [onRefreshTransactions]);
+    if (!onRefreshTransactions) {
+      setToast({
+        type: "error",
+        message:
+          "The table refresh function is not connected. Pass onRefreshTransactions from MoneyMainGrid.",
+      });
+      return;
+    }
 
-  /**
-   * Fallback lock data loaded directly by this table.
-   *
-   * The parent page should still pass lockedYears and lockedMonths, but this
-   * fallback keeps the read-only protection and warning banner working when an
-   * older MoneyMainGrid or hook has not passed the arrays through yet.
-   */
+    setManualRefreshing(true);
+    setToast(null);
+
+    try {
+      await onRefreshTransactions();
+
+      setToast({
+        type: "success",
+        message: "The latest Money Tracker transactions have been loaded.",
+      });
+    } catch (refreshError) {
+      console.error("Manual Money Tracker refresh failed", refreshError);
+
+      setToast({
+        type: "error",
+        message:
+          refreshError instanceof Error
+            ? refreshError.message
+            : "The Money Transactions table could not be refreshed.",
+      });
+    } finally {
+      setManualRefreshing(false);
+    }
+  }
+
+
   const [apiLockedYears, setApiLockedYears] = useState<string[]>([]);
   const [apiLockedMonths, setApiLockedMonths] = useState<string[]>([]);
 
-  /**
-   * Desktop table drag-to-scroll.
-   *
-   * The full money table is wider than the screen on normal/full mode. This
-   * lets admins hold the mouse down on empty/table space and drag left or
-   * right, instead of needing to go down to the bottom browser scrollbar.
-   */
+ 
   const desktopTableScrollRef = useRef<HTMLDivElement | null>(null);
   const desktopTableDragRef = useRef({
     active: false,
@@ -2777,7 +2883,27 @@ export default function MoneyTransactionsTable({
 
     const baseItems = isSpecialSearch ? yearTransactions : filteredTransactions;
 
+    /*
+     * A Direct Debit paid from a personal account has:
+     * 1. the original personal-funds expense; and
+     * 2. a Burton Pride repayment ledger transaction.
+     *
+     * The repayment transaction must remain in the database, but showing both
+     * as normal table rows makes one purchase look like two separate expenses.
+     * Hide the ledger-only repayment row and show its completed state on the
+     * original personal-funds Direct Debit row instead.
+     */
+    const directDebitRepaymentKeys = new Set(
+      baseItems
+        .filter(isDirectDebitRepaymentTransaction)
+        .map(directDebitRepaymentLinkKey)
+        .filter(Boolean),
+    );
+
     const filtered = baseItems.filter((item) => {
+      if (isDirectDebitRepaymentTransaction(item)) {
+        return false;
+      }
       const itemLinkedOrders =
         linkedStockOrders[item.id] || [];
 
@@ -2832,11 +2958,19 @@ export default function MoneyTransactionsTable({
               quickFilter,
               activeReceiptReminderDays,
             );
+      const directDebitKey = directDebitRepaymentLinkKey(item);
+      const hasLinkedDirectDebitRepayment =
+        Boolean(directDebitKey) &&
+        directDebitRepaymentKeys.has(directDebitKey);
+
       const matchesTextSearch =
         !cleanSearch ||
         isSpecialSearch ||
         [
           getRowSearchText(item),
+          hasLinkedDirectDebitRepayment
+            ? "repaid by burton pride linked repayment complete personal funds"
+            : "",
           itemLinkedOrders.length > 0
             ? `connected stock control order ${getLinkedOrderSearchText(
                 itemLinkedOrders,
@@ -3316,6 +3450,7 @@ export default function MoneyTransactionsTable({
 
   function renderMobileCard(item: Transaction) {
     const isPersonal = isPersonalFundsTransaction(item);
+    const repaymentSettled = isDirectDebitRepaymentSettled(item);
     const hasFunding = isSponsorshipTransaction(item);
     const missingReceipt = hasMissingReceiptWarning(item);
     const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
@@ -3371,6 +3506,7 @@ export default function MoneyTransactionsTable({
         <WarningBadges
           item={item}
           receiptReminderDays={activeReceiptReminderDays}
+          repaymentSettled={repaymentSettled}
         />
 
         {locked && (
@@ -3409,7 +3545,10 @@ export default function MoneyTransactionsTable({
               <p className="mb-2 text-xs font-black uppercase tracking-wide text-fuchsia-100/70">
                 Direct Debit
               </p>
-              <DirectDebitBadge item={item} />
+              <DirectDebitBadge
+                item={item}
+                repaymentSettled={repaymentSettled}
+              />
             </div>
           )}
           <div className="sm:col-span-2">
@@ -3502,6 +3641,7 @@ export default function MoneyTransactionsTable({
 
   function renderEasyModeCard(item: Transaction) {
     const isPersonal = isPersonalFundsTransaction(item);
+    const repaymentSettled = isDirectDebitRepaymentSettled(item);
     const hasFunding = isSponsorshipTransaction(item);
     const missingReceipt = hasMissingReceiptWarning(item);
     const receiptOverdue = isReceiptOverdue(item, activeReceiptReminderDays);
@@ -3579,6 +3719,7 @@ export default function MoneyTransactionsTable({
         <WarningBadges
           item={item}
           receiptReminderDays={activeReceiptReminderDays}
+          repaymentSettled={repaymentSettled}
         />
 
         {locked ? (
@@ -3969,6 +4110,21 @@ export default function MoneyTransactionsTable({
                   : `${monthNameFromKey(selectedViewMonth)} locked`}
               </span>
             )}
+
+            <button
+              type="button"
+              onClick={() => void refreshTableManually()}
+              disabled={manualRefreshing}
+              className="inline-flex items-center gap-2 rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-100 ring-1 ring-sky-300/20 transition hover:bg-sky-500/25 disabled:cursor-wait disabled:opacity-60"
+              title="Refresh only the Money Transactions table"
+            >
+              <RefreshCcw
+                className={`h-3.5 w-3.5 ${
+                  manualRefreshing ? "animate-spin" : ""
+                }`}
+              />
+              {manualRefreshing ? "Refreshing..." : "Refresh table"}
+            </button>
 
             <button
               type="button"
@@ -5231,6 +5387,18 @@ export default function MoneyTransactionsTable({
 
                     const item = row.item;
                     const isPersonal = isPersonalFundsTransaction(item);
+                    const directDebitInfo = getDirectDebitInfo(item);
+                    const directDebitLinkKey =
+                      directDebitRepaymentLinkKey(item);
+                    const hasLinkedDirectDebitRepayment =
+                      Boolean(directDebitLinkKey) &&
+                      linkedDirectDebitRepaymentKeys.has(
+                        directDebitLinkKey,
+                      );
+                    const isPersonalPaidBack =
+                      Boolean(item.personal_funds_repaid) ||
+                      directDebitInfo.repaymentComplete ||
+                      hasLinkedDirectDebitRepayment;
                     const hasFunding = isSponsorshipTransaction(item);
                     const fundingRecord = getFundingForTransaction(item);
                     const fundingType =
@@ -5323,6 +5491,7 @@ export default function MoneyTransactionsTable({
                           <WarningBadges
                             item={item}
                             receiptReminderDays={activeReceiptReminderDays}
+                            repaymentSettled={isPersonalPaidBack}
                           />
                           {locked && (
                             <p className="mt-2 rounded-xl bg-red-500/10 px-2 py-1 text-[11px] font-bold text-red-100 ring-1 ring-red-300/20">
@@ -5350,14 +5519,14 @@ export default function MoneyTransactionsTable({
                                 : `${shortLabel}-funded spend`}
                             </div>
                           )}
-                          {isPersonal && item.personal_funds_repaid && (
+                          {isPersonal && isPersonalPaidBack && (
                             <div className="mt-1 text-xs font-semibold text-emerald-300">
-                              Taken from balance
+                              Taken from Burton Pride balance
                             </div>
                           )}
-                          {isPersonal && !item.personal_funds_repaid && (
+                          {isPersonal && !isPersonalPaidBack && (
                             <div className="mt-1 text-xs font-semibold text-orange-300">
-                              Not taken yet
+                              Not taken from Burton Pride balance yet
                             </div>
                           )}
                         </ColumnCell>
@@ -5558,7 +5727,11 @@ export default function MoneyTransactionsTable({
                           column="directDebit"
                           className="min-w-[220px] p-3 align-top"
                         >
-                          <DirectDebitBadge item={item} compact />
+                          <DirectDebitBadge
+                            item={item}
+                            compact
+                            repaymentSettled={isPersonalPaidBack}
+                          />
                         </ColumnCell>
 
                         <ColumnCell
@@ -6009,7 +6182,10 @@ export default function MoneyTransactionsTable({
                   Change future payments from the Direct Debit plan rather than editing historic paid months.
                 </p>
                 <div className="mt-3">
-                  <DirectDebitBadge item={detailsItem} />
+                  <DirectDebitBadge
+                    item={detailsItem}
+                    repaymentSettled={isDirectDebitRepaymentSettled(detailsItem)}
+                  />
                 </div>
                 {getDirectDebitInfo(detailsItem).planNote && (
                   <p className="mt-3 whitespace-pre-wrap rounded-xl bg-black/20 p-3 text-xs leading-5 text-fuchsia-100/75">

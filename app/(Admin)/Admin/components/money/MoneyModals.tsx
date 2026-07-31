@@ -1,7 +1,16 @@
 "use client";
 
-import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { X } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import { Eye, EyeOff, Loader2, X } from "lucide-react";
 
 import type {
   FundingType,
@@ -217,6 +226,39 @@ function notesPlaceholder(type: FundingType) {
   return "Notes / agreed use / restrictions";
 }
 
+
+
+function isPositiveMoneyInput(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
+function isNonNegativeMoneyInput(value: string) {
+  if (!String(value).trim()) return true;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function isValidEmail(value: string) {
+  const email = String(value || "").trim();
+  if (!email) return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidWebsite(value: string) {
+  const website = String(value || "").trim();
+  if (!website) return true;
+
+  try {
+    const url = new URL(
+      /^https?:\/\//i.test(website) ? website : `https://${website}`,
+    );
+    return Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function ModalShell({
   open,
   title,
@@ -236,33 +278,131 @@ function ModalShell({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const panelRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusTimer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !saving) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const panel = panelRef.current;
+      if (!panel) return;
+
+      const focusable = Array.from(
+        panel.querySelectorAll(
+          [
+            "button:not([disabled])",
+            "input:not([disabled])",
+            "select:not([disabled])",
+            "textarea:not([disabled])",
+            "[href]",
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(","),
+        ),
+      ) as HTMLElement[];
+      const visibleFocusable = focusable.filter(
+        (element) => !element.hasAttribute("aria-hidden"),
+      );
+
+      if (visibleFocusable.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+
+      const first = visibleFocusable[0];
+      const last = visibleFocusable[visibleFocusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [open, saving, onClose]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) {
+          onClose();
+        }
+      }}
+    >
       <section
-        className={`max-h-[92vh] w-full ${maxWidth} overflow-y-auto rounded-3xl border border-white/10 bg-[#070716] p-4 text-white shadow-2xl sm:p-5`}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        tabIndex={-1}
+        className={`max-h-[92vh] w-full ${maxWidth} overflow-y-auto rounded-3xl border border-white/10 bg-[#070716] p-4 text-white shadow-2xl outline-none ring-1 ${toneClasses[tone].ring.split(" ")[0]} sm:p-5`}
       >
         <header className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="break-words text-xl font-black text-white">
+            <h2
+              id={titleId}
+              className="break-words text-xl font-black text-white"
+            >
               {title}
             </h2>
             {description ? (
-              <p className="mt-1 text-sm leading-6 text-white/60">
+              <div
+                id={descriptionId}
+                className="mt-1 text-sm leading-6 text-white/60"
+              >
                 {description}
-              </p>
+              </div>
             ) : null}
           </div>
 
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="shrink-0 rounded-xl bg-white/10 p-2 text-white/80 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="shrink-0 rounded-xl bg-white/10 p-2 text-white/80 outline-none transition hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60"
             aria-label={`Close ${title}`}
           >
-            <X className="h-4 w-4" />
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
 
@@ -295,8 +435,12 @@ function TextInput({
   tone = "default",
   type = "text",
   step,
+  min,
+  max,
   name,
   autoComplete,
+  ariaLabel,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -304,8 +448,12 @@ function TextInput({
   tone?: ModalTone;
   type?: string;
   step?: string;
+  min?: string;
+  max?: string;
   name?: string;
   autoComplete?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -314,9 +462,14 @@ function TextInput({
       placeholder={placeholder}
       type={type}
       step={step}
+      min={min}
+      max={max}
       name={name}
       autoComplete={autoComplete}
-      className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 ${toneClasses[tone].ring}`}
+      aria-label={ariaLabel || placeholder}
+      disabled={disabled}
+      inputMode={type === "number" ? "decimal" : undefined}
+      className={`w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60 ${toneClasses[tone].ring}`}
     />
   );
 }
@@ -326,18 +479,24 @@ function TextArea({
   onChange,
   placeholder,
   tone = "default",
+  ariaLabel,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   tone?: ModalTone;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <textarea
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
-      className={`min-h-24 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 ${toneClasses[tone].ring}`}
+      aria-label={ariaLabel || placeholder}
+      disabled={disabled}
+      className={`min-h-24 w-full rounded-xl bg-black/20 p-3 text-white outline-none ring-1 placeholder:text-white/35 disabled:cursor-not-allowed disabled:opacity-60 ${toneClasses[tone].ring}`}
     />
   );
 }
@@ -347,17 +506,23 @@ function SelectInput({
   onChange,
   options,
   tone = "default",
+  ariaLabel,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
   tone?: ModalTone;
+  ariaLabel?: string;
+  disabled?: boolean;
 }) {
   return (
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className={`w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 ${toneClasses[tone].ring}`}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      className={`w-full rounded-xl bg-black/20 p-3 font-bold text-white outline-none ring-1 disabled:cursor-not-allowed disabled:opacity-60 ${toneClasses[tone].ring}`}
     >
       {options.map((option) => (
         <option
@@ -434,6 +599,15 @@ function FundingModal({
   const activeFundingType = sponsorForm.fundingType || "sponsor";
   const activeFundingLabel = fundingTypeLabel(activeFundingType);
   const isLoan = activeFundingType === "loan";
+  const fundingFormInvalid =
+    !sponsorForm.sponsorName.trim() ||
+    !isValidEmail(sponsorForm.email) ||
+    !isNonNegativeMoneyInput(sponsorForm.agreedAmount) ||
+    !isNonNegativeMoneyInput(sponsorForm.receivedAmount) ||
+    (isLoan &&
+      (!isNonNegativeMoneyInput(sponsorForm.loanMonthlyPayment) ||
+        (sponsorForm.loanInterestType !== "none" &&
+          !isPositiveMoneyInput(sponsorForm.loanInterestAmount))));
 
   return (
     <ModalShell
@@ -523,6 +697,7 @@ function FundingModal({
             placeholder={agreedAmountPlaceholder(activeFundingType)}
             type="number"
             step="0.01"
+            min="0"
           />
 
           <TextInput
@@ -534,6 +709,7 @@ function FundingModal({
             tone="amber"
             type="number"
             step="0.01"
+            min="0"
           />
         </div>
 
@@ -570,8 +746,10 @@ function FundingModal({
 
         <button
           type="button"
-          disabled={savingSponsor}
-          onClick={onSave}
+          disabled={savingSponsor || fundingFormInvalid}
+          onClick={() => {
+            if (!fundingFormInvalid) void onSave();
+          }}
           className="w-full rounded-xl bg-amber-500 px-4 py-3 font-bold text-black hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {savingSponsor
@@ -616,6 +794,7 @@ function LoanSetupFields({
           tone="blue"
           type="number"
           step="0.01"
+          min="0"
         />
         <p className="mt-2 text-xs leading-5 text-blue-100/70">
           This is the payment plan only. It does not count as paid back until
@@ -669,6 +848,7 @@ function LoanSetupFields({
             tone="blue"
             type="number"
             step="0.01"
+            min="0"
           />
           <div className="mt-3 space-y-3">
             <InfoBox tone="orange">
@@ -834,7 +1014,11 @@ function SupplierModal({
           saving={savingSupplier}
           confirmLabel={editingSupplier ? "Update Supplier" : "Save Supplier"}
           savingLabel={editingSupplier ? "Updating..." : "Saving..."}
-          disabled={!supplierForm.supplierName.trim()}
+          disabled={
+            !supplierForm.supplierName.trim() ||
+            !isValidEmail(supplierForm.email) ||
+            !isValidWebsite(supplierForm.website)
+          }
           onCancel={() => onClose?.()}
           onConfirm={onSave}
         />
@@ -949,6 +1133,7 @@ function LoanRepaymentModal({
           placeholder="Amount paid back, e.g. 200"
           type="number"
           step="0.01"
+          min="0"
           tone="orange"
         />
 
@@ -989,6 +1174,11 @@ function LoanRepaymentModal({
           saving={saving}
           confirmLabel="Save Repayment"
           savingLabel="Saving..."
+          disabled={
+            !isPositiveMoneyInput(form.amount) ||
+            !form.paymentMethod.trim() ||
+            !form.transactionDate.trim()
+          }
           onCancel={onClose}
           onConfirm={onSave}
         />
@@ -1038,6 +1228,7 @@ function LoanInterestModal({
           placeholder="Interest charged by lender, e.g. 25"
           type="number"
           step="0.01"
+          min="0"
           tone="blue"
         />
 
@@ -1066,6 +1257,10 @@ function LoanInterestModal({
           saving={saving}
           confirmLabel="Save Lender Interest"
           savingLabel="Saving..."
+          disabled={
+            !isPositiveMoneyInput(form.amount) ||
+            !form.transactionDate.trim()
+          }
           onCancel={onClose}
           onConfirm={onSave}
         />

@@ -1,10 +1,20 @@
 "use client";
 
-import { useMemo, useState, type ComponentType } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   CheckCircle2,
   CheckSquare,
   FlaskConical,
+  Loader2,
   Pencil,
   RefreshCcw,
   RotateCcw,
@@ -41,13 +51,19 @@ type WebsitePaymentsSyncCardProps = {
   message?: string | null;
   error?: unknown;
   previewItems?: ImportPreviewItem[];
-  onPreview?: () => void;
-  onSync: (confirmedPayments: ImportPreviewItem[]) => void;
-  DetailedErrorBox: ComponentType<{ title: string; error: unknown }>;
+  onPreview?: () => void | Promise<void>;
+  onSync: (
+    confirmedPayments: ImportPreviewItem[],
+  ) => void | Promise<void>;
+  DetailedErrorBox: ComponentType<{
+    title: string;
+    error: unknown;
+  }>;
 };
 
 type PreviewApiResponse = {
   ok?: boolean;
+  success?: boolean;
   error?: string;
   message?: string;
   previewItems?: ImportPreviewItem[];
@@ -62,6 +78,8 @@ type EditableField = {
   type?: "text" | "email" | "date" | "textarea";
   className?: string;
 };
+
+type StatusTone = "success" | "warning" | "info" | "error";
 
 const TEST_PREVIEW_ITEMS: ImportPreviewItem[] = [
   {
@@ -157,79 +175,130 @@ const EDITABLE_FIELDS: EditableField[] = [
 ];
 
 const inputClass =
-  "w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-sky-300/50 disabled:cursor-not-allowed disabled:opacity-60";
+  "w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/35 focus-visible:border-sky-300/50 focus-visible:ring-2 focus-visible:ring-sky-300/30 disabled:cursor-not-allowed disabled:opacity-60";
 
 const actionButtonClass =
-  "inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto";
+  "inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto";
 
-function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+function cleanText(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
-function cloneItems(items: ImportPreviewItem[]) {
+function safeToday(): string {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+
+  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function isValidDateInput(value: unknown): boolean {
+  const text = cleanText(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text);
+}
+
+function cloneItems(items: ImportPreviewItem[]): ImportPreviewItem[] {
   return items.map((item) => ({ ...item }));
 }
 
-function getSessionId(item: ImportPreviewItem) {
+function getSessionId(item: ImportPreviewItem): string {
   return (
     cleanText(item.id) ||
     cleanText(item.stripe_session_id) ||
-    cleanText(item.checkout_session_id)
+    cleanText(item.checkout_session_id) ||
+    cleanText(item.stripe_payment_intent_id) ||
+    cleanText(item.stripe_payment_id)
   );
 }
 
-function penceFromAmount(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.round(value * 100);
+function penceFromAmount(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0
+      ? Math.round(value * 100)
+      : 0;
   }
 
-  const amount = Number(
-    String(value || "")
-      .replace(/£/g, "")
-      .replace(/,/g, "")
-      .trim(),
-  );
+  const normalised = cleanText(value)
+    .replace(/[£,\s]/g, "")
+    .replace(/^\+/, "");
 
-  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
-}
-
-function formatMoney(item: Pick<ImportPreviewItem, "amount" | "amount_pence">) {
-  if (item.amount !== undefined && item.amount !== null && item.amount !== "") {
-    if (typeof item.amount === "number") return `£${item.amount.toFixed(2)}`;
-
-    const text = String(item.amount).trim();
-    if (text.startsWith("£")) return text;
-
-    const amount = Number(text.replace(/,/g, ""));
-    return Number.isFinite(amount) ? `£${amount.toFixed(2)}` : text;
+  if (!normalised) {
+    return 0;
   }
 
-  const pence = Number(item.amount_pence || 0);
-  return `£${(pence / 100).toFixed(2)}`;
+  const amount = Number(normalised);
+
+  return Number.isFinite(amount) && amount >= 0
+    ? Math.round(amount * 100)
+    : 0;
 }
 
-function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
+function safePence(value: unknown): number {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(parsed));
+}
+
+function formatMoney(
+  item: Pick<ImportPreviewItem, "amount" | "amount_pence">,
+): string {
+  const amountPence =
+    item.amount !== undefined &&
+    item.amount !== null &&
+    cleanText(item.amount) !== ""
+      ? penceFromAmount(item.amount)
+      : safePence(item.amount_pence);
+
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(amountPence / 100);
+}
+
+function normalisePreviewItem(
+  item: ImportPreviewItem,
+): ImportPreviewItem {
   const sessionId = getSessionId(item);
-  const date = cleanText(item.date) || cleanText(item.transaction_date);
-  const amountPence = Number.isFinite(Number(item.amount_pence))
-    ? Number(item.amount_pence)
-    : penceFromAmount(item.amount);
+  const dateCandidate =
+    cleanText(item.date) || cleanText(item.transaction_date);
+  const date = isValidDateInput(dateCandidate)
+    ? dateCandidate
+    : safeToday();
+
+  const amountPence =
+    Number.isFinite(Number(item.amount_pence)) &&
+    Number(item.amount_pence) >= 0
+      ? safePence(item.amount_pence)
+      : penceFromAmount(item.amount);
 
   return {
     ...item,
-    id: sessionId || item.id,
-    stripe_session_id: sessionId || item.stripe_session_id || null,
-    checkout_session_id: sessionId || item.checkout_session_id || null,
-    title: cleanText(item.title) || cleanText(item.name) || "Website payment",
+    id: sessionId || cleanText(item.id) || undefined,
+    stripe_session_id:
+      sessionId || cleanText(item.stripe_session_id) || null,
+    checkout_session_id:
+      sessionId || cleanText(item.checkout_session_id) || null,
+    title:
+      cleanText(item.title) ||
+      cleanText(item.name) ||
+      "Website payment",
     name: cleanText(item.name) || "Website customer",
     type: cleanText(item.type) || "Website Payment",
     category:
-      cleanText(item.category) || cleanText(item.type) || "Website Payment",
+      cleanText(item.category) ||
+      cleanText(item.type) ||
+      "Website Payment",
     description: cleanText(item.description) || null,
-    amount: formatMoney({ amount: item.amount, amount_pence: amountPence }),
+    amount: formatMoney({
+      amount: item.amount,
+      amount_pence: amountPence,
+    }),
     amount_pence: amountPence,
-    date: date || new Date().toISOString().slice(0, 10),
-    transaction_date: date || new Date().toISOString().slice(0, 10),
+    date,
+    transaction_date: date,
     email: cleanText(item.email) || null,
     payment_method: cleanText(item.payment_method) || "Stripe",
     source: cleanText(item.source) || "website_payment",
@@ -237,11 +306,40 @@ function normalisePreviewItem(item: ImportPreviewItem): ImportPreviewItem {
   };
 }
 
-function isAlreadyImported(item: ImportPreviewItem) {
-  return cleanText(item.status).toLowerCase().includes("already imported");
+function normaliseItems(
+  items: ImportPreviewItem[],
+): ImportPreviewItem[] {
+  const seen = new Set<string>();
+
+  return cloneItems(items)
+    .map(normalisePreviewItem)
+    .filter((item, index) => {
+      const id = getSessionId(item);
+
+      if (!id) {
+        return true;
+      }
+
+      if (seen.has(id)) {
+        return false;
+      }
+
+      seen.add(id);
+      return true;
+    })
+    .map((item, index) => ({
+      ...item,
+      id: getSessionId(item) || `preview-row-${index + 1}`,
+    }));
 }
 
-function isSelectableLivePayment(item: ImportPreviewItem) {
+function isAlreadyImported(item: ImportPreviewItem): boolean {
+  return cleanText(item.status)
+    .toLowerCase()
+    .includes("already imported");
+}
+
+function isSelectableLivePayment(item: ImportPreviewItem): boolean {
   return Boolean(getSessionId(item)) && !isAlreadyImported(item);
 }
 
@@ -250,20 +348,44 @@ async function readJsonResponse(
 ): Promise<PreviewApiResponse> {
   const text = await response.text();
 
+  if (!text.trim()) {
+    return {};
+  }
+
   try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return {
-      ok: false,
-      error: text || "The API returned an invalid response.",
-    };
+    const parsed = JSON.parse(text) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Response body was not a JSON object.");
+    }
+
+    return parsed as PreviewApiResponse;
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Invalid JSON response.";
+
+    throw new Error(
+      [
+        "The website payment API returned an invalid response.",
+        `HTTP status: ${response.status}`,
+        `Reason: ${reason}`,
+        `Raw response: ${text.slice(0, 2000)}`,
+      ].join("\n\n"),
+    );
   }
 }
 
-function getPreviewItems(data: PreviewApiResponse) {
+function getPreviewItems(
+  data: PreviewApiResponse,
+): ImportPreviewItem[] {
   const items =
-    data.previewItems || data.items || data.payments || data.transactions || [];
-  return Array.isArray(items) ? items.map(normalisePreviewItem) : [];
+    data.previewItems ??
+    data.items ??
+    data.payments ??
+    data.transactions ??
+    [];
+
+  return Array.isArray(items) ? normaliseItems(items) : [];
 }
 
 function buildEditedPaymentForImport(
@@ -271,21 +393,24 @@ function buildEditedPaymentForImport(
 ): ImportPreviewItem {
   const sessionId = getSessionId(item);
   const amountPence = penceFromAmount(item.amount);
-  const date =
-    cleanText(item.date) ||
-    cleanText(item.transaction_date) ||
-    new Date().toISOString().slice(0, 10);
+  const dateCandidate =
+    cleanText(item.date) || cleanText(item.transaction_date);
+  const date = isValidDateInput(dateCandidate)
+    ? dateCandidate
+    : safeToday();
 
   return {
     ...item,
-    id: sessionId,
-    stripe_session_id: sessionId,
-    checkout_session_id: sessionId,
+    id: sessionId || undefined,
+    stripe_session_id: sessionId || null,
+    checkout_session_id: sessionId || null,
     title: cleanText(item.title) || "Website payment",
     name: cleanText(item.name) || "Website customer",
     type: cleanText(item.type) || "Website Payment",
     category:
-      cleanText(item.category) || cleanText(item.type) || "Website Payment",
+      cleanText(item.category) ||
+      cleanText(item.type) ||
+      "Website Payment",
     description: cleanText(item.description) || null,
     amount: formatMoney({ amount_pence: amountPence }),
     amount_pence: amountPence,
@@ -296,6 +421,25 @@ function buildEditedPaymentForImport(
     source: cleanText(item.source) || "website_payment",
     status: cleanText(item.status) || "Ready to import",
   };
+}
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(selector),
+  ).filter(
+    (element) =>
+      !element.hasAttribute("hidden") &&
+      element.getAttribute("aria-hidden") !== "true",
+  );
 }
 
 function StatusMessage({
@@ -312,10 +456,15 @@ function StatusMessage({
 
   return (
     <div
+      role={type === "success" ? "status" : "alert"}
+      aria-live={type === "success" ? "polite" : "assertive"}
       className={`mt-4 flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm font-medium ${styles}`}
     >
-      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-      <span>{message}</span>
+      <CheckCircle2
+        className="mt-0.5 h-4 w-4 shrink-0"
+        aria-hidden="true"
+      />
+      <span className="break-words">{message}</span>
     </div>
   );
 }
@@ -329,10 +478,15 @@ function EditableInput({
   item: ImportPreviewItem;
   field: EditableField;
   disabled: boolean;
-  onChange: (field: keyof ImportPreviewItem, value: string) => void;
+  onChange: (
+    field: keyof ImportPreviewItem,
+    value: string,
+  ) => void;
 }) {
   const value =
-    field.key === "amount" ? formatMoney(item) : String(item[field.key] || "");
+    field.key === "amount"
+      ? formatMoney(item)
+      : cleanText(item[field.key]);
 
   if (field.type === "textarea") {
     return (
@@ -340,7 +494,9 @@ function EditableInput({
         rows={2}
         value={value}
         disabled={disabled}
-        onChange={(event) => onChange(field.key, event.target.value)}
+        onChange={(event) =>
+          onChange(field.key, event.target.value)
+        }
         className={`${inputClass} resize-y`}
       />
     );
@@ -351,8 +507,15 @@ function EditableInput({
       type={field.type || "text"}
       value={value}
       disabled={disabled}
-      onChange={(event) => onChange(field.key, event.target.value)}
-      className={`${inputClass} ${field.key === "amount" ? "font-bold text-emerald-100" : ""}`}
+      onChange={(event) =>
+        onChange(field.key, event.target.value)
+      }
+      className={`${inputClass} ${
+        field.key === "amount"
+          ? "font-bold text-emerald-100"
+          : ""
+      }`}
+      inputMode={field.key === "amount" ? "decimal" : undefined}
     />
   );
 }
@@ -363,42 +526,140 @@ export default function WebsitePaymentsSyncCard({
   message,
   error,
   previewItems = [],
+  onPreview,
   onSync,
   DetailedErrorBox,
 }: WebsitePaymentsSyncCardProps) {
+  const dialogTitleId = useId();
+  const dialogDescriptionId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const previewAbortRef = useRef<AbortController | null>(null);
+  const apiTestAbortRef = useRef<AbortController | null>(null);
+  const syncSubmitRef = useRef(false);
+
   const [showPreviewWindow, setShowPreviewWindow] = useState(false);
   const [localPreviewing, setLocalPreviewing] = useState(false);
-  const [originalPreviewItems, setOriginalPreviewItems] = useState<
-    ImportPreviewItem[]
-  >(cloneItems(previewItems).map(normalisePreviewItem));
-  const [localPreviewItems, setLocalPreviewItems] = useState<
-    ImportPreviewItem[]
-  >(cloneItems(previewItems).map(normalisePreviewItem));
+  const [originalPreviewItems, setOriginalPreviewItems] =
+    useState<ImportPreviewItem[]>(() => normaliseItems(previewItems));
+  const [localPreviewItems, setLocalPreviewItems] =
+    useState<ImportPreviewItem[]>(() => normaliseItems(previewItems));
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
-  const [testCompleteMessage, setTestCompleteMessage] = useState<string | null>(
-    null,
-  );
+  const [testCompleteMessage, setTestCompleteMessage] =
+    useState<string | null>(null);
   const [apiTestRunning, setApiTestRunning] = useState(false);
-  const [apiTestMessage, setApiTestMessage] = useState<string | null>(null);
+  const [apiTestMessage, setApiTestMessage] =
+    useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [confirmingImport, setConfirmingImport] = useState(false);
 
   const isLoadingPreview = previewing || localPreviewing;
+  const busy =
+    syncing ||
+    isLoadingPreview ||
+    apiTestRunning ||
+    confirmingImport;
 
-  const visiblePreviewItems = useMemo(() => {
-    return localPreviewItems.length > 0
-      ? localPreviewItems
-      : cloneItems(previewItems).map(normalisePreviewItem);
-  }, [localPreviewItems, previewItems]);
+  useEffect(() => {
+    if (showPreviewWindow || localPreviewItems.length > 0) {
+      return;
+    }
+
+    const normalised = normaliseItems(previewItems);
+    setOriginalPreviewItems(normalised);
+    setLocalPreviewItems(normalised);
+  }, [previewItems, showPreviewWindow, localPreviewItems.length]);
+
+  useEffect(() => {
+    if (!showPreviewWindow) {
+      return;
+    }
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const timer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        if (!busy) {
+          event.preventDefault();
+          closePreviewWindow();
+        }
+        return;
+      }
+
+      if (event.key !== "Tab" || !dialogRef.current) {
+        return;
+      }
+
+      const focusable = getFocusableElements(dialogRef.current);
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocusRef.current?.focus();
+    };
+  }, [showPreviewWindow, busy]);
+
+  useEffect(() => {
+    return () => {
+      previewAbortRef.current?.abort();
+      apiTestAbortRef.current?.abort();
+    };
+  }, []);
+
+  const visiblePreviewItems = localPreviewItems;
 
   const selectableLiveIds = useMemo(() => {
     if (testMode) return [];
 
-    return visiblePreviewItems
-      .filter(isSelectableLivePayment)
-      .map(getSessionId)
-      .filter(Boolean);
+    return Array.from(
+      new Set(
+        visiblePreviewItems
+          .filter(isSelectableLivePayment)
+          .map(getSessionId)
+          .filter(Boolean),
+      ),
+    );
   }, [testMode, visiblePreviewItems]);
+
+  useEffect(() => {
+    setSelectedIds((current) =>
+      current.filter((id) => selectableLiveIds.includes(id)),
+    );
+  }, [selectableLiveIds]);
 
   const allSelectableLivePaymentsSelected =
     selectableLiveIds.length > 0 &&
@@ -409,16 +670,31 @@ export default function WebsitePaymentsSyncCard({
     field: keyof ImportPreviewItem,
     value: string,
   ) {
+    setLocalError(null);
+
     setLocalPreviewItems((items) =>
       items.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
 
-        const updated: ImportPreviewItem = { ...item, [field]: value };
+        const updated: ImportPreviewItem = {
+          ...item,
+          [field]: value,
+        };
 
-        if (field === "amount") updated.amount_pence = penceFromAmount(value);
-        if (field === "date") updated.transaction_date = value;
-        if (field === "type" && !cleanText(item.category))
+        if (field === "amount") {
+          updated.amount_pence = penceFromAmount(value);
+        }
+
+        if (field === "date") {
+          updated.transaction_date = value;
+        }
+
+        if (
+          field === "type" &&
+          !cleanText(item.category)
+        ) {
           updated.category = value;
+        }
 
         return updated;
       }),
@@ -431,8 +707,11 @@ export default function WebsitePaymentsSyncCard({
     setTestCompleteMessage(null);
   }
 
-  function loadItemsIntoEditor(items: ImportPreviewItem[], testing: boolean) {
-    const normalised = cloneItems(items).map(normalisePreviewItem);
+  function loadItemsIntoEditor(
+    items: ImportPreviewItem[],
+    testing: boolean,
+  ) {
+    const normalised = normaliseItems(items);
 
     setTestMode(testing);
     setOriginalPreviewItems(cloneItems(normalised));
@@ -449,6 +728,12 @@ export default function WebsitePaymentsSyncCard({
   }
 
   async function testApiConnection() {
+    if (apiTestRunning) return;
+
+    apiTestAbortRef.current?.abort();
+    const controller = new AbortController();
+    apiTestAbortRef.current = controller;
+
     try {
       setApiTestRunning(true);
       resetMessages();
@@ -458,29 +743,50 @@ export default function WebsitePaymentsSyncCard({
         {
           method: "GET",
           cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+          },
         },
       );
+
       const data = await readJsonResponse(response);
 
-      if (!response.ok || data.ok === false) {
+      if (
+        !response.ok ||
+        data.ok === false ||
+        data.success === false
+      ) {
         throw new Error(
-          data.error ||
+          cleanText(data.error) ||
+            cleanText(data.message) ||
             `API connection test failed with status ${response.status}.`,
         );
       }
 
       setApiTestMessage(
-        data.message ||
+        cleanText(data.message) ||
           "API connection test passed. No payments were imported.",
       );
     } catch (err) {
+      if (
+        err instanceof DOMException &&
+        err.name === "AbortError"
+      ) {
+        return;
+      }
+
       setLocalError(
         err instanceof Error
           ? err.message
           : "Something went wrong while testing the API connection.",
       );
     } finally {
-      setApiTestRunning(false);
+      if (apiTestAbortRef.current === controller) {
+        setApiTestRunning(false);
+        apiTestAbortRef.current = null;
+      }
     }
   }
 
@@ -490,6 +796,12 @@ export default function WebsitePaymentsSyncCard({
   }
 
   async function openRealPreviewWindow() {
+    if (localPreviewing) return;
+
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+
     try {
       setLocalPreviewing(true);
       resetMessages();
@@ -499,24 +811,44 @@ export default function WebsitePaymentsSyncCard({
       setLocalPreviewItems([]);
       setSelectedIds([]);
 
+      await onPreview?.();
+
       const response = await fetch(
         `/api/admin/money/sync-stripe?preview=true&t=${Date.now()}`,
         {
           method: "GET",
           cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+          },
         },
       );
+
       const data = await readJsonResponse(response);
 
-      if (!response.ok || data.ok === false) {
+      if (
+        !response.ok ||
+        data.ok === false ||
+        data.success === false
+      ) {
         throw new Error(
-          data.error ||
+          cleanText(data.error) ||
+            cleanText(data.message) ||
             `Failed to preview website payments. API status: ${response.status}.`,
         );
       }
 
       loadItemsIntoEditor(getPreviewItems(data), false);
     } catch (err) {
+      if (
+        err instanceof DOMException &&
+        err.name === "AbortError"
+      ) {
+        return;
+      }
+
       setLocalError(
         err instanceof Error
           ? err.message
@@ -526,15 +858,24 @@ export default function WebsitePaymentsSyncCard({
       setLocalPreviewItems([]);
       setSelectedIds([]);
     } finally {
-      setLocalPreviewing(false);
+      if (previewAbortRef.current === controller) {
+        setLocalPreviewing(false);
+        previewAbortRef.current = null;
+      }
     }
   }
 
-  function closePreviewWindow() {
+  const closePreviewWindow = useCallback(() => {
+    if (busy) {
+      return;
+    }
+
+    previewAbortRef.current?.abort();
     setShowPreviewWindow(false);
     setTestMode(false);
     setSelectedIds([]);
-  }
+    setLocalError(null);
+  }, [busy]);
 
   function resetTestData() {
     loadItemsIntoEditor(TEST_PREVIEW_ITEMS, true);
@@ -547,22 +888,32 @@ export default function WebsitePaymentsSyncCard({
   }
 
   function toggleSelectedPayment(id: string) {
+    if (!id) return;
+
     setSelectedIds((ids) =>
-      ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id],
+      ids.includes(id)
+        ? ids.filter((item) => item !== id)
+        : [...ids, id],
     );
   }
 
   function toggleSelectAllLivePayments() {
     setSelectedIds((ids) => {
-      if (selectableLiveIds.every((id) => ids.includes(id))) {
-        return ids.filter((id) => !selectableLiveIds.includes(id));
+      if (
+        selectableLiveIds.every((id) => ids.includes(id))
+      ) {
+        return ids.filter(
+          (id) => !selectableLiveIds.includes(id),
+        );
       }
 
-      return Array.from(new Set([...ids, ...selectableLiveIds]));
+      return Array.from(
+        new Set([...ids, ...selectableLiveIds]),
+      );
     });
   }
 
-  function confirmImport() {
+  async function confirmImport() {
     if (testMode) {
       closePreviewWindow();
       setTestCompleteMessage(
@@ -571,8 +922,14 @@ export default function WebsitePaymentsSyncCard({
       return;
     }
 
+    if (syncSubmitRef.current || confirmingImport || syncing) {
+      return;
+    }
+
     const selectedPayments = visiblePreviewItems
-      .filter((item) => selectedIds.includes(getSessionId(item)))
+      .filter((item) =>
+        selectedIds.includes(getSessionId(item)),
+      )
       .filter(isSelectableLivePayment)
       .map(buildEditedPaymentForImport);
 
@@ -589,7 +946,7 @@ export default function WebsitePaymentsSyncCard({
         !cleanText(item.title) ||
         !cleanText(item.type) ||
         !cleanText(item.category) ||
-        !cleanText(item.date) ||
+        !isValidDateInput(item.date) ||
         !Number.isFinite(Number(item.amount_pence)) ||
         Number(item.amount_pence) <= 0
       );
@@ -597,22 +954,65 @@ export default function WebsitePaymentsSyncCard({
 
     if (invalidPayment) {
       setLocalError(
-        "A selected payment has missing information. Check title, type, category, amount and date before importing.",
+        "A selected payment has missing or invalid information. Check title, type, category, amount and date before importing.",
       );
       return;
     }
 
-    setShowPreviewWindow(false);
-    onSync(selectedPayments);
-    setSelectedIds([]);
+    syncSubmitRef.current = true;
+    setConfirmingImport(true);
+    setLocalError(null);
+
+    try {
+      await onSync(selectedPayments);
+      setShowPreviewWindow(false);
+      setSelectedIds([]);
+      setTestMode(false);
+    } catch (err) {
+      setLocalError(
+        err instanceof Error
+          ? err.message
+          : "The selected website payments could not be imported.",
+      );
+    } finally {
+      syncSubmitRef.current = false;
+      setConfirmingImport(false);
+    }
+  }
+
+  function handleBackdropMouseDown(
+    event: React.MouseEvent<HTMLDivElement>,
+  ) {
+    if (event.target === event.currentTarget) {
+      closePreviewWindow();
+    }
+  }
+
+  function handleDialogKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) {
+    if (
+      event.key === "Enter" &&
+      event.target === event.currentTarget
+    ) {
+      event.preventDefault();
+    }
   }
 
   return (
     <>
-      <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20">
+      <section
+        aria-labelledby="website-payments-title"
+        className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20"
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
-            <h2 className="text-lg font-black text-white">Website payments</h2>
+            <h2
+              id="website-payments-title"
+              className="text-lg font-black text-white"
+            >
+              Website payments
+            </h2>
             <p className="max-w-3xl text-sm leading-6 text-white/65">
               Preview Stripe payments first. Nothing is imported until you
               select payments and confirm.
@@ -623,37 +1023,55 @@ export default function WebsitePaymentsSyncCard({
             <button
               type="button"
               onClick={openEditableTestData}
-              disabled={syncing || isLoadingPreview || apiTestRunning}
+              disabled={busy}
               className={`${actionButtonClass} border-violet-400/30 bg-violet-500/10 text-violet-100 hover:bg-violet-500/20`}
             >
-              <Pencil className="h-4 w-4" />
+              <Pencil className="h-4 w-4" aria-hidden="true" />
               Test editor
             </button>
 
             <button
               type="button"
-              onClick={testApiConnection}
-              disabled={syncing || isLoadingPreview || apiTestRunning}
+              onClick={() => void testApiConnection()}
+              disabled={busy}
+              aria-busy={apiTestRunning}
               className={`${actionButtonClass} border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20`}
             >
               {apiTestRunning ? (
-                <RefreshCcw className="h-4 w-4 animate-spin" />
+                <Loader2
+                  className="h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                />
               ) : (
-                <FlaskConical className="h-4 w-4" />
+                <FlaskConical
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                />
               )}
               {apiTestRunning ? "Testing..." : "Test API"}
             </button>
 
             <button
               type="button"
-              onClick={openRealPreviewWindow}
-              disabled={syncing || isLoadingPreview || apiTestRunning}
+              onClick={() => void openRealPreviewWindow()}
+              disabled={busy}
+              aria-busy={isLoadingPreview}
               className={`${actionButtonClass} border-sky-400/30 bg-sky-500/10 text-sky-100 hover:bg-sky-500/20`}
             >
-              <RefreshCcw
-                className={`h-4 w-4 ${isLoadingPreview ? "animate-spin" : ""}`}
-              />
-              {isLoadingPreview ? "Loading..." : "Preview live payments"}
+              {isLoadingPreview ? (
+                <Loader2
+                  className="h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                />
+              ) : (
+                <RefreshCcw
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                />
+              )}
+              {isLoadingPreview
+                ? "Loading..."
+                : "Preview live payments"}
             </button>
           </div>
         </div>
@@ -661,7 +1079,11 @@ export default function WebsitePaymentsSyncCard({
         {testCompleteMessage ? (
           <StatusMessage message={testCompleteMessage} />
         ) : null}
-        {apiTestMessage ? <StatusMessage message={apiTestMessage} /> : null}
+
+        {apiTestMessage ? (
+          <StatusMessage message={apiTestMessage} />
+        ) : null}
+
         {message ? <StatusMessage message={message} /> : null}
 
         {localError ? (
@@ -684,10 +1106,22 @@ export default function WebsitePaymentsSyncCard({
       </section>
 
       {showPreviewWindow ? (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl">
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={handleBackdropMouseDown}
+        >
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={dialogTitleId}
+            aria-describedby={dialogDescriptionId}
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
+            className="max-h-[92vh] w-full max-w-7xl overflow-y-auto rounded-3xl border border-sky-300/20 bg-[#0b1020] p-5 text-white shadow-2xl outline-none"
+          >
             <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
+              <div className="min-w-0">
                 <div
                   className={`mb-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black uppercase tracking-[0.18em] ${
                     testMode
@@ -696,19 +1130,31 @@ export default function WebsitePaymentsSyncCard({
                   }`}
                 >
                   {testMode ? (
-                    <Pencil className="h-4 w-4" />
+                    <Pencil
+                      className="h-4 w-4"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Server className="h-4 w-4" />
+                    <Server
+                      className="h-4 w-4"
+                      aria-hidden="true"
+                    />
                   )}
                   {testMode ? "Test mode" : "Stripe preview"}
                 </div>
 
-                <h2 className="text-2xl font-black text-white">
+                <h2
+                  id={dialogTitleId}
+                  className="break-words text-2xl font-black text-white"
+                >
                   {testMode
                     ? "Test the payment editor"
                     : "Check payments before import"}
                 </h2>
-                <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
+                <p
+                  id={dialogDescriptionId}
+                  className="mt-2 max-w-4xl text-sm leading-6 text-white/65"
+                >
                   {testMode
                     ? "Edit these example rows safely. They will not be imported."
                     : "Select the live Stripe payments you want to import. You can edit the details first."}
@@ -716,12 +1162,14 @@ export default function WebsitePaymentsSyncCard({
               </div>
 
               <button
+                ref={closeButtonRef}
                 type="button"
                 onClick={closePreviewWindow}
-                className="rounded-2xl border border-white/10 bg-white/5 p-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                disabled={busy}
+                className="shrink-0 rounded-2xl border border-white/10 bg-white/5 p-2 text-white/80 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Close preview window"
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
 
@@ -739,7 +1187,9 @@ export default function WebsitePaymentsSyncCard({
             !isLoadingPreview &&
             visiblePreviewItems.length > 0 ? (
               <PreviewToolbar
-                title={`${selectedIds.length} live payment${selectedIds.length === 1 ? "" : "s"} selected`}
+                title={`${selectedIds.length} live payment${
+                  selectedIds.length === 1 ? "" : "s"
+                } selected`}
                 text="Only selected payments will be imported. Already imported payments are disabled."
                 buttonLabel="Reset edits"
                 onButtonClick={resetLiveEdits}
@@ -755,7 +1205,10 @@ export default function WebsitePaymentsSyncCard({
             ) : null}
 
             {isLoadingPreview && !testMode ? (
-              <StatusBox text="Loading live website payments from Stripe..." />
+              <StatusBox
+                text="Loading live website payments from Stripe..."
+                tone="info"
+              />
             ) : localError && !testMode ? (
               <StatusBox text={localError} tone="error" />
             ) : visiblePreviewItems.length === 0 ? (
@@ -775,12 +1228,14 @@ export default function WebsitePaymentsSyncCard({
                     const itemId = getSessionId(item);
                     const alreadyImported = isAlreadyImported(item);
                     const selectable = isSelectableLivePayment(item);
-                    const selected = selectedIds.includes(itemId);
+                    const selected =
+                      itemId.length > 0 &&
+                      selectedIds.includes(itemId);
                     const editable = testMode || selectable;
 
                     return (
-                      <div
-                        key={itemId || index}
+                      <article
+                        key={itemId || `preview-row-${index}`}
                         className={`rounded-2xl border p-4 ${
                           selected && !testMode
                             ? "border-sky-300/30 bg-sky-500/10"
@@ -788,17 +1243,23 @@ export default function WebsitePaymentsSyncCard({
                         } ${alreadyImported ? "opacity-70" : ""}`}
                       >
                         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm font-black text-white">
-                              {item.title || "Website payment"}
+                          <div className="min-w-0">
+                            <p className="break-words text-sm font-black text-white">
+                              {cleanText(item.title) ||
+                                "Website payment"}
                             </p>
                             <p
-                              className={`mt-1 text-xs font-semibold ${alreadyImported ? "text-amber-200" : "text-emerald-200"}`}
+                              className={`mt-1 text-xs font-semibold ${
+                                alreadyImported
+                                  ? "text-amber-200"
+                                  : "text-emerald-200"
+                              }`}
                             >
-                              {item.status || "Ready to import"}
+                              {cleanText(item.status) ||
+                                "Ready to import"}
                             </p>
                             {itemId ? (
-                              <p className="mt-1 text-[11px] text-white/35">
+                              <p className="mt-1 break-all text-[11px] text-white/35">
                                 {itemId}
                               </p>
                             ) : null}
@@ -807,16 +1268,24 @@ export default function WebsitePaymentsSyncCard({
                           {!testMode ? (
                             <button
                               type="button"
-                              disabled={!selectable}
+                              disabled={!selectable || busy}
                               onClick={() =>
-                                itemId && toggleSelectedPayment(itemId)
+                                itemId &&
+                                toggleSelectedPayment(itemId)
                               }
-                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-pressed={selected}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {selected ? (
-                                <CheckSquare className="h-4 w-4 text-sky-200" />
+                                <CheckSquare
+                                  className="h-4 w-4 text-sky-200"
+                                  aria-hidden="true"
+                                />
                               ) : (
-                                <Square className="h-4 w-4" />
+                                <Square
+                                  className="h-4 w-4"
+                                  aria-hidden="true"
+                                />
                               )}
                               {alreadyImported
                                 ? "Already imported"
@@ -839,7 +1308,7 @@ export default function WebsitePaymentsSyncCard({
                               <EditableInput
                                 item={item}
                                 field={field}
-                                disabled={!editable}
+                                disabled={!editable || busy}
                                 onChange={(key, value) =>
                                   updatePreviewItem(index, key, value)
                                 }
@@ -847,7 +1316,7 @@ export default function WebsitePaymentsSyncCard({
                             </label>
                           ))}
                         </div>
-                      </div>
+                      </article>
                     );
                   })}
                 </div>
@@ -858,38 +1327,51 @@ export default function WebsitePaymentsSyncCard({
               <button
                 type="button"
                 onClick={closePreviewWindow}
-                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10"
+                disabled={busy}
+                className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
 
               <button
                 type="button"
-                onClick={confirmImport}
+                onClick={() => void confirmImport()}
                 disabled={
-                  syncing ||
-                  isLoadingPreview ||
+                  busy ||
                   Boolean(localError && !testMode) ||
                   (!testMode && selectedIds.length === 0)
                 }
-                className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black text-black transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                aria-busy={confirmingImport || syncing}
+                className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black text-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60 ${
                   testMode
                     ? "bg-violet-300 hover:bg-violet-200"
                     : "bg-sky-400 hover:bg-sky-300"
                 }`}
               >
                 {testMode ? (
-                  <CheckCircle2 className="h-4 w-4" />
+                  <CheckCircle2
+                    className="h-4 w-4"
+                    aria-hidden="true"
+                  />
+                ) : confirmingImport || syncing ? (
+                  <Loader2
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <RefreshCcw
-                    className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                    className="h-4 w-4"
+                    aria-hidden="true"
                   />
                 )}
+
                 {testMode
                   ? "Complete safe test"
-                  : syncing
+                  : confirmingImport || syncing
                     ? "Importing..."
-                    : `Confirm & import ${selectedIds.length} payment${selectedIds.length === 1 ? "" : "s"}`}
+                    : `Confirm & import ${selectedIds.length} payment${
+                        selectedIds.length === 1 ? "" : "s"
+                      }`}
               </button>
             </div>
           </div>
@@ -927,18 +1409,23 @@ function PreviewToolbar({
     <div
       className={`mb-4 flex flex-col gap-3 rounded-2xl border p-4 lg:flex-row lg:items-center lg:justify-between ${styles}`}
     >
-      <div>
-        <p className="font-black">{title}</p>
-        <p className="mt-1 text-sm opacity-75">{text}</p>
+      <div className="min-w-0">
+        <p className="break-words font-black">{title}</p>
+        <p className="mt-1 break-words text-sm opacity-75">
+          {text}
+        </p>
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <button
           type="button"
           onClick={onButtonClick}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
         >
-          <RotateCcw className="h-4 w-4" />
+          <RotateCcw
+            className="h-4 w-4"
+            aria-hidden="true"
+          />
           {buttonLabel}
         </button>
 
@@ -947,9 +1434,12 @@ function PreviewToolbar({
             type="button"
             onClick={onSecondButtonClick}
             disabled={secondButtonDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-black text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <CheckSquare className="h-4 w-4" />
+            <CheckSquare
+              className="h-4 w-4"
+              aria-hidden="true"
+            />
             {secondButtonLabel}
           </button>
         ) : null}
@@ -963,16 +1453,23 @@ function StatusBox({
   tone = "info",
 }: {
   text: string;
-  tone?: "info" | "warning" | "error";
+  tone?: StatusTone;
 }) {
-  const styles = {
+  const styles: Record<StatusTone, string> = {
     info: "border-sky-300/20 bg-sky-500/10 text-sky-100",
-    warning: "border-amber-300/20 bg-amber-500/10 text-amber-100",
+    warning:
+      "border-amber-300/20 bg-amber-500/10 text-amber-100",
     error: "border-red-300/20 bg-red-500/10 text-red-100",
-  }[tone];
+    success:
+      "border-emerald-300/20 bg-emerald-500/10 text-emerald-100",
+  };
 
   return (
-    <div className={`rounded-2xl border p-4 text-sm font-bold ${styles}`}>
+    <div
+      role={tone === "error" ? "alert" : "status"}
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      className={`rounded-2xl border p-4 text-sm font-bold ${styles[tone]}`}
+    >
       {text}
     </div>
   );

@@ -1,6 +1,13 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -46,6 +53,7 @@ type PreviewRow = {
   errors: string[];
 
   duplicateChecking: boolean;
+  duplicateCheckError: string;
   duplicate: boolean;
   duplicateMatches: DuplicateMatch[];
   importAnyway: boolean;
@@ -77,6 +85,10 @@ type PreviewRow = {
 };
 
 const EASY_MODE_STORAGE_KEY = "burton-pride-money-csv-import-easy-mode";
+const MAX_CSV_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_CSV_ROWS = 5_000;
+const DUPLICATE_CHECK_CONCURRENCY = 5;
+
 
 const DEFAULT_CATEGORIES = [
   "Bank Import",
@@ -231,28 +243,51 @@ function detectType(row: CsvRow): "income" | "expense" | "" {
   return "";
 }
 
+function isValidIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 function normaliseDate(value: string) {
   const raw = clean(value);
 
   if (!raw) return "";
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return isValidIsoDate(raw) ? raw : "";
+  }
 
-  const ukMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  const ukMatch = raw.match(
+    /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2}|\d{4})$/,
+  );
 
   if (ukMatch) {
     const day = ukMatch[1].padStart(2, "0");
     const month = ukMatch[2].padStart(2, "0");
-    const year = ukMatch[3].length === 2 ? `20${ukMatch[3]}` : ukMatch[3];
+    const shortYear = ukMatch[3];
+    const year =
+      shortYear.length === 2
+        ? String(Number(shortYear) >= 70 ? 1900 + Number(shortYear) : 2000 + Number(shortYear))
+        : shortYear;
 
-    return `${year}-${month}-${day}`;
+    const isoDate = `${year}-${month}-${day}`;
+
+    return isValidIsoDate(isoDate) ? isoDate : "";
   }
 
-  const date = new Date(raw);
-
-  if (Number.isNaN(date.getTime())) return raw;
-
-  return date.toISOString().slice(0, 10);
+  /*
+   * Avoid Date.parse for ambiguous values such as 03/04/2026. Bank statement
+   * imports must use an explicit ISO or UK day/month/year format.
+   */
+  return "";
 }
 
 function formatMoney(pence: number) {
@@ -276,15 +311,41 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function detectCsvDelimiter(text: string) {
+  const firstLogicalLine = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/, 1)[0];
+
+  const candidates = [",", ";", "\t"];
+
+  return candidates.reduce(
+    (best, candidate) => {
+      const count = firstLogicalLine.split(candidate).length - 1;
+
+      return count > best.count
+        ? { delimiter: candidate, count }
+        : best;
+    },
+    { delimiter: ",", count: -1 },
+  ).delimiter;
+}
+
 function parseCsv(text: string): CsvRow[] {
+  const source = text.replace(/^\uFEFF/, "");
+
+  if (!source.trim()) {
+    throw new Error("The CSV file is empty.");
+  }
+
+  const delimiter = detectCsvDelimiter(source);
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentValue = "";
   let insideQuotes = false;
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const nextChar = text[index + 1];
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const nextChar = source[index + 1];
 
     if (char === '"' && insideQuotes && nextChar === '"') {
       currentValue += '"';
@@ -297,7 +358,7 @@ function parseCsv(text: string): CsvRow[] {
       continue;
     }
 
-    if (char === "," && !insideQuotes) {
+    if (char === delimiter && !insideQuotes) {
       currentRow.push(currentValue);
       currentValue = "";
       continue;
@@ -322,20 +383,58 @@ function parseCsv(text: string): CsvRow[] {
     currentValue += char;
   }
 
+  if (insideQuotes) {
+    throw new Error(
+      "The CSV contains an unclosed quoted field. Check the final row and quotation marks.",
+    );
+  }
+
   currentRow.push(currentValue);
 
   if (currentRow.some((cell) => clean(cell) !== "")) {
     rows.push(currentRow);
   }
 
-  if (rows.length < 2) return [];
+  if (rows.length < 2) {
+    throw new Error(
+      "The CSV must contain a header row and at least one transaction row.",
+    );
+  }
+
+  if (rows.length - 1 > MAX_CSV_ROWS) {
+    throw new Error(
+      `This CSV contains ${(
+        rows.length - 1
+      ).toLocaleString("en-GB")} rows. The maximum is ${MAX_CSV_ROWS.toLocaleString(
+        "en-GB",
+      )} rows per import.`,
+    );
+  }
 
   const headers = rows[0].map(normaliseHeader);
+
+  if (headers.every((header) => !header)) {
+    throw new Error("The CSV header row is empty.");
+  }
+
+  const duplicateHeaders = headers.filter(
+    (header, index) =>
+      Boolean(header) && headers.indexOf(header) !== index,
+  );
+
+  if (duplicateHeaders.length > 0) {
+    throw new Error(
+      `The CSV contains duplicate column headings: ${Array.from(
+        new Set(duplicateHeaders),
+      ).join(", ")}.`,
+    );
+  }
 
   return rows.slice(1).map((row) => {
     const item: CsvRow = {};
 
     headers.forEach((header, index) => {
+      if (!header) return;
       item[header] = clean(row[index]);
     });
 
@@ -363,6 +462,17 @@ function validatePreviewRow(row: PreviewRow) {
   }
 
   if (!clean(row.paymentMethod)) errors.push("Missing payment method.");
+
+  if (row.isPersonalFunds && !clean(row.personalFundsName)) {
+    errors.push("Personal funds name is required.");
+  }
+
+  if (
+    row.personalFundsRepaidAt &&
+    !normaliseDate(row.personalFundsRepaidAt)
+  ) {
+    errors.push("Personal funds repaid date is not valid.");
+  }
 
   return errors;
 }
@@ -414,7 +524,7 @@ function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
     clean(row.payment_method || row.method) || "Bank Transfer";
 
   const previewRow: PreviewRow = {
-    id: `${Date.now()}-${index}`,
+    id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${index}-${Math.random()}`,
     rowNumber: index + 2,
     original: row,
 
@@ -423,6 +533,7 @@ function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
     errors: [],
 
     duplicateChecking: false,
+    duplicateCheckError: "",
     duplicate: false,
     duplicateMatches: [],
     importAnyway: false,
@@ -458,7 +569,7 @@ function buildPreviewRow(row: CsvRow, index: number): PreviewRow {
   return applyValidation(previewRow);
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return (
     <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.12em] text-white/45">
       {children}
@@ -551,11 +662,81 @@ function validatePreparedRow(row: ReturnType<typeof prepareRowForImport>) {
   }
   if (!clean(row.paymentMethod)) errors.push("Missing payment method.");
 
+  if (row.isPersonalFunds && !clean(row.personalFundsName)) {
+    errors.push("Personal funds name is required.");
+  }
+
+  if (
+    row.personalFundsRepaidAt &&
+    !normaliseDate(row.personalFundsRepaidAt)
+  ) {
+    errors.push("Personal funds repaid date is not valid.");
+  }
+
   return errors;
+}
+
+function duplicateFingerprint(row: PreviewRow) {
+  const prepared = prepareRowForImport(row);
+
+  return [
+    clean(prepared.title).toLowerCase(),
+    prepared.transactionDate,
+    prepared.amountPence,
+    clean(prepared.paymentMethod).toLowerCase(),
+    prepared.type,
+  ].join("|");
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= items.length) return;
+
+      results[index] = await worker(items[index]);
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, concurrency), items.length) },
+      () => runWorker(),
+    ),
+  );
+
+  return results;
+}
+
+async function readApiJson(response: Response) {
+  const raw = await response.text();
+
+  if (!raw) return {} as Record<string, unknown>;
+
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {
+      error: "The server returned invalid JSON.",
+      details: raw.slice(0, 1_000),
+    };
+  }
 }
 
 export default function MoneyCsvImport() {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const fileReadRunIdRef = useRef(0);
+  const duplicateRunIdRef = useRef(0);
+  const mountedRef = useRef(true);
 
   /**
    * Full Mode stays as the default.
@@ -584,6 +765,16 @@ export default function MoneyCsvImport() {
     } finally {
       setModeLoaded(true);
     }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      fileReadRunIdRef.current += 1;
+      duplicateRunIdRef.current += 1;
+    };
   }, []);
 
   function toggleEasyMode() {
@@ -649,23 +840,39 @@ export default function MoneyCsvImport() {
     [rows]
   );
 
-  const totals = useMemo(() => {
-    return selectedRows.reduce(
-      (acc, row) => {
-        if (row.duplicate && !row.importAnyway) return acc;
+  const importReadyRows = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          row.selected &&
+          row.valid &&
+          !row.duplicateCheckError &&
+          (!row.duplicate || row.importAnyway),
+      ),
+    [rows],
+  );
 
+  const totals = useMemo(() => {
+    return importReadyRows.reduce(
+      (acc, row) => {
         const prepared = prepareRowForImport(row);
 
-        if (prepared.type === "income") acc.moneyIn += prepared.amountPence;
-        if (prepared.type === "expense") acc.moneyOut += prepared.amountPence;
+        if (prepared.type === "income") {
+          acc.moneyIn += prepared.amountPence;
+        }
+
+        if (prepared.type === "expense") {
+          acc.moneyOut += prepared.amountPence;
+        }
+
         return acc;
       },
       {
         moneyIn: 0,
         moneyOut: 0,
-      }
+      },
     );
-  }, [selectedRows]);
+  }, [importReadyRows]);
 
   function updateRow(rowId: string, patch: Partial<PreviewRow>) {
     setRows((current) =>
@@ -677,6 +884,7 @@ export default function MoneyCsvImport() {
           ...patch,
           duplicate: false,
           duplicateMatches: [],
+          duplicateCheckError: "",
           importAnyway: false,
           duplicateChecking: false,
         });
@@ -761,39 +969,65 @@ export default function MoneyCsvImport() {
   }
 
   async function checkDuplicateTransaction(row: PreviewRow) {
+    const prepared = prepareRowForImport(row);
+
     const response = await fetch(
       "/api/admin/money/transactions/duplicate-check",
       {
         method: "POST",
         headers: {
+          Accept: "application/json",
           "Content-Type": "application/json",
         },
         credentials: "include",
+        cache: "no-store",
         body: JSON.stringify({
-          title: row.title,
-          transaction_date: row.transactionDate,
-          amount_pence: row.amountPence,
-          payment_method: row.paymentMethod,
+          title: prepared.title,
+          transaction_date: prepared.transactionDate,
+          amount_pence: prepared.amountPence,
+          payment_method: prepared.paymentMethod,
+          type: prepared.type,
         }),
-      }
+      },
     );
 
-    const payload = await response.json().catch(() => null);
+    const payload = await readApiJson(response);
 
     if (!response.ok) {
-      throw new Error(payload?.error || "Failed to check duplicate transaction.");
+      throw new Error(
+        [
+          clean(payload.error) ||
+            "Failed to check duplicate transaction.",
+          payload.code ? `Code: ${clean(payload.code)}` : "",
+          payload.details
+            ? `Details: ${clean(payload.details)}`
+            : "",
+          `HTTP: ${response.status}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
     }
 
     return {
-      duplicate: Boolean(payload?.duplicate),
-      matches: Array.isArray(payload?.matches) ? payload.matches : [],
+      duplicate: Boolean(payload.duplicate),
+      matches: Array.isArray(payload.matches)
+        ? (payload.matches as DuplicateMatch[])
+        : [],
     };
   }
 
-  async function checkDuplicatesForRows(previewRows: PreviewRow[]) {
+  async function checkDuplicatesForRows(
+    previewRows: PreviewRow[],
+  ) {
     const validRows = previewRows.filter((row) => row.valid);
 
-    if (validRows.length === 0) return;
+    if (validRows.length === 0) {
+      setCheckingDuplicates(false);
+      return;
+    }
+
+    const runId = ++duplicateRunIdRef.current;
 
     setCheckingDuplicates(true);
 
@@ -803,88 +1037,223 @@ export default function MoneyCsvImport() {
           ? {
               ...row,
               duplicateChecking: true,
+              duplicateCheckError: "",
             }
-          : row
-      )
+          : row,
+      ),
     );
 
-    const checkedRows = await Promise.all(
-      previewRows.map(async (row) => {
-        if (!row.valid) return row;
+    try {
+      const results = await mapWithConcurrency(
+        validRows,
+        DUPLICATE_CHECK_CONCURRENCY,
+        async (row) => {
+          const fingerprint = duplicateFingerprint(row);
 
-        try {
-          const duplicateCheck = await checkDuplicateTransaction(row);
+          try {
+            const duplicateCheck =
+              await checkDuplicateTransaction(row);
+
+            return {
+              id: row.id,
+              fingerprint,
+              duplicate: duplicateCheck.duplicate,
+              matches: duplicateCheck.matches,
+              error: "",
+            };
+          } catch (error) {
+            return {
+              id: row.id,
+              fingerprint,
+              duplicate: false,
+              matches: [] as DuplicateMatch[],
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Duplicate check failed.",
+            };
+          }
+        },
+      );
+
+      if (
+        runId !== duplicateRunIdRef.current ||
+        !mountedRef.current
+      ) {
+        return;
+      }
+
+      const resultMap = new Map(
+        results.map((result) => [result.id, result]),
+      );
+
+      setRows((current) =>
+        current.map((row) => {
+          const result = resultMap.get(row.id);
+
+          if (!result) return row;
+
+          if (duplicateFingerprint(row) !== result.fingerprint) {
+            return {
+              ...row,
+              duplicateChecking: false,
+              duplicate: false,
+              duplicateMatches: [],
+              duplicateCheckError:
+                "This row changed during duplicate checking. Recheck duplicates before importing it.",
+              importAnyway: false,
+            };
+          }
 
           return {
             ...row,
             duplicateChecking: false,
-            duplicate: duplicateCheck.duplicate,
-            duplicateMatches: duplicateCheck.matches,
+            duplicate: result.duplicate,
+            duplicateMatches: result.matches,
+            duplicateCheckError: result.error,
             importAnyway: false,
           };
-        } catch {
-          return {
-            ...row,
-            duplicateChecking: false,
-            duplicate: false,
-            duplicateMatches: [],
-            importAnyway: false,
-          };
-        }
-      })
-    );
-
-    setRows(checkedRows);
-    setCheckingDuplicates(false);
-
-    const duplicateCount = checkedRows.filter(
-      (row) => row.valid && row.duplicate
-    ).length;
-
-    if (duplicateCount > 0) {
-      setStatusMessage(
-        `Loaded ${checkedRows.length} CSV rows. ${duplicateCount} possible duplicate transaction${
-          duplicateCount === 1 ? "" : "s"
-        } found. Review the yellow warnings before importing.`
+        }),
       );
-    } else {
-      setStatusMessage(
-        `Loaded ${checkedRows.length} CSV rows. ${
-          checkedRows.filter((row) => row.valid).length
-        } rows are ready to import. No duplicates found.`
-      );
+
+      const duplicateCount = results.filter(
+        (result) => result.duplicate,
+      ).length;
+
+      const errorCount = results.filter(
+        (result) => result.error,
+      ).length;
+
+      if (errorCount > 0) {
+        setErrorMessage(
+          `${errorCount} duplicate check${
+            errorCount === 1 ? "" : "s"
+          } failed. Those rows are blocked until duplicate checking succeeds.`,
+        );
+      }
+
+      if (duplicateCount > 0) {
+        setStatusMessage(
+          `Loaded ${previewRows.length} CSV rows. ${duplicateCount} possible duplicate transaction${
+            duplicateCount === 1 ? "" : "s"
+          } found. Review the yellow warnings before importing.`,
+        );
+      } else {
+        setStatusMessage(
+          `Loaded ${previewRows.length} CSV rows. ${
+            previewRows.filter((row) => row.valid).length
+          } rows are valid. ${
+            errorCount > 0
+              ? `${errorCount} duplicate checks still need attention.`
+              : "No duplicates found."
+          }`,
+        );
+      }
+    } finally {
+      if (
+        runId === duplicateRunIdRef.current &&
+        mountedRef.current
+      ) {
+        setCheckingDuplicates(false);
+      }
     }
   }
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
     const file = event.target.files?.[0];
 
     if (!file) return;
 
+    const runId = ++fileReadRunIdRef.current;
+    duplicateRunIdRef.current += 1;
+
     setErrorMessage(null);
     setStatusMessage(null);
+    setCheckingDuplicates(false);
+
+    if (file.size > MAX_CSV_FILE_BYTES) {
+      setFileName("");
+      setRows([]);
+      setErrorMessage(
+        `The CSV file is too large. The maximum size is ${(
+          MAX_CSV_FILE_BYTES /
+          1024 /
+          1024
+        ).toFixed(0)} MB.`,
+      );
+      event.target.value = "";
+      return;
+    }
+
+    const lowerName = file.name.toLowerCase();
+
+    if (
+      !lowerName.endsWith(".csv") &&
+      file.type !== "text/csv" &&
+      file.type !== "application/vnd.ms-excel"
+    ) {
+      setFileName("");
+      setRows([]);
+      setErrorMessage("Choose a CSV file.");
+      event.target.value = "";
+      return;
+    }
+
     setFileName(file.name);
 
     try {
-      const text = await file.text();
-      const parsed = parseCsv(text);
+      const csvText = await file.text();
+
+      if (
+        runId !== fileReadRunIdRef.current ||
+        !mountedRef.current
+      ) {
+        return;
+      }
+
+      const parsed = parseCsv(csvText);
       const previewRows = parsed.map(buildPreviewRow);
 
       setRows(previewRows);
 
       setStatusMessage(
-        `Loaded ${previewRows.length} CSV rows. Failed rows can be edited in the cards below. Checking duplicates...`
+        `Loaded ${previewRows.length} CSV rows. Invalid rows can be edited below. Checking duplicates...`,
       );
 
       await checkDuplicatesForRows(previewRows);
     } catch (error) {
-      console.error(error);
+      if (
+        runId !== fileReadRunIdRef.current ||
+        !mountedRef.current
+      ) {
+        return;
+      }
+
+      console.error("CSV file read failed", error);
       setCheckingDuplicates(false);
-      setErrorMessage("Failed to read the CSV file.");
+      setRows([]);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to read the CSV file.",
+      );
+    } finally {
+      /*
+       * Resetting the native input lets the same file be chosen again after
+       * the admin fixes it on disk.
+       */
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
     }
   }
 
   function clearCsv() {
+    fileReadRunIdRef.current += 1;
+    duplicateRunIdRef.current += 1;
+
     setFileName("");
     setRows([]);
     setQuery("");
@@ -994,58 +1363,98 @@ export default function MoneyCsvImport() {
 
     link.href = url;
     link.download = `failed-rows-${fileName || "csv-import"}.csv`;
+    document.body.appendChild(link);
     link.click();
+    link.remove();
 
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 
   async function saveImportHistoryBatch({
+    totalRows,
     importedRows,
     failedRowDetails,
+    totalMoneyInPence,
+    totalMoneyOutPence,
   }: {
+    totalRows: number;
     importedRows: number;
     failedRowDetails: {
       row_number: number;
       error_message: string;
-      row_data: any;
+      row_data: CsvRow;
     }[];
+    totalMoneyInPence: number;
+    totalMoneyOutPence: number;
   }) {
-    const response = await fetch("/api/admin/money/import-history/create-batch", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await fetch(
+      "/api/admin/money/import-history/create-batch",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        cache: "no-store",
+        body: JSON.stringify({
+          fileName: fileName || "bank-statement.csv",
+          importType: "money_transactions",
+          totalRows,
+          importedRows,
+          failedRows: failedRowDetails.length,
+          totalMoneyInPence,
+          totalMoneyOutPence,
+          netTotalPence:
+            totalMoneyInPence - totalMoneyOutPence,
+          failedRowDetails,
+          status:
+            failedRowDetails.length > 0
+              ? "completed_with_errors"
+              : "completed",
+        }),
       },
-      credentials: "include",
-      body: JSON.stringify({
-        fileName: fileName || "bank-statement.csv",
-        importType: "money_transactions",
+    );
 
-        totalRows: rows.length,
-        importedRows,
-        failedRows: failedRowDetails.length,
-
-        totalMoneyInPence: totals.moneyIn,
-        totalMoneyOutPence: totals.moneyOut,
-        netTotalPence: totals.moneyIn - totals.moneyOut,
-
-        failedRowDetails,
-        status:
-          failedRowDetails.length > 0 ? "completed_with_errors" : "completed",
-      }),
-    });
-
-    const payload = await response.json();
+    const payload = await readApiJson(response);
 
     if (!response.ok) {
-      throw new Error(payload?.error || "Failed to save import history.");
+      throw new Error(
+        [
+          clean(payload.error) ||
+            "Failed to save import history.",
+          payload.code ? `Code: ${clean(payload.code)}` : "",
+          payload.details
+            ? `Details: ${clean(payload.details)}`
+            : "",
+          `HTTP: ${response.status}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
     }
 
     return payload.batch;
   }
 
   async function importSelectedRows() {
+    if (importing || checkingDuplicates) return;
+
     if (selectedRows.length === 0) {
       setErrorMessage("Please tick at least one row to import.");
+      return;
+    }
+
+    const duplicateCheckFailures = selectedRows.filter(
+      (row) => row.duplicateCheckError,
+    );
+
+    if (duplicateCheckFailures.length > 0) {
+      setErrorMessage(
+        `${duplicateCheckFailures.length} selected row${
+          duplicateCheckFailures.length === 1 ? "" : "s"
+        } could not be checked for duplicates. Recheck duplicates before importing.`,
+      );
       return;
     }
 
@@ -1053,127 +1462,190 @@ export default function MoneyCsvImport() {
     setErrorMessage(null);
     setStatusMessage(null);
 
-    const selectedRowIds = new Set(selectedRows.map((row) => row.id));
+    const importFailures: {
+      row_number: number;
+      error_message: string;
+      row_data: CsvRow;
+    }[] = [];
 
-    const failedRowDetails = rows
-      .filter((row) => !selectedRowIds.has(row.id) && !row.valid)
-      .map((row) => ({
-        row_number: row.rowNumber,
-        error_message: row.errors.join(" | "),
-        row_data: row.original,
-      }));
+    const importedRowIds = new Set<string>();
+    let importedCount = 0;
+    let importedMoneyInPence = 0;
+    let importedMoneyOutPence = 0;
 
     try {
-      let importedCount = 0;
-
-      const importFailures: {
-        row_number: number;
-        error_message: string;
-        row_data: any;
-      }[] = [];
-
       for (const selectedRow of selectedRows) {
         const row = prepareRowForImport(selectedRow);
         const preparedErrors = validatePreparedRow(row);
 
-        try {
-          if (preparedErrors.length > 0) {
-            importFailures.push({
-              row_number: row.rowNumber,
-              error_message: preparedErrors.join(" | "),
-              row_data: row.original,
-            });
-
-            continue;
-          }
-
-          if (row.duplicate && !row.importAnyway) {
-            importFailures.push({
-              row_number: row.rowNumber,
-              error_message:
-                "Skipped because a possible duplicate transaction already exists. Admin did not choose Import anyway.",
-              row_data: row.original,
-            });
-
-            continue;
-          }
-
-          const response = await fetch("/api/admin/money/transactions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            credentials: "include",
-            body: JSON.stringify({
-              title: row.title,
-              description: row.description || null,
-              type: row.type,
-              category: row.category || null,
-              amount_pence: row.amountPence,
-              payment_method: row.paymentMethod || null,
-              transaction_date: row.transactionDate || null,
-              invoice_image_url: row.invoiceImageUrl || null,
-
-              is_personal_funds: row.isPersonalFunds,
-              personal_funds_name: row.personalFundsName || null,
-              personal_funds_repaid: row.personalFundsRepaid,
-              personal_funds_repaid_at: row.personalFundsRepaidAt || null,
-
-              sponsor_id: row.sponsorId || null,
-              sponsor_name: row.sponsorName || null,
-              sponsorship_note: row.sponsorshipNote || null,
-
-              source: row.source || "bank_csv",
-              stripe_session_id: row.stripeSessionId || null,
-              stripe_invoice_id: row.stripeInvoiceId || null,
-              stripe_customer_id: row.stripeCustomerId || null,
-              stripe_payment_intent_id: row.stripePaymentIntentId || null,
-            }),
+        if (preparedErrors.length > 0) {
+          importFailures.push({
+            row_number: row.rowNumber,
+            error_message: preparedErrors.join(" | "),
+            row_data: row.original,
           });
+          continue;
+        }
 
-          const payload = await response.json().catch(() => null);
+        if (row.duplicate && !row.importAnyway) {
+          importFailures.push({
+            row_number: row.rowNumber,
+            error_message:
+              "Skipped because a possible duplicate transaction already exists. Admin did not choose Import anyway.",
+            row_data: row.original,
+          });
+          continue;
+        }
+
+        try {
+          const response = await fetch(
+            "/api/admin/money/transactions",
+            {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
+              credentials: "include",
+              cache: "no-store",
+              body: JSON.stringify({
+                title: row.title,
+                description: row.description || null,
+                type: row.type,
+                category: row.category || null,
+                amount_pence: row.amountPence,
+                payment_method: row.paymentMethod || null,
+                transaction_date: row.transactionDate || null,
+                invoice_image_url: row.invoiceImageUrl || null,
+
+                is_personal_funds: row.isPersonalFunds,
+                personal_funds_name:
+                  row.personalFundsName || null,
+                personal_funds_repaid:
+                  row.personalFundsRepaid,
+                personal_funds_repaid_at:
+                  row.personalFundsRepaidAt
+                    ? normaliseDate(
+                        row.personalFundsRepaidAt,
+                      )
+                    : null,
+
+                sponsor_id: row.sponsorId || null,
+                sponsor_name: row.sponsorName || null,
+                sponsorship_note:
+                  row.sponsorshipNote || null,
+
+                source: row.source || "bank_csv",
+                stripe_session_id:
+                  row.stripeSessionId || null,
+                stripe_invoice_id:
+                  row.stripeInvoiceId || null,
+                stripe_customer_id:
+                  row.stripeCustomerId || null,
+                stripe_payment_intent_id:
+                  row.stripePaymentIntentId || null,
+              }),
+            },
+          );
+
+          const payload = await readApiJson(response);
 
           if (!response.ok) {
             throw new Error(
-              payload?.error ||
-                payload?.message ||
-                "Transaction could not be created."
+              [
+                clean(payload.error) ||
+                  clean(payload.message) ||
+                  "Transaction could not be created.",
+                payload.code
+                  ? `Code: ${clean(payload.code)}`
+                  : "",
+                payload.details
+                  ? `Details: ${clean(payload.details)}`
+                  : "",
+                `HTTP: ${response.status}`,
+              ]
+                .filter(Boolean)
+                .join("\n"),
             );
           }
 
           importedCount += 1;
-        } catch (error: any) {
+          importedRowIds.add(selectedRow.id);
+
+          if (row.type === "income") {
+            importedMoneyInPence += row.amountPence;
+          } else {
+            importedMoneyOutPence += row.amountPence;
+          }
+        } catch (error) {
           importFailures.push({
             row_number: row.rowNumber,
             error_message:
-              error?.message || "Transaction could not be created.",
+              error instanceof Error
+                ? error.message
+                : "Transaction could not be created.",
             row_data: row.original,
           });
         }
       }
 
-      const allFailedRows = [...failedRowDetails, ...importFailures];
+      /*
+       * Remove imported rows before saving history. If history logging fails,
+       * the successfully created transactions cannot accidentally be imported
+       * again from the same preview.
+       */
+      setRows((current) =>
+        current
+          .filter((row) => !importedRowIds.has(row.id))
+          .map((row) => ({
+            ...row,
+            selected: false,
+          })),
+      );
 
-      await saveImportHistoryBatch({
-        importedRows: importedCount,
-        failedRowDetails: allFailedRows,
-      });
+      let historyError = "";
+
+      try {
+        await saveImportHistoryBatch({
+          totalRows: selectedRows.length,
+          importedRows: importedCount,
+          failedRowDetails: importFailures,
+          totalMoneyInPence: importedMoneyInPence,
+          totalMoneyOutPence: importedMoneyOutPence,
+        });
+      } catch (error) {
+        historyError =
+          error instanceof Error
+            ? error.message
+            : "Import history could not be saved.";
+      }
 
       setStatusMessage(
-        `Import complete. ${importedCount} rows imported and ${allFailedRows.length} failed or skipped rows saved to Import History.`
+        `Import complete. ${importedCount} row${
+          importedCount === 1 ? "" : "s"
+        } imported and ${importFailures.length} failed or skipped row${
+          importFailures.length === 1 ? "" : "s"
+        }.${
+          historyError
+            ? " The transactions were saved, but Import History needs attention."
+            : " The batch was saved to Import History."
+        }`,
       );
 
-      setRows((current) =>
-        current.map((row) => ({
-          ...row,
-          selected: false,
-        }))
+      if (historyError) {
+        setErrorMessage(historyError);
+      }
+    } catch (error) {
+      console.error("CSV import failed", error);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "CSV import failed.",
       );
-    } catch (error: any) {
-      console.error(error);
-      setErrorMessage(error?.message || "CSV import failed.");
     } finally {
-      setImporting(false);
+      if (mountedRef.current) {
+        setImporting(false);
+      }
     }
   }
 
@@ -1211,12 +1683,18 @@ export default function MoneyCsvImport() {
             type="file"
             accept=".csv,text/csv"
             onChange={handleFileChange}
+            aria-label="Choose bank statement CSV file"
             className="hidden"
           />
 
           <button
             type="button"
-            onClick={() => inputRef.current?.click()}
+            onClick={() => {
+              if (inputRef.current) {
+                inputRef.current.value = "";
+                inputRef.current.click();
+              }
+            }}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 px-4 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"
           >
             <Upload className="h-4 w-4" />
@@ -1289,14 +1767,19 @@ export default function MoneyCsvImport() {
       )}
 
       {statusMessage && (
-        <div className="mt-5 flex gap-3 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-5 flex gap-3 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
           <p>{statusMessage}</p>
         </div>
       )}
 
       {errorMessage && (
-        <div className="mt-5 flex gap-3 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
+        <div
+          role="alert"
+          className="mt-5 flex gap-3 rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-100">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <p>{errorMessage}</p>
         </div>
@@ -1449,7 +1932,7 @@ export default function MoneyCsvImport() {
               <button
                 type="button"
                 onClick={importSelectedRows}
-                disabled={importing || selectedRows.length === 0}
+                disabled={importing || checkingDuplicates || selectedRows.length === 0}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-black text-white hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {importing ? (
@@ -1479,6 +1962,12 @@ export default function MoneyCsvImport() {
           )}
 
           <div className="mt-6 space-y-4">
+            {filteredRows.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-center text-sm text-white/55">
+                No CSV rows match the current search.
+              </div>
+            ) : null}
+
             {filteredRows.map((row) => (
               <article
                 key={row.id}
@@ -1516,6 +2005,16 @@ export default function MoneyCsvImport() {
                       <span className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs font-black text-sky-100">
                         <Loader2 className="h-3 w-3 animate-spin" />
                         Checking duplicate
+                      </span>
+                    )}
+
+                    {row.duplicateCheckError && (
+                      <span
+                        className="inline-flex items-center gap-2 rounded-full border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100"
+                        title={row.duplicateCheckError}
+                      >
+                        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                        Duplicate check failed
                       </span>
                     )}
 
@@ -1559,6 +2058,26 @@ export default function MoneyCsvImport() {
                       Similar transaction already exists. Keep blocked or use
                       Import anyway.
                     </p>
+
+                    {row.duplicateMatches.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {row.duplicateMatches.slice(0, 3).map((match) => (
+                          <div
+                            key={match.id}
+                            className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs"
+                          >
+                            <p className="font-black text-white">
+                              {match.title}
+                            </p>
+                            <p className="mt-1 text-white/60">
+                              {formatDate(match.transaction_date)} ·{" "}
+                              {formatMoney(match.amount_pence)} ·{" "}
+                              {match.payment_method || "No payment method"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <button
                       type="button"
@@ -1800,7 +2319,12 @@ export default function MoneyCsvImport() {
 
           <button
             type="button"
-            onClick={() => inputRef.current?.click()}
+            onClick={() => {
+              if (inputRef.current) {
+                inputRef.current.value = "";
+                inputRef.current.click();
+              }
+            }}
             className="mt-5 inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 px-5 py-3 text-sm font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25"
           >
             <Upload className="h-4 w-4" />

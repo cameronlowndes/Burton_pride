@@ -1,12 +1,25 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   CalendarCheck,
+  CheckCircle2,
   Eye,
   EyeOff,
+  Loader2,
   Lock,
   LockOpen,
   ShieldCheck,
@@ -18,6 +31,8 @@ type MonthOption = {
   count: number;
 };
 
+type MonthLockAction = "lock" | "unlock";
+
 type MoneyYearLockPanelProps = {
   selectedYear: string;
   selectedYearLocked: boolean;
@@ -27,10 +42,19 @@ type MoneyYearLockPanelProps = {
   onLockYear: (password?: string) => void | Promise<void>;
   onUnlockYear: (password?: string) => void | Promise<void>;
 
-  printMonthOptions: MonthOption[];
+  printMonthOptions?: MonthOption[];
   selectedLockMonth: string;
   setSelectedLockMonth: Dispatch<SetStateAction<string>>;
   selectedMonthLocked: boolean;
+
+  /**
+   * Optional callback used to update parent state immediately after a
+   * successful month lock action. The component also calls router.refresh().
+   */
+  onMonthLockChanged?: (
+    monthKey: string,
+    locked: boolean,
+  ) => void | Promise<void>;
 };
 
 type ApiResponse = {
@@ -42,7 +66,7 @@ type ApiResponse = {
 };
 
 type MonthLockPayload = {
-  action: "lock" | "unlock";
+  action: MonthLockAction;
   lockType: "month";
   year: string;
   month: number;
@@ -51,29 +75,31 @@ type MonthLockPayload = {
   password: string;
 };
 
-type MonthLockAction = "lock" | "unlock";
-
 type BuildMonthLockPayloadResult =
   | { payload: MonthLockPayload; error?: never }
   | { payload?: never; error: string };
+
+type StatusMessage = {
+  tone: "success" | "error";
+  title: string;
+  body: string;
+};
 
 const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const panelBaseClass = "rounded-3xl border p-4 transition sm:p-5";
 
 const passwordInputClass =
-  "w-full rounded-xl bg-black/30 p-3 pr-12 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus:ring-pink-300/40 disabled:cursor-not-allowed disabled:opacity-60";
+  "w-full rounded-xl bg-black/30 p-3 pr-12 text-white outline-none ring-1 ring-white/10 placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-pink-300/50 disabled:cursor-not-allowed disabled:opacity-60";
 
 const iconButtonClass =
-  "absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg bg-white/10 text-white/80 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60";
+  "absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg bg-white/10 text-white/80 transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-300 disabled:cursor-not-allowed disabled:opacity-60";
 
 const helperBadgeClass =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-xs font-bold text-white/70 ring-1 ring-white/10";
 
 const selectClass =
-  "w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40 disabled:cursor-not-allowed disabled:opacity-60";
-
-const statusMessageClass = "mb-4 rounded-2xl border p-4 text-sm font-bold";
+  "w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus-visible:ring-2 focus-visible:ring-pink-300/50 disabled:cursor-not-allowed disabled:opacity-60";
 
 const PasswordBox = memo(function PasswordBox({
   value,
@@ -82,6 +108,7 @@ const PasswordBox = memo(function PasswordBox({
   visible,
   onToggle,
   name,
+  label,
   disabled = false,
 }: {
   value: string;
@@ -90,63 +117,118 @@ const PasswordBox = memo(function PasswordBox({
   visible: boolean;
   onToggle: () => void;
   name: string;
+  label: string;
   disabled?: boolean;
 }) {
-  return (
-    <div className="relative">
-      <input
-        type={visible ? "text" : "password"}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        name={name}
-        autoComplete="new-password"
-        spellCheck={false}
-        disabled={disabled}
-        className={passwordInputClass}
-      />
+  const inputId = useId();
 
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={disabled}
-        className={iconButtonClass}
-        aria-label={visible ? "Hide password" : "Show password"}
-        title={visible ? "Hide password" : "Show password"}
+  return (
+    <div>
+      <label
+        htmlFor={inputId}
+        className="mb-2 block text-sm font-bold text-white/80"
       >
-        {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
+        {label}
+      </label>
+
+      <div className="relative">
+        <input
+          id={inputId}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          name={name}
+          autoComplete="current-password"
+          spellCheck={false}
+          disabled={disabled}
+          className={passwordInputClass}
+        />
+
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={disabled}
+          className={iconButtonClass}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+          title={visible ? "Hide password" : "Show password"}
+        >
+          {visible ? (
+            <EyeOff className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Eye className="h-4 w-4" aria-hidden="true" />
+          )}
+        </button>
+      </div>
     </div>
   );
 });
 
-function safeDetails(value: unknown) {
-  if (!value) return "";
+function cleanText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function safeCount(value: unknown): number {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(parsed));
+}
+
+function safeDetails(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  if (value instanceof Error) {
+    return JSON.stringify(
+      {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      },
+      null,
+      2,
+    );
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
 
   try {
     return JSON.stringify(value, null, 2);
   } catch {
-    return String(value);
+    try {
+      return String(value);
+    } catch {
+      return "Technical details could not be displayed.";
+    }
   }
 }
 
-function cleanText(value: unknown) {
-  return String(value || "").trim();
-}
-
-function isValidYear(value: string) {
+function isValidYear(value: string): boolean {
   return /^\d{4}$/.test(value);
 }
 
-function isValidMonthKey(value: string) {
+function isValidMonthKey(value: string): boolean {
   return MONTH_KEY_PATTERN.test(value);
 }
 
-function getMonthNumber(monthKey: string) {
-  if (!isValidMonthKey(monthKey)) return null;
+function getMonthNumber(monthKey: string): number | null {
+  if (!isValidMonthKey(monthKey)) {
+    return null;
+  }
 
   const month = Number(monthKey.slice(5, 7));
-  return Number.isInteger(month) && month >= 1 && month <= 12 ? month : null;
+
+  return Number.isInteger(month) && month >= 1 && month <= 12
+    ? month
+    : null;
 }
 
 function buildMonthLockPayload({
@@ -168,10 +250,10 @@ function buildMonthLockPayload({
     return { error: "Please enter the main admin password." };
   }
 
-  if (!year || !isValidYear(year)) {
+  if (!isValidYear(year)) {
     return {
       error:
-        "The selected year is missing or invalid. Please refresh and try again.",
+        "The selected year is missing or invalid. Refresh the page and try again.",
     };
   }
 
@@ -181,7 +263,7 @@ function buildMonthLockPayload({
 
   if (!isValidMonthKey(monthKey)) {
     return {
-      error: `The selected month is invalid. Expected YYYY-MM, got: ${monthKey}`,
+      error: `The selected month is invalid. Expected YYYY-MM but received "${monthKey}".`,
     };
   }
 
@@ -193,7 +275,7 @@ function buildMonthLockPayload({
 
   const month = getMonthNumber(monthKey);
 
-  if (!month) {
+  if (month === null) {
     return { error: "The selected month number is invalid." };
   }
 
@@ -213,13 +295,29 @@ function buildMonthLockPayload({
 async function readJsonResponse(response: Response): Promise<ApiResponse> {
   const text = await response.text();
 
-  if (!text) return {};
+  if (!text.trim()) {
+    return {};
+  }
 
   try {
-    return JSON.parse(text) as ApiResponse;
-  } catch {
+    const parsed = JSON.parse(text) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Response body was not a JSON object.");
+    }
+
+    return parsed as ApiResponse;
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Invalid JSON response.";
+
     throw new Error(
-      `The month lock API returned an invalid response.\n\nHTTP status: ${response.status}\n\nRaw response:\n${text}`,
+      [
+        "The month lock API returned an invalid response.",
+        `HTTP status: ${response.status}`,
+        `Reason: ${reason}`,
+        `Raw response: ${text.slice(0, 2000)}`,
+      ].join("\n\n"),
     );
   }
 }
@@ -234,13 +332,15 @@ function buildApiErrorMessage({
   response: Response;
   data: ApiResponse;
   payload: MonthLockPayload;
-}) {
+}): string {
   const details = safeDetails(data.details);
 
   return [
-    data.error || `Failed to ${action} month.`,
+    cleanText(data.error) ||
+      cleanText(data.message) ||
+      `Failed to ${action} month.`,
     details ? `Details:\n${details}` : "",
-    `Status: ${response.status}`,
+    `HTTP status: ${response.status}`,
     `Month: ${payload.monthKey}`,
   ]
     .filter(Boolean)
@@ -252,7 +352,7 @@ function LockStatusIcon({
   unlockedIcon,
 }: {
   locked: boolean;
-  unlockedIcon: React.ReactNode;
+  unlockedIcon: ReactNode;
 }) {
   return (
     <div
@@ -261,6 +361,7 @@ function LockStatusIcon({
           ? "bg-red-500/20 text-red-100 ring-red-300/20"
           : "bg-emerald-500/20 text-emerald-100 ring-emerald-300/20"
       }`}
+      aria-hidden="true"
     >
       {locked ? <Lock className="h-5 w-5" /> : unlockedIcon}
     </div>
@@ -270,8 +371,45 @@ function LockStatusIcon({
 function MainAdminBadge() {
   return (
     <div className={helperBadgeClass}>
-      <ShieldCheck className="h-4 w-4" />
+      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
       Main admin only
+    </div>
+  );
+}
+
+function StatusPanel({ message }: { message: StatusMessage }) {
+  const success = message.tone === "success";
+
+  return (
+    <div
+      role={success ? "status" : "alert"}
+      aria-live={success ? "polite" : "assertive"}
+      className={`mb-4 rounded-2xl border p-4 text-sm font-bold ${
+        success
+          ? "border-emerald-300/20 bg-emerald-500/15 text-emerald-100"
+          : "border-red-300/20 bg-red-500/15 text-red-100"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {success ? (
+          <CheckCircle2
+            className="mt-0.5 h-5 w-5 shrink-0"
+            aria-hidden="true"
+          />
+        ) : (
+          <AlertTriangle
+            className="mt-0.5 h-5 w-5 shrink-0"
+            aria-hidden="true"
+          />
+        )}
+
+        <div className="min-w-0">
+          <p className="font-black">{message.title}</p>
+          <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 font-sans text-xs leading-relaxed">
+            {message.body}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }
@@ -284,148 +422,293 @@ export default function MoneyYearLockPanel({
   lockingYear,
   onLockYear,
   onUnlockYear,
-  printMonthOptions,
+  printMonthOptions = [],
   selectedLockMonth,
   setSelectedLockMonth,
   selectedMonthLocked,
+  onMonthLockChanged,
 }: MoneyYearLockPanelProps) {
-  const [localYearPassword, setLocalYearPassword] = useState(yearLockPassword);
+  const router = useRouter();
+
+  const [localYearPassword, setLocalYearPassword] =
+    useState(yearLockPassword);
   const [localMonthPassword, setLocalMonthPassword] = useState("");
   const [showYearPassword, setShowYearPassword] = useState(false);
   const [showMonthPassword, setShowMonthPassword] = useState(false);
-  const [lockingMonth, setLockingMonth] = useState(false);
-  const [monthMessage, setMonthMessage] = useState("");
-  const [monthError, setMonthError] = useState("");
+  const [yearActionPending, setYearActionPending] = useState(false);
+  const [monthActionPending, setMonthActionPending] = useState(false);
+  const [statusMessage, setStatusMessage] =
+    useState<StatusMessage | null>(null);
+
+  const yearSubmitRef = useRef(false);
+  const monthSubmitRef = useRef(false);
 
   const cleanSelectedYear = cleanText(selectedYear);
+  const yearIsValid = isValidYear(cleanSelectedYear);
 
-  const monthOptions = useMemo(
-    () =>
-      printMonthOptions
-        .filter((item) => item.key !== "all")
-        .filter((item) => isValidMonthKey(item.key))
-        .filter((item) => item.key.startsWith(`${cleanSelectedYear}-`)),
-    [printMonthOptions, cleanSelectedYear],
-  );
+  useEffect(() => {
+    setLocalYearPassword(yearLockPassword);
+  }, [yearLockPassword]);
+
+  useEffect(() => {
+    setStatusMessage(null);
+    setLocalMonthPassword("");
+    setShowMonthPassword(false);
+  }, [cleanSelectedYear]);
+
+  const monthOptions = useMemo(() => {
+    const seen = new Set<string>();
+
+    return printMonthOptions
+      .map((item) => ({
+        key: cleanText(item.key),
+        label: cleanText(item.label),
+        count: safeCount(item.count),
+      }))
+      .filter((item) => item.key !== "all")
+      .filter((item) => isValidMonthKey(item.key))
+      .filter((item) => item.key.startsWith(`${cleanSelectedYear}-`))
+      .filter((item) => {
+        if (seen.has(item.key)) {
+          return false;
+        }
+
+        seen.add(item.key);
+        return true;
+      })
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }, [printMonthOptions, cleanSelectedYear]);
+
+  useEffect(() => {
+    if (monthOptions.length === 0) {
+      if (selectedLockMonth) {
+        setSelectedLockMonth("");
+      }
+      return;
+    }
+
+    const selectedIsValid = monthOptions.some(
+      (item) => item.key === selectedLockMonth,
+    );
+
+    if (!selectedIsValid) {
+      setSelectedLockMonth(monthOptions[0].key);
+    }
+  }, [monthOptions, selectedLockMonth, setSelectedLockMonth]);
 
   const selectedMonth = useMemo(
-    () => monthOptions.find((item) => item.key === selectedLockMonth) || null,
+    () =>
+      monthOptions.find((item) => item.key === selectedLockMonth) ??
+      null,
     [monthOptions, selectedLockMonth],
   );
 
+  const busy =
+    lockingYear ||
+    yearActionPending ||
+    monthActionPending;
+
   const monthActionDisabled =
-    lockingMonth ||
+    busy ||
     !localMonthPassword.trim() ||
     !selectedMonth ||
     !isValidMonthKey(selectedLockMonth) ||
     !selectedLockMonth.startsWith(`${cleanSelectedYear}-`);
 
-  async function handleYearAction(action: MonthLockAction) {
-    const password = localYearPassword.trim();
-
-    if (!password) return;
-
-    setYearLockPassword(password);
-
-    if (action === "lock") {
-      await onLockYear(password);
-      return;
-    }
-
-    await onUnlockYear(password);
-  }
-
-  async function submitMonthLock(action: MonthLockAction) {
-    if (lockingMonth) return;
-
-    setMonthMessage("");
-    setMonthError("");
-
-    const built = buildMonthLockPayload({
-      action,
-      selectedYear,
-      selectedLockMonth,
-      password: localMonthPassword,
-    });
-
-    if ("error" in built) {
-      setMonthError(built.error ?? "An unexpected error occurred.");
-      return;
-    }
-
-    const { payload } = built;
-
-    setLockingMonth(true);
-
-    try {
-      const response = await fetch("/api/admin/money/month-locks", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await readJsonResponse(response);
-
-      if (!response.ok || !(data.ok || data.success)) {
-        setMonthError(
-          buildApiErrorMessage({
-            action,
-            response,
-            data,
-            payload,
-          }),
-        );
+  const handleYearAction = useCallback(
+    async (action: MonthLockAction) => {
+      if (busy || yearSubmitRef.current) {
         return;
       }
 
-      setMonthMessage(
-        data.message ||
-          `${payload.monthKey} has been ${
+      const password = localYearPassword.trim();
+
+      if (!password) {
+        setStatusMessage({
+          tone: "error",
+          title: "Year lock failed",
+          body: "Please enter the main admin password.",
+        });
+        return;
+      }
+
+      if (!yearIsValid) {
+        setStatusMessage({
+          tone: "error",
+          title: "Year lock failed",
+          body: "The selected year is invalid. Refresh the page and try again.",
+        });
+        return;
+      }
+
+      yearSubmitRef.current = true;
+      setYearActionPending(true);
+      setStatusMessage(null);
+      setYearLockPassword(password);
+
+      try {
+        if (action === "lock") {
+          await onLockYear(password);
+        } else {
+          await onUnlockYear(password);
+        }
+
+        setLocalYearPassword("");
+        setYearLockPassword("");
+        setShowYearPassword(false);
+
+        setStatusMessage({
+          tone: "success",
+          title:
+            action === "lock"
+              ? "Year locked"
+              : "Year unlocked",
+          body: `${cleanSelectedYear} has been ${
             action === "lock" ? "locked" : "unlocked"
           }.`,
-      );
-      setLocalMonthPassword("");
+        });
 
-      window.setTimeout(() => window.location.reload(), 500);
-    } catch (error) {
-      setMonthError(
-        error instanceof Error
-          ? error.message
-          : `Failed to ${action} month. Please try again.`,
-      );
-    } finally {
-      setLockingMonth(false);
-    }
-  }
+        router.refresh();
+      } catch (error) {
+        setStatusMessage({
+          tone: "error",
+          title: "Year lock failed",
+          body:
+            error instanceof Error
+              ? error.message
+              : `Failed to ${action} ${cleanSelectedYear}.`,
+        });
+      } finally {
+        yearSubmitRef.current = false;
+        setYearActionPending(false);
+      }
+    },
+    [
+      busy,
+      cleanSelectedYear,
+      localYearPassword,
+      onLockYear,
+      onUnlockYear,
+      router,
+      setYearLockPassword,
+      yearIsValid,
+    ],
+  );
+
+  const submitMonthLock = useCallback(
+    async (action: MonthLockAction) => {
+      if (busy || monthSubmitRef.current) {
+        return;
+      }
+
+      setStatusMessage(null);
+
+      const built = buildMonthLockPayload({
+        action,
+        selectedYear: cleanSelectedYear,
+        selectedLockMonth,
+        password: localMonthPassword,
+      });
+
+      if ("error" in built) {
+        setStatusMessage({
+          tone: "error",
+          title: "Month lock failed",
+          body: built.error ?? "Unknown error",
+        });
+        return;
+      }
+
+      const { payload } = built;
+
+      monthSubmitRef.current = true;
+      setMonthActionPending(true);
+
+      try {
+        const response = await fetch("/api/admin/money/month-locks", {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await readJsonResponse(response);
+
+        if (!response.ok || !(data.ok === true || data.success === true)) {
+          throw new Error(
+            buildApiErrorMessage({
+              action,
+              response,
+              data,
+              payload,
+            }),
+          );
+        }
+
+        setLocalMonthPassword("");
+        setShowMonthPassword(false);
+
+        setStatusMessage({
+          tone: "success",
+          title:
+            action === "lock"
+              ? "Month locked"
+              : "Month unlocked",
+          body:
+            cleanText(data.message) ||
+            `${payload.monthKey} has been ${
+              action === "lock" ? "locked" : "unlocked"
+            }.`,
+        });
+
+        await onMonthLockChanged?.(
+          payload.monthKey,
+          action === "lock",
+        );
+
+        router.refresh();
+      } catch (error) {
+        setStatusMessage({
+          tone: "error",
+          title: "Month lock failed",
+          body:
+            error instanceof Error
+              ? error.message
+              : `Failed to ${action} ${selectedLockMonth}.`,
+        });
+      } finally {
+        monthSubmitRef.current = false;
+        setMonthActionPending(false);
+      }
+    },
+    [
+      busy,
+      cleanSelectedYear,
+      localMonthPassword,
+      onMonthLockChanged,
+      router,
+      selectedLockMonth,
+    ],
+  );
+
+  const yearAction = selectedYearLocked ? "unlock" : "lock";
+  const monthAction = selectedMonthLocked ? "unlock" : "lock";
 
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5">
-      {monthMessage ? (
-        <div
-          className={`${statusMessageClass} border-emerald-300/20 bg-emerald-500/15 text-emerald-100`}
-        >
-          {monthMessage}
-        </div>
-      ) : null}
+    <section
+      aria-labelledby="money-lock-panel-title"
+      className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/20 sm:p-5"
+    >
+      <h1 id="money-lock-panel-title" className="sr-only">
+        Money tracker year and month locks
+      </h1>
 
-      {monthError ? (
-        <div
-          className={`${statusMessageClass} border-red-300/20 bg-red-500/15 text-red-100`}
-        >
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="min-w-0">
-              <p className="font-black">Month lock failed</p>
-              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-xs leading-relaxed">
-                {monthError}
-              </pre>
-            </div>
-          </div>
-        </div>
+      {statusMessage ? (
+        <StatusPanel message={statusMessage} />
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -447,10 +730,10 @@ export default function MoneyYearLockPanel({
                 <p className="text-xs font-black uppercase tracking-wide text-white/45">
                   Full year lock
                 </p>
-                <h2 className="mt-1 text-xl font-black text-white">
+                <h2 className="mt-1 break-words text-xl font-black text-white">
                   {selectedYearLocked
-                    ? `${selectedYear} is locked`
-                    : `${selectedYear} is open`}
+                    ? `${cleanSelectedYear || "Selected year"} is locked`
+                    : `${cleanSelectedYear || "Selected year"} is open`}
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-white/60">
                   {selectedYearLocked
@@ -460,50 +743,59 @@ export default function MoneyYearLockPanel({
               </div>
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Main admin password
-              </label>
+            <PasswordBox
+              value={localYearPassword}
+              onChange={(value) => {
+                setLocalYearPassword(value);
+                setStatusMessage(null);
+              }}
+              placeholder="Enter main admin password"
+              visible={showYearPassword}
+              onToggle={() =>
+                setShowYearPassword((previous) => !previous)
+              }
+              name="year-lock-password"
+              label="Main admin password"
+              disabled={busy}
+            />
 
-              <PasswordBox
-                value={localYearPassword}
-                onChange={setLocalYearPassword}
-                placeholder="Enter main admin password"
-                visible={showYearPassword}
-                onToggle={() => setShowYearPassword((previous) => !previous)}
-                name="year-lock-password"
-                disabled={lockingYear}
-              />
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void handleYearAction(yearAction)}
+                disabled={
+                  busy ||
+                  !localYearPassword.trim() ||
+                  !yearIsValid
+                }
+                aria-busy={lockingYear || yearActionPending}
+                className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selectedYearLocked
+                    ? "bg-emerald-500 text-black hover:bg-emerald-400"
+                    : "bg-red-500 text-white hover:bg-red-400"
+                }`}
+              >
+                {lockingYear || yearActionPending ? (
+                  <Loader2
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                ) : selectedYearLocked ? (
+                  <LockOpen className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Lock className="h-4 w-4" aria-hidden="true" />
+                )}
 
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleYearAction(selectedYearLocked ? "unlock" : "lock")
-                  }
-                  disabled={lockingYear || !localYearPassword.trim()}
-                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    selectedYearLocked
-                      ? "bg-emerald-500 text-black hover:bg-emerald-400"
-                      : "bg-red-500 text-white hover:bg-red-400"
-                  }`}
-                >
-                  {selectedYearLocked ? (
-                    <LockOpen className="h-4 w-4" />
-                  ) : (
-                    <Lock className="h-4 w-4" />
-                  )}
-                  {lockingYear
-                    ? selectedYearLocked
-                      ? "Unlocking..."
-                      : "Locking..."
-                    : selectedYearLocked
-                      ? `Unlock ${selectedYear}`
-                      : `Lock ${selectedYear}`}
-                </button>
+                {lockingYear || yearActionPending
+                  ? selectedYearLocked
+                    ? "Unlocking..."
+                    : "Locking..."
+                  : selectedYearLocked
+                    ? `Unlock ${cleanSelectedYear}`
+                    : `Lock ${cleanSelectedYear}`}
+              </button>
 
-                <MainAdminBadge />
-              </div>
+              <MainAdminBadge />
             </div>
           </div>
         </div>
@@ -526,9 +818,9 @@ export default function MoneyYearLockPanel({
                 <p className="text-xs font-black uppercase tracking-wide text-white/45">
                   Single month lock
                 </p>
-                <h2 className="mt-1 text-xl font-black text-white">
-                  {selectedMonthLocked
-                    ? `${selectedLockMonth} is locked`
+                <h2 className="mt-1 break-words text-xl font-black text-white">
+                  {selectedMonthLocked && selectedMonth
+                    ? `${selectedMonth.label} ${cleanSelectedYear} is locked`
                     : "Lock one month"}
                 </h2>
                 <p className="mt-1 text-sm leading-6 text-white/60">
@@ -541,36 +833,45 @@ export default function MoneyYearLockPanel({
               <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/75">
                 Selected month:{" "}
                 <span className="font-black text-white">
-                  {selectedMonth.label} {selectedYear}
+                  {selectedMonth.label} {cleanSelectedYear}
                 </span>{" "}
                 · {selectedMonth.count} transaction
                 {selectedMonth.count === 1 ? "" : "s"}
               </div>
             ) : (
-              <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100">
-                Choose a valid month from {selectedYear} before locking or
+              <div
+                role="alert"
+                className="rounded-2xl border border-red-300/20 bg-red-500/10 p-4 text-sm font-bold text-red-100"
+              >
+                Choose a valid month from{" "}
+                {cleanSelectedYear || "the selected year"} before locking or
                 unlocking.
               </div>
             )}
 
             <div>
-              <label className="mb-2 block text-sm font-bold text-white/80">
+              <label
+                htmlFor="money-lock-month"
+                className="mb-2 block text-sm font-bold text-white/80"
+              >
                 Month to lock
               </label>
 
               <select
-                value={selectedLockMonth}
+                id="money-lock-month"
+                value={selectedMonth ? selectedLockMonth : ""}
                 onChange={(event) => {
                   setSelectedLockMonth(event.target.value);
-                  setMonthError("");
-                  setMonthMessage("");
+                  setStatusMessage(null);
+                  setLocalMonthPassword("");
                 }}
-                disabled={lockingMonth}
+                disabled={busy || monthOptions.length === 0}
                 className={`${selectClass} mb-3`}
               >
                 {monthOptions.length === 0 ? (
                   <option className="bg-[#070716]" value="">
-                    No valid months found for {selectedYear}
+                    No valid months found for{" "}
+                    {cleanSelectedYear || "this year"}
                   </option>
                 ) : (
                   monthOptions.map((month) => (
@@ -579,34 +880,35 @@ export default function MoneyYearLockPanel({
                       value={month.key}
                       className="bg-[#070716]"
                     >
-                      {month.label} {selectedYear} — {month.count} transaction
-                      {month.count === 1 ? "" : "s"}
+                      {month.label} {cleanSelectedYear} — {month.count}{" "}
+                      transaction{month.count === 1 ? "" : "s"}
                     </option>
                   ))
                 )}
               </select>
 
-              <label className="mb-2 block text-sm font-bold text-white/80">
-                Main admin password
-              </label>
-
               <PasswordBox
                 value={localMonthPassword}
-                onChange={setLocalMonthPassword}
+                onChange={(value) => {
+                  setLocalMonthPassword(value);
+                  setStatusMessage(null);
+                }}
                 placeholder="Enter main admin password"
                 visible={showMonthPassword}
-                onToggle={() => setShowMonthPassword((previous) => !previous)}
+                onToggle={() =>
+                  setShowMonthPassword((previous) => !previous)
+                }
                 name="month-lock-password"
-                disabled={lockingMonth}
+                label="Main admin password"
+                disabled={busy}
               />
 
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() =>
-                    submitMonthLock(selectedMonthLocked ? "unlock" : "lock")
-                  }
+                  onClick={() => void submitMonthLock(monthAction)}
                   disabled={monthActionDisabled}
+                  aria-busy={monthActionPending}
                   title={
                     monthActionDisabled
                       ? "Choose a valid month and enter the main admin password."
@@ -614,18 +916,27 @@ export default function MoneyYearLockPanel({
                         ? `Unlock ${selectedLockMonth}`
                         : `Lock ${selectedLockMonth}`
                   }
-                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-60 ${
                     selectedMonthLocked
                       ? "bg-emerald-500 text-black hover:bg-emerald-400"
                       : "bg-amber-400 text-black hover:bg-amber-300"
                   }`}
                 >
-                  {selectedMonthLocked ? (
-                    <LockOpen className="h-4 w-4" />
+                  {monthActionPending ? (
+                    <Loader2
+                      className="h-4 w-4 animate-spin"
+                      aria-hidden="true"
+                    />
+                  ) : selectedMonthLocked ? (
+                    <LockOpen
+                      className="h-4 w-4"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Lock className="h-4 w-4" />
+                    <Lock className="h-4 w-4" aria-hidden="true" />
                   )}
-                  {lockingMonth
+
+                  {monthActionPending
                     ? selectedMonthLocked
                       ? "Unlocking..."
                       : "Locking..."

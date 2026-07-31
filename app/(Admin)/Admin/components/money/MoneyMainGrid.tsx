@@ -135,6 +135,15 @@ type MoneyMainGridProps = {
     status: FinanceNoteStatus,
     note?: string,
   ) => Promise<void>;
+
+  /**
+   * Reloads only the Money Tracker transaction data.
+   *
+   * This must be the same async function that fetches
+   * /api/admin/money/transactions and updates the transactions state.
+   * Do not pass window.location.reload or router.refresh.
+   */
+  onRefreshTransactions: () => void | Promise<void>;
 };
 
 export default function MoneyMainGrid({
@@ -146,6 +155,7 @@ export default function MoneyMainGrid({
   saving,
   handleSubmit,
   cancelEditTransaction,
+  fillTestTransaction,
 
   displaySponsors,
   yearlySponsorBreakdown,
@@ -200,6 +210,7 @@ export default function MoneyMainGrid({
   onMarkTransactionChecked,
   onUpdateBankReconciliationStatus,
   onUpdateFinanceNote,
+  onRefreshTransactions,
 }: MoneyMainGridProps) {
   return (
     <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
@@ -260,6 +271,7 @@ export default function MoneyMainGrid({
         onMarkTransactionChecked={onMarkTransactionChecked}
         onUpdateBankReconciliationStatus={onUpdateBankReconciliationStatus}
         onUpdateFinanceNote={onUpdateFinanceNote}
+        onRefreshTransactions={onRefreshTransactions}
       />
     </section>
   );

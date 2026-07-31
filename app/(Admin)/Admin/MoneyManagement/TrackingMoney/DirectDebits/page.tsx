@@ -221,6 +221,7 @@ type ReimburseModalState =
       occurrence: DirectDebitOccurrence;
       payment_method: string;
       reference: string;
+      proof_file: File | null;
       error: string;
     }
   | null;
@@ -231,6 +232,7 @@ type UndoReimbursementModalState =
       occurrence: DirectDebitOccurrence;
       reason: string;
       delete_repayment_transaction: boolean;
+      continue_to_undo_payment: boolean;
       error: string;
     }
   | null;
@@ -803,7 +805,6 @@ export default function DirectDebitsPage() {
 
     if (
       form.account_source === "personal" &&
-      form.auto_reimburse_person &&
       createRepaymentImage &&
       createRepaymentImage.size > 10 * 1024 * 1024
     ) {
@@ -858,7 +859,6 @@ export default function DirectDebitsPage() {
       if (
         payload.plan_id &&
         form.account_source === "personal" &&
-        form.auto_reimburse_person &&
         createRepaymentImage
       ) {
         try {
@@ -898,13 +898,9 @@ export default function DirectDebitsPage() {
           total_payments: form.is_open_ended
             ? null
             : Number(form.total_payments),
-          auto_reimburse_person:
-            form.account_source === "personal"
-              ? form.auto_reimburse_person
-              : false,
+          auto_reimburse_person: form.account_source === "personal",
           reimbursement_payment_method:
-            form.account_source === "personal" &&
-            form.auto_reimburse_person
+            form.account_source === "personal"
               ? form.reimbursement_payment_method
               : null,
           repayment_picture_uploaded: imageWasUploaded,
@@ -917,8 +913,10 @@ export default function DirectDebitsPage() {
         message: imageUploadWarning
           ? `The monthly Direct Debit plan was created, but its repayment picture was not uploaded. ${imageUploadWarning}`
           : imageWasUploaded
-            ? "The monthly Direct Debit plan and repayment picture were saved successfully."
-            : "The monthly Direct Debit plan was created successfully.",
+            ? "The monthly Direct Debit and its connected Burton Pride repayment plan were saved with the repayment picture."
+            : form.account_source === "personal"
+              ? "The monthly Direct Debit and connected Burton Pride repayment plan were created successfully."
+              : "The monthly Direct Debit plan was created successfully.",
       });
       await loadPlans();
     } catch (createError) {
@@ -1312,7 +1310,7 @@ export default function DirectDebitsPage() {
             uploadedReceipt?.transaction_id || null,
           receipt_attachment_id:
             uploadedReceipt?.attachment?.id || null,
-          auto_reimburse_person: Boolean(plan.auto_reimburse_person),
+          repayment_plan_connected: plan.account_source === "personal",
         },
       });
 
@@ -1320,8 +1318,12 @@ export default function DirectDebitsPage() {
       setToast({
         type: "success",
         message: invoiceFile
-          ? `${plan.title} was recorded as a payment and the receipt was added to its Money Tracker receipt section.`
-          : `${plan.title} was recorded as a payment in Money Transactions.`,
+          ? plan.account_source === "personal"
+            ? `${plan.title} was recorded, its receipt was added to Money Tracker, and the linked Burton Pride repayment is now awaiting payment to ${plan.account_holder || "the payer"}.`
+            : `${plan.title} was recorded as a payment and the receipt was added to its Money Tracker receipt section.`
+          : plan.account_source === "personal"
+            ? `${plan.title} was recorded and the linked Burton Pride repayment is now awaiting payment to ${plan.account_holder || "the payer"}.`
+            : `${plan.title} was recorded as a payment in Money Transactions.`,
       });
 
       window.dispatchEvent(
@@ -1491,9 +1493,7 @@ export default function DirectDebitsPage() {
             mandate_reference: editForm.mandate_reference.trim() || null,
             notes: editForm.notes.trim() || null,
             auto_reimburse_person:
-              editForm.account_source === "personal"
-                ? editForm.auto_reimburse_person
-                : false,
+              editForm.account_source === "personal",
             reimbursement_payment_method:
               editForm.account_source === "personal"
                 ? editForm.reimbursement_payment_method
@@ -1516,7 +1516,6 @@ export default function DirectDebitsPage() {
 
       if (
         editForm.account_source === "personal" &&
-        editForm.auto_reimburse_person &&
         (editRepaymentImage || removeExistingRepaymentImage)
       ) {
         await uploadRepaymentImage({
@@ -1525,8 +1524,7 @@ export default function DirectDebitsPage() {
           removeExisting: removeExistingRepaymentImage,
         });
       } else if (
-        (!editForm.auto_reimburse_person ||
-          editForm.account_source !== "personal") &&
+        editForm.account_source !== "personal" &&
         plan.reimbursement_image_url
       ) {
         await uploadRepaymentImage({
@@ -1581,12 +1579,9 @@ export default function DirectDebitsPage() {
             editForm.mandate_reference.trim() || null,
           notes: editForm.notes.trim() || null,
           auto_reimburse_person:
-            editForm.account_source === "personal"
-              ? editForm.auto_reimburse_person
-              : false,
+            editForm.account_source === "personal",
           reimbursement_payment_method:
-            editForm.account_source === "personal" &&
-            editForm.auto_reimburse_person
+            editForm.account_source === "personal"
               ? editForm.reimbursement_payment_method
               : null,
           repayment_picture_changed: pictureChanged,
@@ -1814,10 +1809,25 @@ export default function DirectDebitsPage() {
 
   function openUndoModal(plan: DirectDebitPlanRow) {
     const occurrence = latestPostedOccurrence(plan);
+
     if (!occurrence || !occurrence.transaction_id) {
       setToast({
         type: "error",
         message: "There is no posted payment available to undo.",
+      });
+      return;
+    }
+
+    const reimbursedOccurrence = latestReimbursedOccurrence(plan);
+
+    if (reimbursedOccurrence) {
+      setUndoReimbursementModal({
+        plan,
+        occurrence: reimbursedOccurrence,
+        reason: "Repayment must be undone before the Direct Debit payment",
+        delete_repayment_transaction: true,
+        continue_to_undo_payment: true,
+        error: "",
       });
       return;
     }
@@ -1937,6 +1947,7 @@ export default function DirectDebitsPage() {
       occurrence,
       payment_method: plan.reimbursement_payment_method || "Bank Transfer",
       reference: "",
+      proof_file: null,
       error: "",
     });
   }
@@ -1945,10 +1956,63 @@ export default function DirectDebitsPage() {
     event.preventDefault();
     if (!reimburseModal) return;
 
-    const { plan, occurrence } = reimburseModal;
+    const { plan, occurrence, proof_file: proofFile } = reimburseModal;
+
+    if (!proofFile) {
+      setReimburseModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error:
+                "Upload a picture showing that the person received the repayment.",
+            }
+          : previous,
+      );
+      return;
+    }
+
+    if (proofFile.size > 10 * 1024 * 1024) {
+      setReimburseModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error: "The repayment proof picture must be 10 MB or smaller.",
+            }
+          : previous,
+      );
+      return;
+    }
+
+    const allowedTypes = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+    ]);
+
+    if (proofFile.type && !allowedTypes.has(proofFile.type)) {
+      setReimburseModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error: "Upload a JPG, PNG, WebP or GIF repayment proof picture.",
+            }
+          : previous,
+      );
+      return;
+    }
+
     setBusyAction({ planId: plan.id, action: "reimburse" });
 
     try {
+      const formData = new FormData();
+      formData.append("payment_method", reimburseModal.payment_method);
+      formData.append(
+        "reference",
+        reimburseModal.reference.trim(),
+      );
+      formData.append("proof_file", proofFile);
+
       const response = await fetch(
         `/api/admin/money/direct-debits/${encodeURIComponent(
           plan.id,
@@ -1958,16 +2022,23 @@ export default function DirectDebitsPage() {
           credentials: "include",
           headers: {
             Accept: "application/json",
-            "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            payment_method: reimburseModal.payment_method,
-            reference: reimburseModal.reference.trim() || null,
-          }),
+          body: formData,
         },
       );
 
-      const payload = await readJsonResponse<ListResponse>(response);
+      const payload = await readJsonResponse<
+        ListResponse & {
+          repayment_transaction_id?: string | null;
+          proof_attachment?: {
+            id?: string;
+            transaction_id?: string;
+            file_name?: string;
+            file_url?: string | null;
+          } | null;
+        }
+      >(response);
+
       if (!response.ok) {
         throw new Error(
           apiErrorMessage(payload, "Could not repay the person.", response),
@@ -1981,6 +2052,8 @@ export default function DirectDebitsPage() {
         risk: "high",
         record_type: "direct_debit_occurrence",
         record_id: occurrence.id,
+        transaction_id:
+          payload.repayment_transaction_id || occurrence.transaction_id,
         direct_debit_plan_id: plan.id,
         direct_debit_occurrence_id: occurrence.id,
         summary: `Repaid ${money(occurrence.amount_pence)} to ${
@@ -1995,15 +2068,21 @@ export default function DirectDebitsPage() {
           reference: reimburseModal.reference.trim() || null,
           amount_pence: occurrence.amount_pence,
           account_holder: plan.account_holder || null,
+          proof_uploaded: true,
+          proof_file_name:
+            payload.proof_attachment?.file_name || proofFile.name,
+          proof_attachment_id:
+            payload.proof_attachment?.id || null,
         },
       });
 
       setReimburseModal(null);
+
       setToast({
         type: "success",
         message: `${money(occurrence.amount_pence)} was recorded as repaid to ${
           plan.account_holder || "the payer"
-        }.`,
+        }, and the received-payment proof picture was added to Money Tracker.`,
       });
 
       window.dispatchEvent(
@@ -2012,6 +2091,10 @@ export default function DirectDebitsPage() {
             planId: plan.id,
             occurrenceId: occurrence.id,
             transactionId: occurrence.transaction_id,
+            repaymentTransactionId:
+              payload.repayment_transaction_id || null,
+            proofAttachmentId:
+              payload.proof_attachment?.id || null,
           },
         }),
       );
@@ -2055,6 +2138,7 @@ export default function DirectDebitsPage() {
       occurrence,
       reason: "Repayment was recorded by mistake",
       delete_repayment_transaction: true,
+      continue_to_undo_payment: false,
       error: "",
     });
   }
@@ -2160,15 +2244,10 @@ export default function DirectDebitsPage() {
         },
       });
 
+      const continueToUndoPayment =
+        undoReimbursementModal.continue_to_undo_payment;
+
       setUndoReimbursementModal(null);
-      setToast({
-        type: "success",
-        message: `${money(
-          occurrence.amount_pence,
-        )} is awaiting repayment again for ${
-          plan.account_holder || "the payer"
-        }.`,
-      });
 
       window.dispatchEvent(
         new CustomEvent("money:direct-debit-reimbursement-undone", {
@@ -2185,6 +2264,34 @@ export default function DirectDebitsPage() {
       );
 
       await loadPlans();
+
+      if (continueToUndoPayment) {
+        setUndoModal({
+          plan,
+          occurrence: {
+            ...occurrence,
+            reimbursement_status: "awaiting_reimbursement",
+            reimbursement_transaction_id: null,
+          },
+          reason: "Payment was recorded by mistake",
+          error: "",
+        });
+
+        setToast({
+          type: "success",
+          message:
+            "The repayment was undone. You can now confirm undoing the Direct Debit payment.",
+        });
+      } else {
+        setToast({
+          type: "success",
+          message: `${money(
+            occurrence.amount_pence,
+          )} is awaiting repayment again for ${
+            plan.account_holder || "the payer"
+          }.`,
+        });
+      }
     } catch (undoError) {
       setUndoReimbursementModal((previous) =>
         previous
@@ -2451,7 +2558,7 @@ export default function DirectDebitsPage() {
             </div>
 
             <Link
-              href="/Admin/MoneyManagement/DirectDebits/export"
+              href="/Admin/MoneyManagement/TrackingMoney/DirectDebits/Export"
               className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/15"
             >
               <FileSpreadsheet className="h-4 w-4" />
@@ -2563,6 +2670,15 @@ export default function DirectDebitsPage() {
                           Payment {dueOccurrence?.payment_number} was due on{" "}
                           <strong>{dateLabel(dueOccurrence?.due_date)}</strong>{" "}
                           and has not been posted.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {plan.account_source === "personal" ? (
+                      <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+                        <HandCoins className="mt-0.5 h-4 w-4 shrink-0" />
+                        <p>
+                          <strong>Repayment plan connected.</strong> Each personal-bank payment creates a matching amount Burton Pride owes to {plan.account_holder || "the payer"}.
                         </p>
                       </div>
                     ) : null}
@@ -2748,12 +2864,11 @@ export default function DirectDebitsPage() {
                         onClick={() => openUndoModal(plan)}
                         disabled={
                           planBusy ||
-                          !latestPostedOccurrence(plan)?.transaction_id ||
-                          Boolean(latestReimbursedOccurrence(plan))
+                          !latestPostedOccurrence(plan)?.transaction_id
                         }
                         title={
                           latestReimbursedOccurrence(plan)
-                            ? "Undo the personal repayment first, then undo the Direct Debit payment."
+                            ? "This will first undo the personal repayment, then let you undo the Direct Debit payment."
                             : !latestPostedOccurrence(plan)?.transaction_id
                               ? "There is no posted payment available to undo."
                               : "Remove the linked Money Transaction and return the payment to Scheduled."
@@ -3041,6 +3156,39 @@ export default function DirectDebitsPage() {
                 className="w-full rounded-xl bg-black/30 p-3 ring-1 ring-white/10"
               />
             </label>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-sm font-black">
+                Payment received proof picture
+              </span>
+              <span className="mb-2 block text-xs leading-5 text-white/50">
+                Required. Upload a screenshot or picture showing that the
+                person received the repayment. This will be saved against the
+                original Personal Funds transaction in Money Tracker.
+              </span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                required
+                onChange={(event) =>
+                  setReimburseModal((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          proof_file: event.target.files?.[0] || null,
+                          error: "",
+                        }
+                      : previous,
+                  )
+                }
+                className="block w-full rounded-xl bg-black/30 p-3 text-sm text-white ring-1 ring-white/10 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-500 file:px-3 file:py-2 file:font-black file:text-black"
+              />
+              {reimburseModal.proof_file ? (
+                <p className="mt-2 text-xs font-bold text-emerald-200">
+                  Selected: {reimburseModal.proof_file.name}
+                </p>
+              ) : null}
+            </label>
+
             {reimburseModal.error ? (
               <p className="mt-3 whitespace-pre-line rounded-xl bg-red-500/10 p-3 text-sm font-bold text-red-100">
                 {reimburseModal.error}
@@ -3314,6 +3462,7 @@ export default function DirectDebitsPage() {
                                 source === "personal"
                                   ? previous.form.account_holder
                                   : "",
+                              auto_reimburse_person: source === "personal",
                             },
                           }
                         : previous,
@@ -3403,30 +3552,21 @@ export default function DirectDebitsPage() {
 
               {editModal.form.account_source === "personal" ? (
                 <div className="sm:col-span-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={editModal.form.auto_reimburse_person}
-                      onChange={(event) =>
-                        updateEditForm(
-                          "auto_reimburse_person",
-                          event.target.checked,
-                        )
-                      }
-                      className="mt-1 h-4 w-4"
-                    />
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 rounded-xl bg-emerald-500/20 p-2 text-emerald-100 ring-1 ring-emerald-300/25">
+                      <HandCoins className="h-5 w-5" />
+                    </div>
                     <span>
                       <span className="block text-sm font-black text-emerald-100">
-                        Automatically create repayment after each payment
+                        Burton Pride repayment plan connected
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-emerald-100/65">
-                        This only applies to future monthly payments.
+                      <span className="mt-1 block text-xs leading-5 text-emerald-100/70">
+                        Future payments from this personal account automatically create a linked repayment liability for Burton Pride.
                       </span>
                     </span>
-                  </label>
+                  </div>
 
-                  {editModal.form.auto_reimburse_person ? (
-                    <select
+                  <select
                       value={editModal.form.reimbursement_payment_method}
                       onChange={(event) =>
                         updateEditForm(
@@ -3441,10 +3581,8 @@ export default function DirectDebitsPage() {
                       <option className="bg-[#11111f]">PayPal</option>
                       <option className="bg-[#11111f]">Other</option>
                     </select>
-                  ) : null}
 
-                  {editModal.form.auto_reimburse_person ? (
-                    <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-4">
+                  <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-4">
                       <label className="block">
                         <span className="block text-sm font-black text-cyan-100">
                           Repayment picture for Money Tracker
@@ -3536,7 +3674,6 @@ export default function DirectDebitsPage() {
                         JPG, PNG or WEBP. Maximum 10 MB.
                       </p>
                     </div>
-                  ) : null}
                 </div>
               ) : null}
 
@@ -3767,6 +3904,12 @@ export default function DirectDebitsPage() {
                 Accepted: PDF, JPG, PNG or WEBP. Maximum file size 10 MB.
               </p>
             </div>
+
+            {confirmModal.plan.account_source === "personal" ? (
+              <div className="mt-4 rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm leading-6 text-emerald-100">
+                Posting this payment will create the personal-funds expense and a linked Burton Pride repayment liability for <strong>{confirmModal.plan.account_holder || "the payer"}</strong>. The two records remain connected through this Direct Debit occurrence.
+              </div>
+            ) : null}
 
             <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
               Only continue when the payment has left the paying account and should now appear in Money Transactions.
@@ -4050,6 +4193,7 @@ export default function DirectDebitsPage() {
                       account_source: source,
                       account_holder:
                         source === "personal" ? previous.account_holder : "",
+                      auto_reimburse_person: source === "personal",
                     }));
                   }}
                   className="w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/45"
@@ -4192,28 +4336,21 @@ export default function DirectDebitsPage() {
 
               {form.account_source === "personal" ? (
                 <div className="sm:col-span-2 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
-                  <label className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={form.auto_reimburse_person}
-                      onChange={(event) =>
-                        updateForm("auto_reimburse_person", event.target.checked)
-                      }
-                      className="mt-1 h-4 w-4"
-                    />
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 rounded-xl bg-emerald-500/20 p-2 text-emerald-100 ring-1 ring-emerald-300/25">
+                      <HandCoins className="h-5 w-5" />
+                    </div>
                     <span>
                       <span className="block text-sm font-black text-emerald-100">
-                        Automatically create repayment after each payment
+                        Burton Pride repayment plan connected
                       </span>
-                      <span className="mt-1 block text-xs leading-5 text-emerald-100/65">
-                        When a monthly payment is made, the system will also create
-                        a linked reimbursement transaction to the person who paid.
+                      <span className="mt-1 block text-xs leading-5 text-emerald-100/70">
+                        Every Direct Debit payment leaving this personal account will automatically create a linked amount owed by Burton Pride. Recording the repayment will create the matching Burton Pride repayment transaction and close that liability.
                       </span>
                     </span>
-                  </label>
+                  </div>
 
-                  {form.auto_reimburse_person ? (
-                    <label className="mt-4 block">
+                  <label className="mt-4 block">
                       <span className="mb-1 block text-sm font-black">
                         Repayment method
                       </span>
@@ -4233,10 +4370,8 @@ export default function DirectDebitsPage() {
                         <option className="bg-[#11111f]">Other</option>
                       </select>
                     </label>
-                  ) : null}
 
-                  {form.auto_reimburse_person ? (
-                    <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-4">
+                  <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-4">
                       <label className="block">
                         <span className="block text-sm font-black text-cyan-100">
                           Repayment picture for Money Tracker
@@ -4285,7 +4420,6 @@ export default function DirectDebitsPage() {
                         JPG, PNG or WEBP. Maximum 10 MB.
                       </p>
                     </div>
-                  ) : null}
                 </div>
               ) : null}
 

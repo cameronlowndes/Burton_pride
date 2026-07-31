@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { BarChart3, CircleDollarSign, HandCoins } from "lucide-react";
 
 import type { Transaction } from "@/lib/money/types";
@@ -28,7 +28,7 @@ type SponsorBreakdownItem = {
 type MoneyDashboardChartsProps = {
   selectedYear: string;
   transactions: Transaction[];
-  yearlySponsorBreakdown: SponsorBreakdownItem[];
+  yearlySponsorBreakdown?: SponsorBreakdownItem[];
 };
 
 type MonthInfo = {
@@ -44,6 +44,8 @@ type MonthlyChartRow = MonthInfo & {
 };
 
 type BarTone = "emerald" | "red" | "amber";
+
+type TransactionRecord = Transaction & Record<string, unknown>;
 
 const MONTHS: MonthInfo[] = [
   { key: "01", short: "Jan", full: "January" },
@@ -66,41 +68,115 @@ const barToneClass: Record<BarTone, string> = {
   amber: "bg-amber-400",
 };
 
-function safeAmount(value: unknown) {
-  const amount = Number(value || 0);
+function asRecord(transaction: Transaction): TransactionRecord {
+  return transaction as TransactionRecord;
+}
+
+function cleanText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function lower(value: unknown): string {
+  return cleanText(value).toLowerCase();
+}
+
+function safeAmount(value: unknown): number {
+  if (value === null || value === undefined || value === "") return 0;
+
+  const amount = typeof value === "number" ? value : Number(value);
   return Number.isFinite(amount) ? amount : 0;
 }
 
-function safePercent(value: number, max: number) {
-  if (!max || max <= 0 || value <= 0) return 0;
-  return Math.max(2, Math.min(100, Math.round((value / max) * 100)));
+function nonNegativeAmount(value: unknown): number {
+  return Math.max(0, safeAmount(value));
 }
 
-function isDonationTransaction(item: Transaction) {
-  if (item.type !== "income") return false;
+function safePercent(value: number, max: number): number {
+  const safeValue = nonNegativeAmount(value);
+  const safeMax = nonNegativeAmount(max);
 
-  const searchableText = [
-    item.title,
-    item.source,
-    item.payment_method,
-    item.description,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+  if (safeValue === 0 || safeMax === 0) return 0;
+
+  return Math.min(100, Math.max(2, (safeValue / safeMax) * 100));
+}
+
+function transactionDate(item: Transaction): string {
+  const record = asRecord(item);
 
   return (
-    searchableText.includes("donation") || searchableText.includes("stripe")
+    cleanText(record.transaction_date) ||
+    cleanText(record.date) ||
+    cleanText(record.created_at)
   );
 }
 
-function isYearTransaction(item: Transaction, selectedYear: string) {
-  const date = item.transaction_date || item.created_at;
+function isDeletedTransaction(item: Transaction): boolean {
+  return cleanText(asRecord(item).deleted_at).length > 0;
+}
+
+function transactionType(item: Transaction): string {
+  return lower(asRecord(item).type);
+}
+
+function isDonationTransaction(item: Transaction): boolean {
+  if (transactionType(item) !== "income") return false;
+
+  const record = asRecord(item);
+  const fields = [
+    record.title,
+    record.source,
+    record.payment_method,
+    record.description,
+    record.category,
+    record.transaction_category,
+    record.income_type,
+    record.reference,
+    record.transaction_reference,
+  ];
+
+  const searchableText = fields.map(lower).filter(Boolean).join(" ");
+
+  return (
+    searchableText.includes("donation") ||
+    searchableText.includes("donate") ||
+    searchableText.includes("charitable gift") ||
+    searchableText.includes("fundraising contribution")
+  );
+}
+
+function isYearTransaction(item: Transaction, selectedYear: string): boolean {
+  if (!selectedYear || selectedYear === "all") return true;
+
+  const date = transactionDate(item);
+  if (!date) return false;
+
   return getTransactionYear(date) === selectedYear;
 }
 
-function totalPence(items: Transaction[]) {
-  return items.reduce((sum, item) => sum + safeAmount(item.amount_pence), 0);
+function isTransactionInMonth(
+  item: Transaction,
+  selectedYear: string,
+  monthKey: string,
+): boolean {
+  const date = transactionDate(item);
+  if (!date) return false;
+
+  const transactionMonthKey = getTransactionMonthKey(date);
+  if (!transactionMonthKey) return false;
+
+  if (!selectedYear || selectedYear === "all") {
+    return transactionMonthKey.endsWith(`-${monthKey}`);
+  }
+
+  return transactionMonthKey === `${selectedYear}-${monthKey}`;
+}
+
+function totalPence(items: Transaction[]): number {
+  return items.reduce(
+    (sum, item) => sum + safeAmount(asRecord(item).amount_pence),
+    0,
+  );
 }
 
 function buildMonthlyRows(
@@ -108,17 +184,19 @@ function buildMonthlyRows(
   yearTransactions: Transaction[],
 ): MonthlyChartRow[] {
   return MONTHS.map((month) => {
-    const monthKey = `${selectedYear}-${month.key}`;
+    const rows = yearTransactions.filter((item) =>
+      isTransactionInMonth(item, selectedYear, month.key),
+    );
 
-    const rows = yearTransactions.filter((item) => {
-      const date = item.transaction_date || item.created_at;
-      return getTransactionMonthKey(date) === monthKey;
-    });
+    const moneyIn = totalPence(
+      rows.filter((item) => transactionType(item) === "income"),
+    );
 
-    const moneyIn = totalPence(rows.filter((item) => item.type === "income"));
     const moneyOut = totalPence(
       rows.filter(
-        (item) => item.type === "expense" && !isPersonalFundsTransaction(item),
+        (item) =>
+          transactionType(item) === "expense" &&
+          !isPersonalFundsTransaction(item),
       ),
     );
 
@@ -129,6 +207,10 @@ function buildMonthlyRows(
       balance: moneyIn - moneyOut,
     };
   });
+}
+
+function yearLabel(selectedYear: string): string {
+  return !selectedYear || selectedYear === "all" ? "all years" : selectedYear;
 }
 
 function ChartPanel({
@@ -169,6 +251,8 @@ function ProgressBar({
   max: number;
   tone: BarTone;
 }) {
+  const width = safePercent(value, max);
+
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-3 text-xs">
@@ -178,8 +262,13 @@ function ProgressBar({
 
       <div className="h-2 overflow-hidden rounded-full bg-white/10">
         <div
-          className={`h-full rounded-full ${barToneClass[tone]}`}
-          style={{ width: `${safePercent(value, max)}%` }}
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, max)}
+          aria-valuenow={Math.max(0, value)}
+          className={`h-full rounded-full transition-[width] duration-300 ${barToneClass[tone]}`}
+          style={{ width: `${width}%` }}
         />
       </div>
     </div>
@@ -193,6 +282,18 @@ function MonthlyMoneyChart({
   rows: MonthlyChartRow[];
   maxValue: number;
 }) {
+  const hasData = rows.some(
+    (month) => month.moneyIn !== 0 || month.moneyOut !== 0,
+  );
+
+  if (!hasData) {
+    return (
+      <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
+        No income or expense transactions were found for this period.
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {rows.map((month) => (
@@ -259,7 +360,12 @@ function ComparisonRow({
 
       <div className="h-4 overflow-hidden rounded-full bg-black/30">
         <div
-          className={`h-full rounded-full ${barToneClass[tone]}`}
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, max)}
+          aria-valuenow={Math.max(0, value)}
+          className={`h-full rounded-full transition-[width] duration-300 ${barToneClass[tone]}`}
           style={{ width: `${safePercent(value, max)}%` }}
         />
       </div>
@@ -309,24 +415,28 @@ function DonationsVsExpenses({
 
 function SponsorMoneyCard({
   sponsor,
-  maxSponsorReceived,
 }: {
   sponsor: SponsorBreakdownItem;
-  maxSponsorReceived: number;
 }) {
-  const received = sponsor.received_pence || maxSponsorReceived;
-  const spent = safeAmount(sponsor.spent_pence);
+  const received = nonNegativeAmount(sponsor.received_pence);
+  const spent = nonNegativeAmount(sponsor.spent_pence);
   const remaining = safeAmount(sponsor.remaining_pence);
+  const positiveRemaining = Math.max(remaining, 0);
+
+  // Each sponsor is scaled against its own actual figures. A sponsor with no
+  // received money must never inherit another sponsor's received amount.
+  const scaleMax = Math.max(1, received, spent, positiveRemaining);
+  const sponsorName = cleanText(sponsor.sponsor_name) || "Unnamed sponsor";
 
   return (
     <div className="rounded-2xl bg-black/20 p-3">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="break-words text-sm font-black text-white">
-            {sponsor.sponsor_name}
+            {sponsorName}
           </p>
           <p className="mt-1 text-xs text-white/50">
-            Received {money(sponsor.received_pence)}
+            Received {money(received)}
           </p>
         </div>
 
@@ -340,14 +450,20 @@ function SponsorMoneyCard({
       </div>
 
       <div className="grid gap-2">
-        <ProgressBar label="Spent" value={spent} max={received} tone="red" />
+        <ProgressBar label="Spent" value={spent} max={scaleMax} tone="red" />
         <ProgressBar
           label="Left"
-          value={Math.max(remaining, 0)}
-          max={received}
+          value={positiveRemaining}
+          max={scaleMax}
           tone="amber"
         />
       </div>
+
+      {received === 0 && spent > 0 ? (
+        <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100">
+          Spending is recorded, but no sponsor money has been received.
+        </div>
+      ) : null}
 
       {remaining < 0 ? (
         <div className="mt-3 rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100">
@@ -368,23 +484,20 @@ function SponsorMoneyLeft({
   if (sponsors.length === 0) {
     return (
       <div className="rounded-2xl bg-black/20 p-4 text-sm text-white/60">
-        No sponsor money to show for {selectedYear}.
+        No sponsor money to show for {yearLabel(selectedYear)}.
       </div>
     );
   }
 
-  const maxSponsorReceived = Math.max(
-    1,
-    ...sponsors.map((sponsor) => sponsor.received_pence || 0),
-  );
-
   return (
     <div className="space-y-3">
-      {sponsors.map((sponsor) => (
+      {sponsors.map((sponsor, index) => (
         <SponsorMoneyCard
-          key={sponsor.sponsor_id}
+          key={
+            cleanText(sponsor.sponsor_id) ||
+            `${cleanText(sponsor.sponsor_name) || "sponsor"}-${index}`
+          }
           sponsor={sponsor}
-          maxSponsorReceived={maxSponsorReceived}
         />
       ))}
     </div>
@@ -394,50 +507,89 @@ function SponsorMoneyLeft({
 export default function MoneyDashboardCharts({
   selectedYear,
   transactions,
-  yearlySponsorBreakdown,
+  yearlySponsorBreakdown = [],
 }: MoneyDashboardChartsProps) {
-  const yearTransactions = transactions.filter((item) =>
-    isYearTransaction(item, selectedYear),
+  const yearTransactions = useMemo(
+    () =>
+      transactions.filter(
+        (item) =>
+          !isDeletedTransaction(item) && isYearTransaction(item, selectedYear),
+      ),
+    [transactions, selectedYear],
   );
 
-  const monthlyData = buildMonthlyRows(selectedYear, yearTransactions);
-
-  const maxMonthlyValue = Math.max(
-    1,
-    ...monthlyData.map((month) => Math.max(month.moneyIn, month.moneyOut)),
+  const monthlyData = useMemo(
+    () => buildMonthlyRows(selectedYear, yearTransactions),
+    [selectedYear, yearTransactions],
   );
 
-  const donationsTotal = totalPence(
-    yearTransactions.filter(isDonationTransaction),
+  const maxMonthlyValue = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...monthlyData.map((month) =>
+          Math.max(month.moneyIn, month.moneyOut),
+        ),
+      ),
+    [monthlyData],
   );
 
-  const expensesTotal = totalPence(
-    yearTransactions.filter(
-      (item) => item.type === "expense" && !isPersonalFundsTransaction(item),
-    ),
+  const donationsTotal = useMemo(
+    () => totalPence(yearTransactions.filter(isDonationTransaction)),
+    [yearTransactions],
   );
 
-  const sponsorsWithMoney = yearlySponsorBreakdown
-    .filter(
-      (sponsor) =>
-        safeAmount(sponsor.received_pence) > 0 ||
-        safeAmount(sponsor.spent_pence) > 0 ||
-        safeAmount(sponsor.remaining_pence) !== 0,
-    )
-    .sort(
-      (a, b) => safeAmount(b.remaining_pence) - safeAmount(a.remaining_pence),
-    );
+  const expensesTotal = useMemo(
+    () =>
+      totalPence(
+        yearTransactions.filter(
+          (item) =>
+            transactionType(item) === "expense" &&
+            !isPersonalFundsTransaction(item),
+        ),
+      ),
+    [yearTransactions],
+  );
+
+  const sponsorsWithMoney = useMemo(
+    () =>
+      yearlySponsorBreakdown
+        .filter((sponsor) => {
+          const received = safeAmount(sponsor.received_pence);
+          const spent = safeAmount(sponsor.spent_pence);
+          const remaining = safeAmount(sponsor.remaining_pence);
+          const carriedForward = safeAmount(sponsor.carried_forward_pence);
+
+          return (
+            received !== 0 ||
+            spent !== 0 ||
+            remaining !== 0 ||
+            carriedForward !== 0
+          );
+        })
+        .slice()
+        .sort(
+          (a, b) =>
+            safeAmount(b.remaining_pence) - safeAmount(a.remaining_pence),
+        ),
+    [yearlySponsorBreakdown],
+  );
+
+  const selectedPeriodLabel = yearLabel(selectedYear);
 
   return (
-    <section className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3">
+    <section
+      className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-3"
+      aria-label={`Money dashboard charts for ${selectedPeriodLabel}`}
+    >
       <ChartPanel
         icon={
           <div className="rounded-2xl bg-sky-500/15 p-3 text-sky-200 ring-1 ring-sky-300/20">
-            <BarChart3 className="h-5 w-5" />
+            <BarChart3 className="h-5 w-5" aria-hidden="true" />
           </div>
         }
         title="Money in/out by month"
-        description={`Monthly income and spending for ${selectedYear}.`}
+        description={`Monthly income and spending for ${selectedPeriodLabel}.`}
       >
         <MonthlyMoneyChart rows={monthlyData} maxValue={maxMonthlyValue} />
       </ChartPanel>
@@ -445,11 +597,11 @@ export default function MoneyDashboardCharts({
       <ChartPanel
         icon={
           <div className="rounded-2xl bg-emerald-500/15 p-3 text-emerald-200 ring-1 ring-emerald-300/20">
-            <CircleDollarSign className="h-5 w-5" />
+            <CircleDollarSign className="h-5 w-5" aria-hidden="true" />
           </div>
         }
         title="Donations vs expenses"
-        description={`Quick comparison for ${selectedYear}.`}
+        description={`Quick comparison for ${selectedPeriodLabel}.`}
       >
         <DonationsVsExpenses
           donationsTotal={donationsTotal}
@@ -460,11 +612,11 @@ export default function MoneyDashboardCharts({
       <ChartPanel
         icon={
           <div className="rounded-2xl bg-amber-500/15 p-3 text-amber-200 ring-1 ring-amber-300/20">
-            <HandCoins className="h-5 w-5" />
+            <HandCoins className="h-5 w-5" aria-hidden="true" />
           </div>
         }
         title="Sponsor money left"
-        description="Remaining sponsorship balance by sponsor."
+        description={`Remaining sponsorship balance for ${selectedPeriodLabel}.`}
       >
         <SponsorMoneyLeft
           selectedYear={selectedYear}

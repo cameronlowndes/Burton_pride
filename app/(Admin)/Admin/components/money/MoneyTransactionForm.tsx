@@ -90,14 +90,22 @@ type SupplierContact = {
   is_active?: boolean | null;
 };
 
-type SupplierFormFields = FormState & {
+type ExtendedFormFields = FormState & {
   supplierId?: string | null;
   supplier_id?: string | null;
   supplierName?: string | null;
   supplier_name?: string | null;
   supplierCategory?: string | null;
   supplier_category?: string | null;
+  budgetCategory?: string | null;
+  budgetCategoryKey?: string | null;
+  budget_category?: string | null;
+  budget_category_key?: string | null;
+  budgetCategoryLabel?: string | null;
+  budget_category_label?: string | null;
 };
+
+type SupplierFormFields = ExtendedFormFields;
 
 const defaultBudgetItems: BudgetItem[] = [
   { category_key: "venue", category_label: "Venue" },
@@ -115,6 +123,9 @@ const DIRECT_DEBIT_DEFAULT_MONTHS = 12;
 const DIRECT_DEBIT_MIN_MONTHS = 2;
 const DIRECT_DEBIT_MAX_MONTHS = 60;
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
+const MAX_RECEIPT_FILES = 10;
+const MAX_RECEIPT_FILE_SIZE = 15 * 1024 * 1024;
+const MAX_RECEIPT_TOTAL_SIZE = 50 * 1024 * 1024;
 
 type ReceiptDueFormFields = FormState & {
   receiptDueDate?: string | null;
@@ -494,13 +505,47 @@ const financeNoteOptions: {
 ];
 
 function amountToPence(amount: string) {
-  const cleanAmount = Number(amount || 0);
+  const cleanAmount = Number(String(amount ?? "").trim());
 
-  if (!Number.isFinite(cleanAmount)) {
+  if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
     return 0;
   }
 
   return Math.round(cleanAmount * 100);
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+}
+
+function isUsableAttachment(attachment: unknown) {
+  if (!attachment || typeof attachment !== "object") return false;
+  const item = attachment as { file_url?: unknown; url?: unknown; path?: unknown };
+  return Boolean(
+    String(item.file_url ?? "").trim() ||
+      String(item.url ?? "").trim() ||
+      String(item.path ?? "").trim(),
+  );
+}
+
+function validateReceiptFiles(files: File[]) {
+  if (files.length > MAX_RECEIPT_FILES) {
+    return `Choose no more than ${MAX_RECEIPT_FILES} files.`;
+  }
+
+  const oversized = files.find((file) => file.size > MAX_RECEIPT_FILE_SIZE);
+  if (oversized) {
+    return `${oversized.name} is larger than 15 MB.`;
+  }
+
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  if (totalSize > MAX_RECEIPT_TOTAL_SIZE) {
+    return "The selected files are larger than 50 MB in total.";
+  }
+
+  return "";
 }
 
 function penceToPoundsInput(value: number | null | undefined) {
@@ -575,12 +620,14 @@ export default function MoneyTransactionForm({
   const saveAnywayRef = useRef(false);
   const saveWithoutReceiptRef = useRef(false);
   const saveOverFundingLimitRef = useRef(false);
+  const submittingRef = useRef(false);
 
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<
     DuplicateMatch[] | null
   >(null);
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [missingReceiptWarningOpen, setMissingReceiptWarningOpen] =
     useState(false);
   const [fundingOverspendWarningOpen, setFundingOverspendWarningOpen] =
@@ -649,7 +696,7 @@ export default function MoneyTransactionForm({
     DIRECT_DEBIT_MAX_MONTHS,
     Math.max(
       DIRECT_DEBIT_MIN_MONTHS,
-      Number(form.repeatCount || DIRECT_DEBIT_DEFAULT_MONTHS) ||
+      Math.floor(Number(form.repeatCount || DIRECT_DEBIT_DEFAULT_MONTHS)) ||
         DIRECT_DEBIT_DEFAULT_MONTHS,
     ),
   );
@@ -816,12 +863,17 @@ export default function MoneyTransactionForm({
       : 0;
 
   const existingAttachments = editingTransaction?.attachments || [];
+  const usableExistingAttachments = existingAttachments.filter(isUsableAttachment);
 
   const hasExistingReceipt =
-    existingAttachments.length > 0 ||
-    Boolean(editingTransaction?.invoice_image_url);
+    usableExistingAttachments.length > 0 ||
+    Boolean(String(editingTransaction?.invoice_image_url ?? "").trim());
 
-  const needsReceiptWarning = invoiceFiles.length === 0 && !hasExistingReceipt;
+  const needsReceiptWarning =
+    form.type === "expense" &&
+    !isItemDonation &&
+    invoiceFiles.length === 0 &&
+    !hasExistingReceipt;
 
   const selectedFinanceNoteOption =
     financeNoteOptions.find(
@@ -870,78 +922,113 @@ export default function MoneyTransactionForm({
         },
       );
 
-      const payload = await response.json().catch(() => null);
+      const payload = (await response.json().catch(() => null)) as
+        | { duplicate?: unknown; matches?: unknown; error?: unknown; message?: unknown }
+        | null;
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Failed to check duplicates.");
+        throw new Error(
+          String(payload?.error || payload?.message || "Failed to check duplicates."),
+        );
       }
 
+      const matches = Array.isArray(payload?.matches)
+        ? payload.matches.filter(
+            (item): item is DuplicateMatch =>
+              Boolean(item) && typeof item === "object" && "id" in item,
+          )
+        : [];
+
       return {
-        duplicate: Boolean(payload?.duplicate),
-        matches: Array.isArray(payload?.matches) ? payload.matches : [],
+        duplicate: Boolean(payload?.duplicate) && matches.length > 0,
+        matches,
       };
     } finally {
       setCheckingDuplicate(false);
     }
   }
 
-  async function createSupplierTransactionLog() {
-    if (!selectedSupplierId && !selectedSupplierName) {
+  async function createSupplierTransactionLog(snapshot: {
+    supplierId: string;
+    supplierName: string;
+    supplierCategory: string;
+    title: string;
+    description: string;
+    type: string;
+    amount: string;
+    amountPence: number;
+    transactionDate: string;
+    paymentMethod: string;
+    fundingId: string;
+    fundingName: string;
+    financeNoteStatus: string;
+    financeNote: string;
+    receiptDueDate: string;
+    isRepeating: boolean;
+    repeatFrequency: string;
+    repeatCount: string;
+    directDebitAccountSource: DirectDebitAccountSource;
+    directDebitAccountHolder: string;
+    directDebitReference: string;
+    directDebitPlanNote: string;
+    isDirectDebit: boolean;
+  }) {
+    if (!snapshot.supplierId && !snapshot.supplierName) {
       return;
     }
 
-    const supplierName =
-      selectedSupplier?.supplier_name ||
-      selectedSupplierName ||
-      "Unknown supplier";
-
-    const supplierCategory =
-      selectedSupplier?.category || selectedSupplierCategory || "";
+    const supplierName = snapshot.supplierName || "Unknown supplier";
+    const supplierCategory = snapshot.supplierCategory;
 
     try {
-      await fetch("/api/admin/money/suppliers/logs", {
+      const response = await fetch("/api/admin/money/suppliers/logs", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          supplier_id: selectedSupplierId || null,
+          supplier_id: snapshot.supplierId || null,
           supplier_name: supplierName,
           action: "transaction_linked",
           action_label: "Transaction linked",
           message: `Transaction linked to supplier/contact: ${supplierName}`,
           details: {
-            transaction_title: form.title,
-            transaction_description: form.description,
-            transaction_type: form.type,
-            transaction_amount: form.amount,
-            transaction_amount_pence: currentAmountPence,
-            transaction_date: form.transactionDate,
-            payment_method: form.paymentMethod,
+            transaction_title: snapshot.title,
+            transaction_description: snapshot.description,
+            transaction_type: snapshot.type,
+            transaction_amount: snapshot.amount,
+            transaction_amount_pence: snapshot.amountPence,
+            transaction_date: snapshot.transactionDate,
+            payment_method: snapshot.paymentMethod,
             supplier_category: supplierCategory || null,
-            funding_id: form.sponsorId || null,
-            funding_name: form.sponsorName || null,
-            finance_note_status: form.financeNoteStatus || null,
-            finance_note: form.financeNote || null,
-            receipt_due_date: selectedReceiptDueDate || null,
-            is_repeating: Boolean(form.isRepeating),
-            repeat_frequency: form.isRepeating ? form.repeatFrequency : null,
-            repeat_count: form.isRepeating ? form.repeatCount : null,
-            direct_debit_account_source: isDirectDebit
-              ? directDebitAccountSource
+            funding_id: snapshot.fundingId || null,
+            funding_name: snapshot.fundingName || null,
+            finance_note_status: snapshot.financeNoteStatus || null,
+            finance_note: snapshot.financeNote || null,
+            receipt_due_date: snapshot.receiptDueDate || null,
+            is_repeating: snapshot.isRepeating,
+            repeat_frequency: snapshot.isRepeating ? snapshot.repeatFrequency : null,
+            repeat_count: snapshot.isRepeating ? snapshot.repeatCount : null,
+            direct_debit_account_source: snapshot.isDirectDebit
+              ? snapshot.directDebitAccountSource
               : null,
-            direct_debit_account_holder: isDirectDebit
-              ? directDebitAccountHolder || null
+            direct_debit_account_holder: snapshot.isDirectDebit
+              ? snapshot.directDebitAccountHolder || null
               : null,
-            direct_debit_reference: isDirectDebit
-              ? directDebitReference || null
+            direct_debit_reference: snapshot.isDirectDebit
+              ? snapshot.directDebitReference || null
               : null,
-            direct_debit_plan_note: isDirectDebit
-              ? directDebitPlanNote || null
+            direct_debit_plan_note: snapshot.isDirectDebit
+              ? snapshot.directDebitPlanNote || null
               : null,
           },
         }),
       });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        console.error("Failed to create supplier transaction log:", payload);
+      }
     } catch (error) {
       console.error("Failed to create supplier transaction log:", error);
     }
@@ -949,6 +1036,10 @@ export default function MoneyTransactionForm({
 
   async function handleFormSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (saving || checkingDuplicate || submittingRef.current) {
+      return;
+    }
 
     setDuplicateWarning(null);
     setDuplicateError(null);
@@ -987,9 +1078,9 @@ export default function MoneyTransactionForm({
           setDuplicateWarning(duplicateCheck.matches);
           return;
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         setDuplicateError(
-          error?.message || "Could not check for duplicate transactions.",
+          errorMessage(error, "Could not check for duplicate transactions."),
         );
         return;
       }
@@ -1015,8 +1106,44 @@ export default function MoneyTransactionForm({
     setMissingReceiptWarningOpen(false);
     setFundingOverspendWarningOpen(false);
 
-    await handleSubmit(event);
-    await createSupplierTransactionLog();
+    const supplierSnapshot = {
+      supplierId: selectedSupplierId,
+      supplierName:
+        selectedSupplier?.supplier_name || selectedSupplierName || "",
+      supplierCategory:
+        selectedSupplier?.category || selectedSupplierCategory || "",
+      title: form.title,
+      description: form.description,
+      type: form.type,
+      amount: form.amount,
+      amountPence: currentAmountPence,
+      transactionDate: form.transactionDate,
+      paymentMethod: form.paymentMethod,
+      fundingId: form.sponsorId,
+      fundingName: form.sponsorName,
+      financeNoteStatus: form.financeNoteStatus || "",
+      financeNote: form.financeNote || "",
+      receiptDueDate: selectedReceiptDueDate,
+      isRepeating: Boolean(form.isRepeating),
+      repeatFrequency: form.repeatFrequency || "",
+      repeatCount: form.repeatCount || "",
+      directDebitAccountSource,
+      directDebitAccountHolder,
+      directDebitReference,
+      directDebitPlanNote,
+      isDirectDebit,
+    };
+
+    submittingRef.current = true;
+
+    try {
+      await handleSubmit(event);
+      await createSupplierTransactionLog(supplierSnapshot);
+    } catch (error) {
+      setDuplicateError(errorMessage(error, "The transaction could not be saved."));
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   function saveAnyway() {
@@ -1096,27 +1223,27 @@ export default function MoneyTransactionForm({
         supplierId:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplierId,
+            : (prev as ExtendedFormFields).supplierId,
         supplier_id:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplier_id,
+            : (prev as ExtendedFormFields).supplier_id,
         supplierName:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplierName,
+            : (prev as ExtendedFormFields).supplierName,
         supplier_name:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplier_name,
+            : (prev as ExtendedFormFields).supplier_name,
         supplierCategory:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplierCategory,
+            : (prev as ExtendedFormFields).supplierCategory,
         supplier_category:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).supplier_category,
+            : (prev as ExtendedFormFields).supplier_category,
         type: nextIsItemDonation
           ? "income"
           : nextIsPersonalFunds
@@ -1133,27 +1260,27 @@ export default function MoneyTransactionForm({
         budgetCategory:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budgetCategory,
+            : (prev as ExtendedFormFields).budgetCategory,
         budgetCategoryKey:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budgetCategoryKey,
+            : (prev as ExtendedFormFields).budgetCategoryKey,
         budget_category:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budget_category,
+            : (prev as ExtendedFormFields).budget_category,
         budget_category_key:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budget_category_key,
+            : (prev as ExtendedFormFields).budget_category_key,
         budgetCategoryLabel:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budgetCategoryLabel,
+            : (prev as ExtendedFormFields).budgetCategoryLabel,
         budget_category_label:
           nextIsItemDonation || nextIsPersonalFunds
             ? ""
-            : (prev as any).budget_category_label,
+            : (prev as ExtendedFormFields).budget_category_label,
 
         isPersonalFunds:
           nextIsItemDonation || isLoanFunding
@@ -2116,7 +2243,7 @@ export default function MoneyTransactionForm({
                 </p>
                 <p className="mt-1">
                   This plan will create {directDebitPaymentCount} separate
-                  monthly payments, beginning on {formatDate(form.transactionDate)}.
+                  monthly payments, beginning on {form.transactionDate ? formatDate(form.transactionDate) : "a date still to be selected"}.
                   Weekly and yearly frequencies are disabled for Direct Debit.
                 </p>
                 {directDebitUsesPersonalAccount && (
@@ -2815,12 +2942,28 @@ export default function MoneyTransactionForm({
               accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
               onChange={(event) => {
                 const files = Array.from(event.target.files || []);
+                const validationError = validateReceiptFiles(files);
+
+                if (validationError) {
+                  setFileError(validationError);
+                  setInvoiceFiles([]);
+                  event.currentTarget.value = "";
+                  return;
+                }
+
+                setFileError(null);
                 setInvoiceFiles(files);
                 setMissingReceiptWarningOpen(false);
                 saveWithoutReceiptRef.current = false;
               }}
               className="w-full text-sm text-white/70 file:mr-4 file:rounded-xl file:border-0 file:bg-pink-500 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:file:bg-pink-400"
             />
+
+            {fileError ? (
+              <p role="alert" className="mt-2 rounded-xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100">
+                {fileError}
+              </p>
+            ) : null}
 
             {invoiceFiles.length > 0 && form.isRepeating && (
               <p className="mt-2 rounded-xl bg-purple-500/10 px-3 py-2 text-xs text-purple-100">
@@ -2867,14 +3010,14 @@ export default function MoneyTransactionForm({
               </div>
             )}
 
-            {existingAttachments.length > 0 && (
+            {usableExistingAttachments.length > 0 && (
               <div className="mt-3 rounded-xl bg-sky-500/10 p-3 ring-1 ring-sky-300/20">
                 <p className="mb-2 text-xs font-bold text-sky-100">
-                  Existing attachments ({existingAttachments.length})
+                  Existing attachments ({usableExistingAttachments.length})
                 </p>
 
                 <div className="space-y-2">
-                  {existingAttachments.map((attachment, index) => (
+                  {usableExistingAttachments.map((attachment, index) => (
                     <a
                       key={attachment.id || `${attachment.file_url}-${index}`}
                       href={attachment.file_url}
@@ -2897,7 +3040,7 @@ export default function MoneyTransactionForm({
             )}
 
             {editingTransaction?.invoice_image_url &&
-              existingAttachments.length === 0 &&
+              usableExistingAttachments.length === 0 &&
               invoiceFiles.length === 0 && (
                 <a
                   href={editingTransaction.invoice_image_url}
@@ -2975,7 +3118,8 @@ export default function MoneyTransactionForm({
 
           <button
             type="submit"
-            disabled={saving || checkingDuplicate}
+            disabled={saving || checkingDuplicate || submittingRef.current}
+            aria-busy={saving || checkingDuplicate}
             className={`flex w-full items-center justify-center gap-2 rounded-xl p-3 font-bold disabled:opacity-60 ${
               isItemDonation
                 ? "bg-emerald-500 text-black hover:bg-emerald-400"

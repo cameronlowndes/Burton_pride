@@ -628,6 +628,7 @@ export default function MoneyTransactionsPage() {
               money.updateBankReconciliationStatus
             }
             onUpdateFinanceNote={money.updateFinanceNote}
+            onRefreshTransactions={money.refreshAll}
           />
         </div>
       </div>
