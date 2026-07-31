@@ -140,6 +140,15 @@ type MoneyTransactionsTableProps = {
   ) => void | Promise<void>;
 
   /**
+   * Reloads the Money Tracker transaction source.
+   *
+   * Pass the same transaction-loading function used by the main Money
+   * Management page. The table calls it after a Direct Debit repayment event,
+   * when the tab regains focus, and during a lightweight background sync.
+   */
+  onRefreshTransactions?: () => void | Promise<void>;
+
+  /**
    * Opening balance carried forward into the selected year.
    *
    * This is used when the full-year table view is open so the table's
@@ -2049,6 +2058,7 @@ export default function MoneyTransactionsTable({
   onMarkTransactionChecked,
   onUpdateBankReconciliationStatus,
   onUpdateFinanceNote,
+  onRefreshTransactions,
   openingBalancePence = 0,
   receiptReminderDays = DEFAULT_RECEIPT_REMINDER_DAYS,
   lockedYears = EMPTY_STRING_LIST,
@@ -2099,6 +2109,100 @@ export default function MoneyTransactionsTable({
     useState(false);
   const [linkedStockOrdersError, setLinkedStockOrdersError] =
     useState("");
+
+  /**
+   * Keep Direct Debit repayment information connected to the main Money
+   * Tracker transaction source.
+   *
+   * The reimbursement page should dispatch:
+   *
+   * window.dispatchEvent(
+   *   new CustomEvent("money:direct-debit-reimbursed", {
+   *     detail: { planId, occurrenceId, transactionId },
+   *   }),
+   * );
+   *
+   * The immediate event refresh removes "Personal reimbursement due" without
+   * requiring a manual page reload. Focus and interval refreshes protect
+   * against changes made in another tab or by another admin.
+   */
+  useEffect(() => {
+    if (!onRefreshTransactions) return;
+
+    const refreshTransactionsCallback = onRefreshTransactions;
+    let cancelled = false;
+    let refreshing = false;
+
+    async function refreshTransactions() {
+      if (cancelled || refreshing) return;
+
+      refreshing = true;
+
+      try {
+        await refreshTransactionsCallback();
+      } catch (error) {
+        console.error("Money Tracker live refresh failed", error);
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    function handleDirectDebitReimbursed() {
+      void refreshTransactions();
+    }
+
+    function handleMoneyTrackerChanged() {
+      void refreshTransactions();
+    }
+
+    function handleWindowFocus() {
+      void refreshTransactions();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void refreshTransactions();
+      }
+    }
+
+    window.addEventListener(
+      "money:direct-debit-reimbursed",
+      handleDirectDebitReimbursed,
+    );
+    window.addEventListener(
+      "money:transactions-changed",
+      handleMoneyTrackerChanged,
+    );
+    window.addEventListener("focus", handleWindowFocus);
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshTransactions();
+      }
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener(
+        "money:direct-debit-reimbursed",
+        handleDirectDebitReimbursed,
+      );
+      window.removeEventListener(
+        "money:transactions-changed",
+        handleMoneyTrackerChanged,
+      );
+      window.removeEventListener("focus", handleWindowFocus);
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+    };
+  }, [onRefreshTransactions]);
 
   /**
    * Fallback lock data loaded directly by this table.

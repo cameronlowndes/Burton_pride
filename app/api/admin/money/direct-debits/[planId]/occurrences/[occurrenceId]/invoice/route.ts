@@ -11,10 +11,26 @@ import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const PLANS_TABLE = "money_direct_debit_plans";
 const OCCURRENCES_TABLE = "money_direct_debit_occurrences";
+const TRANSACTIONS_TABLE = "money_transactions";
+const ATTACHMENTS_TABLE = "money_transaction_attachments";
 const AUDIT_LOGS_TABLE = "admin_audit_logs";
+
+const STORAGE_BUCKET =
+  process.env.MONEY_INVOICES_BUCKET?.trim() || "money-invoices";
+
+const MAX_RECEIPT_FILE_SIZE = 10 * 1024 * 1024;
+const RECEIPT_SIGNED_URL_SECONDS = 60 * 60;
+
+const ALLOWED_RECEIPT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 type RouteContext = {
   params: Promise<{
@@ -50,11 +66,16 @@ type InvoiceDetails = {
   createdAt: string | null;
 };
 
-function json(body: JsonRecord, status = 200) {
+function json(
+  body: JsonRecord,
+  status = 200,
+  headers?: HeadersInit,
+) {
   return NextResponse.json(body, {
     status,
     headers: {
       "Cache-Control": "no-store, max-age=0",
+      ...headers,
     },
   });
 }
@@ -66,7 +87,11 @@ function isUuid(value: string): boolean {
 }
 
 function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
 }
 
 function textValue(
@@ -102,7 +127,9 @@ function numberValue(
     }
 
     if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+      const parsed = Number(
+        value.replace(/[^0-9.-]/g, ""),
+      );
 
       if (Number.isFinite(parsed)) {
         return parsed;
@@ -175,8 +202,13 @@ function formatDateTime(value: Date): string {
   }).format(value);
 }
 
-function formatMoney(amount: number, currency: string): string {
-  const safeCurrency = /^[A-Z]{3}$/.test(currency.toUpperCase())
+function formatMoney(
+  amount: number,
+  currency: string,
+): string {
+  const safeCurrency = /^[A-Z]{3}$/.test(
+    currency.toUpperCase(),
+  )
     ? currency.toUpperCase()
     : "GBP";
 
@@ -202,82 +234,654 @@ function safeFileName(value: string): string {
   return cleaned || "direct-debit-invoice";
 }
 
-function getAdminIdentity(request: NextRequest): AdminIdentity {
+
+function safeUploadedFileName(value: string): string {
+  return (
+    String(value || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 120) || "receipt"
+  );
+}
+
+function privateStorageReference(storagePath: string): string {
+  return `storage://${STORAGE_BUCKET}/${storagePath}`;
+}
+
+function storagePathFromReference(value: unknown): string {
+  const text = String(value || "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const privatePrefix = `storage://${STORAGE_BUCKET}/`;
+
+  if (text.startsWith(privatePrefix)) {
+    return text.slice(privatePrefix.length);
+  }
+
+  try {
+    const url = new URL(text);
+
+    const markers = [
+      `/storage/v1/object/public/${STORAGE_BUCKET}/`,
+      `/storage/v1/object/sign/${STORAGE_BUCKET}/`,
+      `/storage/v1/object/authenticated/${STORAGE_BUCKET}/`,
+    ];
+
+    for (const marker of markers) {
+      const index = url.pathname.indexOf(marker);
+
+      if (index >= 0) {
+        const encodedPath = url.pathname.slice(index + marker.length);
+
+        try {
+          return decodeURIComponent(encodedPath);
+        } catch {
+          return encodedPath;
+        }
+      }
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+async function createReceiptSignedUrl(
+  storagePath: string,
+): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(
+      storagePath,
+      RECEIPT_SIGNED_URL_SECONDS,
+    );
+
+  if (error || !data?.signedUrl) {
+    return null;
+  }
+
+  return data.signedUrl;
+}
+
+async function uploadReceiptResponse(
+  request: NextRequest,
+  context: RouteContext,
+) {
+  const { planId, occurrenceId } =
+    await context.params;
+
+  if (!isUuid(planId)) {
+    return json(
+      {
+        success: false,
+        error: "INVALID_PLAN_ID",
+        message:
+          "The direct debit plan ID is not a valid UUID.",
+      },
+      400,
+    );
+  }
+
+  if (!isUuid(occurrenceId)) {
+    return json(
+      {
+        success: false,
+        error: "INVALID_OCCURRENCE_ID",
+        message:
+          "The direct debit occurrence ID is not a valid UUID.",
+      },
+      400,
+    );
+  }
+
+  const [
+    {
+      data: plan,
+      error: planError,
+    },
+    {
+      data: occurrence,
+      error: occurrenceError,
+    },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from(PLANS_TABLE)
+      .select("id,title")
+      .eq("id", planId)
+      .maybeSingle(),
+
+    supabaseAdmin
+      .from(OCCURRENCES_TABLE)
+      .select("*")
+      .eq("id", occurrenceId)
+      .eq("plan_id", planId)
+      .maybeSingle(),
+  ]);
+
+  if (planError) {
+    return json(
+      {
+        success: false,
+        error: "PLAN_LOOKUP_FAILED",
+        message:
+          "The direct debit plan could not be loaded.",
+        code: planError.code,
+        details: planError.details,
+        hint: planError.hint,
+      },
+      500,
+    );
+  }
+
+  if (!plan) {
+    return json(
+      {
+        success: false,
+        error: "PLAN_NOT_FOUND",
+        message:
+          "The requested direct debit plan was not found.",
+      },
+      404,
+    );
+  }
+
+  if (occurrenceError) {
+    return json(
+      {
+        success: false,
+        error: "OCCURRENCE_LOOKUP_FAILED",
+        message:
+          "The direct debit occurrence could not be loaded.",
+        code: occurrenceError.code,
+        details: occurrenceError.details,
+        hint: occurrenceError.hint,
+      },
+      500,
+    );
+  }
+
+  if (!occurrence) {
+    return json(
+      {
+        success: false,
+        error: "OCCURRENCE_NOT_FOUND",
+        message:
+          "The direct debit occurrence could not be found.",
+      },
+      404,
+    );
+  }
+
+  const transactionId = String(
+    occurrence.transaction_id || "",
+  ).trim();
+
+  if (!transactionId || !isUuid(transactionId)) {
+    return json(
+      {
+        success: false,
+        error: "MONEY_TRANSACTION_NOT_LINKED",
+        message:
+          "Make the Direct Debit payment first. The receipt can only be added after its Money Transaction has been created.",
+        plan_id: planId,
+        occurrence_id: occurrenceId,
+      },
+      409,
+    );
+  }
+
+  const formData = await request.formData();
+
+  const fileEntry =
+    formData.get("file") ??
+    formData.get("receipt") ??
+    formData.get("invoice");
+
+  if (!(fileEntry instanceof File)) {
+    return json(
+      {
+        success: false,
+        error: "RECEIPT_REQUIRED",
+        message:
+          "Choose a receipt or invoice before uploading.",
+        field: "file",
+      },
+      400,
+    );
+  }
+
+  const file = fileEntry;
+
+  if (file.size <= 0) {
+    return json(
+      {
+        success: false,
+        error: "EMPTY_RECEIPT",
+        message:
+          "The selected receipt or invoice is empty.",
+      },
+      400,
+    );
+  }
+
+  if (file.size > MAX_RECEIPT_FILE_SIZE) {
+    return json(
+      {
+        success: false,
+        error: "RECEIPT_TOO_LARGE",
+        message:
+          "The receipt or invoice must be 10 MB or smaller.",
+        maximum_bytes: MAX_RECEIPT_FILE_SIZE,
+        received_bytes: file.size,
+      },
+      413,
+    );
+  }
+
+  const mimeType =
+    file.type || "application/octet-stream";
+
+  if (!ALLOWED_RECEIPT_TYPES.has(mimeType)) {
+    return json(
+      {
+        success: false,
+        error: "INVALID_RECEIPT_TYPE",
+        message:
+          "Upload a PDF, JPG, PNG or WebP receipt.",
+        received_type: mimeType,
+      },
+      415,
+    );
+  }
+
+  const uploadedName =
+    `${Date.now()}-${crypto.randomUUID()}-${safeUploadedFileName(
+      file.name,
+    )}`;
+
+  const storagePath =
+    `transactions/${transactionId}/${uploadedName}`;
+
+  const bytes = Buffer.from(
+    await file.arrayBuffer(),
+  );
+
+  const {
+    data: uploadedFile,
+    error: uploadError,
+  } = await supabaseAdmin.storage
+    .from(STORAGE_BUCKET)
+    .upload(storagePath, bytes, {
+      contentType: mimeType,
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+  if (uploadError) {
+    return json(
+      {
+        success: false,
+        error: "RECEIPT_UPLOAD_FAILED",
+        message:
+          uploadError.message ||
+          "The receipt could not be uploaded.",
+      },
+      500,
+    );
+  }
+
+  const storedPath =
+    uploadedFile?.path || storagePath;
+
+  const {
+    data: attachment,
+    error: attachmentError,
+  } = await supabaseAdmin
+    .from(ATTACHMENTS_TABLE)
+    .insert({
+      transaction_id: transactionId,
+      file_name: file.name || uploadedName,
+      file_url:
+        privateStorageReference(storedPath),
+      file_type: mimeType,
+      file_size: file.size,
+    })
+    .select("*")
+    .single();
+
+  if (attachmentError) {
+    await supabaseAdmin.storage
+      .from(STORAGE_BUCKET)
+      .remove([storedPath]);
+
+    return json(
+      {
+        success: false,
+        error: "ATTACHMENT_INSERT_FAILED",
+        message:
+          "The receipt uploaded, but it could not be connected to the Money Tracker receipt section.",
+        code: attachmentError.code,
+        details: attachmentError.details,
+        hint: attachmentError.hint,
+      },
+      500,
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  const {
+    data: updatedOccurrence,
+    error: occurrenceUpdateError,
+  } = await supabaseAdmin
+    .from(OCCURRENCES_TABLE)
+    .update({
+      invoice_url:
+        privateStorageReference(storedPath),
+      invoice_file_name:
+        file.name || uploadedName,
+      invoice_uploaded_at: now,
+      updated_at: now,
+    })
+    .eq("id", occurrenceId)
+    .eq("plan_id", planId)
+    .select("*")
+    .single();
+
+  if (occurrenceUpdateError) {
+    await supabaseAdmin
+      .from(ATTACHMENTS_TABLE)
+      .delete()
+      .eq("id", attachment.id);
+
+    await supabaseAdmin.storage
+      .from(STORAGE_BUCKET)
+      .remove([storedPath]);
+
+    return json(
+      {
+        success: false,
+        error: "OCCURRENCE_UPDATE_FAILED",
+        message:
+          "The receipt was connected to Money Tracker, but the Direct Debit occurrence could not be updated.",
+        code: occurrenceUpdateError.code,
+        details: occurrenceUpdateError.details,
+        hint: occurrenceUpdateError.hint,
+      },
+      500,
+    );
+  }
+
+  const {
+    data: updatedTransaction,
+    error: transactionUpdateError,
+  } = await supabaseAdmin
+    .from(TRANSACTIONS_TABLE)
+    .update({
+      invoice_image_url:
+        privateStorageReference(storedPath),
+      updated_at: now,
+    })
+    .eq("id", transactionId)
+    .select("*")
+    .single();
+
+  if (transactionUpdateError) {
+    console.warn(
+      "Receipt attachment saved, but the legacy invoice_image_url column was not updated.",
+      {
+        transactionId,
+        error: transactionUpdateError,
+      },
+    );
+  }
+
+  const signedUrl =
+    await createReceiptSignedUrl(storedPath);
+
+  return json({
+    success: true,
+    message:
+      "The receipt was uploaded and added to the linked Money Tracker receipt section.",
+    plan_id: planId,
+    occurrence_id: occurrenceId,
+    transaction_id: transactionId,
+    attachment: {
+      ...attachment,
+      file_url: signedUrl,
+      signed_url: signedUrl,
+      storage_path: storedPath,
+      signed_url_expires_in:
+        RECEIPT_SIGNED_URL_SECONDS,
+    },
+    occurrence: updatedOccurrence,
+    transaction:
+      updatedTransaction || null,
+    connected_tables: {
+      occurrences: OCCURRENCES_TABLE,
+      transactions: TRANSACTIONS_TABLE,
+      attachments: ATTACHMENTS_TABLE,
+    },
+  });
+}
+
+async function getReceiptResponse(
+  context: RouteContext,
+) {
+  const { planId, occurrenceId } =
+    await context.params;
+
+  if (!isUuid(planId) || !isUuid(occurrenceId)) {
+    return json(
+      {
+        success: false,
+        error: "INVALID_ID",
+        message:
+          "The plan ID or occurrence ID is invalid.",
+      },
+      400,
+    );
+  }
+
+  const {
+    data: occurrence,
+    error: occurrenceError,
+  } = await supabaseAdmin
+    .from(OCCURRENCES_TABLE)
+    .select("*")
+    .eq("id", occurrenceId)
+    .eq("plan_id", planId)
+    .maybeSingle();
+
+  if (occurrenceError) {
+    return json(
+      {
+        success: false,
+        error: "OCCURRENCE_LOOKUP_FAILED",
+        message:
+          "The Direct Debit occurrence could not be loaded.",
+        code: occurrenceError.code,
+        details: occurrenceError.details,
+        hint: occurrenceError.hint,
+      },
+      500,
+    );
+  }
+
+  if (!occurrence) {
+    return json(
+      {
+        success: false,
+        error: "OCCURRENCE_NOT_FOUND",
+        message:
+          "The Direct Debit occurrence could not be found.",
+      },
+      404,
+    );
+  }
+
+  const transactionId = String(
+    occurrence.transaction_id || "",
+  ).trim();
+
+  if (!transactionId || !isUuid(transactionId)) {
+    return json({
+      success: true,
+      transaction_id: null,
+      occurrence,
+      attachments: [],
+    });
+  }
+
+  const {
+    data: attachmentRows,
+    error: attachmentError,
+  } = await supabaseAdmin
+    .from(ATTACHMENTS_TABLE)
+    .select("*")
+    .eq("transaction_id", transactionId)
+    .order("created_at", {
+      ascending: true,
+    });
+
+  if (attachmentError) {
+    return json(
+      {
+        success: false,
+        error: "ATTACHMENT_LOOKUP_FAILED",
+        message:
+          "The Money Tracker receipts could not be loaded.",
+        code: attachmentError.code,
+        details: attachmentError.details,
+        hint: attachmentError.hint,
+      },
+      500,
+    );
+  }
+
+  const attachments = await Promise.all(
+    (attachmentRows || []).map(
+      async (attachment) => {
+        const path = storagePathFromReference(
+          attachment.file_url,
+        );
+
+        const signedUrl = path
+          ? await createReceiptSignedUrl(path)
+          : String(
+              attachment.file_url || "",
+            ).trim() || null;
+
+        return {
+          ...attachment,
+          file_url: signedUrl,
+          signed_url: signedUrl,
+          storage_path: path || null,
+          signed_url_expires_in: path
+            ? RECEIPT_SIGNED_URL_SECONDS
+            : null,
+        };
+      },
+    ),
+  );
+
+  return json({
+    success: true,
+    plan_id: planId,
+    occurrence_id: occurrenceId,
+    transaction_id: transactionId,
+    occurrence,
+    attachments,
+  });
+}
+
+function getAdminIdentity(
+  request: NextRequest,
+): AdminIdentity {
   return {
     id:
-      request.cookies.get("burton_admin_id")?.value?.trim() ||
+      request.cookies
+        .get("burton_admin_id")
+        ?.value?.trim() ||
+      request.headers.get("x-admin-id")?.trim() ||
       null,
+
     name:
-      request.cookies.get("burton_admin_name")?.value?.trim() ||
+      request.cookies
+        .get("burton_admin_name")
+        ?.value?.trim() ||
       request.headers.get("x-admin-name")?.trim() ||
       null,
+
     email:
-      request.cookies.get("burton_admin_email")?.value?.trim() ||
+      request.cookies
+        .get("burton_admin_email")
+        ?.value?.trim() ||
       request.headers.get("x-admin-email")?.trim() ||
       null,
+
     role:
-      request.cookies.get("burton_admin_role")?.value?.trim() ||
+      request.cookies
+        .get("burton_admin_role")
+        ?.value?.trim() ||
       request.headers.get("x-admin-role")?.trim() ||
       null,
   };
 }
 
-function getRequestIp(request: NextRequest): string | null {
-  const forwardedFor = request.headers.get("x-forwarded-for");
+function getRequestIp(
+  request: NextRequest,
+): string | null {
+  const forwardedFor = request.headers.get(
+    "x-forwarded-for",
+  );
 
   if (forwardedFor) {
-    return forwardedFor.split(",")[0]?.trim() || null;
+    return (
+      forwardedFor.split(",")[0]?.trim() || null
+    );
   }
 
   return (
     request.headers.get("x-real-ip")?.trim() ||
-    request.headers.get("cf-connecting-ip")?.trim() ||
+    request.headers
+      .get("cf-connecting-ip")
+      ?.trim() ||
     null
   );
 }
 
-function buildInvoiceDetails(
+function resolveInvoiceAmount(
   plan: JsonRecord,
   occurrence: JsonRecord,
-): InvoiceDetails {
-  const planName = textValue(
+): number {
+  const occurrenceAmountPence = numberValue(
+    occurrence,
+    ["amount_pence"],
+    Number.NaN,
+  );
+
+  if (Number.isFinite(occurrenceAmountPence)) {
+    return occurrenceAmountPence / 100;
+  }
+
+  const planAmountPence = numberValue(
     plan,
-    [
-      "name",
-      "plan_name",
-      "title",
-      "direct_debit_name",
-      "payment_name",
-    ],
-    "Direct Debit",
+    ["amount_pence"],
+    Number.NaN,
   );
 
-  const supplierName = textValue(
-    occurrence,
-    ["supplier_name", "payee_name", "merchant_name"],
-    textValue(
-      plan,
-      [
-        "supplier_name",
-        "payee_name",
-        "merchant_name",
-        "company_name",
-      ],
-      planName,
-    ),
-  );
+  if (Number.isFinite(planAmountPence)) {
+    return planAmountPence / 100;
+  }
 
-  const description = textValue(
-    occurrence,
-    ["description", "payment_description", "details"],
-    textValue(
-      plan,
-      ["description", "payment_description", "details"],
-      `${planName} direct debit payment`,
-    ),
-  );
-
-  const amount = numberValue(
+  return numberValue(
     occurrence,
     [
       "amount",
@@ -298,11 +902,74 @@ function buildInvoiceDetails(
       0,
     ),
   );
+}
+
+function buildInvoiceDetails(
+  plan: JsonRecord,
+  occurrence: JsonRecord,
+): InvoiceDetails {
+  const planName = textValue(
+    plan,
+    [
+      "title",
+      "name",
+      "plan_name",
+      "direct_debit_name",
+      "payment_name",
+    ],
+    "Direct Debit",
+  );
+
+  const supplierName = textValue(
+    occurrence,
+    [
+      "supplier_name",
+      "payee_name",
+      "merchant_name",
+    ],
+    textValue(
+      plan,
+      [
+        "supplier_name",
+        "payee_name",
+        "merchant_name",
+        "company_name",
+      ],
+      planName,
+    ),
+  );
+
+  const description = textValue(
+    occurrence,
+    [
+      "description",
+      "payment_description",
+      "details",
+    ],
+    textValue(
+      plan,
+      [
+        "description",
+        "payment_description",
+        "details",
+      ],
+      `${planName} direct debit payment`,
+    ),
+  );
+
+  const amount = resolveInvoiceAmount(
+    plan,
+    occurrence,
+  );
 
   const currency = textValue(
     occurrence,
     ["currency", "currency_code"],
-    textValue(plan, ["currency", "currency_code"], "GBP"),
+    textValue(
+      plan,
+      ["currency", "currency_code"],
+      "GBP",
+    ),
   ).toUpperCase();
 
   const dueDate = nullableDateValue(occurrence, [
@@ -313,13 +980,17 @@ function buildInvoiceDetails(
     "date",
   ]);
 
-  const paymentDate = nullableDateValue(occurrence, [
-    "paid_at",
-    "payment_date",
-    "completed_at",
-    "processed_at",
-    "actual_payment_date",
-  ]);
+  const paymentDate = nullableDateValue(
+    occurrence,
+    [
+      "paid_at",
+      "posted_at",
+      "payment_date",
+      "completed_at",
+      "processed_at",
+      "actual_payment_date",
+    ],
+  );
 
   const status = textValue(
     occurrence,
@@ -327,14 +998,27 @@ function buildInvoiceDetails(
     paymentDate ? "paid" : "scheduled",
   );
 
+  const planId = textValue(
+    plan,
+    ["id"],
+    "PLAN",
+  );
+
+  const occurrenceId = textValue(
+    occurrence,
+    ["id"],
+    "PAYMENT",
+  );
+
   const invoiceNumber = textValue(
     occurrence,
-    ["invoice_number", "reference_number"],
-    `DD-${textValue(plan, ["id"], "PLAN").slice(0, 8).toUpperCase()}-${textValue(
-      occurrence,
-      ["id"],
-      "PAYMENT",
-    )
+    [
+      "invoice_number",
+      "reference_number",
+    ],
+    `DD-${planId
+      .slice(0, 8)
+      .toUpperCase()}-${occurrenceId
       .slice(0, 8)
       .toUpperCase()}`,
   );
@@ -349,25 +1033,53 @@ function buildInvoiceDetails(
     dueDate,
     paymentDate,
     paymentStatus: normaliseStatus(status),
+
     paymentMethod: textValue(
       occurrence,
-      ["payment_method", "method"],
-      textValue(plan, ["payment_method", "method"], "Direct Debit"),
-    ),
-    accountName: textValue(
-      occurrence,
-      ["account_name", "bank_account_name"],
+      [
+        "payment_method",
+        "reimbursement_payment_method",
+        "method",
+      ],
       textValue(
         plan,
-        ["account_name", "bank_account_name"],
+        [
+          "reimbursement_payment_method",
+          "payment_method",
+          "method",
+        ],
+        "Direct Debit",
+      ),
+    ),
+
+    accountName: textValue(
+      occurrence,
+      [
+        "account_name",
+        "bank_account_name",
+        "account_holder",
+      ],
+      textValue(
+        plan,
+        [
+          "account_holder",
+          "account_name",
+          "bank_account_name",
+        ],
         "Burton Pride",
       ),
     ),
+
     bankName: textValue(
       occurrence,
       ["bank_name", "bank"],
-      textValue(plan, ["bank_name", "bank"], "Not recorded"),
+      textValue(
+        plan,
+        ["bank_name", "bank"],
+        "Not recorded",
+      ),
     ),
+
     reference: textValue(
       occurrence,
       [
@@ -375,6 +1087,8 @@ function buildInvoiceDetails(
         "reference",
         "bank_reference",
         "transaction_reference",
+        "reimbursement_transaction_id",
+        "transaction_id",
       ],
       textValue(
         plan,
@@ -387,11 +1101,16 @@ function buildInvoiceDetails(
         "Not recorded",
       ),
     ),
+
     notes: textValue(
       occurrence,
       ["notes", "payment_notes"],
-      textValue(plan, ["notes", "payment_notes"]),
+      textValue(
+        plan,
+        ["notes", "payment_notes"],
+      ),
     ),
+
     createdAt: nullableDateValue(occurrence, [
       "created_at",
       "inserted_at",
@@ -416,7 +1135,9 @@ function drawText(
     y: options.y,
     size: options.size,
     font: options.font,
-    color: options.colour ?? rgb(0.12, 0.15, 0.2),
+    color:
+      options.colour ??
+      rgb(0.12, 0.15, 0.2),
     maxWidth: options.maxWidth,
   });
 }
@@ -427,12 +1148,15 @@ function wrapText(
   size: number,
   maxWidth: number,
 ): string[] {
-  const words = text.replace(/\s+/g, " ").trim().split(" ");
+  const cleanedText = text
+    .replace(/\s+/g, " ")
+    .trim();
 
-  if (!words.length || !words[0]) {
+  if (!cleanedText) {
     return [];
   }
 
+  const words = cleanedText.split(" ");
   const lines: string[] = [];
   let currentLine = "";
 
@@ -441,7 +1165,10 @@ function wrapText(
       ? `${currentLine} ${word}`
       : word;
 
-    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+    if (
+      font.widthOfTextAtSize(candidate, size) <=
+      maxWidth
+    ) {
       currentLine = candidate;
       continue;
     }
@@ -450,7 +1177,10 @@ function wrapText(
       lines.push(currentLine);
     }
 
-    if (font.widthOfTextAtSize(word, size) <= maxWidth) {
+    if (
+      font.widthOfTextAtSize(word, size) <=
+      maxWidth
+    ) {
       currentLine = word;
       continue;
     }
@@ -458,11 +1188,14 @@ function wrapText(
     let segment = "";
 
     for (const character of word) {
-      const candidateSegment = `${segment}${character}`;
+      const candidateSegment =
+        `${segment}${character}`;
 
       if (
-        font.widthOfTextAtSize(candidateSegment, size) >
-          maxWidth &&
+        font.widthOfTextAtSize(
+          candidateSegment,
+          size,
+        ) > maxWidth &&
         segment
       ) {
         lines.push(segment);
@@ -516,12 +1249,15 @@ function drawWrappedText(
       index === options.maxLines - 1 &&
       lines.length > options.maxLines
     ) {
-      output = `${line.replace(/[.\s]+$/g, "")}...`;
+      output =
+        `${line.replace(/[.\s]+$/g, "")}...`;
     }
 
     drawText(page, output, {
       x: options.x,
-      y: options.y - index * options.lineHeight,
+      y:
+        options.y -
+        index * options.lineHeight,
       size: options.size,
       font: options.font,
       colour: options.colour,
@@ -529,7 +1265,10 @@ function drawWrappedText(
     });
   });
 
-  return options.y - visibleLines.length * options.lineHeight;
+  return (
+    options.y -
+    visibleLines.length * options.lineHeight
+  );
 }
 
 function drawDetailRow(
@@ -550,9 +1289,19 @@ function drawDetailRow(
     colour: rgb(0.31, 0.35, 0.42),
   });
 
-  const lines = wrapText(value, fonts.regular, 10, 300);
+  const lines = wrapText(
+    value || "Not recorded",
+    fonts.regular,
+    10,
+    300,
+  );
 
-  lines.slice(0, 3).forEach((line, index) => {
+  const visibleLines =
+    lines.length > 0
+      ? lines.slice(0, 3)
+      : ["Not recorded"];
+
+  visibleLines.forEach((line, index) => {
     drawText(page, line, {
       x: 230,
       y: y - index * 14,
@@ -563,7 +1312,10 @@ function drawDetailRow(
     });
   });
 
-  const rowHeight = Math.max(28, lines.slice(0, 3).length * 14 + 12);
+  const rowHeight = Math.max(
+    28,
+    visibleLines.length * 14 + 12,
+  );
 
   page.drawLine({
     start: {
@@ -585,24 +1337,40 @@ async function createInvoicePdf(
   invoice: InvoiceDetails,
 ): Promise<Uint8Array> {
   const document = await PDFDocument.create();
+
   const regularFont = await document.embedFont(
     StandardFonts.Helvetica,
   );
+
   const boldFont = await document.embedFont(
     StandardFonts.HelveticaBold,
   );
 
   document.setTitle(
-    `${invoice.planName} – ${invoice.invoiceNumber}`,
+    `${invoice.planName} - ${invoice.invoiceNumber}`,
   );
+
   document.setAuthor("Burton Pride");
-  document.setSubject("Direct debit payment invoice");
-  document.setCreator("Burton Pride Money Management");
-  document.setProducer("Burton Pride Admin Portal");
+  document.setSubject(
+    "Direct debit payment invoice",
+  );
+
+  document.setCreator(
+    "Burton Pride Money Management",
+  );
+
+  document.setProducer(
+    "Burton Pride Admin Portal",
+  );
+
   document.setCreationDate(new Date());
   document.setModificationDate(new Date());
 
-  const page = document.addPage([595.28, 841.89]);
+  const page = document.addPage([
+    595.28,
+    841.89,
+  ]);
+
   const { width, height } = page.getSize();
 
   page.drawRectangle({
@@ -637,22 +1405,30 @@ async function createInvoicePdf(
     colour: rgb(0.89, 0.86, 0.94),
   });
 
-  drawText(page, "DIRECT DEBIT INVOICE", {
-    x: 342,
-    y: height - 62,
-    size: 15,
-    font: boldFont,
-    colour: rgb(1, 1, 1),
-  });
+  drawText(
+    page,
+    "DIRECT DEBIT INVOICE",
+    {
+      x: 342,
+      y: height - 62,
+      size: 15,
+      font: boldFont,
+      colour: rgb(1, 1, 1),
+    },
+  );
 
-  drawText(page, invoice.invoiceNumber, {
-    x: 342,
-    y: height - 86,
-    size: 10,
-    font: regularFont,
-    colour: rgb(0.89, 0.86, 0.94),
-    maxWidth: 200,
-  });
+  drawText(
+    page,
+    invoice.invoiceNumber,
+    {
+      x: 342,
+      y: height - 86,
+      size: 10,
+      font: regularFont,
+      colour: rgb(0.89, 0.86, 0.94),
+      maxWidth: 200,
+    },
+  );
 
   let y = height - 178;
 
@@ -686,7 +1462,10 @@ async function createInvoicePdf(
 
   drawText(
     page,
-    formatMoney(invoice.amount, invoice.currency),
+    formatMoney(
+      invoice.amount,
+      invoice.currency,
+    ),
     {
       x: 75,
       y: y - 55,
@@ -704,9 +1483,16 @@ async function createInvoicePdf(
     colour: rgb(0.39, 0.4, 0.46),
   });
 
-  const paid =
-    invoice.paymentStatus.toLowerCase() === "paid" ||
-    invoice.paymentStatus.toLowerCase() === "completed";
+  const paidStatuses = new Set([
+    "paid",
+    "completed",
+    "posted",
+    "reimbursed",
+  ]);
+
+  const paid = paidStatuses.has(
+    invoice.paymentStatus.toLowerCase(),
+  );
 
   page.drawRectangle({
     x: 340,
@@ -722,16 +1508,20 @@ async function createInvoicePdf(
     borderWidth: 1,
   });
 
-  drawText(page, invoice.paymentStatus, {
-    x: 352,
-    y: y - 52,
-    size: 11,
-    font: boldFont,
-    colour: paid
-      ? rgb(0.12, 0.42, 0.22)
-      : rgb(0.56, 0.35, 0.04),
-    maxWidth: 140,
-  });
+  drawText(
+    page,
+    invoice.paymentStatus,
+    {
+      x: 352,
+      y: y - 52,
+      size: 11,
+      font: boldFont,
+      colour: paid
+        ? rgb(0.12, 0.42, 0.22)
+        : rgb(0.56, 0.35, 0.04),
+      maxWidth: 140,
+    },
+  );
 
   y -= 125;
 
@@ -746,16 +1536,20 @@ async function createInvoicePdf(
 
   y -= 24;
 
-  y = drawWrappedText(page, invoice.description, {
-    x: 55,
-    y,
-    size: 10,
-    lineHeight: 15,
-    maxWidth: 485,
-    font: regularFont,
-    colour: rgb(0.35, 0.37, 0.42),
-    maxLines: 4,
-  });
+  y = drawWrappedText(
+    page,
+    invoice.description,
+    {
+      x: 55,
+      y,
+      size: 10,
+      lineHeight: 15,
+      maxWidth: 485,
+      font: regularFont,
+      colour: rgb(0.35, 0.37, 0.42),
+      maxLines: 4,
+    },
+  );
 
   y -= 20;
 
@@ -841,16 +1635,20 @@ async function createInvoicePdf(
       colour: rgb(0.18, 0.1, 0.32),
     });
 
-    drawWrappedText(page, invoice.notes, {
-      x: 55,
-      y: y - 22,
-      size: 9.5,
-      lineHeight: 14,
-      maxWidth: 485,
-      font: regularFont,
-      colour: rgb(0.27, 0.29, 0.34),
-      maxLines: 5,
-    });
+    drawWrappedText(
+      page,
+      invoice.notes,
+      {
+        x: 55,
+        y: y - 22,
+        size: 9.5,
+        lineHeight: 14,
+        maxWidth: 485,
+        font: regularFont,
+        colour: rgb(0.27, 0.29, 0.34),
+        maxLines: 5,
+      },
+    );
   }
 
   page.drawLine({
@@ -903,39 +1701,64 @@ async function writeAuditLog(args: {
   errorMessage?: string;
 }): Promise<void> {
   const payload = {
-    action: "money.direct_debit.invoice_downloaded",
+    action:
+      args.status === "success"
+        ? "money.direct_debit.invoice_downloaded"
+        : "money.direct_debit.invoice_download_failed",
+
     action_label:
       args.status === "success"
         ? "Direct debit invoice downloaded"
         : "Direct debit invoice download failed",
+
     module: "money_management",
     area: "direct_debits",
     status: args.status,
-    risk_level: args.status === "success" ? "low" : "medium",
+
+    risk_level:
+      args.status === "success"
+        ? "low"
+        : "medium",
+
     admin_id: args.admin.id,
+
     admin_name:
       args.admin.name ||
       args.admin.email ||
       "Unknown admin",
+
     admin_email: args.admin.email,
     admin_role: args.admin.role,
-    record_type: "money_direct_debit_occurrence",
+
+    record_type:
+      "money_direct_debit_occurrence",
+
     record_id: args.occurrenceId,
+
     description:
       args.status === "success"
         ? `Downloaded invoice ${args.invoiceNumber} for direct debit occurrence ${args.occurrenceId}.`
         : `Failed to download invoice for direct debit occurrence ${args.occurrenceId}.`,
+
     metadata: {
       plan_id: args.planId,
       occurrence_id: args.occurrenceId,
       invoice_number: args.invoiceNumber,
       file_name: args.fileName,
-      error_message: args.errorMessage || null,
+      error_message:
+        args.errorMessage || null,
       request_method: args.request.method,
-      request_path: args.request.nextUrl.pathname,
+      request_path:
+        args.request.nextUrl.pathname,
     },
+
     ip_address: getRequestIp(args.request),
-    user_agent: args.request.headers.get("user-agent"),
+
+    user_agent:
+      args.request.headers.get(
+        "user-agent",
+      ),
+
     created_at: new Date().toISOString(),
   };
 
@@ -944,25 +1767,31 @@ async function writeAuditLog(args: {
     .insert(payload);
 
   if (error) {
-    console.error("Direct debit invoice audit log failed", {
-      planId: args.planId,
-      occurrenceId: args.occurrenceId,
-      auditError: error,
-    });
+    console.error(
+      "Direct debit invoice audit log failed",
+      {
+        planId: args.planId,
+        occurrenceId: args.occurrenceId,
+        auditError: error,
+      },
+    );
   }
 }
 
-export async function GET(
+async function generateInvoiceResponse(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const { planId, occurrenceId } = await context.params;
+  const { planId, occurrenceId } =
+    await context.params;
+
   const admin = getAdminIdentity(request);
 
   if (!isUuid(planId)) {
     return json(
       {
         ok: false,
+        success: false,
         error: "INVALID_PLAN_ID",
         message:
           "The direct debit plan ID is not a valid UUID.",
@@ -976,6 +1805,7 @@ export async function GET(
     return json(
       {
         ok: false,
+        success: false,
         error: "INVALID_OCCURRENCE_ID",
         message:
           "The direct debit occurrence ID is not a valid UUID.",
@@ -985,16 +1815,24 @@ export async function GET(
     );
   }
 
-  let invoiceNumber = `DD-${occurrenceId
-    .slice(0, 8)
-    .toUpperCase()}`;
+  let invoiceNumber =
+    `DD-${occurrenceId
+      .slice(0, 8)
+      .toUpperCase()}`;
 
-  let fileName = `${safeFileName(invoiceNumber)}.pdf`;
+  let fileName =
+    `${safeFileName(invoiceNumber)}.pdf`;
 
   try {
     const [
-      { data: planData, error: planError },
-      { data: occurrenceData, error: occurrenceError },
+      {
+        data: planData,
+        error: planError,
+      },
+      {
+        data: occurrenceData,
+        error: occurrenceError,
+      },
     ] = await Promise.all([
       supabaseAdmin
         .from(PLANS_TABLE)
@@ -1011,15 +1849,19 @@ export async function GET(
     ]);
 
     if (planError) {
-      console.error("Direct debit plan lookup failed", {
-        planId,
-        occurrenceId,
-        error: planError,
-      });
+      console.error(
+        "Direct debit plan lookup failed",
+        {
+          planId,
+          occurrenceId,
+          error: planError,
+        },
+      );
 
       return json(
         {
           ok: false,
+          success: false,
           error: "PLAN_LOOKUP_FAILED",
           message:
             "The direct debit plan could not be loaded.",
@@ -1035,6 +1877,7 @@ export async function GET(
       return json(
         {
           ok: false,
+          success: false,
           error: "PLAN_NOT_FOUND",
           message:
             "The requested direct debit plan was not found.",
@@ -1045,20 +1888,26 @@ export async function GET(
     }
 
     if (occurrenceError) {
-      console.error("Direct debit occurrence lookup failed", {
-        planId,
-        occurrenceId,
-        error: occurrenceError,
-      });
+      console.error(
+        "Direct debit occurrence lookup failed",
+        {
+          planId,
+          occurrenceId,
+          error: occurrenceError,
+        },
+      );
 
       return json(
         {
           ok: false,
-          error: "OCCURRENCE_LOOKUP_FAILED",
+          success: false,
+          error:
+            "OCCURRENCE_LOOKUP_FAILED",
           message:
             "The direct debit payment occurrence could not be loaded.",
           code: occurrenceError.code,
-          details: occurrenceError.details,
+          details:
+            occurrenceError.details,
           hint: occurrenceError.hint,
         },
         500,
@@ -1069,6 +1918,7 @@ export async function GET(
       return json(
         {
           ok: false,
+          success: false,
           error: "OCCURRENCE_NOT_FOUND",
           message:
             "The requested payment occurrence was not found for this direct debit plan.",
@@ -1079,7 +1929,10 @@ export async function GET(
       );
     }
 
-    if (!isRecord(planData) || !isRecord(occurrenceData)) {
+    if (
+      !isRecord(planData) ||
+      !isRecord(occurrenceData)
+    ) {
       throw new Error(
         "The direct debit database response had an invalid format.",
       );
@@ -1090,13 +1943,15 @@ export async function GET(
       occurrenceData,
     );
 
-    invoiceNumber = invoice.invoiceNumber;
+    invoiceNumber =
+      invoice.invoiceNumber;
 
     fileName = `${safeFileName(
       `${invoice.planName}-${invoice.invoiceNumber}`,
     )}.pdf`;
 
-    const pdfBytes = await createInvoicePdf(invoice);
+    const pdfBytes =
+      await createInvoicePdf(invoice);
 
     await writeAuditLog({
       request,
@@ -1108,31 +1963,48 @@ export async function GET(
       status: "success",
     });
 
-    return new NextResponse(Buffer.from(pdfBytes), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${fileName}"`,
-        "Content-Length": String(pdfBytes.byteLength),
-        "Cache-Control":
-          "private, no-store, no-cache, must-revalidate, max-age=0",
-        Pragma: "no-cache",
-        Expires: "0",
-        "X-Content-Type-Options": "nosniff",
-        "X-Invoice-Number": invoiceNumber,
+    return new NextResponse(
+      Buffer.from(pdfBytes),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+
+          "Content-Disposition":
+            `attachment; filename="${fileName}"`,
+
+          "Content-Length": String(
+            pdfBytes.byteLength,
+          ),
+
+          "Cache-Control":
+            "private, no-store, no-cache, must-revalidate, max-age=0",
+
+          Pragma: "no-cache",
+          Expires: "0",
+
+          "X-Content-Type-Options":
+            "nosniff",
+
+          "X-Invoice-Number":
+            invoiceNumber,
+        },
       },
-    });
+    );
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "An unknown server error occurred.";
 
-    console.error("Direct debit invoice generation failed", {
-      planId,
-      occurrenceId,
-      error,
-    });
+    console.error(
+      "Direct debit invoice generation failed",
+      {
+        planId,
+        occurrenceId,
+        error,
+      },
+    );
 
     await writeAuditLog({
       request,
@@ -1148,7 +2020,9 @@ export async function GET(
     return json(
       {
         ok: false,
-        error: "INVOICE_GENERATION_FAILED",
+        success: false,
+        error:
+          "INVOICE_GENERATION_FAILED",
         message:
           "The direct debit invoice could not be generated.",
         reason: message,
@@ -1158,4 +2032,96 @@ export async function GET(
       500,
     );
   }
+}
+
+/**
+ * GET normally downloads the generated PDF invoice.
+ *
+ * Add ?mode=receipt to return the receipts already connected to the linked
+ * Money Tracker transaction.
+ */
+export async function GET(
+  request: NextRequest,
+  context: RouteContext,
+) {
+  const mode =
+    request.nextUrl.searchParams
+      .get("mode")
+      ?.trim()
+      .toLowerCase();
+
+  if (
+    mode === "receipt" ||
+    mode === "receipts" ||
+    mode === "attachments"
+  ) {
+    return getReceiptResponse(context);
+  }
+
+  return generateInvoiceResponse(
+    request,
+    context,
+  );
+}
+
+/**
+ * POST supports two behaviours:
+ *
+ * multipart/form-data:
+ *   Upload a receipt and insert it into money_transaction_attachments.
+ *
+ * JSON or an empty request body:
+ *   Generate and return the PDF invoice.
+ */
+export async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
+  const contentType =
+    request.headers
+      .get("content-type")
+      ?.toLowerCase() || "";
+
+  if (
+    contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return uploadReceiptResponse(
+      request,
+      context,
+    );
+  }
+
+  return generateInvoiceResponse(
+    request,
+    context,
+  );
+}
+
+/**
+ * Explicit method responses.
+ */
+export async function PUT() {
+  return json(
+    {
+      ok: false,
+      success: false,
+      error: "METHOD_NOT_ALLOWED",
+      message:
+        "Use GET to download the invoice, or POST multipart/form-data to upload a receipt.",
+    },
+    405,
+    {
+      Allow: "GET, POST",
+    },
+  );
+}
+
+export async function PATCH() {
+  return PUT();
+}
+
+export async function DELETE() {
+  return PUT();
 }

@@ -86,6 +86,15 @@ type ListResponse = {
   code?: string;
   details?: string | null;
   hint?: string | null;
+  transaction_id?: string | null;
+  attachment?: {
+    id?: string;
+    transaction_id?: string;
+    file_name?: string;
+    file_url?: string | null;
+    file_type?: string | null;
+    file_size?: number | null;
+  } | null;
 };
 
 type MoneyAuditStatus =
@@ -139,7 +148,7 @@ type AccountFilter = "all" | DirectDebitAccountSource;
 type DueFilter = "all" | "due" | "overdue" | "personal_reimbursement";
 type BusyAction = {
   planId: string;
-  action: "pause" | "resume" | "cancel" | "post" | "edit" | "invoice" | "undo" | "reimburse";
+  action: "pause" | "resume" | "cancel" | "post" | "edit" | "invoice" | "undo" | "reimburse" | "undo_reimburse";
 } | null;
 
 type Toast = {
@@ -212,6 +221,16 @@ type ReimburseModalState =
       occurrence: DirectDebitOccurrence;
       payment_method: string;
       reference: string;
+      error: string;
+    }
+  | null;
+
+type UndoReimbursementModalState =
+  | {
+      plan: DirectDebitPlanRow;
+      occurrence: DirectDebitOccurrence;
+      reason: string;
+      delete_repayment_transaction: boolean;
       error: string;
     }
   | null;
@@ -336,17 +355,22 @@ function getOccurrences(plan: DirectDebitPlanRow) {
     : [];
 }
 
+function occurrenceDateKey(value: string | null | undefined) {
+  return cleanText(value).slice(0, 10);
+}
+
 function getNextOccurrence(plan: DirectDebitPlanRow) {
   const today = todayDateKey();
+  const scheduled = getOccurrences(plan).filter(
+    (occurrence) => occurrence.status === "scheduled",
+  );
 
   return (
-    getOccurrences(plan).find(
+    scheduled.find(
       (occurrence) =>
-        occurrence.status === "scheduled" && occurrence.due_date >= today,
+        occurrenceDateKey(occurrence.due_date) >= today,
     ) ||
-    getOccurrences(plan).find(
-      (occurrence) => occurrence.status === "scheduled",
-    ) ||
+    scheduled[0] ||
     null
   );
 }
@@ -357,33 +381,63 @@ function getDueOccurrence(plan: DirectDebitPlanRow) {
   return (
     getOccurrences(plan).find(
       (occurrence) =>
-        occurrence.status === "scheduled" && occurrence.due_date <= today,
+        occurrence.status === "scheduled" &&
+        occurrenceDateKey(occurrence.due_date) <= today,
     ) || null
   );
 }
 
 function isOverdue(plan: DirectDebitPlanRow) {
   const due = getDueOccurrence(plan);
-  return Boolean(due && due.due_date < todayDateKey());
+
+  return Boolean(
+    due &&
+      occurrenceDateKey(due.due_date) < todayDateKey(),
+  );
 }
 
 function getOutstandingReimbursement(plan: DirectDebitPlanRow) {
-  const explicit = Number(plan.outstanding_reimbursement_pence || 0);
-  if (explicit > 0) return explicit;
-
   if (plan.account_source !== "personal") return 0;
 
-  return getOccurrences(plan)
-    .filter(
-      (occurrence) =>
-        occurrence.status === "posted" || occurrence.status === "paid",
-    )
-    .filter(
-      (occurrence) =>
-        occurrence.reimbursement_status === "awaiting_reimbursement" ||
-        occurrence.reimbursement_status === "partially_reimbursed",
-    )
-    .reduce((sum, occurrence) => sum + Number(occurrence.amount_pence || 0), 0);
+  const occurrences = getOccurrences(plan);
+  const reimbursementRows = occurrences.filter(
+    (occurrence) =>
+      occurrence.status === "posted" ||
+      occurrence.status === "paid",
+  );
+
+  /*
+   * Occurrence rows are the source of truth. Using a stale plan-level total
+   * first caused values such as £132 to remain after individual repayments
+   * had changed.
+   */
+  if (reimbursementRows.length > 0) {
+    return reimbursementRows
+      .filter((occurrence) => {
+        const status = cleanText(
+          occurrence.reimbursement_status,
+        ).toLowerCase();
+
+        return (
+          status === "awaiting_reimbursement" ||
+          status === "partially_reimbursed"
+        );
+      })
+      .reduce(
+        (sum, occurrence) =>
+          sum + Math.max(0, Number(occurrence.amount_pence || 0)),
+        0,
+      );
+  }
+
+  /*
+   * Keep the API aggregate only as a fallback for older API responses that do
+   * not include occurrence reimbursement fields.
+   */
+  return Math.max(
+    0,
+    Number(plan.outstanding_reimbursement_pence || 0),
+  );
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -511,6 +565,8 @@ export default function DirectDebitsPage() {
   const [invoiceModal, setInvoiceModal] = useState<InvoiceModalState>(null);
   const [undoModal, setUndoModal] = useState<UndoModalState>(null);
   const [reimburseModal, setReimburseModal] = useState<ReimburseModalState>(null);
+  const [undoReimbursementModal, setUndoReimbursementModal] =
+    useState<UndoReimbursementModalState>(null);
   const [createRepaymentImage, setCreateRepaymentImage] = useState<File | null>(
     null,
   );
@@ -796,19 +852,28 @@ export default function DirectDebitsPage() {
         );
       }
 
+      let imageWasUploaded = false;
+      let imageUploadWarning = "";
+
       if (
         payload.plan_id &&
         form.account_source === "personal" &&
         form.auto_reimburse_person &&
         createRepaymentImage
       ) {
-        await uploadRepaymentImage({
-          planId: payload.plan_id,
-          file: createRepaymentImage,
-        });
+        try {
+          await uploadRepaymentImage({
+            planId: payload.plan_id,
+            file: createRepaymentImage,
+          });
+          imageWasUploaded = true;
+        } catch (imageError) {
+          imageUploadWarning =
+            imageError instanceof Error
+              ? imageError.message
+              : "The repayment picture could not be uploaded.";
+        }
       }
-
-      const imageWasUploaded = Boolean(createRepaymentImage);
 
       await writeMoneyAuditLog({
         action: "money.direct_debit.created",
@@ -848,10 +913,12 @@ export default function DirectDebitsPage() {
 
       closeCreateModal();
       setToast({
-        type: "success",
-        message: imageWasUploaded
-          ? "The monthly Direct Debit plan and repayment picture were saved successfully."
-          : "The monthly Direct Debit plan was created successfully.",
+        type: imageUploadWarning ? "error" : "success",
+        message: imageUploadWarning
+          ? `The monthly Direct Debit plan was created, but its repayment picture was not uploaded. ${imageUploadWarning}`
+          : imageWasUploaded
+            ? "The monthly Direct Debit plan and repayment picture were saved successfully."
+            : "The monthly Direct Debit plan was created successfully.",
       });
       await loadPlans();
     } catch (createError) {
@@ -1107,9 +1174,29 @@ export default function DirectDebitsPage() {
 
     if (!response.ok) {
       throw new Error(
-        apiErrorMessage(payload, "The payment was made, but the invoice could not be uploaded.", response),
+        apiErrorMessage(
+          payload,
+          "The payment was made, but the receipt could not be added to the linked Money Tracker transaction.",
+          response,
+        ),
       );
     }
+
+    window.dispatchEvent(
+      new CustomEvent("money:transactions-changed", {
+        detail: {
+          source: "direct-debit-receipt-upload",
+          planId,
+          occurrenceId,
+          transactionId:
+            payload.transaction_id || null,
+          attachmentId:
+            payload.attachment?.id || null,
+        },
+      }),
+    );
+
+    return payload;
   }
 
   async function confirmPostDuePayment() {
@@ -1126,7 +1213,30 @@ export default function DirectDebitsPage() {
         previous
           ? {
               ...previous,
-              invoiceError: "The invoice must be 10 MB or smaller.",
+              invoiceError:
+                "The receipt or invoice must be 10 MB or smaller.",
+            }
+          : previous,
+      );
+      return;
+    }
+
+    if (
+      invoiceFile &&
+      invoiceFile.type &&
+      !new Set([
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ]).has(invoiceFile.type)
+    ) {
+      setConfirmModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              invoiceError:
+                "Upload a PDF, JPG, PNG or WebP receipt.",
             }
           : previous,
       );
@@ -1165,12 +1275,17 @@ export default function DirectDebitsPage() {
         );
       }
 
+      let uploadedReceipt:
+        | ListResponse
+        | null = null;
+
       if (invoiceFile) {
-        await uploadInvoiceForOccurrence({
-          planId: plan.id,
-          occurrenceId: dueOccurrence.id,
-          file: invoiceFile,
-        });
+        uploadedReceipt =
+          await uploadInvoiceForOccurrence({
+            planId: plan.id,
+            occurrenceId: dueOccurrence.id,
+            file: invoiceFile,
+          });
       }
 
       await writeMoneyAuditLog({
@@ -1193,6 +1308,10 @@ export default function DirectDebitsPage() {
           occurrence_status: "posted",
           amount_pence: dueOccurrence.amount_pence,
           invoice_uploaded: Boolean(invoiceFile),
+          receipt_transaction_id:
+            uploadedReceipt?.transaction_id || null,
+          receipt_attachment_id:
+            uploadedReceipt?.attachment?.id || null,
           auto_reimburse_person: Boolean(plan.auto_reimburse_person),
         },
       });
@@ -1201,9 +1320,23 @@ export default function DirectDebitsPage() {
       setToast({
         type: "success",
         message: invoiceFile
-          ? `${plan.title} was recorded as a payment and the invoice was uploaded.`
+          ? `${plan.title} was recorded as a payment and the receipt was added to its Money Tracker receipt section.`
           : `${plan.title} was recorded as a payment in Money Transactions.`,
       });
+
+      window.dispatchEvent(
+        new CustomEvent("money:transactions-changed", {
+          detail: {
+            source: "direct-debit-payment-posted",
+            planId: plan.id,
+            occurrenceId: dueOccurrence.id,
+            transactionId:
+              uploadedReceipt?.transaction_id ||
+              null,
+          },
+        }),
+      );
+
       await loadPlans();
     } catch (actionError) {
       const message =
@@ -1487,13 +1620,54 @@ export default function DirectDebitsPage() {
   }
 
 
-  function latestPostedOccurrence(plan: DirectDebitPlanRow) {
+  function postedOccurrences(plan: DirectDebitPlanRow) {
     return getOccurrences(plan)
       .filter(
         (occurrence) =>
-          occurrence.status === "posted" || occurrence.status === "paid",
+          occurrence.status === "posted" ||
+          occurrence.status === "paid",
       )
-      .sort((a, b) => b.due_date.localeCompare(a.due_date))[0] || null;
+      .sort((a, b) =>
+        occurrenceDateKey(b.due_date).localeCompare(
+          occurrenceDateKey(a.due_date),
+        ),
+      );
+  }
+
+  function latestPostedOccurrence(plan: DirectDebitPlanRow) {
+    return postedOccurrences(plan)[0] || null;
+  }
+
+  function latestReimbursedOccurrence(
+    plan: DirectDebitPlanRow,
+  ) {
+    return (
+      postedOccurrences(plan).find(
+        (occurrence) =>
+          cleanText(
+            occurrence.reimbursement_status,
+          ).toLowerCase() === "reimbursed",
+      ) || null
+    );
+  }
+
+  function latestOutstandingReimbursementOccurrence(
+    plan: DirectDebitPlanRow,
+  ) {
+    return (
+      postedOccurrences(plan).find((occurrence) => {
+        const status = cleanText(
+          occurrence.reimbursement_status,
+        ).toLowerCase();
+
+        return (
+          status === "awaiting_reimbursement" ||
+          status === "partially_reimbursed" ||
+          status === "" ||
+          status === "not_required"
+        );
+      }) || null
+    );
   }
 
   function openInvoiceModal(plan: DirectDebitPlanRow) {
@@ -1515,12 +1689,46 @@ export default function DirectDebitsPage() {
 
     if (!invoiceModal.file) {
       setInvoiceModal((previous) =>
-        previous ? { ...previous, error: "Choose an invoice or receipt file." } : previous,
+        previous ? { ...previous, error: "Choose a receipt or invoice file." } : previous,
       );
       return;
     }
 
     const { plan, occurrence, file } = invoiceModal;
+
+    if (file.size > 10 * 1024 * 1024) {
+      setInvoiceModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error:
+                "The receipt or invoice must be 10 MB or smaller.",
+            }
+          : previous,
+      );
+      return;
+    }
+
+    const allowedTypes = new Set([
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ]);
+
+    if (file.type && !allowedTypes.has(file.type)) {
+      setInvoiceModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error:
+                "Upload a PDF, JPG, PNG or WebP receipt.",
+            }
+          : previous,
+      );
+      return;
+    }
+
     setBusyAction({ planId: plan.id, action: "invoice" });
 
     try {
@@ -1542,32 +1750,50 @@ export default function DirectDebitsPage() {
       const payload = await readJsonResponse<ListResponse>(response);
       if (!response.ok) {
         throw new Error(
-          apiErrorMessage(payload, "Could not upload the invoice.", response),
+          apiErrorMessage(payload, "Could not upload the receipt.", response),
         );
       }
 
       await writeMoneyAuditLog({
-        action: "money.direct_debit.invoice_uploaded",
-        action_label: "Direct Debit invoice uploaded",
+        action: "money.direct_debit.receipt_uploaded",
+        action_label: "Direct Debit receipt uploaded",
         status: "success",
         risk: "low",
         record_type: "direct_debit_occurrence",
         record_id: occurrence.id,
         direct_debit_plan_id: plan.id,
         direct_debit_occurrence_id: occurrence.id,
-        summary: `Uploaded invoice for payment ${occurrence.payment_number}: ${plan.title}`,
+        summary: `Uploaded receipt for payment ${occurrence.payment_number}: ${plan.title}`,
         after_data: {
-          invoice_file_name: file.name,
-          invoice_file_size: file.size,
-          invoice_mime_type: file.type,
+          receipt_file_name: file.name,
+          receipt_file_size: file.size,
+          receipt_mime_type: file.type,
         },
       });
 
       setInvoiceModal(null);
       setToast({
         type: "success",
-        message: `Invoice uploaded for payment ${occurrence.payment_number}.`,
+        message:
+          `Receipt uploaded for payment ${occurrence.payment_number} and added to its Money Tracker receipt section.`,
       });
+
+      window.dispatchEvent(
+        new CustomEvent("money:transactions-changed", {
+          detail: {
+            source: "direct-debit-receipt-upload",
+            planId: plan.id,
+            occurrenceId: occurrence.id,
+            transactionId:
+              payload.transaction_id ||
+              occurrence.transaction_id ||
+              null,
+            attachmentId:
+              payload.attachment?.id || null,
+          },
+        }),
+      );
+
       await loadPlans();
     } catch (uploadError) {
       setInvoiceModal((previous) =>
@@ -1577,7 +1803,7 @@ export default function DirectDebitsPage() {
               error:
                 uploadError instanceof Error
                   ? uploadError.message
-                  : "Could not upload the invoice.",
+                  : "Could not upload the receipt.",
             }
           : previous,
       );
@@ -1687,7 +1913,8 @@ export default function DirectDebitsPage() {
   }
 
   function openReimburseModal(plan: DirectDebitPlanRow) {
-    const occurrence = latestPostedOccurrence(plan);
+    const occurrence =
+      latestOutstandingReimbursementOccurrence(plan);
 
     if (plan.account_source !== "personal") {
       setToast({
@@ -1701,14 +1928,6 @@ export default function DirectDebitsPage() {
       setToast({
         type: "error",
         message: "Make a payment before repaying the person.",
-      });
-      return;
-    }
-
-    if (occurrence.reimbursement_status === "reimbursed") {
-      setToast({
-        type: "error",
-        message: "This payment has already been reimbursed.",
       });
       return;
     }
@@ -1786,6 +2005,21 @@ export default function DirectDebitsPage() {
           plan.account_holder || "the payer"
         }.`,
       });
+
+      window.dispatchEvent(
+        new CustomEvent("money:direct-debit-reimbursed", {
+          detail: {
+            planId: plan.id,
+            occurrenceId: occurrence.id,
+            transactionId: occurrence.transaction_id,
+          },
+        }),
+      );
+
+      window.dispatchEvent(
+        new CustomEvent("money:transactions-changed"),
+      );
+
       await loadPlans();
     } catch (reimburseError) {
       setReimburseModal((previous) =>
@@ -1796,6 +2030,170 @@ export default function DirectDebitsPage() {
                 reimburseError instanceof Error
                   ? reimburseError.message
                   : "Could not repay the person.",
+            }
+          : previous,
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function openUndoReimbursementModal(plan: DirectDebitPlanRow) {
+    const occurrence =
+      latestReimbursedOccurrence(plan);
+
+    if (!occurrence) {
+      setToast({
+        type: "error",
+        message: "There is no reimbursed payment available to undo.",
+      });
+      return;
+    }
+
+    setUndoReimbursementModal({
+      plan,
+      occurrence,
+      reason: "Repayment was recorded by mistake",
+      delete_repayment_transaction: true,
+      error: "",
+    });
+  }
+
+  function closeUndoReimbursementModal() {
+    if (
+      undoReimbursementModal &&
+      busyAction?.planId === undoReimbursementModal.plan.id &&
+      busyAction.action === "undo_reimburse"
+    ) {
+      return;
+    }
+
+    setUndoReimbursementModal(null);
+  }
+
+  async function confirmUndoReimbursement(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    if (!undoReimbursementModal) return;
+
+    const { plan, occurrence } = undoReimbursementModal;
+    const reason = undoReimbursementModal.reason.trim();
+
+    if (!reason) {
+      setUndoReimbursementModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error: "Enter a reason for undoing the repayment.",
+            }
+          : previous,
+      );
+      return;
+    }
+
+    setBusyAction({
+      planId: plan.id,
+      action: "undo_reimburse",
+    });
+
+    try {
+      const response = await fetch(
+        `/api/admin/money/direct-debits/${encodeURIComponent(
+          plan.id,
+        )}/occurrences/${encodeURIComponent(
+          occurrence.id,
+        )}/reimburse/undo`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            reason,
+            delete_repayment_transaction:
+              undoReimbursementModal.delete_repayment_transaction,
+          }),
+        },
+      );
+
+      const payload = await readJsonResponse<ListResponse>(response);
+
+      if (!response.ok) {
+        throw new Error(
+          apiErrorMessage(
+            payload,
+            "Could not undo the repayment.",
+            response,
+          ),
+        );
+      }
+
+      await writeMoneyAuditLog({
+        action: "money.direct_debit.person_reimbursement_undone",
+        action_label: "Personal Direct Debit repayment undone",
+        status: "warning",
+        risk: "high",
+        record_type: "direct_debit_occurrence",
+        record_id: occurrence.id,
+        transaction_id: occurrence.transaction_id,
+        direct_debit_plan_id: plan.id,
+        direct_debit_occurrence_id: occurrence.id,
+        summary: `Undid ${money(
+          occurrence.amount_pence,
+        )} repayment to ${
+          plan.account_holder || "the payer"
+        } for ${plan.title}`,
+        before_data: {
+          reimbursement_status: "reimbursed",
+          reimbursement_transaction_id:
+            occurrence.reimbursement_transaction_id || null,
+        },
+        after_data: {
+          reimbursement_status: "awaiting_reimbursement",
+          reimbursement_transaction_id: null,
+          undo_reason: reason,
+          repayment_transaction_deleted:
+            undoReimbursementModal.delete_repayment_transaction,
+        },
+      });
+
+      setUndoReimbursementModal(null);
+      setToast({
+        type: "success",
+        message: `${money(
+          occurrence.amount_pence,
+        )} is awaiting repayment again for ${
+          plan.account_holder || "the payer"
+        }.`,
+      });
+
+      window.dispatchEvent(
+        new CustomEvent("money:direct-debit-reimbursement-undone", {
+          detail: {
+            planId: plan.id,
+            occurrenceId: occurrence.id,
+            transactionId: occurrence.transaction_id,
+          },
+        }),
+      );
+
+      window.dispatchEvent(
+        new CustomEvent("money:transactions-changed"),
+      );
+
+      await loadPlans();
+    } catch (undoError) {
+      setUndoReimbursementModal((previous) =>
+        previous
+          ? {
+              ...previous,
+              error:
+                undoError instanceof Error
+                  ? undoError.message
+                  : "Could not undo the repayment.",
             }
           : previous,
       );
@@ -2148,7 +2546,7 @@ export default function DirectDebitsPage() {
                       </div>
 
                       <Link
-                        href={`/Admin/MoneyManagement/DirectDebits/${encodeURIComponent(
+                        href={`/Admin/MoneyManagement/TrackingMoney/DirectDebits/${encodeURIComponent(
                           plan.id,
                         )}`}
                         className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-pink-500/15 px-3 py-2 text-xs font-black text-pink-100 ring-1 ring-pink-300/20 hover:bg-pink-500/25"
@@ -2342,7 +2740,7 @@ export default function DirectDebitsPage() {
                         className="inline-flex items-center gap-2 rounded-xl bg-purple-500/15 px-3 py-2 text-xs font-black text-purple-100 ring-1 ring-purple-300/20 hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-35"
                       >
                         <FileUp className="h-4 w-4" />
-                        Upload invoice
+                        Upload receipt
                       </button>
 
                       <button
@@ -2350,7 +2748,15 @@ export default function DirectDebitsPage() {
                         onClick={() => openUndoModal(plan)}
                         disabled={
                           planBusy ||
-                          !latestPostedOccurrence(plan)?.transaction_id
+                          !latestPostedOccurrence(plan)?.transaction_id ||
+                          Boolean(latestReimbursedOccurrence(plan))
+                        }
+                        title={
+                          latestReimbursedOccurrence(plan)
+                            ? "Undo the personal repayment first, then undo the Direct Debit payment."
+                            : !latestPostedOccurrence(plan)?.transaction_id
+                              ? "There is no posted payment available to undo."
+                              : "Remove the linked Money Transaction and return the payment to Scheduled."
                         }
                         className="inline-flex items-center gap-2 rounded-xl bg-orange-500/15 px-3 py-2 text-xs font-black text-orange-100 ring-1 ring-orange-300/20 hover:bg-orange-500/25 disabled:cursor-not-allowed disabled:opacity-35"
                       >
@@ -2359,20 +2765,63 @@ export default function DirectDebitsPage() {
                       </button>
 
                       {plan.account_source === "personal" ? (
-                        <button
-                          type="button"
-                          onClick={() => openReimburseModal(plan)}
-                          disabled={
-                            planBusy ||
-                            !latestPostedOccurrence(plan) ||
-                            latestPostedOccurrence(plan)?.reimbursement_status ===
-                              "reimbursed"
-                          }
-                          className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-35"
-                        >
-                          <HandCoins className="h-4 w-4" />
-                          Repay person
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openReimburseModal(plan)
+                            }
+                            disabled={
+                              planBusy ||
+                              !latestOutstandingReimbursementOccurrence(
+                                plan,
+                              )
+                            }
+                            title={
+                              latestOutstandingReimbursementOccurrence(
+                                plan,
+                              )
+                                ? "Record money paid from Burton Pride back to the person for the newest outstanding payment."
+                                : latestPostedOccurrence(plan)
+                                  ? "Every posted payment is already reimbursed."
+                                  : "Make a Direct Debit payment before repaying the person."
+                            }
+                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            {busyAction?.planId === plan.id &&
+                            busyAction.action === "reimburse" ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <HandCoins className="h-4 w-4" />
+                            )}
+                            Repay person
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openUndoReimbursementModal(plan)
+                            }
+                            disabled={
+                              planBusy ||
+                              !latestReimbursedOccurrence(plan)
+                            }
+                            title={
+                              latestReimbursedOccurrence(plan)
+                                ? "Undo the recorded repayment and return it to awaiting reimbursement."
+                                : "No completed personal repayment is available to undo."
+                            }
+                            className="inline-flex items-center gap-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs font-black text-red-100 ring-1 ring-red-300/20 hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            {busyAction?.planId === plan.id &&
+                            busyAction.action === "undo_reimburse" ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCcw className="h-4 w-4" />
+                            )}
+                            Undo repay person
+                          </button>
+                        </>
                       ) : null}
 
                       {plan.status === "active" ? (
@@ -2440,7 +2889,7 @@ export default function DirectDebitsPage() {
             onSubmit={uploadInvoice}
             className="w-full max-w-lg rounded-3xl border border-purple-300/20 bg-[#121220] p-6 shadow-2xl"
           >
-            <h2 className="text-2xl font-black">Upload invoice or receipt</h2>
+            <h2 className="text-2xl font-black">Upload receipt or receipt</h2>
             <p className="mt-2 text-sm text-white/55">
               Payment {invoiceModal.occurrence.payment_number} ·{" "}
               {money(invoiceModal.occurrence.amount_pence)}
@@ -2487,7 +2936,7 @@ export default function DirectDebitsPage() {
                 ) : (
                   <FileUp className="h-4 w-4" />
                 )}
-                Upload invoice
+                Upload receipt
               </button>
             </div>
           </form>
@@ -2612,6 +3061,129 @@ export default function DirectDebitsPage() {
               >
                 <HandCoins className="h-4 w-4" />
                 Record repayment
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+
+      {undoReimbursementModal ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={confirmUndoReimbursement}
+            className="w-full max-w-lg rounded-3xl border border-red-300/20 bg-[#121220] p-6 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-red-500/15 p-3 text-red-200 ring-1 ring-red-300/20">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black">Undo repay person</h2>
+                <p className="mt-2 text-sm leading-6 text-white/55">
+                  This will mark{" "}
+                  {money(
+                    undoReimbursementModal.occurrence.amount_pence,
+                  )}{" "}
+                  as awaiting repayment again for{" "}
+                  <strong className="text-white">
+                    {undoReimbursementModal.plan.account_holder ||
+                      "the payer"}
+                  </strong>
+                  .
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-amber-300/20 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+              The original Direct Debit payment will stay posted. Only the
+              personal repayment will be undone.
+            </div>
+
+            <label className="mt-5 block">
+              <span className="mb-1 block text-sm font-black">
+                Reason for undoing repayment
+              </span>
+              <textarea
+                value={undoReimbursementModal.reason}
+                onChange={(event) =>
+                  setUndoReimbursementModal((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          reason: event.target.value,
+                          error: "",
+                        }
+                      : previous,
+                  )
+                }
+                className="min-h-24 w-full rounded-xl bg-black/30 p-3 text-white outline-none ring-1 ring-white/10 focus:ring-red-300/40"
+                placeholder="Explain why this repayment needs to be undone"
+              />
+            </label>
+
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-red-300/20 bg-red-500/10 p-3">
+              <input
+                type="checkbox"
+                checked={
+                  undoReimbursementModal.delete_repayment_transaction
+                }
+                onChange={(event) =>
+                  setUndoReimbursementModal((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          delete_repayment_transaction:
+                            event.target.checked,
+                          error: "",
+                        }
+                      : previous,
+                  )
+                }
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                <span className="block text-sm font-black text-red-100">
+                  Remove the linked repayment transaction
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-red-100/65">
+                  Keep this selected when the repayment transaction was created
+                  by mistake. The original Direct Debit payment is not deleted.
+                </span>
+              </span>
+            </label>
+
+            {undoReimbursementModal.error ? (
+              <p className="mt-4 whitespace-pre-line rounded-xl bg-red-500/10 p-3 text-sm font-bold text-red-100">
+                {undoReimbursementModal.error}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeUndoReimbursementModal}
+                disabled={
+                  busyAction?.action === "undo_reimburse"
+                }
+                className="rounded-xl bg-white/10 px-4 py-3 font-black text-white ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  busyAction?.action === "undo_reimburse" ||
+                  !undoReimbursementModal.reason.trim()
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-red-500 px-4 py-3 font-black text-white hover:bg-red-400 disabled:opacity-40"
+              >
+                {busyAction?.action === "undo_reimburse" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                Undo repayment
               </button>
             </div>
           </form>
@@ -3120,7 +3692,7 @@ export default function DirectDebitsPage() {
                 <div className="min-w-0 flex-1">
                   <label className="block">
                     <span className="block text-sm font-black text-purple-100">
-                      Upload invoice or receipt
+                      Upload receipt or receipt
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-purple-100/65">
                       Optional. The file will be attached to this monthly payment

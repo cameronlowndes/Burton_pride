@@ -21,11 +21,11 @@ const Watermark = () => {
       "
     >
       <div className="text-yellow-300">
-        The Money Management is in Migration mode
+        The Money Management is in BETA 
       </div>
 
       <div className="mt-1 text-[10px] font-medium text-white/90 sm:text-xs">
-        This means data on this app could be wrong. Please contact Cameron to fix data.
+        This mean They Could be Some Bugs or Issues, Please Report Any Issues to the Development Team.
       </div>
     </div>
   );
