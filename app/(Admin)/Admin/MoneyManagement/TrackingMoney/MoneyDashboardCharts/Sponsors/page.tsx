@@ -177,6 +177,8 @@ export default function SponsorTrackingPage() {
           openNewSponsorForm={moneyPage.openNewSponsorForm}
           startEditSponsor={moneyPage.startEditSponsor}
           setDeleteSponsorId={moneyPage.setDeleteSponsorId}
+          openLoanRepaymentModal={moneyPage.openLoanRepaymentModal as any}
+          openLoanInterestModal={moneyPage.openLoanInterestModal as any}
         />
 
         <div className="flex flex-wrap gap-3">
