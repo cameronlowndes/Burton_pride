@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -35,6 +42,7 @@ import ManualBankBalanceCheck from "../../../components/money/ManualBankBalanceC
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 import { money } from "@/lib/money/helpers";
+import { SponsorBreakdown } from "@/lib/money/types";
 
 type RefundType = "money_received_back" | "money_sent_back";
 type RefundStatus = "pending" | "completed" | "cancelled";
@@ -60,18 +68,96 @@ type RefundApiResponse = {
   details?: unknown;
 };
 
-async function readJsonResponse(response: Response) {
+
+type MoneyDashboardAlertsProps = ComponentProps<typeof MoneyDashboardAlerts>;
+type MoneyTransactionsTableProps = ComponentProps<
+  typeof MoneyTransactionsTable
+>;
+type MoneySponsorSectionProps = ComponentProps<typeof MoneySponsorSection>;
+
+type ExtendedMoneyPage = ReturnType<typeof useMoneyTransactionsPage> & {
+  failedCsvRows?: MoneyDashboardAlertsProps["failedCsvRows"];
+  lockedYears?: MoneyTransactionsTableProps["lockedYears"];
+  lockedMonths?: MoneyTransactionsTableProps["lockedMonths"];
+};
+
+type RefundRequestError = Error & {
+  details?: unknown;
+  status?: number;
+};
+
+function cleanText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function safeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isRefundType(value: unknown): value is RefundType {
+  return value === "money_received_back" || value === "money_sent_back";
+}
+
+function isRefundStatus(value: unknown): value is RefundStatus {
+  return value === "pending" || value === "completed" || value === "cancelled";
+}
+
+function normaliseRefund(value: unknown): DashboardRefund | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const item = value as Partial<DashboardRefund>;
+  const id = cleanText(item.id);
+  const refundDate = cleanText(item.refund_date);
+  const title = cleanText(item.title);
+
+  if (
+    !id ||
+    !refundDate ||
+    !title ||
+    !isRefundType(item.refund_type) ||
+    !isRefundStatus(item.status)
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    year: Math.trunc(safeNumber(item.year)),
+    refund_date: refundDate,
+    refund_type: item.refund_type,
+    amount_pence: Math.max(0, Math.round(safeNumber(item.amount_pence))),
+    title,
+    notes: cleanText(item.notes) || null,
+    reference_number: cleanText(item.reference_number) || null,
+    status: item.status,
+    is_hidden: item.is_hidden === true,
+    created_at: cleanText(item.created_at) || null,
+  };
+}
+
+async function readJsonResponse(
+  response: Response,
+): Promise<RefundApiResponse & { rawResponse?: string }> {
   const rawBody = await response.text();
 
-  if (!rawBody) {
+  if (!rawBody.trim()) {
     return {};
   }
 
   try {
-    return JSON.parse(rawBody);
+    const parsed = JSON.parse(rawBody) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Response body was not a JSON object.");
+    }
+
+    return parsed as RefundApiResponse;
   } catch {
     return {
-      rawResponse: rawBody,
+      rawResponse: rawBody.slice(0, 2000),
     };
   }
 }
@@ -89,7 +175,9 @@ function getRefundMonthKey(refund: DashboardRefund) {
 }
 
 export default function MoneyDashboardPage() {
-  const moneyPage = useMoneyTransactionsPage();
+  const moneyPage = useMoneyTransactionsPage() as ExtendedMoneyPage;
+  const refundAbortRef = useRef<AbortController | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [refunds, setRefunds] = useState<DashboardRefund[]>([]);
   const [refundsLoading, setRefundsLoading] = useState(false);
@@ -142,6 +230,10 @@ export default function MoneyDashboardPage() {
   }, [easyMode, easyModeReady]);
 
   const loadRefunds = useCallback(async () => {
+    refundAbortRef.current?.abort();
+    const controller = new AbortController();
+    refundAbortRef.current = controller;
+
     setRefundsLoading(true);
     setRefundsError("");
     setRefundsErrorDetails(null);
@@ -154,40 +246,62 @@ export default function MoneyDashboardPage() {
         {
           method: "GET",
           cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+          },
         },
       );
 
-      const payload = (await readJsonResponse(response)) as RefundApiResponse;
+      const payload = await readJsonResponse(response);
 
       if (!response.ok) {
-        throw {
-          message:
-            payload.message ||
+        const requestError = new Error(
+          payload.message ||
             payload.error ||
             "Refund records could not be loaded.",
-          details: payload,
-          status: response.status,
-        };
+        ) as RefundRequestError;
+
+        requestError.details = payload;
+        requestError.status = response.status;
+        throw requestError;
       }
 
-      setRefunds(
-        Array.isArray(payload.refunds)
-          ? payload.refunds.filter((refund) => !refund.is_hidden)
-          : [],
-      );
-    } catch (error: any) {
+      const nextRefunds = Array.isArray(payload.refunds)
+        ? payload.refunds
+            .map(normaliseRefund)
+            .filter((refund): refund is DashboardRefund => Boolean(refund))
+            .filter((refund) => !refund.is_hidden)
+        : [];
+
+      setRefunds(nextRefunds);
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
       setRefunds([]);
-
-      setRefundsError(error?.message || "Refund records could not be loaded.");
-
+      setRefundsError(
+        error instanceof Error
+          ? error.message
+          : "Refund records could not be loaded.",
+      );
       setRefundsErrorDetails(error);
     } finally {
-      setRefundsLoading(false);
+      if (refundAbortRef.current === controller) {
+        refundAbortRef.current = null;
+        setRefundsLoading(false);
+      }
     }
   }, [moneyPage.selectedYear]);
 
   useEffect(() => {
     void loadRefunds();
+
+    return () => {
+      refundAbortRef.current?.abort();
+    };
   }, [loadRefunds]);
 
   const visibleRefunds = useMemo(() => {
@@ -212,11 +326,11 @@ export default function MoneyDashboardPage() {
     return completedRefunds.reduce(
       (acc, refund) => {
         if (refund.refund_type === "money_received_back") {
-          acc.receivedBack += Number(refund.amount_pence || 0);
+          acc.receivedBack += safeNumber(refund.amount_pence);
         }
 
         if (refund.refund_type === "money_sent_back") {
-          acc.sentBack += Number(refund.amount_pence || 0);
+          acc.sentBack += safeNumber(refund.amount_pence);
         }
 
         return acc;
@@ -232,11 +346,11 @@ export default function MoneyDashboardPage() {
     return completedVisibleRefunds.reduce(
       (acc, refund) => {
         if (refund.refund_type === "money_received_back") {
-          acc.receivedBack += Number(refund.amount_pence || 0);
+          acc.receivedBack += safeNumber(refund.amount_pence);
         }
 
         if (refund.refund_type === "money_sent_back") {
-          acc.sentBack += Number(refund.amount_pence || 0);
+          acc.sentBack += safeNumber(refund.amount_pence);
         }
 
         return acc;
@@ -262,10 +376,22 @@ export default function MoneyDashboardPage() {
     };
   }, [moneyPage.totals, refundTotals]);
 
-  const refreshDashboard = useCallback(() => {
-    moneyPage.refreshAll();
-    void loadRefunds();
-  }, [loadRefunds, moneyPage]);
+  const refreshDashboard = useCallback(async () => {
+    if (refreshing) {
+      return;
+    }
+
+    setRefreshing(true);
+
+    try {
+      await Promise.all([
+        Promise.resolve(moneyPage.refreshAll()),
+        loadRefunds(),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadRefunds, moneyPage.refreshAll, refreshing]);
 
   async function writeMoneyAuditLog(
     action: string,
@@ -273,10 +399,12 @@ export default function MoneyDashboardPage() {
     extra?: Record<string, unknown>,
   ) {
     try {
-      await fetch("/api/admin/money/audit-log", {
+      const response = await fetch("/api/admin/money/audit-logs", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify({
           action,
@@ -293,7 +421,16 @@ export default function MoneyDashboardPage() {
           extra: extra || {},
         }),
       });
-    } catch {
+
+      if (!response.ok) {
+        console.error(
+          "Money dashboard audit log failed:",
+          response.status,
+          await response.text().catch(() => ""),
+        );
+      }
+    } catch (error: unknown) {
+      console.error("Money dashboard audit log failed:", error);
       // Do not block the dashboard if audit logging fails.
     }
   }
@@ -435,7 +572,7 @@ export default function MoneyDashboardPage() {
       recordType: "refund" as const,
       title: refund.title,
       date: refund.refund_date || refund.created_at || "",
-      amountPence: Number(refund.amount_pence || 0),
+      amountPence: safeNumber(refund.amount_pence),
       direction:
         refund.refund_type === "money_received_back"
           ? ("in" as const)
@@ -458,6 +595,21 @@ export default function MoneyDashboardPage() {
       .slice(0, 6);
   }, [moneyPage.yearTransactions, refunds]);
 
+
+  const openLoanRepaymentFromSponsor = useCallback(
+    (sponsor?: SponsorBreakdown) => {
+      moneyPage.openLoanRepaymentModal(sponsor as any);
+    },
+    [moneyPage.openLoanRepaymentModal],
+  );
+
+  const openLoanInterestFromSponsor = useCallback(
+    (sponsor?: SponsorBreakdown) => {
+      moneyPage.openLoanInterestModal(sponsor as any);
+    },
+    [moneyPage.openLoanInterestModal],
+  );
+
   return (
     <main className="min-h-screen w-full max-w-none overflow-x-auto bg-[#070716] px-1 py-5 text-white sm:px-2 lg:px-3">
       <div className="w-full max-w-none min-w-0 space-y-6">
@@ -466,6 +618,7 @@ export default function MoneyDashboardPage() {
           yearOptions={moneyPage.yearOptions}
           onYearChange={moneyPage.handleYearChange}
           onRefresh={refreshDashboard}
+          refreshing={refreshing}
         />
 
         <section className="rounded-3xl border border-pink-300/20 bg-pink-500/10 p-4 shadow-2xl shadow-black/20 sm:p-5">
@@ -678,7 +831,7 @@ export default function MoneyDashboardPage() {
           selectedYear={moneyPage.selectedYear}
           transactions={moneyPage.yearTransactions}
           yearlySponsorBreakdown={moneyPage.yearlySponsorBreakdown}
-          failedCsvRows={(moneyPage as any).failedCsvRows || []}
+          failedCsvRows={moneyPage.failedCsvRows ?? []}
           onSetFilter={moneyPage.setFilter}
           onSetSearchTerm={moneyPage.setSearchTerm}
           onMarkTransactionChecked={moneyPage.markTransactionChecked}
@@ -686,7 +839,7 @@ export default function MoneyDashboardPage() {
 
         {!easyMode && (
           <>
-            <MoneyStatsCards totals={dashboardTotals as any} />
+            <MoneyStatsCards totals={dashboardTotals} />
 
             <ManualBankBalanceCheck selectedYear={moneyPage.selectedYear} />
           </>
@@ -1454,6 +1607,8 @@ export default function MoneyDashboardPage() {
               openNewSponsorForm={moneyPage.openNewSponsorForm}
               startEditSponsor={moneyPage.startEditSponsor}
               setDeleteSponsorId={moneyPage.setDeleteSponsorId}
+              openLoanRepaymentModal={openLoanRepaymentFromSponsor}
+              openLoanInterestModal={openLoanInterestFromSponsor}
             />
           </div>
         </div>
@@ -1511,8 +1666,8 @@ export default function MoneyDashboardPage() {
               financeNoteUpdatingId={moneyPage.financeNoteUpdatingId}
               deleting={moneyPage.deleting}
               openingBalancePence={moneyPage.totals.openingBalance}
-              lockedYears={(moneyPage as any).lockedYears || []}
-              lockedMonths={(moneyPage as any).lockedMonths || []}
+              lockedYears={moneyPage.lockedYears ?? []}
+              lockedMonths={moneyPage.lockedMonths ?? []}
               onPrint={moneyPage.printTransactions}
               onExportExcel={moneyPage.exportTransactionsToExcel}
               onExportYearlyReport={moneyPage.exportFullYearlyReport}
