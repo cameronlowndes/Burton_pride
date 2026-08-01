@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -234,6 +234,70 @@ function DetailedErrorBox({
   );
 }
 
+type BudgetAwareForm = Record<string, unknown> & {
+  budgetCategory?: string | null;
+  budgetCategoryKey?: string | null;
+  budgetCategoryLabel?: string | null;
+  budget_category?: string | null;
+  budget_category_key?: string | null;
+  budget_category_label?: string | null;
+  costArea?: string | null;
+  cost_area?: string | null;
+};
+
+function cleanBudgetValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Keeps all budget field aliases in sync before the transaction save handler
+ * builds its API payload. This prevents a manually selected budget from being
+ * lost and incorrectly displayed as an automatic budget match in the table.
+ */
+function normaliseBudgetFields<T extends BudgetAwareForm>(form: T): T {
+  const key = cleanBudgetValue(
+    form.budget_category_key ||
+      form.budgetCategoryKey ||
+      form.budget_category ||
+      form.budgetCategory ||
+      form.cost_area ||
+      form.costArea,
+  );
+
+  const label = cleanBudgetValue(
+    form.budget_category_label || form.budgetCategoryLabel,
+  );
+
+  if (!key && !label) {
+    return {
+      ...form,
+      budgetCategory: "",
+      budgetCategoryKey: "",
+      budgetCategoryLabel: "",
+      budget_category: "",
+      budget_category_key: "",
+      budget_category_label: "",
+      costArea: "",
+      cost_area: "",
+    };
+  }
+
+  const resolvedKey = key || label;
+  const resolvedLabel = label || key;
+
+  return {
+    ...form,
+    budgetCategory: resolvedKey,
+    budgetCategoryKey: resolvedKey,
+    budgetCategoryLabel: resolvedLabel,
+    budget_category: resolvedKey,
+    budget_category_key: resolvedKey,
+    budget_category_label: resolvedLabel,
+    costArea: resolvedKey,
+    cost_area: resolvedKey,
+  };
+}
+
 export default function MoneyTransactionsPage() {
   const money = useMoneyTransactionsPage();
   const [displayMode, setDisplayMode] =
@@ -292,6 +356,22 @@ export default function MoneyTransactionsPage() {
   // when they need to show only the most basic add-payment controls.
   // The `as any` keeps this page compatible while older components are updated.
   const easyModeProps = { easyMode, superEasyMode, displayMode } as any;
+
+  async function handleMoneyTransactionSubmit(
+    event: SyntheticEvent<HTMLFormElement>,
+  ) {
+    const currentForm = money.form as unknown as BudgetAwareForm;
+    const normalisedForm = normaliseBudgetFields(currentForm);
+
+    // Update the state used by the form and also synchronise the current object
+    // immediately. The immediate synchronisation is important because the hook's
+    // submit handler may read the existing form object before React completes the
+    // state update.
+    Object.assign(currentForm, normalisedForm);
+    money.setForm(normalisedForm as typeof money.form);
+
+    await money.handleSubmit(event);
+  }
 
   return (
     <main
@@ -576,6 +656,7 @@ export default function MoneyTransactionsPage() {
             editingTransaction={money.editingTransaction}
             displaySponsors={money.displaySponsors}
             yearlySponsorBreakdown={money.yearlySponsorBreakdown}
+            budgetItems={(money as any).budgetItems || []}
             displaySuppliers={
               (money as any).displaySuppliers ||
               (money as any).suppliers ||
@@ -583,7 +664,7 @@ export default function MoneyTransactionsPage() {
             }
             openNewSupplierForm={(money as any).openNewSupplierForm}
             saving={money.saving}
-            handleSubmit={money.handleSubmit}
+            handleSubmit={handleMoneyTransactionSubmit}
             cancelEditTransaction={money.cancelEditTransaction}
             fillTestTransaction={money.fillTestTransaction}
             openNewSponsorForm={money.openNewSponsorForm}

@@ -233,6 +233,16 @@ type ToastState = {
   message: string;
 } | null;
 
+
+type MoneyTransactionSavedEventDetail = {
+  transactionId?: string | null;
+  title?: string | null;
+  transactionDate?: string | null;
+  budgetKey?: string | null;
+  budgetLabel?: string | null;
+  budgetMode?: "manual" | "auto" | string | null;
+};
+
 type RefundType = "money_received_back" | "money_sent_back";
 type RefundStatus = "pending" | "completed" | "cancelled";
 
@@ -414,6 +424,42 @@ function cleanText(value?: unknown) {
 
 function lower(value?: unknown) {
   return cleanText(value).toLowerCase();
+}
+
+/**
+ * Item donations are non-cash records. Their amount is the estimated value of
+ * the donated item only, so they must never increase or reduce Burton Pride's
+ * available money, Money In, Money Out or Budget Planning spend.
+ */
+function isItemDonationTransaction(item: Transaction) {
+  return (
+    lower(item.payment_method) === "item donation" ||
+    lower(item.category) === "item donation"
+  );
+}
+
+/**
+ * Balance adjustments correct the Money Tracker's available balance only.
+ *
+ * They still count as Money In or Money Out so the available balance is
+ * corrected, but they must never be assigned or auto-matched to a Budget
+ * Planning row.
+ */
+function isBalanceAdjustmentTransaction(item: Transaction) {
+  return (
+    lower(item.payment_method) === "balance adjustment" ||
+    lower(item.category) === "balance adjustment"
+  );
+}
+
+function transactionTypeLabel(item: Transaction) {
+  if (isItemDonationTransaction(item)) return "Item Donation";
+  if (isBalanceAdjustmentTransaction(item)) {
+    return item.type === "income"
+      ? "Balance Adjustment In"
+      : "Balance Adjustment Out";
+  }
+  return item.type === "income" ? "Money In" : "Money Out";
 }
 
 function numberValue(value?: unknown) {
@@ -683,9 +729,26 @@ function getTransactionBudgetInfo(item: Transaction) {
   const isManualBudget = Boolean(budgetKey || budgetLabel);
   const isPersonal = isPersonalFundsTransaction(item);
   const isMoneyIn = item.type === "income";
-  const isItemDonation =
-    item.payment_method === "Item Donation" ||
-    cleanText(item.category).toLowerCase() === "item donation";
+  const isItemDonation = isItemDonationTransaction(item);
+  const isBalanceAdjustment = isBalanceAdjustmentTransaction(item);
+
+  /*
+   * Balance adjustments are deliberately excluded before the normal income
+   * and expense budget rules. This prevents an outgoing correction from
+   * falling through to title/notes auto-matching.
+   */
+  if (isBalanceAdjustment) {
+    return {
+      label: "None",
+      detail:
+        "Balance adjustment only — this changes the available Money Tracker balance and is not linked to Budget Planning.",
+      isManualBudget: false,
+      isAutoMatched: false,
+      isExcluded: true,
+      matchLabel: "None",
+      matchKey: "",
+    };
+  }
 
   if (isMoneyIn) {
     return {
@@ -1243,7 +1306,12 @@ function hasRepaymentProof(item: Transaction) {
 function hasMissingReceiptWarning(item: Transaction) {
   const receiptFiles = getNormalReceiptFiles(item);
 
-  return item.type === "expense" && receiptFiles.length === 0;
+  return (
+    item.type === "expense" &&
+    !isItemDonationTransaction(item) &&
+    !isBalanceAdjustmentTransaction(item) &&
+    receiptFiles.length === 0
+  );
 }
 
 function normaliseText(value?: string | null) {
@@ -1622,7 +1690,13 @@ function getRowSearchText(item: Transaction) {
     item.transaction_reference,
     item.title,
     item.description,
-    item.type === "income" ? "money in income" : "money out expense",
+    isItemDonationTransaction(item)
+      ? "item donation donated item non cash recorded value only"
+      : isBalanceAdjustmentTransaction(item)
+        ? "balance adjustment tracker correction available balance no budget"
+        : item.type === "income"
+          ? "money in income"
+          : "money out expense",
     item.payment_method,
     getDirectDebitSearchText(item),
     item.sponsor_name,
@@ -1910,7 +1984,7 @@ function exportSelectedTransactionsCsv(items: Transaction[]) {
     item.transaction_reference || "",
     item.transaction_date || "",
     item.title || "",
-    item.type || "",
+    transactionTypeLabel(item),
     money(item.amount_pence),
     getTransactionBudgetInfo(item).label,
     getTransactionBudgetInfo(item).detail,
@@ -2259,6 +2333,48 @@ export default function MoneyTransactionsTable({
   const [linkedStockOrdersError, setLinkedStockOrdersError] =
     useState("");
   const [manualRefreshing, setManualRefreshing] = useState(false);
+
+
+  /**
+   * Reload the table as soon as the transaction form reports a successful
+   * save. Manual budget choices are stored by the transaction API, and this
+   * refresh makes the selected budget appear in the table immediately.
+   *
+   * This is event-driven only: no polling, focus refresh or page reload.
+   */
+  useEffect(() => {
+    function handleTransactionSaved(event: Event) {
+      const detail = (event as CustomEvent<MoneyTransactionSavedEventDetail>)
+        .detail;
+
+      if (!onRefreshTransactions) {
+        return;
+      }
+
+      void Promise.resolve(onRefreshTransactions()).catch((refreshError) => {
+        console.error(
+          "Money Transactions table refresh after save failed",
+          refreshError,
+          detail,
+        );
+
+        setToast({
+          type: "error",
+          message:
+            "The transaction was saved, but the table could not reload automatically. Press Refresh table to try again.",
+        });
+      });
+    }
+
+    window.addEventListener("money-transaction-saved", handleTransactionSaved);
+
+    return () => {
+      window.removeEventListener(
+        "money-transaction-saved",
+        handleTransactionSaved,
+      );
+    };
+  }, [onRefreshTransactions]);
 
   const linkedDirectDebitRepaymentKeys = useMemo(
     () =>
@@ -3189,37 +3305,42 @@ export default function MoneyTransactionsTable({
         const amount = Number(item.amount_pence || 0);
         const personalFunds = isPersonalFundsTransaction(item);
         const fundingLinked = isSponsorshipTransaction(item);
+        const itemDonation = isItemDonationTransaction(item);
 
         /**
          * Use the same money rules as the main tracker:
          *
+         * - Item donations are non-cash records and never affect any money
+         *   total or the available balance.
          * - General income counts as available Money In.
          * - Restricted funding stays separate.
          * - Normal Burton Pride spending counts as Money Out.
          * - Personal-funds spending only counts after it is paid back.
          */
-        if (item.type === "income" && !fundingLinked) {
-          acc.availableIncome += amount;
-        }
+        if (!itemDonation) {
+          if (item.type === "income" && !fundingLinked) {
+            acc.availableIncome += amount;
+          }
 
-        if (item.type === "expense" && !fundingLinked && !personalFunds) {
-          acc.availableExpense += amount;
-        }
+          if (item.type === "expense" && !fundingLinked && !personalFunds) {
+            acc.availableExpense += amount;
+          }
 
-        if (
-          item.type === "expense" &&
-          personalFunds &&
-          item.personal_funds_repaid === true
-        ) {
-          acc.availableExpense += amount;
-        }
+          if (
+            item.type === "expense" &&
+            personalFunds &&
+            item.personal_funds_repaid === true
+          ) {
+            acc.availableExpense += amount;
+          }
 
-        if (item.type === "income") {
-          acc.rawIncome += amount;
-        }
+          if (item.type === "income") {
+            acc.rawIncome += amount;
+          }
 
-        if (item.type === "expense") {
-          acc.rawExpense += amount;
+          if (item.type === "expense") {
+            acc.rawExpense += amount;
+          }
         }
 
         if (!item.checked_at) {
@@ -3497,9 +3618,20 @@ export default function MoneyTransactionsTable({
           </label>
 
           <div
-            className={`shrink-0 rounded-xl px-3 py-2 text-sm font-black ring-1 ${item.type === "income" ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20" : "bg-red-500/15 text-red-100 ring-red-300/20"}`}
+            className={`shrink-0 rounded-xl px-3 py-2 text-sm font-black ring-1 ${
+              isItemDonationTransaction(item)
+                ? "bg-violet-500/15 text-violet-100 ring-violet-300/20"
+                : item.type === "income"
+                  ? "bg-emerald-500/15 text-emerald-100 ring-emerald-300/20"
+                  : "bg-red-500/15 text-red-100 ring-red-300/20"
+            }`}
           >
-            {money(item.amount_pence)}
+            <div>{money(item.amount_pence)}</div>
+            {isItemDonationTransaction(item) ? (
+              <div className="mt-1 text-[10px] font-bold text-violet-100/70">
+                Recorded value only
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -3531,7 +3663,7 @@ export default function MoneyTransactionsTable({
           <div>
             Type:{" "}
             <strong className="text-white">
-              {item.type === "income" ? "Money In" : "Money Out"}
+              {transactionTypeLabel(item)}
             </strong>
           </div>
           <div>
@@ -4735,7 +4867,8 @@ export default function MoneyTransactionsTable({
           <p className="mt-3 max-w-3xl text-sm leading-6 text-sky-100/75">
             This is the money currently available in the selected view. It
             updates when money comes in, payments go out or completed refunds
-            are added.
+            are added. Item donations are records only and do not change this
+            balance.
           </p>
         </div>
 
@@ -5504,7 +5637,7 @@ export default function MoneyTransactionsTable({
                           column="type"
                           className="whitespace-nowrap p-3 align-top"
                         >
-                          {item.type === "income" ? "Money In" : "Money Out"}
+                          {transactionTypeLabel(item)}
                         </ColumnCell>
 
                         <ColumnCell
@@ -5524,11 +5657,18 @@ export default function MoneyTransactionsTable({
                               Taken from Burton Pride balance
                             </div>
                           )}
-                          {isPersonal && !isPersonalPaidBack && (
-                            <div className="mt-1 text-xs font-semibold text-orange-300">
-                              Not taken from Burton Pride balance yet
+                          {isItemDonationTransaction(item) && (
+                            <div className="mt-1 text-xs font-semibold text-violet-300">
+                              Recorded value only — no money added or taken away
                             </div>
                           )}
+                          {!isItemDonationTransaction(item) &&
+                            isPersonal &&
+                            !isPersonalPaidBack && (
+                              <div className="mt-1 text-xs font-semibold text-orange-300">
+                                Not taken from Burton Pride balance yet
+                              </div>
+                            )}
                         </ColumnCell>
 
                         <ColumnCell
@@ -6136,7 +6276,7 @@ export default function MoneyTransactionsTable({
               <div className="rounded-2xl bg-white/5 p-4">
                 <p className="text-xs font-black text-white/40">Type</p>
                 <p className="mt-1 font-bold text-white">
-                  {detailsItem.type === "income" ? "Money In" : "Money Out"}
+                  {transactionTypeLabel(detailsItem)}
                 </p>
               </div>
               <div className="rounded-2xl bg-white/5 p-4">

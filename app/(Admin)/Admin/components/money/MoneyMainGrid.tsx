@@ -50,6 +50,22 @@ type SupplierContact = {
   is_active?: boolean | null;
 };
 
+/**
+ * Budget Planning row passed into MoneyTransactionForm.
+ *
+ * Passing these rows through MoneyMainGrid allows the form to save the exact
+ * manually selected category key and label instead of falling back to the
+ * table's automatic title/notes matching.
+ */
+type BudgetItem = {
+  id?: string | null;
+  year?: string;
+  category_key: string;
+  category_label: string;
+  planned_amount_pence?: number;
+  notes?: string | null;
+};
+
 type MoneyMainGridProps = {
   form: FormState;
   setForm: Dispatch<SetStateAction<FormState>>;
@@ -66,6 +82,18 @@ type MoneyMainGridProps = {
   displaySponsors: Sponsor[];
   yearlySponsorBreakdown: YearlySponsorBreakdown[];
   openNewSponsorForm: () => void;
+
+  /**
+   * Existing Budget Planning rows for the selected year.
+   *
+   * These must come from the same source used by the Budget Planning page.
+   * The selected row is written into the transaction form as:
+   * - budgetCategory / budget_category
+   * - budgetCategoryKey / budget_category_key
+   * - budgetCategoryLabel / budget_category_label
+   * - costArea / cost_area
+   */
+  budgetItems?: BudgetItem[];
 
   displaySuppliers?: SupplierContact[];
   openNewSupplierForm?: () => void;
@@ -161,6 +189,8 @@ export default function MoneyMainGrid({
   yearlySponsorBreakdown,
   openNewSponsorForm,
 
+  budgetItems = [],
+
   displaySuppliers = [],
   openNewSupplierForm,
 
@@ -223,6 +253,7 @@ export default function MoneyMainGrid({
         saving={saving}
         displaySponsors={displaySponsors}
         yearlySponsorBreakdown={yearlySponsorBreakdown}
+        budgetItems={budgetItems}
         displaySuppliers={displaySuppliers}
         openNewSupplierForm={openNewSupplierForm}
         handleSubmit={handleSubmit}

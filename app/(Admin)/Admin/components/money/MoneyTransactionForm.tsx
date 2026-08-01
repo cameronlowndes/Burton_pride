@@ -233,6 +233,7 @@ function supplierContactLine(supplier?: SupplierContact | null) {
 }
 
 type DirectDebitAccountSource = "organisation" | "personal";
+type BudgetSelectionMode = "auto" | "saved" | "manual";
 
 type DirectDebitFormFields = FormState & {
   directDebitAccountSource?: DirectDebitAccountSource | null;
@@ -425,6 +426,7 @@ const paymentMethods = [
   "Card Machine",
   "Personal Funds",
   "Item Donation",
+  "Balance Adjustment",
   "Other Types",
   "Ticket Sales",
   "Refund Received",
@@ -617,6 +619,7 @@ export default function MoneyTransactionForm({
   openNewSponsorForm,
 }: MoneyTransactionFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
+  const transactionDateInputRef = useRef<HTMLInputElement | null>(null);
   const saveAnywayRef = useRef(false);
   const saveWithoutReceiptRef = useRef(false);
   const saveOverFundingLimitRef = useRef(false);
@@ -636,6 +639,8 @@ export default function MoneyTransactionForm({
   const [showFullAccountingDetails, setShowFullAccountingDetails] =
     useState(false);
   const [budgetTextDraft, setBudgetTextDraft] = useState("");
+  const [budgetSelectionMode, setBudgetSelectionMode] =
+    useState<BudgetSelectionMode>("auto");
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
@@ -656,6 +661,8 @@ export default function MoneyTransactionForm({
   const hasLinkedFunding = Boolean(form.sponsorId);
   const isItemDonation =
     !hasLinkedFunding && form.paymentMethod === "Item Donation";
+  const isBalanceAdjustment =
+    !hasLinkedFunding && form.paymentMethod === "Balance Adjustment";
   const budgetOptions =
     budgetItems.length > 0 ? budgetItems : defaultBudgetItems;
   const selectedBudgetCategory = getBudgetFormValue(form);
@@ -720,10 +727,16 @@ export default function MoneyTransactionForm({
   );
 
   const canManuallyLinkBudget =
-    form.type === "expense" && !isItemDonation && !isPersonalFundsPayment;
+    form.type === "expense" &&
+    !isItemDonation &&
+    !isBalanceAdjustment &&
+    !isPersonalFundsPayment;
 
   useEffect(() => {
-    if (form.type !== "income") {
+    const mustNotUseBudget =
+      form.type === "income" || isItemDonation || isBalanceAdjustment;
+
+    if (!mustNotUseBudget) {
       return;
     }
 
@@ -732,7 +745,14 @@ export default function MoneyTransactionForm({
     }
 
     setForm((prev) => clearBudgetOnForm(prev));
-  }, [form.type, selectedBudgetCategory, selectedBudgetLabel, setForm]);
+  }, [
+    form.type,
+    isItemDonation,
+    isBalanceAdjustment,
+    selectedBudgetCategory,
+    selectedBudgetLabel,
+    setForm,
+  ]);
 
   useEffect(() => {
     if (!isDirectDebit || editingTransaction) {
@@ -802,8 +822,21 @@ export default function MoneyTransactionForm({
   }, [lockLoanRepaymentAmount, plannedLoanRepaymentAmount, setForm]);
 
   useEffect(() => {
-    setBudgetTextDraft(selectedBudgetLabel || "");
-  }, [selectedBudgetLabel]);
+    if (!selectedBudgetKey) {
+      setBudgetSelectionMode("auto");
+      setBudgetTextDraft("");
+      return;
+    }
+
+    if (selectedBudgetOption) {
+      setBudgetSelectionMode("saved");
+      setBudgetTextDraft(selectedBudgetOption.category_label);
+      return;
+    }
+
+    setBudgetSelectionMode("manual");
+    setBudgetTextDraft(selectedBudgetLabel || selectedBudgetKey);
+  }, [selectedBudgetKey, selectedBudgetLabel, selectedBudgetOption]);
 
   useEffect(() => {
     if (!easyMode && (editingTransaction || hasAdvancedValues)) {
@@ -815,6 +848,7 @@ export default function MoneyTransactionForm({
     const selectedBudget = findBudgetByKeyOrLabel(budgetOptions, selectedKey);
 
     if (!selectedKey) {
+      setBudgetSelectionMode("auto");
       setBudgetTextDraft("");
       setForm((prev) => clearBudgetOnForm(prev));
       return;
@@ -823,6 +857,7 @@ export default function MoneyTransactionForm({
     const label = selectedBudget?.category_label || selectedKey;
     const key = selectedBudget?.category_key || makeBudgetKeyFromLabel(label);
 
+    setBudgetSelectionMode("saved");
     setBudgetTextDraft(label);
     setForm((prev) => setBudgetOnForm(prev, key, label));
   }
@@ -833,8 +868,11 @@ export default function MoneyTransactionForm({
     const label = matchedBudget?.category_label || cleanValue;
     const key = matchedBudget?.category_key || makeBudgetKeyFromLabel(label);
 
+    setBudgetSelectionMode("manual");
     setBudgetTextDraft(value);
 
+    // Keep the transaction state updated immediately so the parent submit
+    // handler sends the manual budget key and label to the database/table.
     setForm((prev) => {
       if (!cleanValue) {
         return clearBudgetOnForm(prev);
@@ -842,6 +880,12 @@ export default function MoneyTransactionForm({
 
       return setBudgetOnForm(prev, key, label);
     });
+  }
+
+  function useAutoBudgetMatching() {
+    setBudgetSelectionMode("auto");
+    setBudgetTextDraft("");
+    setForm((prev) => clearBudgetOnForm(prev));
   }
 
   const selectedFundingLabel = fundingTypeLabel(selectedFundingType);
@@ -872,6 +916,7 @@ export default function MoneyTransactionForm({
   const needsReceiptWarning =
     form.type === "expense" &&
     !isItemDonation &&
+    !isBalanceAdjustment &&
     invoiceFiles.length === 0 &&
     !hasExistingReceipt;
 
@@ -1139,6 +1184,23 @@ export default function MoneyTransactionForm({
     try {
       await handleSubmit(event);
       await createSupplierTransactionLog(supplierSnapshot);
+
+      // Tell the transactions table to reload immediately after a successful
+      // save. This is especially important for manually selected budgets so
+      // the chosen Budget Planning row appears in the table without requiring
+      // the admin to press Refresh table.
+      window.dispatchEvent(
+        new CustomEvent("money-transaction-saved", {
+          detail: {
+            transactionId: editingTransaction?.id || null,
+            title: form.title,
+            transactionDate: form.transactionDate,
+            budgetKey: selectedBudgetKey || null,
+            budgetLabel: selectedBudgetLabel || null,
+            budgetMode: selectedBudgetKey || selectedBudgetLabel ? "manual" : "auto",
+          },
+        }),
+      );
     } catch (error) {
       setDuplicateError(errorMessage(error, "The transaction could not be saved."));
     } finally {
@@ -1210,90 +1272,102 @@ export default function MoneyTransactionForm({
 
     setForm((prev) => {
       const nextIsItemDonation = method === "Item Donation";
+      const nextIsBalanceAdjustment = method === "Balance Adjustment";
       const nextIsPersonalFunds = method === "Personal Funds";
       const nextIsDirectDebit = method === "Direct Debit";
+      const clearsLinkedAccounting =
+        nextIsItemDonation ||
+        nextIsBalanceAdjustment ||
+        nextIsPersonalFunds;
+
+      const previousCategory = String(prev.category || "").trim();
+      const nextCategory = nextIsItemDonation
+        ? "Item Donation"
+        : nextIsBalanceAdjustment
+          ? "Balance Adjustment"
+          : previousCategory === "Item Donation" ||
+              previousCategory === "Balance Adjustment"
+            ? ""
+            : prev.category;
 
       const nextForm = {
         ...prev,
         paymentMethod: method,
-        sponsorId:
-          nextIsItemDonation || nextIsPersonalFunds ? "" : prev.sponsorId,
-        sponsorName:
-          nextIsItemDonation || nextIsPersonalFunds ? "" : prev.sponsorName,
-        supplierId:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplierId,
-        supplier_id:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplier_id,
-        supplierName:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplierName,
-        supplier_name:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplier_name,
-        supplierCategory:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplierCategory,
-        supplier_category:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).supplier_category,
+        sponsorId: clearsLinkedAccounting ? "" : prev.sponsorId,
+        sponsorName: clearsLinkedAccounting ? "" : prev.sponsorName,
+        supplierId: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplierId,
+        supplier_id: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplier_id,
+        supplierName: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplierName,
+        supplier_name: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplier_name,
+        supplierCategory: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplierCategory,
+        supplier_category: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).supplier_category,
+
+        // Item donations are non-cash records. Balance adjustments are genuine
+        // corrections to available money and keep the direction selected by
+        // the admin: Money In increases the balance and Money Out reduces it.
         type: nextIsItemDonation
           ? "income"
           : nextIsPersonalFunds
             ? "expense"
             : prev.type,
-        category: nextIsItemDonation
-          ? "Item Donation"
-          : prev.category === "Item Donation"
-            ? ""
-            : prev.category,
+        category: nextCategory,
 
-        // Personal Funds are not Burton Pride spending until paid back,
-        // so do not send them to Budget Planning.
-        budgetCategory:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budgetCategory,
-        budgetCategoryKey:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budgetCategoryKey,
-        budget_category:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budget_category,
-        budget_category_key:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budget_category_key,
-        budgetCategoryLabel:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budgetCategoryLabel,
-        budget_category_label:
-          nextIsItemDonation || nextIsPersonalFunds
-            ? ""
-            : (prev as ExtendedFormFields).budget_category_label,
+        // Item donations, personal funds awaiting repayment and balance
+        // corrections must never be attached to Budget Planning.
+        budgetCategory: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budgetCategory,
+        budgetCategoryKey: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budgetCategoryKey,
+        budget_category: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budget_category,
+        budget_category_key: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budget_category_key,
+        budgetCategoryLabel: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budgetCategoryLabel,
+        budget_category_label: clearsLinkedAccounting
+          ? ""
+          : (prev as ExtendedFormFields).budget_category_label,
+        costArea: clearsLinkedAccounting
+          ? ""
+          : (prev as BudgetFormFields).costArea,
+        cost_area: clearsLinkedAccounting
+          ? ""
+          : (prev as BudgetFormFields).cost_area,
 
         isPersonalFunds:
-          nextIsItemDonation || isLoanFunding
+          nextIsItemDonation || nextIsBalanceAdjustment || isLoanFunding
             ? false
             : nextIsPersonalFunds
               ? true
               : prev.isPersonalFunds,
         personalFundsName:
-          nextIsItemDonation || isLoanFunding ? "" : prev.personalFundsName,
-        sponsorshipNote: nextIsItemDonation ? "" : prev.sponsorshipNote,
+          nextIsItemDonation || nextIsBalanceAdjustment || isLoanFunding
+            ? ""
+            : prev.personalFundsName,
+        sponsorshipNote:
+          nextIsItemDonation || nextIsBalanceAdjustment
+            ? ""
+            : prev.sponsorshipNote,
         isRepeating: nextIsDirectDebit
           ? true
-          : nextIsItemDonation || nextIsPersonalFunds
+          : clearsLinkedAccounting
             ? false
             : prev.isRepeating,
         repeatFrequency: nextIsDirectDebit
@@ -1457,6 +1531,72 @@ export default function MoneyTransactionForm({
                 not count as Burton Pride money in, money out, or cash balance.
               </p>
             </div>
+          ) : isBalanceAdjustment ? (
+            <div className="rounded-xl border border-cyan-300/25 bg-cyan-500/10 p-3 text-sm text-cyan-100">
+              <p className="font-bold">Transaction type</p>
+
+              <p className="mt-1 text-lg font-black text-white">
+                Balance Adjustment
+              </p>
+
+              <p className="mt-1 text-xs leading-5 text-cyan-100/75">
+                Use this only to correct the Money Tracker balance. Choose
+                Money In to increase the available balance or Money Out to
+                reduce it. This correction will not be sent to Budget Planning.
+              </p>
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) =>
+                      clearBudgetOnForm({
+                        ...prev,
+                        type: "income",
+                        category: "Balance Adjustment",
+                        isPersonalFunds: false,
+                        personalFundsName: "",
+                      } as FormState),
+                    )
+                  }
+                  className={`rounded-xl px-3 py-3 text-left text-sm font-black ring-1 transition ${
+                    form.type === "income"
+                      ? "bg-emerald-500 text-black ring-emerald-200/60"
+                      : "bg-black/20 text-emerald-100 ring-emerald-300/20 hover:bg-emerald-500/15"
+                  }`}
+                >
+                  Increase available balance
+                  <span className="mt-1 block text-xs font-semibold opacity-75">
+                    Save this correction as Money In
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) =>
+                      clearBudgetOnForm({
+                        ...prev,
+                        type: "expense",
+                        category: "Balance Adjustment",
+                        isPersonalFunds: false,
+                        personalFundsName: "",
+                      } as FormState),
+                    )
+                  }
+                  className={`rounded-xl px-3 py-3 text-left text-sm font-black ring-1 transition ${
+                    form.type === "expense"
+                      ? "bg-red-500 text-white ring-red-200/60"
+                      : "bg-black/20 text-red-100 ring-red-300/20 hover:bg-red-500/15"
+                  }`}
+                >
+                  Reduce available balance
+                  <span className="mt-1 block text-xs font-semibold opacity-75">
+                    Save this correction as Money Out
+                  </span>
+                </button>
+              </div>
+            </div>
           ) : easyMode ? (
             <div>
               <p className="mb-2 text-sm font-black text-white">
@@ -1576,7 +1716,9 @@ export default function MoneyTransactionForm({
               placeholder={
                 isItemDonation
                   ? "Estimated item value"
-                  : isLoanFunding
+                  : isBalanceAdjustment
+                    ? "Balance correction amount"
+                    : isLoanFunding
                     ? isLoanRepayment
                       ? plannedLoanRepaymentAmount
                         ? `Locked repayment amount: £${plannedLoanRepaymentAmount}`
@@ -1619,6 +1761,14 @@ export default function MoneyTransactionForm({
                 balance.
               </p>
             )}
+
+            {isBalanceAdjustment && (
+              <p className="mt-2 rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-xs leading-5 text-cyan-100">
+                This amount will {form.type === "income" ? "increase" : "reduce"} the
+                available Money Tracker balance. It is an accounting correction
+                only and will not be included in any Budget Planning row.
+              </p>
+            )}
           </div>
 
           {!easyMode &&
@@ -1637,6 +1787,25 @@ export default function MoneyTransactionForm({
                     This will not be added to money in, money out, current
                     balance, year-end balance, monthly income, or monthly
                     spending.
+                  </p>
+                </div>
+              </div>
+            ) : isBalanceAdjustment ? (
+              <div className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 p-3 text-sm text-cyan-100">
+                <p className="font-black text-white">
+                  Money Tracker balance correction
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-cyan-100/75">
+                  This entry changes the available balance using the selected
+                  Money In or Money Out direction. It is kept as a clear audit
+                  record and is excluded from Budget Planning.
+                </p>
+
+                <div className="mt-3 rounded-xl bg-black/20 px-3 py-2 text-xs leading-5 text-cyan-50">
+                  <p>
+                    No budget, supplier, sponsor, personal-funds record, or
+                    recurring payment will be attached.
                   </p>
                 </div>
               </div>
@@ -2054,7 +2223,9 @@ export default function MoneyTransactionForm({
                   className={`mt-3 rounded-lg px-3 py-2 text-xs ${
                     isItemDonation
                       ? "bg-emerald-500/10 text-emerald-100 ring-1 ring-emerald-300/20"
-                      : "bg-white/10 text-white/70"
+                      : isBalanceAdjustment
+                        ? "bg-cyan-500/10 text-cyan-100 ring-1 ring-cyan-300/20"
+                        : "bg-white/10 text-white/70"
                   }`}
                 >
                   Selected:{" "}
@@ -2065,6 +2236,12 @@ export default function MoneyTransactionForm({
                     <span className="mt-1 block text-emerald-100/75">
                       Record the item value only. This is not cash money in or
                       money out.
+                    </span>
+                  )}
+                  {isBalanceAdjustment && (
+                    <span className="mt-1 block text-cyan-100/75">
+                      This adjusts the available balance only. It is not linked
+                      to a budget, supplier, sponsor, or funding record.
                     </span>
                   )}
                 </p>
@@ -2414,88 +2591,148 @@ export default function MoneyTransactionForm({
               </label>
 
               <p className="mb-3 text-xs leading-5 text-pink-100/70">
-                Choose the Budget Planning row for this transaction, or type a
-                budget name manually. This is saved with the transaction so
-                Budget Planning knows exactly where to place it.
+                Pick one of the three options below. A saved or manually typed
+                budget is stored on the transaction and sent to the Money
+                Tracker table exactly as selected.
               </p>
 
-              <select
-                value={
-                  selectedBudgetOption
-                    ? selectedBudgetOption.category_key
-                    : selectedBudgetKey
-                }
-                onChange={(event) => chooseBudgetCategory(event.target.value)}
-                className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-pink-300/25 focus:ring-pink-300/60"
-              >
-                <option className="bg-[#11111f] text-white" value="">
-                  Auto match from title / notes
-                </option>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={useAutoBudgetMatching}
+                  className={`rounded-xl px-3 py-3 text-left text-xs font-black ring-1 transition ${
+                    budgetSelectionMode === "auto"
+                      ? "bg-pink-500 text-white ring-pink-200/60"
+                      : "bg-black/25 text-pink-100 ring-pink-300/20 hover:bg-pink-500/15"
+                  }`}
+                >
+                  Auto match
+                  <span className="mt-1 block font-semibold opacity-70">
+                    Match from title and notes
+                  </span>
+                </button>
 
-                {budgetOptions.map((item) => (
-                  <option
-                    key={item.category_key}
-                    value={item.category_key}
-                    className="bg-[#11111f] text-white"
-                  >
-                    {item.category_label}
-                  </option>
-                ))}
-              </select>
+                <button
+                  type="button"
+                  onClick={() => setBudgetSelectionMode("saved")}
+                  className={`rounded-xl px-3 py-3 text-left text-xs font-black ring-1 transition ${
+                    budgetSelectionMode === "saved"
+                      ? "bg-pink-500 text-white ring-pink-200/60"
+                      : "bg-black/25 text-pink-100 ring-pink-300/20 hover:bg-pink-500/15"
+                  }`}
+                >
+                  Choose saved budget
+                  <span className="mt-1 block font-semibold opacity-70">
+                    Pick a Budget Planning row
+                  </span>
+                </button>
 
-              <div className="mt-3">
-                <label className="mb-1 block text-xs font-black text-pink-100/80">
-                  Or type the budget name manually
-                </label>
-
-                <input
-                  value={budgetTextDraft}
-                  onChange={(event) => typeBudgetCategory(event.target.value)}
-                  placeholder="Example: Venue, Insurance, Printing, Security..."
-                  className="w-full rounded-xl bg-black/25 p-3 text-sm font-bold text-white outline-none ring-1 ring-pink-300/25 placeholder:text-white/35 focus:ring-pink-300/60"
-                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBudgetSelectionMode("manual");
+                    if (selectedBudgetOption) {
+                      setBudgetTextDraft("");
+                      setForm((prev) => clearBudgetOnForm(prev));
+                    }
+                  }}
+                  className={`rounded-xl px-3 py-3 text-left text-xs font-black ring-1 transition ${
+                    budgetSelectionMode === "manual"
+                      ? "bg-pink-500 text-white ring-pink-200/60"
+                      : "bg-black/25 text-pink-100 ring-pink-300/20 hover:bg-pink-500/15"
+                  }`}
+                >
+                  Type manually
+                  <span className="mt-1 block font-semibold opacity-70">
+                    Create your own budget name
+                  </span>
+                </button>
               </div>
 
-              {selectedBudgetKey ? (
+              {budgetSelectionMode === "saved" && (
+                <div className="mt-3">
+                  <label className="mb-1 block text-xs font-black text-pink-100/80">
+                    Choose the Budget Planning row
+                  </label>
+
+                  <select
+                    value={selectedBudgetOption?.category_key || ""}
+                    onChange={(event) => chooseBudgetCategory(event.target.value)}
+                    className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-pink-300/25 focus:ring-pink-300/60"
+                  >
+                    <option className="bg-[#11111f] text-white" value="">
+                      Choose a budget...
+                    </option>
+
+                    {budgetOptions.map((item) => (
+                      <option
+                        key={item.category_key}
+                        value={item.category_key}
+                        className="bg-[#11111f] text-white"
+                      >
+                        {item.category_label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {budgetSelectionMode === "manual" && (
+                <div className="mt-3">
+                  <label className="mb-1 block text-xs font-black text-pink-100/80">
+                    Type the budget name manually
+                  </label>
+
+                  <input
+                    value={budgetTextDraft}
+                    onChange={(event) => typeBudgetCategory(event.target.value)}
+                    placeholder="Example: Venue, Insurance, Printing, Security..."
+                    className="w-full rounded-xl bg-black/25 p-3 text-sm font-bold text-white outline-none ring-1 ring-pink-300/25 placeholder:text-white/35 focus:ring-pink-300/60"
+                  />
+
+                  <p className="mt-2 text-xs leading-5 text-pink-100/70">
+                    The manual name is linked immediately while you type and
+                    will be sent to the transaction table when you save.
+                  </p>
+                </div>
+              )}
+
+              {budgetSelectionMode === "auto" ? (
+                <p className="mt-3 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/70">
+                  Auto match is on. No fixed budget is stored. Budget Planning
+                  will match from the title, notes, category and payment details.
+                </p>
+              ) : selectedBudgetKey ? (
                 <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100">
-                  <p>
-                    This will be saved in Budget Planning under:{" "}
+                  <p className="font-black text-white">Budget link ready</p>
+                  <p className="mt-1">
+                    This transaction will be sent to the table under: {" "}
                     <strong className="text-white">
                       {selectedBudgetLabel || selectedBudgetKey}
                     </strong>
                   </p>
-
                   <p className="mt-1 text-emerald-100/75">
-                    Saved key:{" "}
+                    Saved key: {" "}
                     <span className="font-mono text-white">
                       {selectedBudgetKey}
                     </span>
                   </p>
                 </div>
               ) : (
-                <p className="mt-3 rounded-xl bg-black/25 px-3 py-2 text-xs text-pink-100/70">
-                  Auto match is on. Budget Planning will try to match this from
-                  the title, notes, category, and payment information.
+                <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
+                  Choose a saved budget or type a manual budget name before
+                  saving this transaction.
                 </p>
               )}
 
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => chooseBudgetCategory("")}
-                  disabled={!selectedBudgetKey && !budgetTextDraft}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Clear budget link
-                </button>
-              </div>
-
-              {form.type === "income" && (
-                <p className="mt-2 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
-                  This is currently set as Money In. Budget Planning actual
-                  spending is normally counted from Money Out transactions only.
-                </p>
-              )}
+              <button
+                type="button"
+                onClick={useAutoBudgetMatching}
+                disabled={budgetSelectionMode === "auto" && !selectedBudgetKey}
+                className="mt-3 rounded-xl bg-white/10 px-4 py-2 text-xs font-black text-white ring-1 ring-white/10 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Clear budget link and use auto match
+              </button>
             </div>
           )}
 
@@ -2755,22 +2992,48 @@ export default function MoneyTransactionForm({
             </label>
 
             <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                type="date"
-                value={form.transactionDate}
-                onChange={(event) => {
-                  setDuplicateWarning(null);
-                  setDuplicateError(null);
+              <div className="relative w-full">
+                <input
+                  ref={transactionDateInputRef}
+                  type="date"
+                  value={form.transactionDate}
+                  onChange={(event) => {
+                    setDuplicateWarning(null);
+                    setDuplicateError(null);
 
-                  setForm((prev) => ({
-                    ...prev,
-                    transactionDate: event.target.value,
-                  }));
-                }}
-                className={`w-full rounded-xl bg-black/20 p-3 outline-none ring-1 ring-white/10 focus:ring-pink-300/40 ${
-                  easyMode ? "text-base font-bold sm:p-4" : ""
-                }`}
-              />
+                    setForm((prev) => ({
+                      ...prev,
+                      transactionDate: event.target.value,
+                    }));
+                  }}
+                  style={{ colorScheme: "dark" }}
+                  className={`w-full rounded-xl bg-black/20 p-3 pr-16 text-white outline-none ring-1 ring-white/10 focus:ring-pink-300/40 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-y-0 [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-14 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0 ${
+                    easyMode ? "text-base font-bold sm:p-4 sm:pr-16" : ""
+                  }`}
+                />
+
+                <button
+                  type="button"
+                  aria-label="Open calendar"
+                  title="Open calendar"
+                  onClick={() => {
+                    const input = transactionDateInputRef.current;
+
+                    if (!input) return;
+
+                    input.focus();
+
+                    if (typeof input.showPicker === "function") {
+                      input.showPicker();
+                    } else {
+                      input.click();
+                    }
+                  }}
+                  className="absolute right-2 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg bg-pink-500 text-white shadow-lg ring-1 ring-pink-200/40 transition hover:bg-pink-400 focus:outline-none focus:ring-2 focus:ring-pink-200"
+                >
+                  <CalendarDays className="h-5 w-5" strokeWidth={2.5} />
+                </button>
+              </div>
 
               <button
                 type="button"
