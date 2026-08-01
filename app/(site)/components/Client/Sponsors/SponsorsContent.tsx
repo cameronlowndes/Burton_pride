@@ -106,7 +106,7 @@ export default function SponsorsContent() {
         initial={{ opacity: 0, y: 28 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7 }}
-        className="min-h-screen overflow-hidden bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-3 pb-12 pt-24 text-white sm:px-6 sm:pb-16 sm:pt-28 md:px-10 md:pt-32"
+        className="min-h-screen overflow-hidden bg-gradient-to-r  px-3 pb-12 pt-24 text-white sm:px-6 sm:pb-16 sm:pt-28 md:px-10 md:pt-32"
       >
         <div className="mx-auto max-w-6xl">
           <div className="text-center">

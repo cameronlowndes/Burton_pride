@@ -1,7 +1,7 @@
 import Head from 'next/head';
-import ValuesHero from '../../components/Client/ValuesHero';
-import ValuesGrid from '../../components/Client/ValuesGrid';
-import ValuesFooter from '../../components/Client/ValuesFooter';
+import ValuesHero from '../../components/Client/CoreValuesClient';
+
+
 
 export const metadata = {
   title: 'Burton Pride - Our Core Values',
@@ -24,10 +24,9 @@ export default function Values() {
         />
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-gray-900 flex flex-col items-center p-8 sm:p-16">
+      <div className="min-h-screen  text-gray-900 flex flex-col items-center p-8 sm:p-16">
         <ValuesHero />
-        <ValuesGrid />
-        <ValuesFooter />
+      
       </div>
     </>
   );

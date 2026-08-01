@@ -2,13 +2,13 @@
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import Countdown from '../Countdown';
+
 import EventCard from '../Card/EventCard';
 
 export default function EventsClient() {
   return (
     <motion.div
-      className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24"
+      className="min-h-screen text-white flex flex-col items-center p-8 sm:p-16 pb-24"
       initial="hidden"
       animate="visible"
       variants={{
@@ -70,7 +70,7 @@ export default function EventsClient() {
         transition={{ delay: 0.8 }}
         className="w-full"
       >
-        <Countdown />
+       
       </motion.div>
 
       {/* Events Section */}

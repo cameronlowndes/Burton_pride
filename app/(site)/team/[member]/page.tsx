@@ -86,7 +86,7 @@ export default function TeamMemberPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
+      <div className="min-h-screen bg-gradient-to-r  px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
         <div className="mx-auto max-w-5xl rounded-[32px] border border-white/20 bg-white/10 px-8 py-12 text-center shadow-2xl backdrop-blur-xl">
           <p className="text-2xl font-bold">Loading team member...</p>
         </div>
@@ -96,7 +96,7 @@ export default function TeamMemberPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
+      <div className="min-h-screen bg-gradient-to-r px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
         <div className="mx-auto max-w-5xl rounded-[32px] border border-red-300/30 bg-red-500/20 px-8 py-12 text-center shadow-2xl backdrop-blur-xl">
           <h1 className="text-3xl font-bold">Something went wrong</h1>
           <p className="mt-3 text-white/90">{error}</p>
@@ -113,7 +113,7 @@ export default function TeamMemberPage() {
 
   if (!member) {
     return (
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
+      <div className="min-h-screen bg-gradient-to-r  px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
         <div className="mx-auto max-w-5xl rounded-[32px] border border-white/20 bg-white/10 px-8 py-12 text-center shadow-2xl backdrop-blur-xl">
           <h1 className="text-3xl font-bold">Member not found</h1>
           <p className="mt-3 text-white/80">
@@ -131,7 +131,7 @@ export default function TeamMemberPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
+    <div className="min-h-screen bg-gradient-to-r  px-6 pb-24 pt-[calc(env(safe-area-inset-top)+96px)] text-white">
       <div className="mx-auto max-w-5xl">
         <div className="overflow-hidden rounded-[32px] border border-white/20 bg-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
           <div className="bg-gradient-to-r from-white/10 to-white/5 px-6 py-10 sm:px-10 lg:px-14">

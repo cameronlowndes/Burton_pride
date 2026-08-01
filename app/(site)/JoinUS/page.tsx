@@ -16,7 +16,7 @@ export default function JoinUs() {
       />
 
       {/* Page Container */}
-      <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex flex-col items-center p-8 sm:p-16 pb-24">
+      <div className="min-h-screen bg-gradient-to-r  text-white flex flex-col items-center p-8 sm:p-16 pb-24">
 
         {/* Client Component */}
         <JoinUsContent />

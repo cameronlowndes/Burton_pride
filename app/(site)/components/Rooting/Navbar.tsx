@@ -124,12 +124,12 @@ export default function Navbar() {
       item.href.startsWith("http://") || item.href.startsWith("https://");
 
     const commonClass = mobile
-      ? `block w-full rounded-2xl px-5 py-3 text-center text-lg font-bold text-white transition hover:bg-white/15 ${
+      ? `block w-full rounded-2xl px-5 py-3 text-center text-lg font-bold text-white transition hover:bg-white/15 dark:hover:bg-white/10 ${
           isActive(item.href) ? "bg-white/20" : ""
         }`
       : isActive(item.href)
       ? rainbowClass
-      : "hover:underline";
+      : "rounded-lg px-1 py-1 transition-colors hover:bg-white/15 hover:underline dark:hover:bg-white/10";
 
     return (
       <Link
@@ -150,7 +150,19 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="fixed left-0 right-0 top-0 z-[9999] w-full bg-gradient-to-r from-red-500 via-orange-400 via-yellow-300 via-green-500 via-blue-500 to-purple-600 px-4 py-3 text-white shadow-md backdrop-blur-md sm:px-6 md:px-8">
+    <nav className="
+      fixed left-0 right-0 top-0 z-[9999] w-full
+      bg-gradient-to-r
+      from-red-500 via-orange-400 via-yellow-300
+      via-green-500 via-blue-500 to-purple-600
+      px-4 py-3 text-white shadow-md backdrop-blur-md
+      transition-colors duration-300
+      sm:px-6 md:px-8
+
+      dark:border-b dark:border-white/10
+      dark:bg-black dark:bg-none
+      dark:shadow-[0_8px_30px_rgba(0,0,0,0.65)]
+    ">
       <div className="flex w-full items-center justify-between gap-3">
         <div className="min-w-0 flex-1 leading-tight">
           <Link
@@ -188,7 +200,7 @@ export default function Navbar() {
                       type="button"
                       onClick={() => toggleDropdown(item.id)}
                       className={`flex cursor-pointer items-center gap-1 ${
-                        active ? rainbowClass : "hover:underline"
+                        active ? rainbowClass : "rounded-lg px-1 py-1 transition-colors hover:bg-white/15 hover:underline dark:hover:bg-white/10"
                       }`}
                     >
                       {item.label}
@@ -201,7 +213,16 @@ export default function Navbar() {
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -10 }}
-                          className="absolute left-0 z-[9999] mt-2 w-56 rounded-md border border-gray-200 bg-white text-black shadow-lg"
+                          className="
+                          absolute left-0 z-[9999] mt-2 w-56 overflow-hidden
+                          rounded-xl border border-gray-200 bg-white text-black
+                          shadow-lg transition-colors duration-300
+
+                          dark:border-white/10
+                          dark:bg-zinc-950
+                          dark:text-white
+                          dark:shadow-[0_18px_45px_rgba(0,0,0,0.7)]
+                        "
                         >
                           {(item.children || []).map((child) => {
                             if (!child.href) return null;
@@ -224,7 +245,7 @@ export default function Navbar() {
                                     ? "noopener noreferrer"
                                     : undefined
                                 }
-                                className="block px-4 py-2 hover:bg-gray-100"
+                                className="block px-4 py-2 transition-colors hover:bg-gray-100 dark:hover:bg-white/10"
                               >
                                 {child.label}
                               </Link>
@@ -244,7 +265,15 @@ export default function Navbar() {
         <button
           type="button"
           onClick={() => setIsMenuOpen((prev) => !prev)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-2xl text-purple-700 shadow-lg ring-2 ring-white/60 md:hidden"
+          className="
+          flex h-11 w-11 shrink-0 items-center justify-center rounded-full
+          bg-white text-2xl text-purple-700 shadow-lg ring-2 ring-white/60
+          transition-colors duration-300 md:hidden
+
+          dark:bg-zinc-950
+          dark:text-white
+          dark:ring-white/20
+        "
           aria-label={isMenuOpen ? "Close menu" : "Open menu"}
           aria-expanded={isMenuOpen}
         >
@@ -259,7 +288,17 @@ export default function Navbar() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.2 }}
-            className="fixed left-0 right-0 top-[68px] z-[9998] max-h-[calc(100vh-68px)] overflow-y-auto bg-gradient-to-b from-purple-700 via-pink-600 to-red-500 px-5 py-6 text-white shadow-2xl md:hidden"
+            className="
+              fixed left-0 right-0 top-[68px] z-[9998]
+              max-h-[calc(100vh-68px)] overflow-y-auto
+              bg-gradient-to-b from-purple-700 via-pink-600 to-red-500
+              px-5 py-6 text-white shadow-2xl
+              transition-colors duration-300 md:hidden
+
+              dark:border-t dark:border-white/10
+              dark:bg-black dark:bg-none
+              dark:shadow-[0_20px_60px_rgba(0,0,0,0.8)]
+            "
           >
             <div className="mx-auto flex w-full max-w-md flex-col items-center gap-3">
               {loading && (
@@ -297,7 +336,15 @@ export default function Navbar() {
                               initial={{ opacity: 0, y: -8 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -8 }}
-                              className="flex w-full flex-col overflow-hidden rounded-2xl bg-white text-black shadow-lg"
+                              className="
+                              flex w-full flex-col overflow-hidden rounded-2xl
+                              bg-white text-black shadow-lg
+                              transition-colors duration-300
+
+                              dark:border dark:border-white/10
+                              dark:bg-zinc-950
+                              dark:text-white
+                            "
                             >
                               {(item.children || []).map((child) => {
                                 if (!child.href) return null;
@@ -320,7 +367,7 @@ export default function Navbar() {
                                         ? "noopener noreferrer"
                                         : undefined
                                     }
-                                    className="px-4 py-3 text-center font-semibold hover:bg-gray-100"
+                                    className="px-4 py-3 text-center font-semibold transition-colors hover:bg-gray-100 dark:hover:bg-white/10"
                                     onClick={() => setIsMenuOpen(false)}
                                   >
                                     {child.label}

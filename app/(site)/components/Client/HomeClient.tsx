@@ -13,7 +13,11 @@ const fadeUp = {
 export default function HomeClient() {
   return (
     <motion.div
-      className="min-h-screen bg-gradient-to-br  text-white"
+      className="
+        min-h-screen
+        bg-transparent
+        text-white
+      "
       initial="hidden"
       animate="visible"
       variants={{
@@ -24,12 +28,12 @@ export default function HomeClient() {
       <div className="px-5 py-10 sm:px-10 sm:py-14 lg:px-16">
         {/* HERO */}
         <motion.section
-          className="relative flex flex-col items-center overflow-hidden rounded-[2rem] border border-white/20 bg-white/10 px-5 py-12 text-center shadow-2xl backdrop-blur-md sm:px-10 sm:py-16"
+          className="relative flex flex-col items-center overflow-hidden rounded-[2rem] border border-white/20 bg-white/10 px-5 py-12 text-center shadow-2xl backdrop-blur-md transition-colors duration-300 sm:px-10 sm:py-16 dark:border-white/10 dark:bg-zinc-950/85 dark:shadow-black/60"
           variants={fadeUp}
           transition={{ duration: 0.7, ease: "easeOut" }}
         >
-          <div className="pointer-events-none absolute left-1/2 top-0 h-[360px] w-[360px] -translate-x-1/2 rounded-full bg-pink-300/30 blur-3xl animate-pulse" />
-          <div className="pointer-events-none absolute bottom-0 right-0 h-[260px] w-[260px] rounded-full bg-blue-300/30 blur-3xl animate-pulse" />
+          <div className="pointer-events-none absolute left-1/2 top-0 h-[360px] w-[360px] -translate-x-1/2 animate-pulse rounded-full bg-pink-300/30 blur-3xl dark:bg-pink-500/10" />
+          <div className="pointer-events-none absolute bottom-0 right-0 h-[260px] w-[260px] animate-pulse rounded-full bg-blue-300/30 blur-3xl dark:bg-blue-500/10" />
 
           <motion.div
             className="relative mb-6 overflow-hidden rounded-full border-4 border-white shadow-2xl shadow-pink-400/50"
@@ -72,7 +76,7 @@ export default function HomeClient() {
 
             <Link
               href="/FeedBack"
-              className="rounded-full bg-white px-8 py-4 text-lg font-black text-purple-700 shadow-xl transition-transform hover:scale-105 hover:bg-purple-100 sm:text-xl"
+              className="rounded-full bg-white px-8 py-4 text-lg font-black text-purple-700 shadow-xl transition-all hover:scale-105 hover:bg-purple-100 sm:text-xl dark:bg-zinc-100 dark:text-purple-800 dark:hover:bg-white"
             >
               💬 Give Feedback
             </Link>
@@ -92,7 +96,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.1, duration: 0.6 }}
           >
-            <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 p-8 text-center shadow-2xl sm:p-12">
+            <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 p-8 text-center shadow-2xl transition-colors duration-300 sm:p-12 dark:border-white/10 dark:bg-zinc-950 dark:bg-none dark:shadow-black/60">
               <p className="mb-3 inline-flex rounded-full bg-white/20 px-5 py-2 text-sm font-black uppercase tracking-wide text-white shadow-lg backdrop-blur-md">
                 Thank you for supporting Burton Pride
               </p>
@@ -117,7 +121,7 @@ export default function HomeClient() {
 
                 <Link
                   href="/FeedBack"
-                  className="rounded-full bg-white px-9 py-3.5 text-lg font-black text-purple-700 shadow-xl transition-transform hover:scale-105 hover:bg-purple-100"
+                  className="rounded-full bg-white px-9 py-3.5 text-lg font-black text-purple-700 shadow-xl transition-all hover:scale-105 hover:bg-purple-100 dark:bg-zinc-100 dark:text-purple-800 dark:hover:bg-white"
                 >
                   Give Feedback
                 </Link>
@@ -130,8 +134,8 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.12, duration: 0.6 }}
           >
-            <div className="relative overflow-hidden rounded-3xl border-4 border-yellow-300 bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 p-5 text-center shadow-2xl shadow-yellow-400/40 sm:p-8">
-              <div className="relative rounded-[28px] border border-white/25 bg-purple-950/85 px-5 py-8 shadow-2xl backdrop-blur-md sm:px-10 sm:py-12">
+            <div className="relative overflow-hidden rounded-3xl border-4 border-yellow-300 bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 p-5 text-center shadow-2xl shadow-yellow-400/40 transition-colors duration-300 sm:p-8 dark:border-white/10 dark:bg-zinc-950 dark:bg-none dark:shadow-black/60">
+              <div className="relative rounded-[28px] border border-white/25 bg-purple-950/85 px-5 py-8 shadow-2xl backdrop-blur-md transition-colors duration-300 sm:px-10 sm:py-12 dark:border-white/10 dark:bg-black/80">
                 <p className="mb-4 inline-flex rounded-full bg-yellow-300 px-5 py-2 text-sm font-black uppercase tracking-wide text-purple-950 shadow-xl">
                   Help keep Burton Pride free
                 </p>
@@ -200,7 +204,7 @@ export default function HomeClient() {
 
                   <Link
                     href="/DonateToUs?type=monthly"
-                    className="rounded-full bg-white px-10 py-4 text-xl font-black text-pink-600 shadow-2xl transition-transform hover:scale-110 hover:bg-pink-50"
+                    className="rounded-full bg-white px-10 py-4 text-xl font-black text-pink-600 shadow-2xl transition-all hover:scale-110 hover:bg-pink-50 dark:bg-zinc-100 dark:text-pink-700 dark:hover:bg-white"
                   >
                     🌈 Donate Monthly
                   </Link>
@@ -219,7 +223,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.15, duration: 0.6 }}
           >
-            <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md sm:p-6">
+            <div className="rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md transition-colors duration-300 sm:p-6 dark:border-white/10 dark:bg-zinc-950/85 dark:shadow-black/60">
               <EventCard />
             </div>
           </motion.section>
@@ -229,8 +233,8 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.17, duration: 0.6 }}
           >
-            <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-br from-fuchsia-600 via-purple-600 to-blue-600 p-1 shadow-2xl shadow-purple-500/30">
-              <div className="relative overflow-hidden rounded-[22px] bg-purple-950/80 px-6 py-9 backdrop-blur-md sm:px-10 sm:py-12">
+            <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-br from-fuchsia-600 via-purple-600 to-blue-600 p-1 shadow-2xl shadow-purple-500/30 transition-colors duration-300 dark:border-white/10 dark:bg-zinc-950 dark:bg-none dark:shadow-black/60">
+              <div className="relative overflow-hidden rounded-[22px] bg-purple-950/80 px-6 py-9 backdrop-blur-md transition-colors duration-300 sm:px-10 sm:py-12 dark:bg-black/80">
                 <div className="pointer-events-none absolute -left-16 -top-16 h-52 w-52 rounded-full bg-pink-400/30 blur-3xl" />
                 <div className="pointer-events-none absolute -bottom-20 -right-16 h-64 w-64 rounded-full bg-blue-400/30 blur-3xl" />
 
@@ -270,7 +274,7 @@ export default function HomeClient() {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                       <p className="text-3xl">🖼️</p>
                       <h3 className="mt-3 text-xl font-black text-white">
                         Share Creativity
@@ -281,7 +285,7 @@ export default function HomeClient() {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                       <p className="text-3xl">💬</p>
                       <h3 className="mt-3 text-xl font-black text-white">
                         Tell Our Stories
@@ -292,7 +296,7 @@ export default function HomeClient() {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md">
+                    <div className="rounded-2xl border border-white/15 bg-white/10 p-5 shadow-xl backdrop-blur-md transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                       <p className="text-3xl">🌈</p>
                       <h3 className="mt-3 text-xl font-black text-white">
                         Build Community
@@ -316,7 +320,7 @@ export default function HomeClient() {
             <div className="grid gap-6 sm:grid-cols-3">
               <Link
                 href="/DonateToUs"
-                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-transform hover:scale-105"
+                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white/20 dark:border-white/10 dark:bg-zinc-950/85 dark:hover:bg-zinc-900"
               >
                 <p className="text-5xl">💖</p>
                 <h2 className="mt-4 text-2xl font-black">Donate</h2>
@@ -327,7 +331,7 @@ export default function HomeClient() {
 
               <Link
                 href="/JoinUS/Volunteer"
-                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-transform hover:scale-105"
+                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white/20 dark:border-white/10 dark:bg-zinc-950/85 dark:hover:bg-zinc-900"
               >
                 <p className="text-5xl">💚</p>
                 <h2 className="mt-4 text-2xl font-black">Volunteer</h2>
@@ -338,7 +342,7 @@ export default function HomeClient() {
 
               <Link
                 href="/Sponsor"
-                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-transform hover:scale-105"
+                className="rounded-3xl border border-white/20 bg-white/15 p-7 text-center shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white/20 dark:border-white/10 dark:bg-zinc-950/85 dark:hover:bg-zinc-900"
               >
                 <p className="text-5xl">⭐</p>
                 <h2 className="mt-4 text-2xl font-black">Sponsors</h2>
@@ -354,7 +358,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.2, duration: 0.6 }}
           >
-            <div className="rounded-3xl border border-white/20 bg-white/10 p-8 shadow-2xl backdrop-blur-md sm:p-12">
+            <div className="rounded-3xl border border-white/20 bg-white/10 p-8 shadow-2xl backdrop-blur-md transition-colors duration-300 sm:p-12 dark:border-white/10 dark:bg-zinc-950/85 dark:shadow-black/60">
               <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
                 <div>
                   <p className="mb-3 inline-flex rounded-full bg-white/20 px-5 py-2 text-sm font-black uppercase tracking-wide text-white">
@@ -374,21 +378,21 @@ export default function HomeClient() {
                 </div>
 
                 <div className="grid gap-4">
-                  <div className="rounded-2xl bg-white/15 p-5">
+                  <div className="rounded-2xl border border-transparent bg-white/15 p-5 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                     <h3 className="text-xl font-black">🌈 Inclusion</h3>
                     <p className="mt-2 text-white/90">
                       Everyone deserves to feel welcome, safe and respected.
                     </p>
                   </div>
 
-                  <div className="rounded-2xl bg-white/15 p-5">
+                  <div className="rounded-2xl border border-transparent bg-white/15 p-5 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                     <h3 className="text-xl font-black">💬 Community</h3>
                     <p className="mt-2 text-white/90">
                       We work with local people, groups and organisations.
                     </p>
                   </div>
 
-                  <div className="rounded-2xl bg-white/15 p-5">
+                  <div className="rounded-2xl border border-transparent bg-white/15 p-5 transition-colors duration-300 dark:border-white/10 dark:bg-white/[0.06]">
                     <h3 className="text-xl font-black">❤️ Equality</h3>
                     <p className="mt-2 text-white/90">
                       We stand for LGBTQIA+ rights, safety and visibility.
@@ -400,7 +404,7 @@ export default function HomeClient() {
               <div className="mt-8 flex flex-wrap gap-4">
                 <Link
                   href="/about"
-                  className="rounded-full bg-white px-8 py-3 text-lg font-bold text-purple-700 shadow-lg transition-transform hover:scale-105 hover:bg-purple-100"
+                  className="rounded-full bg-white px-8 py-3 text-lg font-bold text-purple-700 shadow-lg transition-all hover:scale-105 hover:bg-purple-100 dark:bg-zinc-100 dark:text-purple-800 dark:hover:bg-white"
                 >
                   Learn More
                 </Link>
@@ -420,7 +424,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.24, duration: 0.6 }}
           >
-            <div className="rounded-3xl border border-white/20 bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center shadow-2xl sm:p-10">
+            <div className="rounded-3xl border border-white/20 bg-gradient-to-r from-emerald-500 to-green-600 p-8 text-center shadow-2xl transition-colors duration-300 sm:p-10 dark:border-white/10 dark:bg-zinc-950 dark:bg-none dark:shadow-black/60">
               <h2 className="mb-3 text-3xl font-black sm:text-5xl">
                 💚 Volunteer With Burton Pride
               </h2>
@@ -445,7 +449,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.26, duration: 0.6 }}
           >
-            <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 text-center shadow-2xl backdrop-blur-md sm:p-10">
+            <div className="flex flex-col rounded-3xl border border-white/20 bg-white/10 p-7 text-center shadow-2xl backdrop-blur-md transition-colors duration-300 sm:p-10 dark:border-white/10 dark:bg-zinc-950/85 dark:shadow-black/60">
               <h2 className="mb-3 text-2xl font-black sm:text-3xl">
                 Collaborate With Us
               </h2>
@@ -469,7 +473,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.28, duration: 0.6 }}
           >
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 p-7 shadow-2xl shadow-pink-500/40 sm:p-12">
+            <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 p-7 shadow-2xl shadow-pink-500/40 transition-colors duration-300 sm:p-12 dark:bg-zinc-950 dark:bg-none dark:shadow-black/60">
               <h2 className="mb-3 text-3xl font-black drop-shadow-lg sm:text-5xl">
                 Give Your Feedback 💖
               </h2>
@@ -494,7 +498,7 @@ export default function HomeClient() {
             variants={fadeUp}
             transition={{ delay: 0.3, duration: 0.6 }}
           >
-            <div className="rounded-3xl border border-white/20 bg-white/10 p-7 text-center shadow-2xl backdrop-blur-md sm:p-10">
+            <div className="rounded-3xl border border-white/20 bg-white/10 p-7 text-center shadow-2xl backdrop-blur-md transition-colors duration-300 sm:p-10 dark:border-white/10 dark:bg-zinc-950/85 dark:shadow-black/60">
               <h2 className="mb-3 text-3xl font-black">Follow Burton Pride</h2>
 
               <p className="mx-auto mb-6 max-w-2xl text-base leading-relaxed text-white/90 sm:text-lg">

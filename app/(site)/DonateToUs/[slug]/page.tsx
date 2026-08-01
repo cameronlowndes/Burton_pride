@@ -83,7 +83,7 @@ export default async function StoryPage({ params }: Props) {
         <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-sm" />
 
         <div className="fixed inset-0 z-50 flex items-center justify-center px-8 py-8">
-          <section className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[30px] border border-white/20 bg-gradient-to-br from-purple-700 via-fuchsia-700 to-pink-700 p-12 text-white shadow-[0_25px_90px_rgba(0,0,0,0.65)]">
+          <section className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[30px] border border-white/20  p-12 text-white shadow-[0_25px_90px_rgba(0,0,0,0.65)]">
             <Link
               href="/DonateToUs"
               className="absolute right-5 top-5 rounded-full border border-white/20 bg-white/15 px-5 py-2 text-sm font-bold text-white transition hover:bg-white/25"
@@ -146,7 +146,7 @@ export default async function StoryPage({ params }: Props) {
         </div>
       </div>
 
-      <div className="block min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 px-3 py-8 lg:hidden">
+      <div className="block min-h-screen px-3 py-8 lg:hidden">
         <section className="mx-auto overflow-hidden rounded-[28px] border border-white/20 bg-white/15 shadow-2xl backdrop-blur-xl">
           <div className="px-6 pb-10 pt-10 text-center">
             <div className="mx-auto h-36 w-36 overflow-hidden rounded-full border-4 border-white/50 bg-white/20 shadow-xl">

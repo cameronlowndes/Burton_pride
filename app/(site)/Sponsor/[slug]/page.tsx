@@ -139,7 +139,7 @@ export default async function SponsorStoryPage({
     sponsor.story?.trim() || "No sponsor story has been added yet.";
 
   return (
-    <main className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 pb-10 pt-28 text-white sm:px-6 md:px-8 md:pt-32">
+    <main className="min-h-screen bg-gradient-to-r px-4 pb-10 pt-28 text-white sm:px-6 md:px-8 md:pt-32">
       <div
         className={
           isMainSponsor

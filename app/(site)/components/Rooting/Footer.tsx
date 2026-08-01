@@ -1,51 +1,180 @@
-import Link from 'next/link';
-import { FaFacebookF, FaInstagram } from 'react-icons/fa';
+import Link from "next/link";
+import { FaFacebookF, FaInstagram } from "react-icons/fa";
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="relative w-full bg-gradient-to-r from-teal-400 via-cyan-500 to-purple-600 text-white shadow-2xl py-10 px-6 overflow-hidden">
-      {/* Neon Glow Circles */}
-      <div className="absolute -top-20 -left-20 w-72 h-72 bg-cyan-400/50 rounded-full blur-3xl animate-pulse"></div>
-      <div className="absolute -bottom-20 -right-20 w-72 h-72 bg-purple-400/50 rounded-full blur-3xl animate-pulse"></div>
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-teal-400/30 rounded-full blur-3xl animate-pulse"></div>
+    <footer
+      className="
+        relative
+        w-full
+        overflow-hidden
+        bg-gradient-to-r
+        from-teal-400
+        via-cyan-500
+        to-purple-600
+        px-6
+        py-10
+        text-white
+        shadow-2xl
+        transition-colors
+        duration-300
 
-      {/* Main Content */}
-      <div className="relative z-10 max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
-        
-        {/* Copyright & Links */}
-        <div className="text-center md:text-left space-y-2">
-          <p className="font-bold text-lg md:text-xl drop-shadow-lg">
+        dark:border-t
+        dark:border-white/10
+        dark:bg-black
+        dark:bg-none
+        dark:shadow-[0_-12px_45px_rgba(0,0,0,0.75)]
+      "
+    >
+      {/* Decorative glow circles */}
+      <div
+        aria-hidden="true"
+        className="
+          absolute
+          -left-20
+          -top-20
+          h-72
+          w-72
+          animate-pulse
+          rounded-full
+          bg-cyan-400/50
+          blur-3xl
+          transition-opacity
+          duration-300
+
+          dark:bg-cyan-500/10
+        "
+      />
+
+      <div
+        aria-hidden="true"
+        className="
+          absolute
+          -bottom-20
+          -right-20
+          h-72
+          w-72
+          animate-pulse
+          rounded-full
+          bg-purple-400/50
+          blur-3xl
+          transition-opacity
+          duration-300
+
+          dark:bg-purple-500/10
+        "
+      />
+
+      <div
+        aria-hidden="true"
+        className="
+          absolute
+          left-1/2
+          top-1/2
+          h-96
+          w-96
+          -translate-x-1/2
+          -translate-y-1/2
+          animate-pulse
+          rounded-full
+          bg-teal-400/30
+          blur-3xl
+          transition-opacity
+          duration-300
+
+          dark:bg-teal-500/5
+        "
+      />
+
+      {/* Main content */}
+      <div
+        className="
+          relative
+          z-10
+          mx-auto
+          flex
+          max-w-6xl
+          flex-col
+          items-center
+          justify-between
+          gap-6
+
+          md:flex-row
+        "
+      >
+        {/* Copyright and links */}
+        <div className="space-y-2 text-center md:text-left">
+          <p className="text-lg font-bold drop-shadow-lg md:text-xl">
             &copy; {currentYear} Burton Pride | CIC No: 15490242
           </p>
 
-          <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-1 items-center">
+          <div
+            className="
+              mt-1
+              flex
+              flex-wrap
+              items-center
+              justify-center
+              gap-4
+
+              md:justify-start
+            "
+          >
             <Link
               href="/terms"
-              className="hover:text-yellow-300 transition-colors duration-300 font-semibold"
+              className="
+                font-semibold
+                transition-colors
+                duration-300
+                hover:text-yellow-300
+
+                dark:hover:text-yellow-300
+              "
             >
               Terms
             </Link>
 
-            <a
+            <Link
               href="/DonateToUs"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-bold hover:text-cyan-100 transition-colors duration-300"
+              className="
+                font-bold
+                transition-colors
+                duration-300
+                hover:text-cyan-100
+
+                dark:hover:text-cyan-300
+              "
             >
               Donate
-            </a>
+            </Link>
 
-            {/* 🔐 Admin Login Button */}
             <Link
               href="/Admin/Login"
               className="
-                bg-white/20 backdrop-blur-md border border-white/30
-                px-4 py-1.5 rounded-full text-sm font-semibold
-                hover:bg-white hover:text-purple-700
-                transition-all duration-300
-                shadow-md hover:shadow-xl
+                rounded-full
+                border
+                border-white/30
+                bg-white/20
+                px-4
+                py-1.5
+                text-sm
+                font-semibold
+                shadow-md
+                backdrop-blur-md
+                transition-all
+                duration-300
+
+                hover:bg-white
+                hover:text-purple-700
+                hover:shadow-xl
+
+                dark:border-white/15
+                dark:bg-white/10
+                dark:text-white
+                dark:hover:bg-white
+                dark:hover:text-black
               "
             >
               🔐 Admin Login
@@ -53,13 +182,33 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Social Icons */}
-        <div className="flex items-center gap-4 mt-4 md:mt-0">
+        {/* Social icons */}
+        <div className="mt-4 flex items-center gap-4 md:mt-0">
           <a
             href="https://www.facebook.com/profile.php?id=61556621159422"
             target="_blank"
             rel="noopener noreferrer"
-            className="bg-white text-blue-600 p-4 rounded-full shadow-xl hover:scale-125 transform transition duration-300 hover:shadow-cyan-400/60"
+            aria-label="Visit Burton Pride on Facebook"
+            className="
+              transform
+              rounded-full
+              bg-white
+              p-4
+              text-blue-600
+              shadow-xl
+              transition
+              duration-300
+
+              hover:scale-125
+              hover:shadow-cyan-400/60
+
+              dark:border
+              dark:border-white/10
+              dark:bg-zinc-950
+              dark:text-blue-400
+              dark:hover:bg-zinc-900
+              dark:hover:shadow-blue-500/30
+            "
           >
             <FaFacebookF size={20} />
           </a>
@@ -68,20 +217,64 @@ export default function Footer() {
             href="https://www.instagram.com/prideburton/"
             target="_blank"
             rel="noopener noreferrer"
-            className="bg-white text-pink-500 p-4 rounded-full shadow-xl hover:scale-125 transform transition duration-300 hover:shadow-purple-400/60"
+            aria-label="Visit Burton Pride on Instagram"
+            className="
+              transform
+              rounded-full
+              bg-white
+              p-4
+              text-pink-500
+              shadow-xl
+              transition
+              duration-300
+
+              hover:scale-125
+              hover:shadow-purple-400/60
+
+              dark:border
+              dark:border-white/10
+              dark:bg-zinc-950
+              dark:text-pink-400
+              dark:hover:bg-zinc-900
+              dark:hover:shadow-pink-500/30
+            "
           >
             <FaInstagram size={20} />
           </a>
         </div>
       </div>
 
-      {/* Powered By - Mega Neon Watermark */}
-      <div className="mt-14 relative z-30 flex justify-center">
-        {/* Outer neon ring */}
-        <div className="absolute inset-0 flex justify-center items-center">
-          <div className="w-64 h-64 sm:w-80 sm:h-80 rounded-full bg-gradient-to-r 
-                          from-fuchsia-500 via-yellow-400 to-cyan-500 
-                          opacity-40 blur-3xl animate-spin-slow" />
+      {/* Powered by */}
+      <div className="relative z-30 mt-14 flex justify-center">
+        <div
+          aria-hidden="true"
+          className="
+            absolute
+            inset-0
+            flex
+            items-center
+            justify-center
+          "
+        >
+          <div
+            className="
+              h-64
+              w-64
+              animate-spin-slow
+              rounded-full
+              bg-gradient-to-r
+              from-fuchsia-500
+              via-yellow-400
+              to-cyan-500
+              opacity-40
+              blur-3xl
+
+              sm:h-80
+              sm:w-80
+
+              dark:opacity-20
+            "
+          />
         </div>
 
         <a
@@ -89,17 +282,36 @@ export default function Footer() {
           target="_blank"
           rel="noopener noreferrer"
           className="
-            relative text-center font-extrabold uppercase tracking-widest
-            text-4xl sm:text-5xl md:text-6xl
-            bg-gradient-to-r from-pink-500 via-yellow-400 to-cyan-500
-            bg-[length:200%_auto] bg-clip-text text-transparent
-            animate-gradient-x
+            relative
+            bg-gradient-to-r
+            from-pink-500
+            via-yellow-400
+            to-cyan-500
+            bg-[length:200%_auto]
+            bg-clip-text
+            text-center
+            text-4xl
+            font-extrabold
+            uppercase
+            tracking-widest
+            text-transparent
             drop-shadow-[0_0_25px_rgba(255,255,255,0.95)]
-            hover:scale-110 hover:drop-shadow-[0_0_35px_rgba(255,255,255,1)]
-            transition-transform duration-500
+            transition-transform
+            duration-500
+
+            animate-gradient-x
+
+            hover:scale-110
+            hover:drop-shadow-[0_0_35px_rgba(255,255,255,1)]
+
+            sm:text-5xl
+            md:text-6xl
+
+            dark:drop-shadow-[0_0_25px_rgba(236,72,153,0.45)]
+            dark:hover:drop-shadow-[0_0_35px_rgba(34,211,238,0.55)]
           "
         >
-          🚀 Built & Powered by Cameron Digital Works 🚀
+          🚀 Built &amp; Powered by Cameron Digital Works 🚀
         </a>
       </div>
     </footer>

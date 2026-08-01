@@ -11,7 +11,7 @@ const PDF_FILENAME = "BurtonPrideCICWebsitePolicies.pdf";
 
 const TermsPage = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 px-4 pb-24 pt-8 text-white sm:px-8 sm:pt-16">
+    <div className="min-h-screen bg-gradient-to-r px-4 pb-24 pt-8 text-white sm:px-8 sm:pt-16">
       <MetaHead
         title="Website Policy Terms and Conditions | Burton Pride C.I.C."
         description="Read the official Burton Pride C.I.C. Website Policy Terms and Conditions and download the verified PDF."
