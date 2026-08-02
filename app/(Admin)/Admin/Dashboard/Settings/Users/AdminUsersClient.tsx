@@ -1,15 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Filter,
+  Loader2,
   RefreshCcw,
   Save,
+  Search,
   ShieldCheck,
   UserCog,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
 
 type AdminRole = "main_admin" | "admin" | "editor";
@@ -24,12 +35,18 @@ type AdminUser = {
   created_at: string | null;
   updated_at: string | null;
   permissions?: string[];
+  two_factor_required?: boolean | null;
+  two_factor_enabled?: boolean | null;
+  two_factor_email_enabled?: boolean | null;
+  two_factor_method?: "email" | "totp" | null;
 };
 
 type PermissionItem = {
   key: string;
   label: string;
   description: string;
+  dangerous?: boolean;
+  mainAdminRecommended?: boolean;
 };
 
 type PermissionGroup = {
@@ -38,187 +55,610 @@ type PermissionGroup = {
   permissions: PermissionItem[];
 };
 
-const roleOptions: { value: AdminRole; label: string; description: string }[] = [
+type ApiResult = {
+  ok?: boolean;
+  message?: string;
+  error?: string;
+  reason?: string;
+  likelyFix?: string;
+  details?: unknown;
+  debug?: unknown;
+  admins?: AdminUser[];
+};
+
+type AdminFilter = "all" | "active" | "inactive" | "main_admin" | "admin" | "editor";
+
+const roleOptions: {
+  value: AdminRole;
+  label: string;
+  description: string;
+}[] = [
   {
     value: "main_admin",
     label: "Main Admin",
     description:
-      "Full access, including all pages, delete all, year deletion, sponsor totals and permissions.",
+      "Full access to every app, page, permission and high-risk action.",
   },
   {
     value: "admin",
     label: "Admin",
-    description: "Can only use the admin portal pages and actions you tick below.",
+    description:
+      "Access only to the pages and actions selected in the permission list.",
   },
   {
     value: "editor",
     label: "Editor",
     description:
-      "Limited access. Usually used for website pages or view-only admin tasks.",
+      "Limited access for content updates, viewing records and lower-risk tasks.",
   },
 ];
 
 const permissionGroups: PermissionGroup[] = [
   {
     title: "Admin Portal",
-    description: "Main admin level access to the portal and admin user tools.",
+    description: "Core portal access, dashboard and admin account management.",
     permissions: [
       {
         key: "admin:dashboard:view",
         label: "View admin dashboard",
-        description: "Can open the main admin dashboard.",
+        description: "Can open the main Admin Portal dashboard.",
+      },
+      {
+        key: "admin:users:view",
+        label: "View admin users",
+        description: "Can view admin accounts and their access status.",
       },
       {
         key: "admin:users:manage",
         label: "Manage admin users",
-        description: "Can add admins, change roles and change permissions.",
+        description: "Can add admins, edit roles and change permissions.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "admin:users:manage_2fa",
+        label: "Manage two-step verification",
+        description:
+          "Can enable or update approved two-step verification settings for admins.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "admin:sidebar:manage",
+        label: "Manage admin sidebar",
+        description:
+          "Can add, reorder, hide and choose icons for Admin Portal sidebar pages.",
+        dangerous: true,
+        mainAdminRecommended: true,
       },
     ],
   },
   {
-    title: "Money Tracker",
-    description: "Control what the admin can do in the money tracker.",
+    title: "Money Management",
+    description:
+      "Transactions, budgets, suppliers, refunds, reconciliation and finance controls.",
     permissions: [
       {
         key: "money:view",
-        label: "View money tracker",
-        description: "Can open the money tracker page.",
+        label: "View Money Management",
+        description: "Can open the Money Management app.",
       },
       {
         key: "money:add_transactions",
         label: "Add transactions",
-        description: "Can add new income, spending and receipt uploads.",
+        description: "Can add income, expenses, donations and personal payments.",
       },
       {
         key: "money:edit_transactions",
         label: "Edit transactions",
-        description: "Can edit existing transactions.",
-      },
-      {
-        key: "money:edit_old_years",
-        label: "Edit old financial years",
-        description: "Can edit transactions from previous years.",
+        description: "Can update existing financial records.",
       },
       {
         key: "money:hide_transactions",
         label: "Hide transactions",
-        description: "Can soft-delete or hide transactions.",
+        description: "Can hide or soft-delete transaction records.",
       },
       {
-        key: "money:delete_all",
-        label: "Delete all transactions",
-        description: "Dangerous action. Main admin only recommended.",
+        key: "money:restore_transactions",
+        label: "Restore hidden transactions",
+        description: "Can restore previously hidden transaction records.",
       },
       {
-        key: "money:delete_year",
-        label: "Delete selected year",
-        description: "Dangerous action. Main admin only recommended.",
+        key: "money:edit_old_years",
+        label: "Edit previous years",
+        description: "Can edit transactions from previous financial years.",
+        dangerous: true,
+      },
+      {
+        key: "money:manage_month_locks",
+        label: "Manage month locks",
+        description: "Can lock and unlock individual financial months.",
+        dangerous: true,
       },
       {
         key: "money:manage_year_locks",
         label: "Manage year locks",
-        description: "Can lock or unlock financial years.",
+        description: "Can lock and unlock financial years.",
+        dangerous: true,
       },
       {
-        key: "money:manage_sponsors",
+        key: "money:delete_year",
+        label: "Delete a financial year",
+        description: "Can permanently remove a selected financial year.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "money:delete_all",
+        label: "Delete all money records",
+        description: "Can permanently remove all money records.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "money:budgets:view",
+        label: "View budgets",
+        description: "Can view budget planning and remaining balances.",
+      },
+      {
+        key: "money:budgets:manage",
+        label: "Manage budgets",
+        description: "Can create, edit and allocate budgets.",
+      },
+      {
+        key: "money:sponsors:view",
+        label: "View sponsors and grants",
+        description: "Can view sponsorship and grant funding records.",
+      },
+      {
+        key: "money:sponsors:manage",
         label: "Manage sponsors and grants",
-        description: "Can add, edit and remove restricted funding records.",
+        description: "Can add, edit and remove sponsor or grant records.",
       },
       {
-        key: "money:change_sponsor_totals",
-        label: "Change sponsor / grant totals",
-        description: "Can change agreed and received funding totals.",
+        key: "money:sponsors:change_totals",
+        label: "Change sponsor totals",
+        description: "Can change agreed, received and outstanding funding totals.",
+        dangerous: true,
       },
       {
-        key: "money:sync_website_payments",
-        label: "Sync website payments",
-        description: "Can pull live Stripe website payments into the tracker.",
+        key: "money:suppliers:view",
+        label: "View money suppliers",
+        description: "Can view suppliers connected to Money Management.",
       },
       {
-        key: "money:print_reports",
-        label: "Print money reports",
-        description: "Can print money reports.",
+        key: "money:suppliers:manage",
+        label: "Manage money suppliers",
+        description: "Can add, edit, link and unlink supplier records.",
       },
       {
-        key: "money:export_reports",
-        label: "Export money reports",
-        description: "Can export Excel and yearly reports.",
+        key: "money:refunds:view",
+        label: "View refunds",
+        description: "Can view the refund tracker.",
       },
       {
         key: "money:manage_refunds",
         label: "Manage refunds",
-        description: "Can view and manage refund tracker records.",
+        description: "Can create, update and complete refund records.",
+      },
+      {
+        key: "money:direct_debits:view",
+        label: "View direct debits",
+        description: "Can view direct debit plans and occurrences.",
+      },
+      {
+        key: "money:direct_debits:manage",
+        label: "Manage direct debits",
+        description: "Can create, edit and process direct debit plans.",
+      },
+      {
+        key: "money:reconciliation:view",
+        label: "View bank reconciliation",
+        description: "Can view balance checks and reconciliation records.",
+      },
+      {
+        key: "money:reconciliation:manage",
+        label: "Manage bank reconciliation",
+        description: "Can record and update bank balance checks.",
+      },
+      {
+        key: "money:saving_targets:manage",
+        label: "Manage saving targets",
+        description: "Can create and update saving targets.",
+      },
+      {
+        key: "money:csv_import",
+        label: "Import bank CSV files",
+        description: "Can preview and import bank activity CSV files.",
+      },
+      {
+        key: "money:sync_website_payments",
+        label: "Sync website payments",
+        description: "Can import live website payment records.",
+        dangerous: true,
+      },
+      {
+        key: "money:receipts:manage",
+        label: "Manage receipts",
+        description: "Can upload, view and link receipt images or files.",
+      },
+      {
+        key: "money:print_reports",
+        label: "Print money reports",
+        description: "Can print money and reconciliation reports.",
+      },
+      {
+        key: "money:export_reports",
+        label: "Export money reports",
+        description: "Can export Excel workbooks and finance packs.",
       },
     ],
   },
   {
-    title: "Donations",
-    description: "Donation admin and supporter wall access.",
+    title: "Event Hub",
+    description:
+      "Events, contacts, stallholders, checklists, applications and event audit records.",
+    permissions: [
+      {
+        key: "event_hub:view",
+        label: "View Event Hub",
+        description: "Can open the Event Hub app.",
+      },
+      {
+        key: "event_hub:events:manage",
+        label: "Manage events",
+        description: "Can create, edit, activate and archive events.",
+      },
+      {
+        key: "event_hub:contacts:view",
+        label: "View event contacts",
+        description: "Can view business, stallholder and event contact records.",
+      },
+      {
+        key: "event_hub:contacts:manage",
+        label: "Manage event contacts",
+        description: "Can add, edit, link and update event contacts.",
+      },
+      {
+        key: "event_hub:checklists:view",
+        label: "View event checklists",
+        description: "Can view PLI, food hygiene, gas and generator checks.",
+      },
+      {
+        key: "event_hub:checklists:manage",
+        label: "Manage event checklists",
+        description: "Can update event compliance and checklist records.",
+      },
+      {
+        key: "event_hub:applications:view",
+        label: "View applications",
+        description: "Can view attraction, stallholder and food applications.",
+      },
+      {
+        key: "event_hub:applications:manage",
+        label: "Manage applications",
+        description: "Can approve, reject or request more information.",
+      },
+      {
+        key: "event_hub:files:view",
+        label: "View event documents",
+        description: "Can view uploaded PLI, hygiene and selling images.",
+      },
+      {
+        key: "event_hub:files:manage",
+        label: "Manage event documents",
+        description: "Can upload, replace and remove event documents.",
+      },
+      {
+        key: "event_hub:email",
+        label: "Email event contacts",
+        description: "Can open the email composer for selected contacts.",
+      },
+      {
+        key: "event_hub:export",
+        label: "Export Event Hub records",
+        description: "Can export Event Hub contacts and checklists to Excel.",
+      },
+      {
+        key: "event_audit:view",
+        label: "View Event Hub audit logs",
+        description: "Can view event-related audit records.",
+      },
+      {
+        key: "event_audit:view_all_events",
+        label: "View audit logs for all events",
+        description: "Can view audit activity across every event year.",
+      },
+      {
+        key: "event_audit:view_security",
+        label: "View security-related event logs",
+        description: "Can view security and high-risk event audit records.",
+        dangerous: true,
+      },
+    ],
+  },
+  {
+    title: "Stock Management",
+    description:
+      "Inventory, movements, locations, low stock, orders and supplier connections.",
+    permissions: [
+      {
+        key: "stock:view",
+        label: "View Stock Management",
+        description: "Can open the Stock Management app.",
+      },
+      {
+        key: "stock:items:view",
+        label: "View inventory",
+        description: "Can view stock items and quantities.",
+      },
+      {
+        key: "stock:items:manage",
+        label: "Manage inventory items",
+        description: "Can add and edit stock items.",
+      },
+      {
+        key: "stock:items:delete",
+        label: "Delete stock items",
+        description: "Can permanently delete stock items when allowed.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "stock:quantity:adjust",
+        label: "Adjust stock quantities",
+        description: "Can add, remove or set stock quantities.",
+      },
+      {
+        key: "stock:movements:view",
+        label: "View stock movements",
+        description: "Can view movement and adjustment history.",
+      },
+      {
+        key: "stock:movements:create",
+        label: "Move stock",
+        description: "Can move stock between locations.",
+      },
+      {
+        key: "stock:locations:view",
+        label: "View stock locations",
+        description: "Can view storage locations and totals.",
+      },
+      {
+        key: "stock:locations:manage",
+        label: "Manage stock locations",
+        description: "Can create and rename stock locations.",
+      },
+      {
+        key: "stock:locations:delete",
+        label: "Delete stock locations",
+        description: "Can delete empty stock locations.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "stock:low_stock:view",
+        label: "View low-stock page",
+        description: "Can view low and out-of-stock items.",
+      },
+      {
+        key: "stock:orders:view",
+        label: "View stock orders",
+        description: "Can view stock purchase orders.",
+      },
+      {
+        key: "stock:orders:manage",
+        label: "Manage stock orders",
+        description: "Can create, edit and update order records.",
+      },
+      {
+        key: "stock:deliveries:manage",
+        label: "Manage deliveries",
+        description: "Can record partial, missing or damaged deliveries.",
+      },
+      {
+        key: "stock:suppliers:view",
+        label: "View stock suppliers",
+        description: "Can view Stock, Event Hub and Money supplier links.",
+      },
+      {
+        key: "stock:suppliers:manage",
+        label: "Manage stock suppliers",
+        description: "Can edit profiles, connections and supplier ratings.",
+      },
+      {
+        key: "stock:suppliers:override_block",
+        label: "Override blocked suppliers",
+        description: "Can override a do-not-use supplier warning.",
+        dangerous: true,
+        mainAdminRecommended: true,
+      },
+      {
+        key: "stock:export",
+        label: "Export stock reports",
+        description: "Can export styled Excel inventory workbooks.",
+      },
+      {
+        key: "stock:audit:view",
+        label: "View stock audit logs",
+        description: "Can view Stock Management change records.",
+      },
+    ],
+  },
+  {
+    title: "Community Art",
+    description:
+      "Community artwork submissions, moderation and public display controls.",
+    permissions: [
+      {
+        key: "community_art:view",
+        label: "View Community Art submissions",
+        description: "Can view submitted artwork and artist details.",
+      },
+      {
+        key: "community_art:manage",
+        label: "Manage Community Art",
+        description: "Can approve, reject, hide and edit submissions.",
+      },
+      {
+        key: "community_art:add",
+        label: "Add Community Art",
+        description: "Can manually add artwork from the admin page.",
+      },
+      {
+        key: "community_art:files",
+        label: "Manage artwork images",
+        description: "Can view, upload and replace artwork images.",
+      },
+    ],
+  },
+  {
+    title: "Donations & Supporters",
+    description: "Donations, supporter wall and public donation records.",
     permissions: [
       {
         key: "donations:view",
-        label: "View donations admin",
-        description: "Can view donation records and supporter wall details.",
+        label: "View donations",
+        description: "Can view donation records and supporter details.",
       },
       {
         key: "donations:manage",
         label: "Manage donations",
-        description: "Can approve, edit or manage donation records.",
+        description: "Can approve, edit or hide donation records.",
+      },
+      {
+        key: "donations:export",
+        label: "Export donation reports",
+        description: "Can export donation and supporter information.",
       },
     ],
   },
   {
     title: "Raffle",
-    description: "Raffle entries, payments and winner draw access.",
+    description: "Raffle entries, payments and winner controls.",
     permissions: [
       {
         key: "raffle:view",
-        label: "View raffle admin",
-        description: "Can view raffle entries and raffle stats.",
+        label: "View raffle",
+        description: "Can view raffle entries and statistics.",
       },
       {
         key: "raffle:manage",
         label: "Manage raffle entries",
-        description: "Can update, tidy or manage raffle entries.",
+        description: "Can update and manage raffle records.",
       },
       {
         key: "raffle:draw_winners",
         label: "Draw raffle winners",
-        description: "Can run or redo the official raffle draw.",
+        description: "Can run or repeat the official raffle draw.",
+        dangerous: true,
       },
     ],
   },
   {
-    title: "Website Pages",
-    description: "Admin tools for site pages, nav and page visibility.",
+    title: "Website & Content",
+    description:
+      "Public pages, navigation, visibility, forms, sponsors and website content.",
     permissions: [
       {
         key: "site_pages:view",
-        label: "View site pages admin",
-        description: "Can view the site pages admin area.",
+        label: "View website page manager",
+        description: "Can view public page settings and visibility.",
       },
       {
         key: "site_pages:manage",
-        label: "Manage site pages",
-        description: "Can update page status, nav settings and page messages.",
+        label: "Manage website pages",
+        description: "Can update page status, messages and navigation settings.",
+      },
+      {
+        key: "site_pages:hide",
+        label: "Hide or relock pages",
+        description: "Can hide public pages and use page relock controls.",
+        dangerous: true,
+      },
+      {
+        key: "website:sponsors:view",
+        label: "View website sponsors",
+        description: "Can view sponsor stories and website display settings.",
+      },
+      {
+        key: "website:sponsors:manage",
+        label: "Manage website sponsors",
+        description: "Can edit sponsor stories, logos and display order.",
+      },
+      {
+        key: "website:forms:view",
+        label: "View website form submissions",
+        description: "Can view form responses from the public website.",
+      },
+      {
+        key: "website:forms:manage",
+        label: "Manage website form submissions",
+        description: "Can update and process public form submissions.",
       },
     ],
   },
   {
-    title: "Audit Logs",
-    description: "View account, money and admin audit logs.",
+    title: "Email",
+    description: "Admin email tools and contact messaging.",
+    permissions: [
+      {
+        key: "email:view",
+        label: "View email tools",
+        description: "Can open the Admin Portal email area.",
+      },
+      {
+        key: "email:send",
+        label: "Send emails",
+        description: "Can send emails from approved Burton Pride accounts.",
+        dangerous: true,
+      },
+      {
+        key: "email:templates:manage",
+        label: "Manage email templates",
+        description: "Can create and update reusable email templates.",
+      },
+    ],
+  },
+  {
+    title: "Audit & Security",
+    description: "Platform audit logs, login activity and security records.",
     permissions: [
       {
         key: "audit_logs:view",
-        label: "View audit logs",
-        description: "Can view audit logs across the admin portal.",
+        label: "View platform audit logs",
+        description: "Can view Admin Portal audit activity.",
+      },
+      {
+        key: "audit_logs:view_security",
+        label: "View security audit logs",
+        description: "Can view login, blocked and high-risk audit events.",
+        dangerous: true,
+      },
+      {
+        key: "audit_logs:export",
+        label: "Export audit logs",
+        description: "Can export audit records for review.",
+        dangerous: true,
+      },
+      {
+        key: "security:settings:view",
+        label: "View security settings",
+        description: "Can view account and two-step verification settings.",
+      },
+      {
+        key: "security:settings:manage",
+        label: "Manage security settings",
+        description: "Can update security and two-step verification controls.",
+        dangerous: true,
+        mainAdminRecommended: true,
       },
     ],
   },
 ];
 
 const allPermissionKeys = permissionGroups.flatMap((group) =>
-  group.permissions.map((permission) => permission.key)
+  group.permissions.map((permission) => permission.key),
 );
 
 const defaultPermissionsByRole: Record<AdminRole, string[]> = {
@@ -226,46 +666,50 @@ const defaultPermissionsByRole: Record<AdminRole, string[]> = {
   admin: [
     "admin:dashboard:view",
     "money:view",
-    "money:add_transactions",
-    "money:print_reports",
-    "money:export_reports",
+    "event_hub:view",
+    "stock:view",
+    "community_art:view",
+    "site_pages:view",
+    "audit_logs:view",
   ],
-  editor: ["admin:dashboard:view"],
+  editor: [
+    "admin:dashboard:view",
+    "community_art:view",
+    "community_art:manage",
+    "site_pages:view",
+    "site_pages:manage",
+    "website:sponsors:view",
+    "website:sponsors:manage",
+  ],
 };
 
-async function readJsonResponse(res: Response) {
+async function readJsonResponse(res: Response): Promise<ApiResult> {
   const text = await res.text();
 
   try {
-    return text ? JSON.parse(text) : {};
+    return text ? (JSON.parse(text) as ApiResult) : {};
   } catch {
     return {
       ok: false,
-      error: "The server returned a response that was not valid JSON.",
-      rawResponse: text,
-      status: res.status,
+      error: "The server returned an unreadable response.",
     };
   }
 }
 
-function buildApiError(data: any, fallback: string) {
-  const mainMessage = data?.error || data?.message || fallback;
-  const reason = data?.reason ? `\nReason: ${data.reason}` : "";
-  const likelyFix = data?.likelyFix ? `\nLikely fix: ${data.likelyFix}` : "";
-  const details =
-    data?.details || data?.debug
-      ? `\nDetails: ${JSON.stringify(data.details || data.debug, null, 2)}`
-      : "";
-
-  return `${mainMessage}${reason}${likelyFix}${details}`;
+function buildSafeApiError(data: ApiResult, fallback: string) {
+  return data?.error || data?.message || fallback;
 }
 
 function normalisePermissions(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
 
-  return value
-    .map((item) => String(item || "").trim())
-    .filter((item) => item.length > 0);
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item || "").trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
 }
 
 function roleLabel(role: AdminRole) {
@@ -291,19 +735,40 @@ function permissionCount(role: AdminRole, permissions: string[] | undefined) {
   return normalisePermissions(permissions).length;
 }
 
+function formatDate(value: string | null) {
+  if (!value) return "Unknown";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "Unknown";
+
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 export default function AdminUsersClient() {
   const [admins, setAdmins] = useState<AdminUser[]>([]);
+
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<AdminRole>("admin");
   const [isActive, setIsActive] = useState(true);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>(
-    defaultPermissionsByRole.admin
+    defaultPermissionsByRole.admin,
   );
+
+  const [permissionSearch, setPermissionSearch] = useState("");
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminFilter, setAdminFilter] = useState<AdminFilter>("all");
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     "Admin Portal": true,
-    "Money Tracker": true,
+    "Money Management": true,
+    "Event Hub": true,
+    "Stock Management": true,
   });
 
   const [expandedAdminId, setExpandedAdminId] = useState<string | null>(null);
@@ -320,13 +785,36 @@ export default function AdminUsersClient() {
 
   const activeAdmins = useMemo(
     () => admins.filter((admin) => admin.is_active),
-    [admins]
+    [admins],
   );
 
   const mainAdmins = useMemo(
-    () => admins.filter((admin) => admin.role === "main_admin" && admin.is_active),
-    [admins]
+    () =>
+      admins.filter(
+        (admin) => admin.role === "main_admin" && admin.is_active,
+      ),
+    [admins],
   );
+
+  const filteredAdmins = useMemo(() => {
+    const search = adminSearch.trim().toLowerCase();
+
+    return admins.filter((admin) => {
+      const matchesSearch =
+        !search ||
+        String(admin.full_name || "").toLowerCase().includes(search) ||
+        String(admin.email || "").toLowerCase().includes(search) ||
+        String(admin.role || "").toLowerCase().includes(search);
+
+      const matchesFilter =
+        adminFilter === "all" ||
+        (adminFilter === "active" && admin.is_active) ||
+        (adminFilter === "inactive" && !admin.is_active) ||
+        admin.role === adminFilter;
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [admins, adminFilter, adminSearch]);
 
   async function loadAdmins() {
     try {
@@ -342,10 +830,12 @@ export default function AdminUsersClient() {
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(buildApiError(data, "Failed to load admin users."));
+        throw new Error(
+          buildSafeApiError(data, "Failed to load admin users."),
+        );
       }
 
-      const nextAdmins = (data.admins || []).map((admin: AdminUser) => ({
+      const nextAdmins = (data.admins || []).map((admin) => ({
         ...admin,
         permissions:
           admin.role === "main_admin"
@@ -358,7 +848,7 @@ export default function AdminUsersClient() {
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong loading admin users."
+          : "Something went wrong while loading admin users.",
       );
     } finally {
       setLoading(false);
@@ -366,7 +856,7 @@ export default function AdminUsersClient() {
   }
 
   useEffect(() => {
-    loadAdmins();
+    void loadAdmins();
   }, []);
 
   function toggleGroup(title: string) {
@@ -384,35 +874,44 @@ export default function AdminUsersClient() {
   function toggleSelectedPermission(permissionKey: string) {
     if (role === "main_admin") return;
 
-    setSelectedPermissions((prev) => {
-      if (prev.includes(permissionKey)) {
-        return prev.filter((item) => item !== permissionKey);
-      }
-
-      return [...prev, permissionKey];
-    });
+    setSelectedPermissions((prev) =>
+      prev.includes(permissionKey)
+        ? prev.filter((item) => item !== permissionKey)
+        : [...prev, permissionKey],
+    );
   }
 
   function toggleDraftPermission(adminId: string, permissionKey: string) {
     const admin = admins.find((item) => item.id === adminId);
 
-    if (admin?.role === "main_admin") return;
+    if (!admin || admin.role === "main_admin") return;
 
     setDraftPermissions((prev) => {
       const existing = prev[adminId] || [];
 
-      if (existing.includes(permissionKey)) {
-        return {
-          ...prev,
-          [adminId]: existing.filter((item) => item !== permissionKey),
-        };
-      }
-
       return {
         ...prev,
-        [adminId]: [...existing, permissionKey],
+        [adminId]: existing.includes(permissionKey)
+          ? existing.filter((item) => item !== permissionKey)
+          : [...existing, permissionKey],
       };
     });
+  }
+
+  function selectWholeGroup(
+    group: PermissionGroup,
+    current: string[],
+    onChange: (next: string[]) => void,
+  ) {
+    const groupKeys = group.permissions.map((item) => item.key);
+    const allSelected = groupKeys.every((key) => current.includes(key));
+
+    if (allSelected) {
+      onChange(current.filter((key) => !groupKeys.includes(key)));
+      return;
+    }
+
+    onChange(Array.from(new Set([...current, ...groupKeys])));
   }
 
   function startEditPermissions(admin: AdminUser) {
@@ -427,8 +926,8 @@ export default function AdminUsersClient() {
     }));
   }
 
-  async function addOrUpdateAdmin(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function addOrUpdateAdmin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
     try {
       setSaving(true);
@@ -455,17 +954,22 @@ export default function AdminUsersClient() {
           role,
           isActive,
           permissions:
-            role === "main_admin" ? allPermissionKeys : selectedPermissions,
+            role === "main_admin"
+              ? allPermissionKeys
+              : selectedPermissions,
+          twoFactorRequired: true,
         }),
       });
 
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(buildApiError(data, "Failed to save admin user."));
+        throw new Error(
+          buildSafeApiError(data, "Failed to save admin user."),
+        );
       }
 
-      setMessage(data.message || "Admin user saved.");
+      setMessage(data.message || "Admin user saved successfully.");
       setEmail("");
       setFullName("");
       setRole("admin");
@@ -477,7 +981,7 @@ export default function AdminUsersClient() {
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong saving admin user."
+          : "Something went wrong while saving the admin user.",
       );
     } finally {
       setSaving(false);
@@ -487,7 +991,7 @@ export default function AdminUsersClient() {
   async function updateAdmin(
     admin: AdminUser,
     nextValues: Partial<AdminUser>,
-    nextPermissions?: string[]
+    nextPermissions?: string[],
   ) {
     try {
       setUpdatingId(admin.id);
@@ -522,22 +1026,25 @@ export default function AdminUsersClient() {
             typeof nextValues.full_name === "string"
               ? nextValues.full_name
               : admin.full_name ?? null,
+          twoFactorRequired: true,
         }),
       });
 
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(buildApiError(data, "Failed to update admin user."));
+        throw new Error(
+          buildSafeApiError(data, "Failed to update admin user."),
+        );
       }
 
-      setMessage(data.message || "Admin user updated.");
+      setMessage(data.message || "Admin user updated successfully.");
       await loadAdmins();
     } catch (err: unknown) {
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong updating admin user."
+          : "Something went wrong while updating the admin user.",
       );
     } finally {
       setUpdatingId(null);
@@ -548,37 +1055,11 @@ export default function AdminUsersClient() {
     const permissionsToSave =
       admin.role === "main_admin"
         ? allPermissionKeys
-        : draftPermissions[admin.id] || normalisePermissions(admin.permissions);
+        : draftPermissions[admin.id] ||
+          normalisePermissions(admin.permissions);
 
     await updateAdmin(admin, {}, permissionsToSave);
     setExpandedAdminId(null);
-  }
-
-  function renderMainAdminPermissionsCard() {
-    return (
-      <div className="rounded-2xl border border-purple-300/25 bg-purple-500/10 p-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-xl border border-purple-300/25 bg-purple-500/20 p-2 text-purple-100">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
-
-          <div>
-            <p className="text-sm font-black text-white">
-              Main admin gets every permission automatically
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-white/55">
-              You do not need to tick individual boxes for a main admin. They
-              can access all admin portal pages and all high-risk actions.
-            </p>
-
-            <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-purple-100">
-              {allPermissionKeys.length} permissions included automatically
-            </div>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   function renderPermissionGroups(args: {
@@ -586,52 +1067,117 @@ export default function AdminUsersClient() {
     permissions: string[];
     disabled?: boolean;
     onToggle: (permissionKey: string) => void;
+    onReplace?: (permissions: string[]) => void;
   }) {
     if (args.roleValue === "main_admin") {
-      return renderMainAdminPermissionsCard();
+      return (
+        <div className="rounded-2xl border border-purple-300/25 bg-purple-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl border border-purple-300/25 bg-purple-500/20 p-2 text-purple-100">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+
+            <div>
+              <p className="text-sm font-black text-white">
+                Main admins receive every permission automatically
+              </p>
+              <p className="mt-1 text-xs leading-5 text-white/55">
+                Main admins can access every current and future Admin Portal
+                feature, including high-risk actions.
+              </p>
+              <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-purple-100">
+                {allPermissionKeys.length} permissions included
+              </div>
+            </div>
+          </div>
+        </div>
+      );
     }
 
-    const disabled = args.disabled === true;
+    const search = permissionSearch.trim().toLowerCase();
+
+    const visibleGroups = permissionGroups
+      .map((group) => ({
+        ...group,
+        permissions: group.permissions.filter((permission) => {
+          if (!search) return true;
+
+          return (
+            permission.label.toLowerCase().includes(search) ||
+            permission.description.toLowerCase().includes(search) ||
+            permission.key.toLowerCase().includes(search) ||
+            group.title.toLowerCase().includes(search)
+          );
+        }),
+      }))
+      .filter((group) => group.permissions.length > 0);
 
     return (
       <div className="space-y-3">
-        {permissionGroups.map((group) => {
+        {visibleGroups.map((group) => {
           const isOpen = openGroups[group.title] !== false;
-          const groupPermissionKeys = group.permissions.map(
-            (permission) => permission.key
-          );
-          const enabledInGroup = groupPermissionKeys.filter((key) =>
-            args.permissions.includes(key)
+          const groupKeys = group.permissions.map((permission) => permission.key);
+          const enabledInGroup = groupKeys.filter((key) =>
+            args.permissions.includes(key),
           ).length;
+          const allInGroupEnabled =
+            groupKeys.length > 0 &&
+            groupKeys.every((key) => args.permissions.includes(key));
 
           return (
             <div
               key={group.title}
               className="rounded-2xl border border-white/10 bg-black/20"
             >
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.title)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-              >
-                <div>
+              <div className="flex items-start justify-between gap-3 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.title)}
+                  className="min-w-0 flex-1 text-left"
+                >
                   <p className="text-sm font-black text-white">{group.title}</p>
                   <p className="mt-1 text-xs text-white/45">
                     {group.description}
                   </p>
                   <p className="mt-1 text-[11px] font-bold text-purple-100/70">
-                    {enabledInGroup} of {groupPermissionKeys.length} enabled
+                    {enabledInGroup} of {groupKeys.length} enabled
                   </p>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {args.onReplace ? (
+                    <button
+                      type="button"
+                      disabled={args.disabled}
+                      onClick={() =>
+                        selectWholeGroup(
+                          group,
+                          args.permissions,
+                          args.onReplace!,
+                        )
+                      }
+                      className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-bold text-white/70 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {allInGroupEnabled ? "Clear" : "Select all"}
+                    </button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.title)}
+                    className="rounded-lg p-1.5 text-white/60 hover:bg-white/10"
+                    aria-label={`${isOpen ? "Close" : "Open"} ${group.title}`}
+                  >
+                    {isOpen ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </button>
                 </div>
+              </div>
 
-                {isOpen ? (
-                  <ChevronUp className="h-4 w-4 text-white/60" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-white/60" />
-                )}
-              </button>
-
-              {isOpen && (
+              {isOpen ? (
                 <div className="space-y-2 border-t border-white/10 p-3">
                   {group.permissions.map((permission) => {
                     const checked = args.permissions.includes(permission.key);
@@ -642,41 +1188,68 @@ export default function AdminUsersClient() {
                         className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${
                           checked
                             ? "border-sky-300/25 bg-sky-500/10"
-                            : "border-white/10 bg-black/20 hover:bg-white/5"
-                        } ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
+                            : permission.dangerous
+                              ? "border-amber-300/15 bg-amber-500/[0.05] hover:bg-amber-500/[0.08]"
+                              : "border-white/10 bg-black/20 hover:bg-white/5"
+                        } ${args.disabled ? "cursor-not-allowed opacity-70" : ""}`}
                       >
                         <input
                           type="checkbox"
                           checked={checked}
-                          disabled={disabled}
+                          disabled={args.disabled}
                           onChange={() => args.onToggle(permission.key)}
                           className="mt-1"
                         />
 
-                        <div>
-                          <p className="text-sm font-bold text-white">
-                            {permission.label}
-                          </p>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-bold text-white">
+                              {permission.label}
+                            </p>
+
+                            {permission.dangerous ? (
+                              <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
+                                High risk
+                              </span>
+                            ) : null}
+
+                            {permission.mainAdminRecommended ? (
+                              <span className="rounded-full border border-purple-300/20 bg-purple-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-purple-100">
+                                Main admin recommended
+                              </span>
+                            ) : null}
+                          </div>
+
                           <p className="mt-1 text-xs leading-5 text-white/45">
                             {permission.description}
+                          </p>
+
+                          <p className="mt-1 break-all font-mono text-[10px] text-white/25">
+                            {permission.key}
                           </p>
                         </div>
                       </label>
                     );
                   })}
                 </div>
-              )}
+              ) : null}
             </div>
           );
         })}
+
+        {visibleGroups.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-center text-sm text-white/50">
+            No permissions match your search.
+          </div>
+        ) : null}
       </div>
     );
   }
 
   return (
     <main className="min-h-screen w-full bg-transparent px-3 py-5 text-white sm:px-5 lg:px-6">
-      <div className="mx-auto w-full max-w-[1500px] space-y-6">
-        <section className="rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
+      <div className="mx-auto w-full max-w-[1600px] space-y-6">
+        <section className="rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex items-center gap-3">
@@ -694,15 +1267,16 @@ export default function AdminUsersClient() {
                 </div>
               </div>
 
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
-                Main admin only page. Add admins by email, choose their role and
-                decide which admin portal pages and actions they can use.
+              <p className="mt-3 max-w-4xl text-sm leading-6 text-white/65">
+                Manage access across Money Management, Event Hub, Stock
+                Management, Community Art, website tools, email, donations,
+                applications, audit logs and security settings.
               </p>
             </div>
 
             <button
               type="button"
-              onClick={loadAdmins}
+              onClick={() => void loadAdmins()}
               disabled={loading}
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -713,52 +1287,51 @@ export default function AdminUsersClient() {
             </button>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-white/40">
-                Total Admins
-              </p>
-              <p className="mt-1 text-2xl font-black text-white">
-                {admins.length}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-100/70">
-                Active Admins
-              </p>
-              <p className="mt-1 text-2xl font-black text-emerald-100">
-                {activeAdmins.length}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-purple-100/70">
-                Main Admins
-              </p>
-              <p className="mt-1 text-2xl font-black text-purple-100">
-                {mainAdmins.length}
-              </p>
-            </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Total Admins" value={admins.length} tone="white" />
+            <StatCard
+              label="Active Admins"
+              value={activeAdmins.length}
+              tone="emerald"
+            />
+            <StatCard
+              label="Main Admins"
+              value={mainAdmins.length}
+              tone="purple"
+            />
+            <StatCard
+              label="Available Permissions"
+              value={allPermissionKeys.length}
+              tone="sky"
+            />
           </div>
         </section>
 
-        {(message || error) && (
+        {message || error ? (
           <section
+            role={error ? "alert" : "status"}
             className={`rounded-3xl border p-4 text-sm font-semibold backdrop-blur-xl ${
               error
                 ? "border-red-400/30 bg-red-500/10 text-red-100"
                 : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
             }`}
           >
-            <span className="whitespace-pre-line">{error || message}</span>
-          </section>
-        )}
+            <div className="flex gap-3">
+              {error ? (
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              )}
 
-        <section className="grid gap-6 xl:grid-cols-[500px_minmax(0,1fr)]">
+              <span>{error || message}</span>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="grid gap-6 xl:grid-cols-[520px_minmax(0,1fr)]">
           <form
             onSubmit={addOrUpdateAdmin}
-            className="rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl"
+            className="h-fit rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl"
           >
             <div className="flex items-center gap-3">
               <div className="rounded-2xl bg-emerald-500/10 p-3 text-emerald-100">
@@ -768,7 +1341,7 @@ export default function AdminUsersClient() {
               <div>
                 <h2 className="text-xl font-black text-white">Add Admin</h2>
                 <p className="text-sm text-white/55">
-                  Type their email, choose role and permissions.
+                  Add an approved user and choose exactly what they can access.
                 </p>
               </div>
             </div>
@@ -779,9 +1352,10 @@ export default function AdminUsersClient() {
               </span>
               <input
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 type="email"
-                placeholder="name@example.com"
+                autoComplete="email"
+                placeholder="name@burtonpride.co.uk"
                 className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-300/40"
               />
             </label>
@@ -792,9 +1366,10 @@ export default function AdminUsersClient() {
               </span>
               <input
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(event) => setFullName(event.target.value)}
                 type="text"
-                placeholder="Cameron Lowndes"
+                autoComplete="name"
+                placeholder="Full name"
                 className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-300/40"
               />
             </label>
@@ -833,21 +1408,47 @@ export default function AdminUsersClient() {
             </div>
 
             <div className="mt-5">
-              <div className="mb-3 flex flex-col gap-1">
+              <div className="mb-3">
                 <p className="text-sm font-bold text-white/70">
-                  Admin portal permissions
+                  Admin Portal permissions
                 </p>
-                <p className="text-xs leading-5 text-white/45">
+                <p className="mt-1 text-xs leading-5 text-white/45">
                   {role === "main_admin"
-                    ? "Main admin permissions are automatic, so the boxes are hidden."
-                    : "Tick the pages and actions this admin can use."}
+                    ? "Main admin permissions are included automatically."
+                    : "Select only the pages and actions this admin needs."}
                 </p>
               </div>
+
+              {role !== "main_admin" ? (
+                <div className="relative mb-3">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                  <input
+                    value={permissionSearch}
+                    onChange={(event) =>
+                      setPermissionSearch(event.target.value)
+                    }
+                    placeholder="Search permissions..."
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 py-3 pl-10 pr-10 text-sm text-white outline-none placeholder:text-white/30 focus:border-purple-300/40"
+                  />
+
+                  {permissionSearch ? (
+                    <button
+                      type="button"
+                      onClick={() => setPermissionSearch("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-white/40 hover:bg-white/10 hover:text-white"
+                      aria-label="Clear permission search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
 
               {renderPermissionGroups({
                 roleValue: role,
                 permissions: selectedPermissions,
                 onToggle: toggleSelectedPermission,
+                onReplace: setSelectedPermissions,
               })}
             </div>
 
@@ -855,58 +1456,106 @@ export default function AdminUsersClient() {
               <input
                 type="checkbox"
                 checked={isActive}
-                onChange={(e) => setIsActive(e.target.checked)}
+                onChange={(event) => setIsActive(event.target.checked)}
               />
+
               <div>
                 <p className="text-sm font-bold text-white">Active admin</p>
                 <p className="text-xs text-white/50">
-                  Turn this off to create or update the user as inactive.
+                  Inactive admins cannot access the Admin Portal.
                 </p>
               </div>
             </label>
+
+            <div className="mt-5 rounded-2xl border border-blue-300/20 bg-blue-500/10 p-4">
+              <div className="flex gap-3">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-100" />
+                <div>
+                  <p className="text-sm font-black text-white">
+                    Two-step verification required
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-white/55">
+                    New admin accounts are saved with two-step verification
+                    required.
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <button
               type="submit"
               disabled={saving}
               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-black text-white shadow-lg shadow-purple-950/30 hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Save className="h-4 w-4" />
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
               {saving ? "Saving..." : "Save Admin"}
             </button>
-
-            <p className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100/80">
-              Safety note: only main admins should give main admin access or
-              dangerous money permissions.
-            </p>
           </form>
 
           <section className="min-w-0 rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="rounded-2xl bg-sky-500/10 p-3 text-sky-100">
-                <UserCog className="h-5 w-5" />
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-sky-500/10 p-3 text-sky-100">
+                  <UserCog className="h-5 w-5" />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-black text-white">
+                    Current Admin Users
+                  </h2>
+                  <p className="text-sm text-white/55">
+                    Search, filter and manage access.
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <h2 className="text-xl font-black text-white">
-                  Current Admin Users
-                </h2>
-                <p className="text-sm text-white/55">
-                  Change roles, permissions or deactivate access.
-                </p>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px] lg:w-[520px]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                  <input
+                    value={adminSearch}
+                    onChange={(event) => setAdminSearch(event.target.value)}
+                    placeholder="Search admins..."
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-white/30"
+                  />
+                </div>
+
+                <div className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                  <select
+                    value={adminFilter}
+                    onChange={(event) =>
+                      setAdminFilter(event.target.value as AdminFilter)
+                    }
+                    className="w-full appearance-none rounded-2xl border border-white/10 bg-black/30 py-3 pl-10 pr-4 text-sm text-white outline-none"
+                  >
+                    <option value="all">All admins</option>
+                    <option value="active">Active only</option>
+                    <option value="inactive">Inactive only</option>
+                    <option value="main_admin">Main admins</option>
+                    <option value="admin">Admins</option>
+                    <option value="editor">Editors</option>
+                  </select>
+                </div>
               </div>
             </div>
 
             {loading ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center text-sm text-white/60">
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-8 text-center text-sm text-white/60">
+                <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
                 Loading admin users...
               </div>
-            ) : admins.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-6 text-center text-sm text-white/60">
-                No admin users found.
+            ) : filteredAdmins.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-8 text-center text-sm text-white/60">
+                No admin users match the current search or filter.
               </div>
             ) : (
-              <div className="space-y-4">
-                {admins.map((admin) => {
+              <div className="mt-5 space-y-4">
+                {filteredAdmins.map((admin) => {
                   const adminPermissions =
                     draftPermissions[admin.id] ||
                     normalisePermissions(admin.permissions);
@@ -921,7 +1570,7 @@ export default function AdminUsersClient() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span
                               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold ${roleBadgeClass(
-                                admin.role
+                                admin.role,
                               )}`}
                             >
                               <ShieldCheck className="h-3.5 w-3.5" />
@@ -949,32 +1598,43 @@ export default function AdminUsersClient() {
                                 ? "Supabase linked"
                                 : "Not linked"}
                             </span>
+
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
+                                admin.two_factor_enabled
+                                  ? "border-blue-300/30 bg-blue-500/10 text-blue-100"
+                                  : "border-amber-300/30 bg-amber-500/10 text-amber-100"
+                              }`}
+                            >
+                              {admin.two_factor_enabled
+                                ? `2FA: ${
+                                    admin.two_factor_method || "enabled"
+                                  }`
+                                : "2FA setup required"}
+                            </span>
                           </div>
 
                           <p className="mt-3 break-words text-base font-black text-white">
-                            {admin.full_name || admin.email || "No name saved"}
+                            {admin.full_name ||
+                              admin.email ||
+                              "No name saved"}
                           </p>
 
                           <p className="mt-1 break-words text-sm text-white/55">
                             {admin.email || "No email saved"}
                           </p>
 
-                          <p className="mt-2 break-words text-xs text-white/35">
-                            Supabase user ID:{" "}
-                            {admin.supabase_user_id || "Not linked yet"}
-                          </p>
-
-                          <p className="mt-2 text-xs text-white/35">
-                            Added:{" "}
-                            {admin.created_at
-                              ? new Date(admin.created_at).toLocaleDateString(
-                                  "en-GB"
-                                )
-                              : "Unknown"}
-                          </p>
+                          <div className="mt-3 grid gap-1 text-xs text-white/35">
+                            <p>
+                              Supabase user ID:{" "}
+                              {admin.supabase_user_id || "Not linked yet"}
+                            </p>
+                            <p>Added: {formatDate(admin.created_at)}</p>
+                            <p>Updated: {formatDate(admin.updated_at)}</p>
+                          </div>
                         </div>
 
-                        <div className="flex w-full flex-col gap-3 2xl:w-[280px]">
+                        <div className="flex w-full flex-col gap-3 2xl:w-[300px]">
                           <label>
                             <span className="text-xs font-bold text-white/50">
                               Role
@@ -982,15 +1642,15 @@ export default function AdminUsersClient() {
                             <select
                               value={admin.role}
                               disabled={updatingId === admin.id}
-                              onChange={(e) =>
-                                updateAdmin(
+                              onChange={(event) =>
+                                void updateAdmin(
                                   admin,
                                   {
-                                    role: e.target.value as AdminRole,
+                                    role: event.target.value as AdminRole,
                                   },
                                   defaultPermissionsByRole[
-                                    e.target.value as AdminRole
-                                  ]
+                                    event.target.value as AdminRole
+                                  ],
                                 )
                               }
                               className="mt-1 block w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none"
@@ -1011,7 +1671,7 @@ export default function AdminUsersClient() {
                             type="button"
                             disabled={updatingId === admin.id}
                             onClick={() =>
-                              updateAdmin(admin, {
+                              void updateAdmin(admin, {
                                 is_active: !admin.is_active,
                               })
                             }
@@ -1038,10 +1698,10 @@ export default function AdminUsersClient() {
                             </p>
                             <p className="text-xs text-white/45">
                               {admin.role === "main_admin"
-                                ? "Main admins automatically have all permissions."
+                                ? "Main admins automatically have every permission."
                                 : `${permissionCount(
                                     admin.role,
-                                    admin.permissions
+                                    admin.permissions,
                                   )} permissions enabled.`}
                             </p>
                           </div>
@@ -1051,23 +1711,46 @@ export default function AdminUsersClient() {
                             onClick={() => startEditPermissions(admin)}
                             className="inline-flex items-center justify-center rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100 hover:bg-purple-500/20"
                           >
-                            {admin.role === "main_admin"
-                              ? expandedAdminId === admin.id
-                                ? "Close automatic permissions"
-                                : "View automatic permissions"
-                              : expandedAdminId === admin.id
-                                ? "Close permissions"
+                            {expandedAdminId === admin.id
+                              ? "Close permissions"
+                              : admin.role === "main_admin"
+                                ? "View permissions"
                                 : "Manage permissions"}
                           </button>
                         </div>
 
-                        {expandedAdminId === admin.id && (
+                        {expandedAdminId === admin.id ? (
                           <div className="mt-4 space-y-4">
+                            {admin.role !== "main_admin" ? (
+                              <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+                                <input
+                                  value={permissionSearch}
+                                  onChange={(event) =>
+                                    setPermissionSearch(event.target.value)
+                                  }
+                                  placeholder="Search permissions..."
+                                  className="w-full rounded-2xl border border-white/10 bg-black/30 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-white/30"
+                                />
+                              </div>
+                            ) : null}
+
                             {renderPermissionGroups({
                               roleValue: admin.role,
                               permissions: adminPermissions,
                               onToggle: (permissionKey) =>
-                                toggleDraftPermission(admin.id, permissionKey),
+                                toggleDraftPermission(
+                                  admin.id,
+                                  permissionKey,
+                                ),
+                              onReplace:
+                                admin.role === "main_admin"
+                                  ? undefined
+                                  : (permissions) =>
+                                      setDraftPermissions((prev) => ({
+                                        ...prev,
+                                        [admin.id]: permissions,
+                                      })),
                             })}
 
                             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -1076,24 +1759,26 @@ export default function AdminUsersClient() {
                                 onClick={() => setExpandedAdminId(null)}
                                 className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold text-white hover:bg-white/20"
                               >
-                                {admin.role === "main_admin" ? "Close" : "Cancel"}
+                                Close
                               </button>
 
-                              {admin.role !== "main_admin" && (
+                              {admin.role !== "main_admin" ? (
                                 <button
                                   type="button"
                                   disabled={updatingId === admin.id}
-                                  onClick={() => saveAdminPermissions(admin)}
+                                  onClick={() =>
+                                    void saveAdminPermissions(admin)
+                                  }
                                   className="rounded-xl bg-purple-500 px-4 py-2 text-xs font-black text-white hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   {updatingId === admin.id
                                     ? "Saving..."
                                     : "Save permissions"}
                                 </button>
-                              )}
+                              ) : null}
                             </div>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   );
@@ -1104,5 +1789,33 @@ export default function AdminUsersClient() {
         </section>
       </div>
     </main>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "white" | "emerald" | "purple" | "sky";
+}) {
+  const classes = {
+    white: "border-white/10 bg-black/20 text-white",
+    emerald:
+      "border-emerald-300/20 bg-emerald-500/10 text-emerald-100",
+    purple:
+      "border-purple-300/20 bg-purple-500/10 text-purple-100",
+    sky: "border-sky-300/20 bg-sky-500/10 text-sky-100",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${classes[tone]}`}>
+      <p className="text-xs font-bold uppercase tracking-wide opacity-70">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-black">{value}</p>
+    </div>
   );
 }

@@ -52,7 +52,7 @@ const siteThemeScript = `
     root.classList.toggle("dark", theme === "dark");
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
-  } catch (error) {
+  } catch {
     var root = document.documentElement;
 
     root.classList.remove("dark");
@@ -72,7 +72,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className="h-full"
+      className="
+        h-full
+        bg-white
+        dark:bg-[#2b2b2b]
+      "
       suppressHydrationWarning
     >
       <head>
@@ -95,8 +99,8 @@ export default function RootLayout({
           antialiased
           transition-colors
           duration-300
-          dark:bg-slate-950
-          dark:text-white
+          dark:bg-[#2b2b2b]
+          dark:text-[#f1f1f1]
         `}
       >
         {children}

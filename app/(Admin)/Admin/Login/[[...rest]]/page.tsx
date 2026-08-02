@@ -1294,10 +1294,7 @@ export default function LoginPage() {
                 </div>
 
                 <h1 className="mt-10 max-w-xl text-5xl font-black leading-[1.2] tracking-tight">
-                  Secure access for
-                  <span className="block bg-gradient-to-r from-pink-200 via-purple-100 to-blue-200 bg-clip-text text-transparent">
-                    approved users only.
-                  </span>
+                  Welcome to the Burton Pride Admin Portal
                 </h1>
 
                 <p className="mt-8 max-w-lg text-lg leading-9 text-white/72">
