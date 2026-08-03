@@ -75,6 +75,7 @@ const EMAIL_PREFIX = "/admin/email";
 const MONEY_PREFIX = "/admin/money";
 const MONEY_MANAGEMENT_PREFIX = "/admin/moneymanagement";
 const STOCK_MANAGEMENT_PREFIX = "/admin/stockmanagement";
+const BUG_TRACKER_PREFIX = "/admin/bugtracker";
 
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -760,15 +761,21 @@ export default function AdminLayoutClient({ children }: { children: ReactNode })
   const path = normalisePath(pathname);
 
   /**
-   * Stock Management is a fully separate admin app.
+   * Stock Management and Bug Tracker are fully separate admin apps.
    *
    * Nothing in this main Admin layout controls routes under:
    * /Admin/StockManagement
+   * /Admin/BugTracker
    *
-   * Stock Management must use its own layout.tsx for its sidebar,
-   * authentication, permissions, audit logging, page title and styling.
+   * These sections use their own page or nested layout for their sidebar,
+   * authentication, permissions, audit logging, page title, width,
+   * background and styling.
    */
-  if (isPathOrChild(path, STOCK_MANAGEMENT_PREFIX)) {
+  const usesSeparateAdminLayout =
+    isPathOrChild(path, STOCK_MANAGEMENT_PREFIX) ||
+    isPathOrChild(path, BUG_TRACKER_PREFIX);
+
+  if (usesSeparateAdminLayout) {
     return <>{children}</>;
   }
 
