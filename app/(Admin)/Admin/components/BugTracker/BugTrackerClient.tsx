@@ -12,6 +12,7 @@ import {
   Clock3,
   FileText,
   Filter,
+  Home,
   LayoutDashboard,
   Loader2,
   Plus,
@@ -718,6 +719,40 @@ export default function BugTrackerClient({
     });
   }, [reports]);
 
+  const activeReports = useMemo(
+    () =>
+      sortedReports.filter(
+        (report) =>
+          report.status !== "resolved" &&
+          report.status !== "closed",
+      ),
+    [sortedReports],
+  );
+
+  const resolvedReports = useMemo(
+    () =>
+      sortedReports
+        .filter(
+          (report) =>
+            report.status === "resolved" ||
+            report.status === "closed",
+        )
+        .sort(
+          (first, second) =>
+            new Date(
+              second.resolved_at ||
+                second.closed_at ||
+                second.updated_at,
+            ).getTime() -
+            new Date(
+              first.resolved_at ||
+                first.closed_at ||
+                first.updated_at,
+            ).getTime(),
+        ),
+    [sortedReports],
+  );
+
   function clearFilters() {
     setSearch("");
     setApplication("all");
@@ -878,6 +913,25 @@ export default function BugTrackerClient({
         <div className="absolute right-[12%] top-28 h-72 w-72 rounded-full bg-sky-500/10 blur-3xl" />
         <div className="absolute -right-24 top-8 h-72 w-72 rounded-full bg-purple-500/10 blur-3xl" />
       </div>
+      <section className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-xl shadow-black/10 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.15em] text-purple-200/70">
+            Admin Portal
+          </p>
+          <h1 className="mt-1 text-xl font-black text-white">
+            Bug Tracker
+          </h1>
+        </div>
+
+        <Link
+          href="/Admin/Dashboard"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-5 text-sm font-black text-purple-100 transition hover:bg-purple-500/20 hover:text-white"
+        >
+          <Home aria-hidden="true" className="h-4 w-4" />
+          Back to Admin Portal
+        </Link>
+      </section>
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <SummaryCard
           label="All Bugs"
@@ -944,18 +998,7 @@ export default function BugTrackerClient({
           tone="sky"
         />
 
-        <SummaryCard
-          label="Resolved"
-          value={summary.resolved}
-          description="Reports that have been fixed and marked as resolved."
-          icon={
-            <CheckCircle2
-              aria-hidden="true"
-              className="h-5 w-5 text-emerald-200"
-            />
-          }
-          tone="emerald"
-        />
+        
       </section>
 
       <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/15 backdrop-blur-2xl sm:p-5">
@@ -1330,13 +1373,13 @@ export default function BugTrackerClient({
               />
 
               <h2 className="text-lg font-black text-white">
-                Bug Reports
+                Active Bug Reports
               </h2>
             </div>
 
             <p className="mt-1 text-sm text-slate-400">
-              Showing {sortedReports.length} report
-              {sortedReports.length === 1 ? "" : "s"}.
+              Showing {activeReports.length} active report
+              {activeReports.length === 1 ? "" : "s"}.
             </p>
           </div>
 
@@ -1358,7 +1401,7 @@ export default function BugTrackerClient({
               </p>
             </div>
           </div>
-        ) : sortedReports.length === 0 ? (
+        ) : activeReports.length === 0 ? (
           <div className="px-6 py-16 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-500/10 ring-1 ring-purple-300/15">
               <Bug
@@ -1368,13 +1411,13 @@ export default function BugTrackerClient({
             </div>
 
             <h3 className="mt-5 text-xl font-black text-white">
-              No bug reports found
+              No active bug reports found
             </h3>
 
             <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-400">
               {hasActiveFilters
                 ? "No reports match the filters you selected."
-                : "There are currently no bug reports recorded in the tracker."}
+                : "There are currently no active bug reports. Resolved reports are shown in the separate table below."}
             </p>
 
             <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -1401,7 +1444,7 @@ export default function BugTrackerClient({
           </div>
         ) : (
           <div className="space-y-3 p-4 sm:p-5">
-            {sortedReports.map((report) => {
+            {activeReports.map((report) => {
               const priorityStyle = getPriorityClasses(
                 report.priority,
               );
@@ -1614,6 +1657,143 @@ export default function BugTrackerClient({
                 </Link>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      <section className="relative overflow-hidden rounded-3xl border border-emerald-300/15 bg-white/[0.04] shadow-2xl shadow-black/15 backdrop-blur-2xl">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/70 to-transparent"
+        />
+
+        <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2
+                aria-hidden="true"
+                className="h-5 w-5 text-emerald-300"
+              />
+
+              <h2 className="text-lg font-black text-white">
+                Resolved Bug Reports
+              </h2>
+            </div>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Resolved and closed reports are kept separately so they
+              do not get mixed up with bugs that still need work.
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-100 ring-1 ring-emerald-300/20">
+            {resolvedReports.length} resolved report
+            {resolvedReports.length === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex min-h-[180px] items-center justify-center px-6 py-12">
+            <Loader2
+              aria-hidden="true"
+              className="h-7 w-7 animate-spin text-emerald-300"
+            />
+          </div>
+        ) : resolvedReports.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <CheckCircle2
+              aria-hidden="true"
+              className="mx-auto h-10 w-10 text-emerald-300/60"
+            />
+            <h3 className="mt-4 text-lg font-black text-white">
+              No resolved reports yet
+            </h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Bugs will move into this table when their status is
+              changed to Resolved or Closed.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-white/10">
+              <thead className="bg-black/20">
+                <tr>
+                  <th className="px-5 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    Reference
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    Bug
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    Application
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    Status
+                  </th>
+                  
+                  <th className="px-5 py-3 text-right text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    Action
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-white/10">
+                {resolvedReports.map((report) => (
+                  <tr
+                    key={report.id}
+                    className="bg-emerald-500/[0.025] transition hover:bg-emerald-500/[0.06]"
+                  >
+                    <td className="whitespace-nowrap px-5 py-4 font-mono text-xs font-bold text-emerald-200">
+                      {report.reference_number}
+                    </td>
+
+                    <td className="min-w-[300px] px-5 py-4">
+                      <p className="font-black text-white">
+                        {report.title}
+                      </p>
+                      <p className="mt-1 line-clamp-1 text-sm text-slate-400">
+                        {report.description}
+                      </p>
+                    </td>
+
+                    <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-300">
+                      {APPLICATION_LABELS[report.application]}
+                    </td>
+
+                    <td className="whitespace-nowrap px-5 py-4">
+                      <span
+                        className={`inline-flex rounded-full px-3 py-1 text-xs font-black ring-1 ${getStatusClasses(
+                          report.status,
+                        )}`}
+                      >
+                        {STATUS_LABELS[report.status]}
+                      </span>
+                    </td>
+
+                    <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-300">
+                      {formatDate(
+                        report.resolved_at ||
+                          report.closed_at ||
+                          report.updated_at,
+                      )}
+                    </td>
+
+                    <td className="whitespace-nowrap px-5 py-4 text-right">
+                      <Link
+                        href={`/Admin/BugTracker/${report.id}`}
+                        className="inline-flex h-9 items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 text-xs font-black text-emerald-100 transition hover:bg-emerald-500/20"
+                      >
+                        View report
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                        />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
