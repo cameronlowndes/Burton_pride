@@ -115,18 +115,7 @@ export async function POST(req: NextRequest) {
       body.confirmPassword || body.confirm_password || ""
     ).trim();
 
-    /*
-      IMPORTANT:
-      Money tracker month/year lock sends only:
-      { password: "..." }
-
-      Delete-password reset sends:
-      { password: "...", confirmPassword: "..." }
-
-      So:
-      - password only = verify password
-      - password + confirmPassword = set/reset password
-    */
+   
     const isPasswordCheckOnly = Boolean(password) && !confirmPassword;
 
     if (isPasswordCheckOnly) {

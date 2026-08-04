@@ -69,7 +69,7 @@ const AUTH_ROUTES = [
   "/admin/change-password",
 ];
 
-const EVENT_HUB_PREFIX = "/admin/burtonprideeventhub";
+const EVENT_HUB_PREFIX = "/admin/eventhub";
 const DASHBOARD_PREFIX = "/admin/dashboard";
 const EMAIL_PREFIX = "/admin/email";
 const MONEY_PREFIX = "/admin/money";
