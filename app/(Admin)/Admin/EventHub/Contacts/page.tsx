@@ -1077,14 +1077,6 @@ export default function EventHubContactsPage() {
     }
   }
 
-  function eventQuery() {
-    const params = new URLSearchParams();
-    if (eventId) params.set("event_id", eventId);
-    if (eventYear) params.set("event_year", String(eventYear));
-    const query = params.toString();
-    return query ? `?${query}` : "";
-  }
-
   async function loadMoneySuppliers(
     contactRows: Contact[],
   ) {
@@ -1296,7 +1288,9 @@ export default function EventHubContactsPage() {
 
       if (eventLoading) return;
 
-      const endpoint = `${CONTACTS_API}${eventQuery()}`;
+      // Business Contacts is the master contact list.
+      // Always load every saved contact, even when a specific event is active.
+      const endpoint = CONTACTS_API;
       const res = await fetch(endpoint, {
         cache: "no-store",
         credentials: "include",
@@ -1314,7 +1308,10 @@ export default function EventHubContactsPage() {
         });
       }
 
-      const loadedContacts = data.contacts || [];
+      const loadedContacts = Array.isArray(data.contacts)
+        ? data.contacts
+        : [];
+
       setContacts(loadedContacts);
 
       await Promise.all([
@@ -1322,11 +1319,15 @@ export default function EventHubContactsPage() {
         loadStockSuppliers(loadedContacts),
       ]);
     } catch (error) {
+      setContacts([]);
+      setMoneySupplierConnections({});
+      setStockSupplierConnections({});
+
       setNotice(
         buildErrorNotice(
           error,
           "Could not load contacts",
-          "Failed to load contacts.",
+          "The master contact list could not be loaded.",
         ),
       );
     } finally {
@@ -2229,14 +2230,16 @@ export default function EventHubContactsPage() {
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">
                 Store suppliers, vendors, sponsors, venues, entertainers,
-                charities, contractors, and community partners for the active
-                Burton Pride event.
+                charities, contractors, and community partners in one master
+                contact list. The active event is used when adding new contacts
+                or sending contacts to the checklist.
               </p>
 
               {currentEvent && (
                 <p className="mt-2 text-xs font-bold text-pink-100/80">
-                  Managing: {currentEvent.event_name} {currentEvent.event_year}
+                  Active event: {currentEvent.event_name} {currentEvent.event_year}
                   {currentEvent.event_date ? ` · ${currentEvent.event_date}` : ""}
+                  {" · Showing all saved contacts"}
                 </p>
               )}
             </div>
@@ -2290,8 +2293,10 @@ export default function EventHubContactsPage() {
                   This Event Hub page is connected to Money Management and Stock Management
                 </h2>
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
-                  Event Hub keeps the main event contact, application history,
-                  relationship rating and checklist information. Money
+                  Event Hub keeps the master contact list, application history,
+                  relationship rating and checklist information. All saved Event
+                  Hub contacts are shown here, regardless of which event originally
+                  created them. Money
                   Management keeps the financial supplier record, transactions,
                   invoices, refunds and payment history. Stock Management keeps
                   stock supplier profiles, item links, purchase orders,
@@ -2342,7 +2347,7 @@ export default function EventHubContactsPage() {
                 <p className="mt-1 text-white/75">
                   {isEventLocked
                     ? "Contacts can be viewed, but adding, editing, deleting, uploading, and sending to the checklist are disabled until the event is unlocked."
-                    : "You can still manage your master contact list. These contacts will not be linked to a specific Burton Pride event until an active event is selected in Event Management."}
+                    : "The full master contact list is still shown. New contacts will not be linked to a specific event until an active event is selected in Event Management."}
                 </p>
                 {eventError && <p className="mt-2 text-xs text-white/70">{eventError}</p>}
               </div>

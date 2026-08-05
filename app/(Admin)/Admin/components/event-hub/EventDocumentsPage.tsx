@@ -79,17 +79,17 @@ type EventOption = {
 };
 
 type ApiErrorPayload = {
-  error?: string;
-  message?: string;
-  code?: string;
-  details?: string | null;
-  hint?: string | null;
+  error?: unknown;
+  message?: unknown;
+  code?: unknown;
+  details?: unknown;
+  hint?: unknown;
   requestId?: string | null;
   request_id?: string | null;
-  supabase_code?: string | null;
-  supabase_message?: string | null;
-  supabase_details?: string | null;
-  supabase_hint?: string | null;
+  supabase_code?: unknown;
+  supabase_message?: unknown;
+  supabase_details?: unknown;
+  supabase_hint?: unknown;
 };
 
 type DetailedError = {
@@ -312,6 +312,43 @@ function getExpiryState(expiryDate?: string | null): ExpiryState {
 }
 
 
+function apiValueToText(
+  value: unknown,
+): string | undefined {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  try {
+    return JSON.stringify(
+      value,
+      null,
+      2,
+    );
+  } catch {
+    return String(value);
+  }
+}
+
 function readApiError(
   payload: ApiErrorPayload,
   fallbackMessage: string,
@@ -324,19 +361,41 @@ function readApiError(
 } {
   return {
     message:
-      payload.message ||
-      payload.error ||
-      payload.supabase_message ||
+      apiValueToText(
+        payload.message,
+      ) ||
+      apiValueToText(
+        payload.error,
+      ) ||
+      apiValueToText(
+        payload.supabase_message,
+      ) ||
       fallbackMessage,
-    code: payload.code || payload.supabase_code || undefined,
+
+    code:
+      apiValueToText(
+        payload.code,
+      ) ||
+      apiValueToText(
+        payload.supabase_code,
+      ),
+
     details:
-      payload.details ||
-      payload.supabase_details ||
-      undefined,
+      apiValueToText(
+        payload.details,
+      ) ||
+      apiValueToText(
+        payload.supabase_details,
+      ),
+
     hint:
-      payload.hint ||
-      payload.supabase_hint ||
-      undefined,
+      apiValueToText(
+        payload.hint,
+      ) ||
+      apiValueToText(
+        payload.supabase_hint,
+      ),
+
     requestId:
       payload.requestId ||
       payload.request_id ||
@@ -1571,8 +1630,20 @@ export default function EventDocumentsPage() {
       }
 
       closeDeleteDocumentModal();
+
+      const auditWarning =
+        apiValueToText(
+          (
+            payload as ApiErrorPayload & {
+              auditWarning?: unknown;
+            }
+          ).auditWarning,
+        );
+
       setSuccessMessage(
-        `"${title}" and its stored file were permanently deleted.`,
+        auditWarning
+          ? `"${title}" and its stored file were permanently deleted. The audit log returned a warning, but the deletion completed successfully.`
+          : `"${title}" and its stored file were permanently deleted.`,
       );
 
       await loadDocuments(eventId);
@@ -1701,8 +1772,12 @@ export default function EventDocumentsPage() {
           passed: response.ok,
           message: response.ok
             ? "The Event Documents API is working."
-            : payload.message ||
-              payload.error ||
+            : apiValueToText(
+                payload.message,
+              ) ||
+              apiValueToText(
+                payload.error,
+              ) ||
               `The API returned ${response.status} ${response.statusText}.`,
         },
       ];

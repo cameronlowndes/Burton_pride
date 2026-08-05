@@ -162,10 +162,7 @@ function getRequiredPermission(pathname: string | null | undefined) {
   if (!path || path === "/") return null;
   if (isAuthRoute(path)) return null;
 
-  /**
-   * Event Hub keeps its own layout/sidebar,
-   * but it is still protected and reported by this Admin layout.
-   */
+ 
   if (isPathOrChild(path, EVENT_HUB_PREFIX)) {
     return "event_hub:view";
   }
@@ -717,8 +714,8 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   const displayName = adminName || adminEmail || "Committee Member";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="min-h-screen w-full max-w-none overflow-x-hidden bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="flex min-h-screen w-full max-w-none flex-col md:flex-row">
         {showAdminNav ? (
           <AdminSidebar
             permissions={safePermissions}
@@ -728,9 +725,9 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
           />
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           {showAdminNav ? (
-            <header className="hidden h-16 items-center justify-between border-b border-white/10 bg-white/10 px-8 shadow-sm backdrop-blur-xl md:flex">
+            <header className="hidden h-16 w-full shrink-0 items-center justify-between border-b border-white/10 bg-white/10 px-5 shadow-sm backdrop-blur-xl md:flex lg:px-6">
               <div>
                 <div className="font-semibold text-white/90">Admin Portal</div>
                 {refreshing ? (
@@ -747,8 +744,10 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
             </header>
           ) : null}
 
-          <main className="flex-1 px-4 py-6 md:px-8 md:py-10">
-            <div className="mx-auto max-w-6xl">{children}</div>
+          <main className="min-w-0 flex-1 overflow-x-hidden px-0 py-0">
+            <div className="w-full min-w-0 max-w-none">
+              {children}
+            </div>
           </main>
         </div>
       </div>

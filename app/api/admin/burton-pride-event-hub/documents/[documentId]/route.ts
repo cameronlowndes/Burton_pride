@@ -156,6 +156,34 @@ function getStatusFromPermissionError(error: unknown) {
 }
 
 
+function safeAuditResponse(
+  value: unknown,
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value),
+    ) as unknown;
+  } catch {
+    return String(value);
+  }
+}
+
+
 function getRequestAuditMetadata(request: NextRequest) {
   const forwardedFor =
     request.headers.get("x-forwarded-for") || "";
@@ -269,10 +297,21 @@ async function reportEventAudit({
         status: response.status,
         error:
           payload &&
-          typeof payload === "object" &&
-          "error" in payload
+          typeof payload === "object"
             ? String(
-                (payload as Record<string, unknown>).error,
+                (
+                  payload as Record<
+                    string,
+                    unknown
+                  >
+                ).error ||
+                  (
+                    payload as Record<
+                      string,
+                      unknown
+                    >
+                  ).message ||
+                  "Event Hub audit API rejected the entry.",
               )
             : "Event Hub audit API rejected the entry.",
         response: payload,
@@ -1206,21 +1245,40 @@ export async function DELETE(
         },
       });
 
-    if (!deletionStartedAudit.ok) {
-      return apiError({
-        requestId,
-        status: 502,
-        error: "Audit logging failed",
-        code: "EVENT_DOCUMENT_DELETE_AUDIT_START_FAILED",
-        message:
-          "The document was not deleted because the Event Hub audit entry could not be recorded.",
-        details: deletionStartedAudit.response || {
-          error: deletionStartedAudit.error,
-          status: deletionStartedAudit.status,
+    /*
+     * The main route has already completed its own main-admin and password
+     * checks. A separate audit endpoint can still return 403 when the
+     * internal request does not carry the same permission context.
+     *
+     * Do not block a correctly authorised deletion because an optional
+     * audit report failed. Continue with deletion and return a warning.
+     */
+    const deletionStartedAuditWarning =
+      deletionStartedAudit.ok
+        ? null
+        : {
+            stage: "delete_started",
+            status:
+              deletionStartedAudit.status || null,
+            error:
+              deletionStartedAudit.error ||
+              "The delete-started audit entry could not be recorded.",
+            response:
+              safeAuditResponse(
+                deletionStartedAudit.response,
+              ),
+          };
+
+    if (deletionStartedAuditWarning) {
+      console.warn(
+        "Continuing Event document deletion after non-fatal audit failure",
+        {
+          requestId,
+          documentId,
+          auditWarning:
+            deletionStartedAuditWarning,
         },
-        hint:
-          "Check /api/admin/burton-pride-event-hub/audit-log and retry. No document data has been removed.",
-      });
+      );
     }
 
     const storageDeleteResult =
@@ -1463,13 +1521,27 @@ export async function DELETE(
             documentRecord.original_file_name || null,
         },
         passwordActionKey: ACTION_KEY,
-        auditLogged: deletionCompletedAudit.ok,
-        auditWarning: deletionCompletedAudit.ok
-          ? null
-          : {
-              status: deletionCompletedAudit.status || null,
-              error: deletionCompletedAudit.error || null,
-            },
+        auditLogged:
+          deletionStartedAudit.ok &&
+          deletionCompletedAudit.ok,
+        auditWarning:
+          deletionStartedAuditWarning ||
+          (deletionCompletedAudit.ok
+            ? null
+            : {
+                stage:
+                  "delete_completed",
+                status:
+                  deletionCompletedAudit.status ||
+                  null,
+                error:
+                  deletionCompletedAudit.error ||
+                  "The delete-completed audit entry could not be recorded.",
+                response:
+                  safeAuditResponse(
+                    deletionCompletedAudit.response,
+                  ),
+              }),
         requestId,
       },
       200,

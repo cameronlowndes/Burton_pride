@@ -388,12 +388,16 @@ const safetyChecklistSections: ChecklistSection[] = [
 ];
 
 const requiredByType: Record<string, Array<keyof FormState>> = {
-  Stallholder: ["docs_public_liability_insurance", "docs_risk_assessment", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
-  Charity: ["docs_public_liability_insurance", "docs_risk_assessment", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
-  Vendor: ["docs_public_liability_insurance", "docs_risk_assessment", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
-  "Food Vendor": ["docs_public_liability_insurance", "docs_risk_assessment", "food_hygiene_certificate", "food_hygiene_rating_checked", "food_registration_verified", "hand_washing_facilities", "allergen_information", "fire_extinguisher", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
-  Entertainment: ["docs_public_liability_insurance", "docs_risk_assessment", "pat_testing_certificate", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
-  "Service Provider": ["docs_public_liability_insurance", "docs_risk_assessment", "terms_accepted", "privacy_policy_accepted", "emergency_contact_recorded"],
+  Stallholder: ["docs_public_liability_insurance"],
+  Charity: ["docs_public_liability_insurance"],
+  Vendor: ["docs_public_liability_insurance"],
+  "Food Vendor": ["docs_public_liability_insurance"],
+  Entertainment: ["docs_public_liability_insurance"],
+  "Service Provider": ["docs_public_liability_insurance"],
+  "Community Group": ["docs_public_liability_insurance"],
+  Sponsor: ["docs_public_liability_insurance"],
+  Partner: ["docs_public_liability_insurance"],
+  Other: ["docs_public_liability_insurance"],
 };
 
 function getLabelForChecklistKey(key: keyof FormState) {
@@ -772,7 +776,7 @@ function bpStatus(contact: Contact) {
   const missing = bpMissingRequiredLabels(contact);
   if (missing.length === 0 && contact.committee_compliance_passed) return "🟢 Ready";
   if (missing.length === 0) return "🟡 Waiting committee sign-off";
-  return "🔴 Missing documents";
+  return "🔴 Missing PLI";
 }
 
 function bpGroupedContacts(contactsToUse: Contact[]) {
@@ -814,7 +818,7 @@ function bpBuildDashboardSheet(eventYear: number | string, contactsToUse: Contac
     ["Total organisations", sheetStats.total],
     ["Ready for event", ready],
     ["Waiting committee sign-off", waiting],
-    ["Missing required checks", missingDocs],
+    ["Missing PLI", missingDocs],
     ["Food vendors", foodVendors],
     ["Checklist sent", sheetStats.sent],
     ["Checklist confirmed", sheetStats.confirmed],
@@ -846,7 +850,7 @@ function bpBuildDashboardSheet(eventYear: number | string, contactsToUse: Contac
 
 function bpBuildOrganisationsSheet(contactsToUse: Contact[]) {
   const rows: unknown[][] = [
-    ["✔", "Organisation", "Type", "Contact", "Email", "Phone", "Pitch", "Arrival", "Progress", "Status", "Missing required checks", "Notes"],
+    ["✔", "Organisation", "Type", "Contact", "Email", "Phone", "Pitch", "Arrival", "Progress", "Status", "Missing PLI", "Notes"],
     ...bpGroupedContacts(contactsToUse).map((contact) => [
       contact.committee_compliance_passed ? "✅" : "",
       contact.organisation_name || "",
@@ -966,7 +970,7 @@ function bpBuildStatisticsSheet(contactsToUse: Contact[]) {
     ["Status", "Count"],
     ["Ready", contactsToUse.filter((contact) => bpStatus(contact).includes("Ready")).length],
     ["Waiting committee sign-off", contactsToUse.filter((contact) => bpStatus(contact).includes("Waiting")).length],
-    ["Missing required checks", contactsToUse.filter((contact) => bpStatus(contact).includes("Missing")).length],
+    ["Missing PLI", contactsToUse.filter((contact) => bpStatus(contact).includes("Missing")).length],
   ];
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1061,7 +1065,7 @@ function bpExportStyledChecklistWorkbook({
   XLSX.utils.book_append_sheet(workbook, bpBuildDashboardSheet(eventYear, contactsToUse, sheetStats), "Dashboard");
   XLSX.utils.book_append_sheet(workbook, bpBuildOrganisationsSheet(filteredContactsToUse), "Organisations");
   XLSX.utils.book_append_sheet(workbook, bpBuildFoodVendorsSheet(filteredContactsToUse), "Food Vendors");
-  XLSX.utils.book_append_sheet(workbook, bpBuildMissingDocumentsSheet(filteredContactsToUse), "Missing Documents");
+  XLSX.utils.book_append_sheet(workbook, bpBuildMissingDocumentsSheet(filteredContactsToUse), "Missing PLI");
   XLSX.utils.book_append_sheet(workbook, bpBuildEventDaySheet(filteredContactsToUse), "Event Day");
   XLSX.utils.book_append_sheet(workbook, bpBuildStatisticsSheet(filteredContactsToUse), "Statistics");
   XLSX.utils.book_append_sheet(workbook, bpBuildFullDataSheet(filteredContactsToUse), "Full Checklist Data");
@@ -1910,7 +1914,7 @@ export default function StallholdersCharitiesChecklistPage() {
                 <div className="mb-4 rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-4">
                   <h2 className="text-xl font-bold text-white">Edit checklist record</h2>
                   <p className="mt-1 text-sm leading-6 text-emerald-100/75">
-                    Update setup details, document checks, safety checks, arrival, event-day status and committee sign-off for this organisation.
+                    Update the organisation details, required documents, electrical and gas checks, and administration checks.
                   </p>
                   <p className="mt-2 text-xs font-semibold text-emerald-100/80">
                     New organisations are added on the Contacts page, then imported into this checklist.
@@ -1942,44 +1946,238 @@ export default function StallholdersCharitiesChecklistPage() {
                 <CheckBox label="Active / attending" checked={form.is_active} onChange={(checked) => updateForm("is_active", checked)} />
               </div>
 
-              <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
-                <h3 className="font-bold">They need to bring</h3>
-                <div className="mt-3 grid gap-2">
-                  {bringChecklist.map((item) => (
-                    <CheckBox key={String(item.key)} label={item.label} checked={Boolean(form[item.key])} onChange={(checked) => updateForm(item.key, checked as never)} compact />
-                  ))}
-                </div>
-              </div>
+              <div className="rounded-[28px] border border-emerald-400/25 bg-emerald-500/10 p-5 shadow-lg">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-100">
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
 
-              <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-4">
-                <h3 className="font-bold text-emerald-100">Recommended checks for this type</h3>
-                <p className="mt-1 text-xs leading-5 text-emerald-100/75">
-                  These are the main checks Burton Pride should normally confirm for a {form.organisation_type || "stallholder"}.
-                </p>
-                <div className="mt-3 grid gap-2">
-                  {getRequiredKeysForType(form.organisation_type).map((key) => (
-                    <CheckBox key={String(key)} label={getLabelForChecklistKey(key)} checked={Boolean(form[key])} onChange={(checked) => updateForm(key, checked as never)} compact />
-                  ))}
-                </div>
-              </div>
-
-              {safetyChecklistSections.map((section) => (
-                <div key={section.title} className="rounded-3xl border border-white/10 bg-black/20 p-4">
-                  <h3 className="font-bold">{section.title}</h3>
-                  <p className="mt-1 text-xs leading-5 text-white/55">{section.description}</p>
-                  <div className="mt-3 grid gap-2">
-                    {section.items.map((item) => (
-                      <CheckBox key={String(item.key)} label={item.label} checked={Boolean(form[item.key])} onChange={(checked) => updateForm(item.key, checked as never)} compact />
-                    ))}
+                  <div>
+                    <h3 className="text-lg font-black text-emerald-100">
+                      Personal document check
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-emerald-100/70">
+                      Use this section to record whether the organisation's Public Liability Insurance has been received.
+                    </p>
                   </div>
                 </div>
-              ))}
 
-              <div className="rounded-3xl border border-amber-400/20 bg-amber-500/10 p-4">
-                <h3 className="font-bold text-amber-100">Important Burton Pride reminders</h3>
-                <div className="mt-3 grid gap-2">
-                  {reminderChecklist.map((item) => (
-                    <CheckBox key={String(item.key)} label={item.label} checked={Boolean(form[item.key])} onChange={(checked) => updateForm(item.key, checked as never)} compact />
+                <label className="mt-5 flex cursor-pointer items-start gap-4 rounded-2xl border border-white/15 bg-black/20 p-5 transition hover:border-emerald-300/40 hover:bg-black/30">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.docs_public_liability_insurance)}
+                    onChange={(event) =>
+                      updateForm(
+                        "docs_public_liability_insurance",
+                        event.target.checked,
+                      )
+                    }
+                    className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-400"
+                  />
+
+                  <span>
+                    <span className="block font-black text-white">
+                      Public Liability Insurance received
+                    </span>
+                    <span className="mt-1 block text-sm leading-6 text-white/55">
+                      Tick this after you have received and checked their current Public Liability Insurance document.
+                    </span>
+                  </span>
+                </label>
+
+                <div
+                  className={`mt-4 rounded-2xl border p-4 text-sm font-bold ${
+                    form.docs_public_liability_insurance
+                      ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                      : "border-amber-400/25 bg-amber-500/10 text-amber-100"
+                  }`}
+                >
+                  {form.docs_public_liability_insurance
+                    ? "Public Liability Insurance has been checked."
+                    : "Public Liability Insurance still needs to be checked."}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-100">
+                    <FileUp className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-black text-white">
+                      Required documents
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-white/55">
+                      Record the documents received for legal, insurance and safety checks.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3">
+                  {[
+                    {
+                      key: "docs_risk_assessment",
+                      label: "Risk Assessment received",
+                    },
+                    {
+                      key: "food_hygiene_certificate",
+                      label: "Food Hygiene Certificate received",
+                    },
+                    {
+                      key: "food_hygiene_rating_checked",
+                      label: "Food Hygiene Rating checked",
+                    },
+                    {
+                      key: "gas_safety_certificate",
+                      label: "Gas Safety Certificate received, if using LPG",
+                    },
+                    {
+                      key: "generator_safety_certificate",
+                      label: "Generator safety certificate received, if using a generator",
+                    },
+                    {
+                      key: "pat_testing_certificate",
+                      label: "PAT testing or electrical certificate received",
+                    },
+                    {
+                      key: "fire_risk_assessment",
+                      label: "Fire Risk Assessment received, where required",
+                    },
+                    {
+                      key: "first_aid_arrangements",
+                      label: "First aid arrangements confirmed, if applicable",
+                    },
+                    {
+                      key: "dbs_checked",
+                      label: "DBS checked, where applicable",
+                    },
+                  ].map((item) => (
+                    <CheckBox
+                      key={item.key}
+                      label={item.label}
+                      checked={Boolean(
+                        form[item.key as keyof FormState],
+                      )}
+                      onChange={(checked) =>
+                        updateForm(
+                          item.key as keyof FormState,
+                          checked as never,
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-100">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-black text-white">
+                      Electrical, gas and generators
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-white/55">
+                      Use these checks when the organisation is using power, LPG, electrical equipment or a generator.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3">
+                  {[
+                    {
+                      key: "electrical_outdoor_leads",
+                      label: "Outdoor-safe extension leads confirmed",
+                    },
+                    {
+                      key: "rcd_protection",
+                      label: "RCD protection confirmed",
+                    },
+                    {
+                      key: "generator_fuel_safe",
+                      label: "Generator fuel storage confirmed safe",
+                    },
+                    {
+                      key: "generator_positioned_safe",
+                      label: "Generator position confirmed safe",
+                    },
+                    {
+                      key: "cable_ramps",
+                      label: "Cable ramps or cable protection confirmed",
+                    },
+                  ].map((item) => (
+                    <CheckBox
+                      key={item.key}
+                      label={item.label}
+                      checked={Boolean(
+                        form[item.key as keyof FormState],
+                      )}
+                      onChange={(checked) =>
+                        updateForm(
+                          item.key as keyof FormState,
+                          checked as never,
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-white/10 bg-black/20 p-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-500/15 text-blue-100">
+                    <ClipboardCheck className="h-5 w-5" />
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-black text-white">
+                      Administration checks
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-white/55">
+                      Record the main finance, consent and emergency contact checks.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3">
+                  {[
+                    {
+                      key: "invoice_sent",
+                      label: "Invoice sent",
+                    },
+                    {
+                      key: "payment_received",
+                      label: "Payment received",
+                    },
+                    {
+                      key: "terms_accepted",
+                      label: "Terms and Conditions accepted",
+                    },
+                    {
+                      key: "privacy_policy_accepted",
+                      label: "Privacy Policy accepted",
+                    },
+                    {
+                      key: "emergency_contact_recorded",
+                      label: "Emergency contact recorded",
+                    },
+                  ].map((item) => (
+                    <CheckBox
+                      key={item.key}
+                      label={item.label}
+                      checked={Boolean(
+                        form[item.key as keyof FormState],
+                      )}
+                      onChange={(checked) =>
+                        updateForm(
+                          item.key as keyof FormState,
+                          checked as never,
+                        )
+                      }
+                    />
                   ))}
                 </div>
               </div>
@@ -2278,7 +2476,7 @@ function ContactCard({ contact, locked = false, onEdit, onDelete }: { contact: C
 
           {missingRequired.length > 0 && (
             <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-100">
-              <p className="font-bold">Missing required checks</p>
+              <p className="font-bold">Missing PLI</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-100/85">
                 {missingRequired.map((key) => (
                   <li key={String(key)}>{getLabelForChecklistKey(key)}</li>

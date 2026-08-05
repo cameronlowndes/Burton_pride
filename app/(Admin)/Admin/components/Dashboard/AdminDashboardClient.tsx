@@ -1932,7 +1932,14 @@ export default function AdminDashboardClient() {
   }
 
   return (
-    <div className="min-h-dvh w-full max-w-full overflow-x-hidden px-3 py-5 text-white sm:px-6 lg:px-8">
+    <div className="relative min-h-dvh w-full min-w-0 max-w-none overflow-x-hidden bg-[#07070d] px-3 py-4 text-white sm:px-4 sm:py-5 lg:px-4 xl:px-5">
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-[#07070d]">
+        <div className="absolute left-[-12%] top-[-16%] h-[620px] w-[620px] rounded-full bg-purple-700/20 blur-[150px]" />
+        <div className="absolute right-[-10%] top-[4%] h-[560px] w-[560px] rounded-full bg-pink-600/15 blur-[150px]" />
+        <div className="absolute bottom-[-25%] left-[30%] h-[620px] w-[620px] rounded-full bg-sky-700/10 blur-[170px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:38px_38px]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#07070d]/10 to-[#07070d]/70" />
+      </div>
       <CommandPalette
         open={commandOpen}
         query={commandQuery}
@@ -1954,14 +1961,15 @@ export default function AdminDashboardClient() {
         onSubmit={() => void submitIncident()}
       />
 
-      <div className="mx-auto w-full max-w-[96rem] min-w-0 space-y-6 sm:space-y-8">
-        <section className="relative w-full max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#0d0d1a]/90 p-4 shadow-2xl backdrop-blur-xl sm:rounded-[2.25rem] sm:p-8 lg:p-10">
-          <div className="absolute inset-0 bg-gradient-to-br from-pink-500/20 via-purple-500/15 to-blue-500/20" />
-          <div className="absolute -right-20 -top-20 h-80 w-80 rounded-full bg-pink-400/20 blur-3xl" />
-          <div className="absolute -bottom-28 left-10 h-96 w-96 rounded-full bg-blue-400/20 blur-3xl" />
+      <div className="relative z-10 m-0 w-full min-w-0 max-w-none space-y-5 sm:space-y-6">
+        <section className="relative w-full max-w-full overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.055] p-5 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:p-7 lg:p-8">
+          <div className="absolute inset-0 bg-gradient-to-br from-pink-500/16 via-purple-500/12 to-blue-500/16" />
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pink-300/70 to-transparent" />
+          <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-pink-400/18 blur-3xl" />
+          <div className="absolute -bottom-36 left-[18%] h-[430px] w-[430px] rounded-full bg-blue-400/16 blur-3xl" />
 
-          <div className="relative z-10 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)] xl:items-end">
-            <div>
+          <div className="relative z-10 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.65fr)] 2xl:items-end">
+            <div className="min-w-0">
               <div className="flex flex-wrap gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-black uppercase tracking-[0.2em] text-white/80">
                   <ShieldCheck className="h-4 w-4" />
@@ -1981,7 +1989,7 @@ export default function AdminDashboardClient() {
                 </div>
               </div>
 
-              <h1 className="mt-6 max-w-5xl break-words text-3xl font-black leading-tight sm:text-5xl lg:text-7xl">
+              <h1 className="mt-5 max-w-6xl break-words text-3xl font-black leading-[1.05] sm:text-5xl xl:text-6xl 2xl:text-7xl">
                 {getGreeting()},{" "}
                 <span className="bg-gradient-to-r from-pink-200 via-white to-blue-200 bg-clip-text text-transparent">
                   {adminLoading ? "Loading..." : displayName}
@@ -2077,7 +2085,7 @@ export default function AdminDashboardClient() {
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-white/10 bg-black/25 p-5 shadow-xl backdrop-blur-xl">
+            <div className="min-w-0 rounded-[1.75rem] border border-white/10 bg-black/25 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.2em] text-white/45">
@@ -2112,7 +2120,7 @@ export default function AdminDashboardClient() {
           <AnnouncementPanel announcements={announcements} meetingMode={meetingMode} />
         ) : null}
 
-        <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid w-full min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <CommandCentreCard
             title="Urgent messages"
             value={commandCentre.urgentMessages}
@@ -2139,7 +2147,7 @@ export default function AdminDashboardClient() {
           />
         </section>
 
-        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <section className="grid w-full min-w-0 gap-5 2xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
           <Card>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -2174,7 +2182,7 @@ export default function AdminDashboardClient() {
           <DailyCheckCard result={dailyCheck} onRun={runDailyCheck} />
         </section>
 
-        <section className="grid min-w-0 gap-6 xl:grid-cols-3">
+        <section className="grid w-full min-w-0 gap-5 xl:grid-cols-2">
           <SecurityWatchCard data={securityWatch} />
           <CommunicationHealthCard
             emailHealth={emailHealth}
@@ -2184,11 +2192,11 @@ export default function AdminDashboardClient() {
           />
         </section>
 
-        <section className="grid min-w-0 gap-6">
+        <section className="grid w-full min-w-0 gap-5">
           <RecentActivityCard activity={recentActivity} meetingMode={meetingMode} />
         </section>
 
-        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="grid w-full min-w-0 gap-5 2xl:grid-cols-[minmax(380px,0.8fr)_minmax(0,1.2fr)]">
           <PermissionAccessPanel
             canUsePermission={canUsePermission}
             isMainAdmin={Boolean(isMainAdmin || adminRole === "main_admin")}
@@ -2257,7 +2265,7 @@ export default function AdminDashboardClient() {
           />
         </section>
 
-        <section className="grid min-w-0 gap-6">
+        <section className="grid w-full min-w-0 gap-5">
 
           <Card>
             <div className="flex items-center justify-between gap-4">
@@ -2279,7 +2287,7 @@ export default function AdminDashboardClient() {
           </Card>
         </section>
 
-        <section className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <section className="grid w-full min-w-0 gap-5 2xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
           <Card>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -2965,9 +2973,10 @@ function CommandCentreCard({
   return (
     <SecureLink
       href={href}
-      className="group rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-5 shadow-xl backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-[#171729]"
+      className="group relative overflow-hidden rounded-[1.6rem] border border-white/10 bg-white/[0.055] p-5 shadow-xl shadow-black/15 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.075]"
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/55 to-transparent" />
+      <div className="relative flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-black uppercase tracking-[0.16em] text-white/45">{title}</div>
           <div className="mt-3 text-4xl font-black text-white">{value}</div>
@@ -2989,7 +2998,7 @@ function ActionItemCard({ item }: { item: DashboardActionItem }) {
   return (
     <SecureLink
       href={item.href}
-      className="block rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:-translate-y-0.5 hover:bg-black/30"
+      className="block rounded-2xl border border-white/10 bg-black/20 p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-purple-300/25 hover:bg-black/30"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -3379,7 +3388,7 @@ function Card({
   return (
     <div
       className={[
-        "w-full min-w-0 max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-4 shadow-xl backdrop-blur-xl sm:rounded-[2rem] sm:p-6",
+        "relative w-full min-w-0 max-w-full overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.05] p-4 shadow-xl shadow-black/15 backdrop-blur-xl sm:p-6",
         className,
       ].join(" ")}
     >
@@ -3400,7 +3409,7 @@ function TopButton({
   return (
     <SecureLink
       href={href}
-      className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/20 active:scale-[0.99] sm:w-auto sm:min-w-[150px]"
+      className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/[0.09] px-5 py-3 text-sm font-black text-white shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:border-pink-300/30 hover:bg-white/[0.14] active:scale-[0.99] sm:w-auto sm:min-w-[150px]"
     >
       <Icon className="h-4 w-4" />
       {children}
