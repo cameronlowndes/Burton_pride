@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import bcrypt from "bcryptjs";
 
 import {
   NextRequest,
@@ -13,6 +14,13 @@ export const dynamic = "force-dynamic";
 
 const APPLICATIONS_TABLE =
   "event_vendor_applications";
+
+
+const DELETE_SETTINGS_TABLE =
+  "admin_delete_settings";
+
+const DELETE_PASSWORD_ACTION_KEY =
+  "delete_all_donations";
 
 const DOCUMENTS_TABLE =
   "event_documents";
@@ -52,6 +60,14 @@ type UpdateBody = {
   payment_status?: unknown;
   admin_notes?: unknown;
   rejection_reason?: unknown;
+};
+
+
+type DeleteBody = {
+  id?: unknown;
+  eventId?: unknown;
+  mainAdminPassword?: unknown;
+  confirmation?: unknown;
 };
 
 function json(
@@ -104,6 +120,310 @@ function adminDisplayName(
     clean(admin.email, 250) ||
     "Administrator"
   );
+}
+
+
+function isMainAdmin(
+  admin: AdminIdentity,
+) {
+  const role = clean(
+    admin.role,
+    100,
+  )
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  return role === "main_admin";
+}
+
+type DeletePasswordVerificationResult = {
+  valid: boolean;
+  status: number;
+  error?: string;
+  code?: string;
+  details?: unknown;
+  hint?: string;
+};
+
+async function verifyMainAdminPassword(
+  password: string,
+): Promise<DeletePasswordVerificationResult> {
+  const {
+    data: setting,
+    error,
+  } = await supabaseAdmin
+    .from(
+      DELETE_SETTINGS_TABLE,
+    )
+    .select(
+      "password_hash",
+    )
+    .eq(
+      "action_key",
+      DELETE_PASSWORD_ACTION_KEY,
+    )
+    .maybeSingle();
+
+  if (error) {
+    return {
+      valid: false,
+      status: 500,
+      error:
+        "Failed to read the main-admin delete password.",
+      code:
+        error.code ||
+        "DELETE_PASSWORD_LOOKUP_FAILED",
+      details: {
+        message:
+          error.message,
+        details:
+          error.details,
+        hint:
+          error.hint,
+        table:
+          DELETE_SETTINGS_TABLE,
+        actionKey:
+          DELETE_PASSWORD_ACTION_KEY,
+      },
+      hint:
+        "Check admin_delete_settings exists and contains action_key and password_hash columns.",
+    };
+  }
+
+  if (!setting?.password_hash) {
+    return {
+      valid: false,
+      status: 400,
+      error:
+        "No main-admin delete password has been configured.",
+      code:
+        "MAIN_ADMIN_DELETE_PASSWORD_NOT_SET",
+      details: {
+        table:
+          DELETE_SETTINGS_TABLE,
+        actionKey:
+          DELETE_PASSWORD_ACTION_KEY,
+      },
+      hint:
+        "Open Main Admin Delete Password settings and set the password first.",
+    };
+  }
+
+  let passwordMatches = false;
+
+  try {
+    passwordMatches =
+      await bcrypt.compare(
+        password,
+        setting.password_hash,
+      );
+  } catch (compareError) {
+    return {
+      valid: false,
+      status: 500,
+      error:
+        "The saved main-admin password hash could not be checked.",
+      code:
+        "DELETE_PASSWORD_HASH_COMPARE_FAILED",
+      details:
+        compareError instanceof Error
+          ? compareError.message
+          : String(
+              compareError,
+            ),
+      hint:
+        "Reset the main-admin delete password so a valid bcrypt hash is saved.",
+    };
+  }
+
+  if (!passwordMatches) {
+    return {
+      valid: false,
+      status: 403,
+      error:
+        "Main admin password is wrong.",
+      code:
+        "MAIN_ADMIN_PASSWORD_INCORRECT",
+      hint:
+        "Use the password set in Main Admin Delete Password settings.",
+    };
+  }
+
+  return {
+    valid: true,
+    status: 200,
+  };
+}
+
+async function writeApplicationDeleteAudit({
+  admin,
+  application,
+}: {
+  admin: AdminIdentity;
+  application: Record<string, unknown>;
+}) {
+  const eventId =
+    clean(
+      application.event_id,
+      100,
+    ) || null;
+
+  const applicationId =
+    clean(
+      application.id,
+      100,
+    ) || null;
+
+  const organisationName =
+    clean(
+      application.organisation_name,
+      500,
+    ) ||
+    clean(
+      application.application_reference,
+      500,
+    ) ||
+    applicationId ||
+    "Vendor application";
+
+  const now =
+    new Date().toISOString();
+
+  /*
+   * Write to the Event Hub audit table first. This keeps the
+   * deletion under Applications Hub and linked to the correct event.
+   */
+  const {
+    error: eventAuditError,
+  } = await supabaseAdmin
+    .from("event_audit_logs")
+    .insert({
+      event_id:
+        eventId,
+      admin_id:
+        admin.id || null,
+      admin_email:
+        admin.email || null,
+      admin_name:
+        adminDisplayName(
+          admin,
+        ),
+      admin_role:
+        admin.role || null,
+      action:
+        "event_hub_vendor_application_deleted",
+      action_label:
+        "Vendor application permanently deleted",
+      area:
+        "application_hub",
+      category:
+        "applications",
+      status:
+        "success",
+      risk_level:
+        "high",
+      record_type:
+        "event_vendor_application",
+      record_id:
+        applicationId,
+      record_title:
+        organisationName,
+      route:
+        "/api/admin/burton-pride-event-hub/stalls-vendors",
+      http_method:
+        "DELETE",
+      response_status:
+        200,
+      request_id:
+        randomUUID(),
+      is_confidential:
+        true,
+      is_security_event:
+        false,
+      requires_review:
+        true,
+      summary:
+        `${organisationName} was permanently deleted from the Applications Hub.`,
+      created_at:
+        now,
+    });
+
+  if (eventAuditError) {
+    console.warn(
+      "Event Hub application delete audit was not written:",
+      {
+        code:
+          eventAuditError.code,
+        message:
+          eventAuditError.message,
+        details:
+          eventAuditError.details,
+        hint:
+          eventAuditError.hint,
+      },
+    );
+  }
+
+  /*
+   * Keep the existing general admin audit trail as a second,
+   * best-effort record. Do not include the password.
+   */
+  const {
+    error: adminAuditError,
+  } = await supabaseAdmin
+    .from("admin_audit_logs")
+    .insert({
+      admin_id:
+        admin.id || null,
+      admin_email:
+        admin.email || null,
+      action:
+        "event_vendor_application_deleted",
+      area:
+        "application_hub",
+      route:
+        "/api/admin/burton-pride-event-hub/stalls-vendors",
+      method:
+        "DELETE",
+      status:
+        "completed",
+      target_type:
+        "event_vendor_application",
+      target_id:
+        applicationId,
+      target_label:
+        organisationName,
+      metadata: {
+        event_id:
+          eventId,
+        deletion_type:
+          "permanent",
+        main_admin_verified:
+          true,
+        confirmation_entered:
+          true,
+        deleted_record:
+          application,
+      },
+      created_at:
+        now,
+    });
+
+  if (adminAuditError) {
+    console.warn(
+      "General application delete audit was not written:",
+      {
+        code:
+          adminAuditError.code,
+        message:
+          adminAuditError.message,
+        details:
+          adminAuditError.details,
+        hint:
+          adminAuditError.hint,
+      },
+    );
+  }
 }
 
 function databaseError(
@@ -1733,3 +2053,286 @@ export async function PATCH(
     approvalSync,
   });
 }
+
+/**
+ * DELETE /api/admin/burton-pride-event-hub/stalls-vendors
+ *
+ * Permanently deletes one vendor application.
+ *
+ * Required JSON:
+ * - id
+ * - eventId
+ * - mainAdminPassword
+ * - confirmation: "DELETE"
+ */
+export async function DELETE(
+  request: NextRequest,
+) {
+  const admin =
+    await requireAdmin();
+
+  if (!admin) {
+    return json(
+      {
+        ok: false,
+        error:
+          "Unauthorised. Sign in to the admin portal.",
+      },
+      401,
+    );
+  }
+
+  if (!isMainAdmin(admin)) {
+    return json(
+      {
+        ok: false,
+        error:
+          "Only a main admin can permanently delete an application.",
+      },
+      403,
+    );
+  }
+
+  const body =
+    (await request
+      .json()
+      .catch(() => null)) as
+      | DeleteBody
+      | null;
+
+  if (!body) {
+    return json(
+      {
+        ok: false,
+        error:
+          "A valid JSON request body is required.",
+      },
+      400,
+    );
+  }
+
+  const id =
+    clean(
+      body.id,
+      100,
+    );
+
+  const eventId =
+    clean(
+      body.eventId,
+      100,
+    );
+
+  const deleteBody =
+    body as DeleteBody & {
+      password?: unknown;
+      deletePassword?: unknown;
+    };
+
+  const password =
+    typeof deleteBody.mainAdminPassword === "string"
+      ? deleteBody.mainAdminPassword
+      : typeof deleteBody.password === "string"
+        ? deleteBody.password
+        : typeof deleteBody.deletePassword === "string"
+          ? deleteBody.deletePassword
+          : "";
+
+  const confirmation =
+    clean(
+      body.confirmation,
+      20,
+    );
+
+  if (!id || !isUuid(id)) {
+    return json(
+      {
+        ok: false,
+        error:
+          "A valid vendor application ID is required.",
+      },
+      400,
+    );
+  }
+
+  if (
+    eventId &&
+    !isUuid(eventId)
+  ) {
+    return json(
+      {
+        ok: false,
+        error:
+          "The selected Event Hub event ID is invalid.",
+      },
+      400,
+    );
+  }
+
+  if (confirmation !== "DELETE") {
+    return json(
+      {
+        ok: false,
+        error:
+          "Type DELETE exactly to confirm the permanent deletion.",
+      },
+      400,
+    );
+  }
+
+  if (!password) {
+    return json(
+      {
+        ok: false,
+        error:
+          "Enter the main admin password.",
+      },
+      400,
+    );
+  }
+
+  const passwordVerification =
+    await verifyMainAdminPassword(
+      password,
+    );
+
+  if (!passwordVerification.valid) {
+    return json(
+      {
+        ok: false,
+        error:
+          passwordVerification.error ||
+          "The main-admin delete password could not be verified.",
+        code:
+          passwordVerification.code ||
+          "MAIN_ADMIN_PASSWORD_INCORRECT",
+        details:
+          passwordVerification.details ||
+          null,
+        hint:
+          passwordVerification.hint ||
+          null,
+      },
+      passwordVerification.status,
+    );
+  }
+
+  const {
+    data: application,
+    error: applicationError,
+  } = await supabaseAdmin
+    .from(APPLICATIONS_TABLE)
+    .select("*")
+    .eq(
+      "id",
+      id,
+    )
+    .maybeSingle();
+
+  if (applicationError) {
+    return databaseError(
+      "Vendor application delete lookup failed:",
+      applicationError,
+    );
+  }
+
+  if (!application) {
+    return json(
+      {
+        ok: false,
+        error:
+          "The vendor application was not found.",
+      },
+      404,
+    );
+  }
+
+  const applicationEventId =
+    clean(
+      (
+        application as Record<
+          string,
+          unknown
+        >
+      ).event_id,
+      100,
+    );
+
+  if (
+    eventId &&
+    applicationEventId !== eventId
+  ) {
+    return json(
+      {
+        ok: false,
+        error:
+          "This application does not belong to the selected Event Hub event.",
+      },
+      409,
+    );
+  }
+
+  /*
+   * Delete only the application record. Approved contacts,
+   * checklist records and Documents Hub records are retained as
+   * organisational records and are not silently removed.
+   */
+  let deleteQuery =
+    supabaseAdmin
+      .from(APPLICATIONS_TABLE)
+      .delete()
+      .eq(
+        "id",
+        id,
+      );
+
+  if (applicationEventId) {
+    deleteQuery =
+      deleteQuery.eq(
+        "event_id",
+        applicationEventId,
+      );
+  }
+
+  const {
+    error: deleteError,
+  } = await deleteQuery;
+
+  if (deleteError) {
+    return databaseError(
+      "Vendor application delete failed:",
+      deleteError,
+    );
+  }
+
+  try {
+    await writeApplicationDeleteAudit({
+      admin,
+      application:
+        application as Record<
+          string,
+          unknown
+        >,
+    });
+  } catch (auditError) {
+    /*
+     * The application has already been deleted. Audit failures
+     * are logged but do not falsely report that deletion failed.
+     */
+    console.warn(
+      "Vendor application delete audit failed:",
+      auditError,
+    );
+  }
+
+  return json({
+    ok: true,
+    message:
+      "The vendor application was permanently deleted.",
+    deletedApplicationId:
+      id,
+    eventId:
+      applicationEventId || null,
+  });
+}
+

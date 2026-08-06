@@ -34,6 +34,8 @@ import {
 
 import { createPortal } from "react-dom";
 
+import ApplicationFormTermsSection from "./ApplicationFormTermsSection";
+
 type ApplicationType =
   | "stallholder"
   | "food_vendor"
@@ -110,6 +112,7 @@ type FormState = {
   additionalInformation: string;
 
   termsAccepted: boolean;
+  termsId: string;
   dataProcessingAccepted: boolean;
 };
 
@@ -175,6 +178,7 @@ const initialForm: FormState = {
   additionalInformation: "",
 
   termsAccepted: false,
+  termsId: "",
   dataProcessingAccepted: false,
 };
 
@@ -512,6 +516,8 @@ export default function StallsVendorsClient() {
         applicationType === "stallholder"
           ? current.pitchType
           : "standard",
+      termsAccepted: false,
+      termsId: "",
     }));
 
     setError("");
@@ -526,6 +532,8 @@ export default function StallsVendorsClient() {
       ...current,
       applicationType,
       pitchType,
+      termsAccepted: false,
+      termsId: "",
     }));
 
     setError("");
@@ -635,6 +643,36 @@ export default function StallsVendorsClient() {
       return;
     }
 
+    if (!form.termsAccepted || !form.termsId) {
+      setError(
+        "You must read and accept the current application terms before submitting.",
+      );
+
+      setFieldErrors((current) => ({
+        ...current,
+        termsAccepted: [
+          "Read and accept the current terms and conditions.",
+        ],
+      }));
+
+      return;
+    }
+
+    if (!form.dataProcessingAccepted) {
+      setError(
+        "You must agree to the data-processing declaration before submitting.",
+      );
+
+      setFieldErrors((current) => ({
+        ...current,
+        dataProcessingAccepted: [
+          "You must agree to data processing.",
+        ],
+      }));
+
+      return;
+    }
+
     setSubmitting(true);
     setError("");
     setFieldErrors({});
@@ -650,6 +688,8 @@ export default function StallsVendorsClient() {
           },
           body: JSON.stringify({
             ...form,
+            terms_id: form.termsId,
+            terms_accepted: form.termsAccepted,
 
             gazeboWidthMetres:
               form.gazeboWidthMetres.trim() ===
@@ -1749,19 +1789,56 @@ export default function StallsVendorsClient() {
               />
 
               <div className="mt-6 space-y-4">
-                <CheckboxField
-                  required
-                  checked={
-                    form.termsAccepted
-                  }
-                  label="I confirm that the information supplied is accurate and I accept the Burton Pride Stalls & Vendors terms."
-                  onChange={(checked) =>
-                    updateField(
-                      "termsAccepted",
-                      checked,
-                    )
-                  }
+                <ApplicationFormTermsSection
+                  eventId={form.eventId}
+                  applicationType={form.applicationType}
+                  accepted={form.termsAccepted}
+                  onAcceptedChange={(
+                    accepted,
+                    termsId,
+                  ) => {
+                    setForm((current) => ({
+                      ...current,
+                      termsAccepted: accepted,
+                      termsId: accepted
+                        ? termsId
+                        : "",
+                    }));
+
+                    setFieldErrors((current) => {
+                      if (
+                        !current.termsAccepted
+                      ) {
+                        return current;
+                      }
+
+                      const next = {
+                        ...current,
+                      };
+
+                      delete next.termsAccepted;
+
+                      return next;
+                    });
+
+                    if (accepted) {
+                      setError("");
+                    }
+                  }}
                 />
+
+                {fieldErrors
+                  .termsAccepted?.[0] ? (
+                  <p
+                    role="alert"
+                    className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700 dark:border-red-300/20 dark:bg-red-500/10 dark:text-red-100"
+                  >
+                    {
+                      fieldErrors
+                        .termsAccepted[0]
+                    }
+                  </p>
+                ) : null}
 
                 <CheckboxField
                   required
@@ -1776,6 +1853,19 @@ export default function StallsVendorsClient() {
                     )
                   }
                 />
+
+                {fieldErrors
+                  .dataProcessingAccepted?.[0] ? (
+                  <p
+                    role="alert"
+                    className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700 dark:border-red-300/20 dark:bg-red-500/10 dark:text-red-100"
+                  >
+                    {
+                      fieldErrors
+                        .dataProcessingAccepted[0]
+                    }
+                  </p>
+                ) : null}
               </div>
 
               <div className="mt-7 rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-black/20">
@@ -1810,8 +1900,10 @@ export default function StallsVendorsClient() {
                 type="submit"
                 disabled={
                   submitting ||
-                  uploadingField !==
-                    null
+                  uploadingField !== null ||
+                  !form.termsAccepted ||
+                  !form.termsId ||
+                  !form.dataProcessingAccepted
                 }
                 className="
                   mt-7

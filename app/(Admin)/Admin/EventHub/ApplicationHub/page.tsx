@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import EventDocumentsPage from "../../components/event-hub/StallsVendors";
+import ApplicationsHub from "../../components/event-hub/ApplicationHub";
 
 export const metadata: Metadata = {
   title: "Applications Hub | Burton Pride Admin",
@@ -14,6 +14,6 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DocumentsPage() {
-  return <EventDocumentsPage />;
+export default function ApplicationsHubPage() {
+  return <ApplicationsHub />;
 }

@@ -65,7 +65,7 @@ import {
   getRecordId,
   getRecordTitle,
   getRiskLevel,
-  getSourceLabel,
+  getSourceLabel as getBaseSourceLabel,
   getYearOnly,
   isBudgetPlanningAuditLog,
   isCheckedAuditLog,
@@ -79,6 +79,29 @@ import {
 } from "@/lib/money/audit_logs/audit-log-utils";
 import { InfoCard, RawDataCard, StatCard } from "../../../components/money/AduitLogs/AuditLogCards";
 import AuditRiskRulesPanel from "../../../components/money/AduitLogs/AuditRiskRulesPanel";
+
+const EVENT_HUB_ACTION_OPTIONS = [
+  {
+    value: "event_hub_vendor_payment_created",
+    label: "Event Hub application payment created",
+  },
+  {
+    value: "event_hub_vendor_payment_duplicate_created",
+    label: "Possible duplicate Event Hub payment",
+  },
+  {
+    value: "event_hub_application_payment_created",
+    label: "Event Hub application payment created",
+  },
+  {
+    value: "event_hub_application_payment_updated",
+    label: "Event Hub application payment updated",
+  },
+  {
+    value: "event_hub_application_payment_refunded",
+    label: "Event Hub application payment refunded",
+  },
+];
 
 const DIRECT_DEBIT_ACTION_OPTIONS = [
   { value: "money.direct_debit.created", label: "Direct Debit created" },
@@ -115,7 +138,62 @@ const allActionOptions = [
         (existingOption) => existingOption.value === directDebitOption.value,
       ),
   ),
+  ...EVENT_HUB_ACTION_OPTIONS.filter(
+    (eventHubOption) =>
+      !actionOptions.some(
+        (existingOption) => existingOption.value === eventHubOption.value,
+      ) &&
+      !DIRECT_DEBIT_ACTION_OPTIONS.some(
+        (existingOption) => existingOption.value === eventHubOption.value,
+      ),
+  ),
 ];
+
+function isEventHubAuditLog(log: MoneyAuditLog) {
+  const row = log as any;
+  const action = String(row?.action || "").toLowerCase();
+  const source = String(
+    row?.source ||
+      row?.metadata?.source ||
+      row?.metadata?.audit_source ||
+      "",
+  ).toLowerCase();
+  const moduleName = String(
+    row?.module || row?.metadata?.module || "",
+  ).toLowerCase();
+  const area = String(
+    row?.area ||
+      row?.audit_area ||
+      row?.metadata?.area ||
+      row?.metadata?.audit_area ||
+      "",
+  ).toLowerCase();
+
+  return (
+    action.startsWith("event_hub_") ||
+    action.startsWith("event.hub.") ||
+    source === "event_hub" ||
+    source === "application_hub" ||
+    moduleName === "event_hub" ||
+    moduleName === "application_hub" ||
+    area === "application_hub" ||
+    area === "applications_hub" ||
+    Boolean(
+      row?.event_hub_application_id ||
+        row?.application_id ||
+        row?.metadata?.application_id ||
+        row?.metadata?.event_hub_application_id,
+    )
+  );
+}
+
+function getSourceLabel(log: MoneyAuditLog) {
+  if (isEventHubAuditLog(log)) {
+    return "Event Hub → Money Management";
+  }
+
+  return getBaseSourceLabel(log);
+}
 
 function isDirectDebitAuditLog(log: MoneyAuditLog) {
   const action = String(log.action || "").toLowerCase();
@@ -135,6 +213,10 @@ function isDirectDebitAuditLog(log: MoneyAuditLog) {
 }
 
 function getAuditArea(log: MoneyAuditLog) {
+  if (isEventHubAuditLog(log)) {
+    return "Applications Hub";
+  }
+
   if (isDirectDebitAuditLog(log)) {
     return "Direct Debits";
   }
@@ -143,6 +225,23 @@ function getAuditArea(log: MoneyAuditLog) {
 }
 
 function actionLabel(action: string, log?: MoneyAuditLog) {
+  const eventHubLabels: Record<string, string> = {
+    event_hub_vendor_payment_created:
+      "Event Hub application payment created",
+    event_hub_vendor_payment_duplicate_created:
+      "Possible duplicate Event Hub payment",
+    event_hub_application_payment_created:
+      "Event Hub application payment created",
+    event_hub_application_payment_updated:
+      "Event Hub application payment updated",
+    event_hub_application_payment_refunded:
+      "Event Hub application payment refunded",
+  };
+
+  if (eventHubLabels[action]) {
+    return eventHubLabels[action];
+  }
+
   const directDebitLabels: Record<string, string> = {
     "money.direct_debit.created": "Direct Debit created",
     "money.direct_debit.updated": "Direct Debit updated",
@@ -160,6 +259,14 @@ function actionLabel(action: string, log?: MoneyAuditLog) {
 }
 
 function actionIcon(action: string, log?: MoneyAuditLog) {
+  if (
+    action.startsWith("event_hub_") ||
+    action.startsWith("event.hub.") ||
+    (log && isEventHubAuditLog(log))
+  ) {
+    return Layers3;
+  }
+
   if (
     action === "money.direct_debit.payment_posted" ||
     action === "money.direct_debit.person_reimbursed"
@@ -439,6 +546,13 @@ export default function MoneyAuditLogsPage() {
       rows = rows.filter((log) => log.action === selectedAction);
     }
 
+    if (
+      selectedAction.startsWith("event_hub_") ||
+      selectedAction.startsWith("event.hub.")
+    ) {
+      rows = rows.filter((log) => log.action === selectedAction);
+    }
+
     if (selectedYear !== "all") {
       rows = rows.filter((log) => getYearOnly(log.created_at) === selectedYear);
     }
@@ -555,6 +669,10 @@ export default function MoneyAuditLogsPage() {
       isDirectDebitAuditLog(log),
     );
 
+    const eventHubLogs = logs.filter((log) =>
+      isEventHubAuditLog(log),
+    );
+
     return {
       total: logs.length,
       visible: filteredLogs.length,
@@ -611,6 +729,24 @@ export default function MoneyAuditLogsPage() {
       directDebitCancelled: directDebitLogs.filter(
         (log) => log.action === "money.direct_debit.cancelled",
       ).length,
+
+      eventHub: eventHubLogs.length,
+      eventHubPayments: eventHubLogs.filter((log) => {
+        const action = String(log.action || "").toLowerCase();
+        return action.includes("payment");
+      }).length,
+      eventHubPossibleDuplicates: eventHubLogs.filter((log) => {
+        const row = log as any;
+        const action = String(row?.action || "").toLowerCase();
+
+        return (
+          action.includes("duplicate") ||
+          row?.is_possible_duplicate === true ||
+          row?.metadata?.possible_duplicate === true ||
+          row?.metadata?.is_possible_duplicate === true
+        );
+      }).length,
+
       comments: logs.filter((log) => Boolean(getAuditComment(log))).length,
       uniqueUsers: new Set(
         logs
@@ -925,7 +1061,7 @@ export default function MoneyAuditLogsPage() {
                 <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                   {easyMode
                     ? "A simple view of the most important money tracker audit logs. Use Full Mode when you need advanced filters, detailed statistics, JSON export, or raw technical data."
-                    : "View every money tracker action, including creates, edits, checks, hidden soft-deletes, saving target changes, budget tracker updates, restore actions, selected-year deletes, delete-all actions, refund tracker actions, permanent refund deletions, personal funds paid-back changes, Direct Debit plans, payments, invoices, undo actions, repayments, cancellations, and main-admin comments explaining why changes were made."}
+                    : "View every money tracker action, including creates, edits, checks, hidden soft-deletes, saving target changes, budget tracker updates, restore actions, selected-year deletes, delete-all actions, refund tracker actions, permanent refund deletions, personal funds paid-back changes, Direct Debit plans, payments, invoices, undo actions, repayments, cancellations, Applications Hub payments sent from Event Hub, possible duplicate application payments, and main-admin comments explaining why changes were made."}
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-white/50">
@@ -1088,6 +1224,21 @@ export default function MoneyAuditLogsPage() {
           <StatCard label="Saving Targets" value={stats.savingTargets} tone="sky" />
           <StatCard label="Budget Logs" value={stats.budgetPlanning} tone="purple" />
           <StatCard label="Direct Debit Logs" value={stats.directDebits} tone="pink" />
+          <StatCard
+            label="Applications Hub Logs"
+            value={stats.eventHub}
+            tone="purple"
+          />
+          <StatCard
+            label="Event Hub Payments"
+            value={stats.eventHubPayments}
+            tone="emerald"
+          />
+          <StatCard
+            label="Possible Duplicates"
+            value={stats.eventHubPossibleDuplicates}
+            tone="orange"
+          />
           <StatCard
             label="Direct Debit Payments"
             value={stats.directDebitPayments}
@@ -1471,6 +1622,15 @@ export default function MoneyAuditLogsPage() {
             >
               <CreditCard className="h-4 w-4" />
               Direct Debit logs
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedArea("Applications Hub")}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500/10 px-4 py-2 text-xs font-bold text-purple-100 ring-1 ring-purple-300/20 hover:bg-purple-500/20"
+            >
+              <Layers3 className="h-4 w-4" />
+              Applications Hub
             </button>
 
             <button

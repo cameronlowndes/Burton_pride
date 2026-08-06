@@ -2334,7 +2334,7 @@ export default function MoneyTransactionForm({
                         }),
                       )
                     }
-                    placeholder="Example: Cameron Lowndes"
+                    placeholder="Example: Your Name"
                     className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-sky-300/20 placeholder:text-white/35 focus:ring-sky-300/50"
                   />
                   <p className="mt-2 text-xs leading-5 text-sky-100/70">
