@@ -36,6 +36,7 @@ type TermsApiResponse = {
 type TermsSection = {
   id: string;
   title: string;
+  level: number;
 };
 
 async function readJson(
@@ -98,11 +99,13 @@ function addHeadingIds(
   html: string,
 ) {
   let headingIndex = 0;
+  const usedIds = new Set<string>();
 
   return html.replace(
-    /<h2([^>]*)>(.*?)<\/h2>/gi,
+    /<h([1-6])([^>]*)>(.*?)<\/h\1>/gi,
     (
       _match,
+      level: string,
       attributes: string,
       content: string,
     ) => {
@@ -111,13 +114,22 @@ function addHeadingIds(
           /\sid=["']([^"']+)["']/i,
         )?.[1];
 
-      const id =
+      const baseId =
         existingId ||
         createSectionId(
           content,
           headingIndex,
         );
 
+      let id = baseId;
+      let duplicateIndex = 2;
+
+      while (usedIds.has(id)) {
+        id = `${baseId}-${duplicateIndex}`;
+        duplicateIndex += 1;
+      }
+
+      usedIds.add(id);
       headingIndex += 1;
 
       const cleanedAttributes =
@@ -126,7 +138,7 @@ function addHeadingIds(
           "",
         );
 
-      return `<h2 id="${id}"${cleanedAttributes}>${content}</h2>`;
+      return `<h${level} id="${id}"${cleanedAttributes}>${content}</h${level}>`;
     },
   );
 }
@@ -136,23 +148,30 @@ function extractSections(
 ): TermsSection[] {
   const sections: TermsSection[] = [];
   const regex =
-    /<h2[^>]*id=["']([^"']+)["'][^>]*>(.*?)<\/h2>/gi;
+    /<h([1-4])[^>]*id=["']([^"']+)["'][^>]*>(.*?)<\/h\1>/gi;
 
   let match: RegExpExecArray | null;
 
   while (
     (match = regex.exec(html)) !== null
   ) {
-    const title = match[2]
+    const title = match[3]
       .replace(/<[^>]*>/g, "")
       .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
       .trim();
 
+    if (!title) {
+      continue;
+    }
+
     sections.push({
-      id: match[1],
+      id: match[2],
       title,
+      level: Number(match[1]),
     });
   }
 
@@ -427,13 +446,25 @@ export default function PublicApplicationTermsClient({
                           <a
                             key={section.id}
                             href={`#${section.id}`}
-                            className="flex items-start gap-3 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-purple-100 hover:text-purple-800 dark:text-white/65 dark:hover:bg-purple-500/15 dark:hover:text-purple-100"
+                            className={`flex items-start gap-3 rounded-xl py-2.5 pr-3 text-sm text-slate-700 transition hover:bg-purple-100 hover:text-purple-800 dark:text-white/65 dark:hover:bg-purple-500/15 dark:hover:text-purple-100 ${
+                              section.level <= 2
+                                ? "pl-3 font-black"
+                                : section.level === 3
+                                  ? "pl-7 font-bold"
+                                  : "pl-11 text-[13px] font-semibold"
+                            }`}
                           >
-                            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-purple-100 text-[10px] font-black text-purple-700 dark:bg-purple-500/20 dark:text-purple-200">
+                            <span
+                              className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full bg-purple-100 font-black text-purple-700 dark:bg-purple-500/20 dark:text-purple-200 ${
+                                section.level <= 2
+                                  ? "h-5 w-5 text-[10px]"
+                                  : "h-4 w-4 text-[9px]"
+                              }`}
+                            >
                               {index + 1}
                             </span>
 
-                            <span>
+                            <span className="leading-5">
                               {section.title}
                             </span>
                           </a>
@@ -491,9 +522,82 @@ export default function PublicApplicationTermsClient({
                     [&_h3]:scroll-mt-32
                     [&_h3]:text-xl
                     [&_h3]:font-black
-                    [&_h3]:text-slate-950
+                    [&_h3]:text-purple-800
 
-                    dark:[&_h3]:text-white
+                    dark:[&_h3]:text-purple-100
+
+                    [&_h4]:mt-7
+                    [&_h4]:scroll-mt-32
+                    [&_h4]:text-lg
+                    [&_h4]:font-black
+                    [&_h4]:text-cyan-800
+
+                    dark:[&_h4]:text-cyan-100
+
+                    [&_h5]:mt-6
+                    [&_h5]:scroll-mt-32
+                    [&_h5]:text-sm
+                    [&_h5]:font-black
+                    [&_h5]:uppercase
+                    [&_h5]:tracking-[0.08em]
+                    [&_h5]:text-slate-800
+
+                    dark:[&_h5]:text-white/90
+
+                    [&_h6]:mt-5
+                    [&_h6]:scroll-mt-32
+                    [&_h6]:text-xs
+                    [&_h6]:font-black
+                    [&_h6]:uppercase
+                    [&_h6]:tracking-[0.12em]
+                    [&_h6]:text-slate-600
+
+                    dark:[&_h6]:text-white/65
+
+                    [&_blockquote]:my-6
+                    [&_blockquote]:rounded-r-2xl
+                    [&_blockquote]:border-l-4
+                    [&_blockquote]:border-purple-400
+                    [&_blockquote]:bg-purple-50
+                    [&_blockquote]:px-5
+                    [&_blockquote]:py-4
+                    [&_blockquote]:italic
+                    [&_blockquote]:text-slate-700
+
+                    dark:[&_blockquote]:border-purple-300/60
+                    dark:[&_blockquote]:bg-purple-500/10
+                    dark:[&_blockquote]:text-white/75
+
+                    [&_code]:rounded-md
+                    [&_code]:bg-slate-100
+                    [&_code]:px-1.5
+                    [&_code]:py-0.5
+                    [&_code]:font-mono
+                    [&_code]:text-[0.92em]
+
+                    dark:[&_code]:bg-white/10
+
+                    [&_hr]:my-8
+                    [&_hr]:border-slate-200
+
+                    dark:[&_hr]:border-white/10
+
+                    [&_table]:my-6
+                    [&_table]:w-full
+                    [&_table]:border-collapse
+                    [&_th]:border
+                    [&_th]:border-slate-200
+                    [&_th]:bg-slate-50
+                    [&_th]:p-3
+                    [&_th]:text-left
+                    [&_th]:font-black
+                    [&_td]:border
+                    [&_td]:border-slate-200
+                    [&_td]:p-3
+
+                    dark:[&_th]:border-white/10
+                    dark:[&_th]:bg-white/[0.05]
+                    dark:[&_td]:border-white/10
 
                     [&_li]:mb-3
                     [&_li]:pl-1
@@ -509,6 +613,21 @@ export default function PublicApplicationTermsClient({
                     [&_strong]:text-slate-950
 
                     dark:[&_strong]:text-white
+
+                    [&_b]:font-black
+                    [&_b]:text-slate-950
+
+                    dark:[&_b]:text-white
+
+                    [&_em]:italic
+                    [&_em]:text-slate-800
+
+                    dark:[&_em]:text-white/90
+
+                    [&_u]:decoration-purple-400
+                    [&_u]:decoration-2
+                    [&_u]:underline
+                    [&_u]:underline-offset-4
 
                     [&_ul]:my-5
                     [&_ul]:list-disc

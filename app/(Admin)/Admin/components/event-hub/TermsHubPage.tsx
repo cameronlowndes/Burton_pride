@@ -5,6 +5,12 @@ import {
   ClipboardCheck,
   Eye,
   FilePenLine,
+  Heading2,
+  Heading3,
+  Bold,
+  List,
+  ListOrdered,
+  Pilcrow,
   Loader2,
   Plus,
   RefreshCw,
@@ -86,6 +92,12 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+function renderInlineFormatting(value: string) {
+  return escapeHtml(value)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<strong>$1</strong>");
+}
+
 function normalTextToHtml(value: string) {
   const lines = value
     .replace(/\r\n/g, "\n")
@@ -93,130 +105,118 @@ function normalTextToHtml(value: string) {
 
   const html: string[] = [];
   let paragraph: string[] = [];
-  let listItems: string[] = [];
+  let unorderedItems: string[] = [];
+  let orderedItems: string[] = [];
 
   function flushParagraph() {
-    if (paragraph.length === 0) {
-      return;
-    }
+    if (paragraph.length === 0) return;
 
     html.push(
       `<p>${paragraph
-        .map((line) => escapeHtml(line.trim()))
+        .map((line) => renderInlineFormatting(line.trim()))
         .join("<br />")}</p>`,
     );
     paragraph = [];
   }
 
-  function flushList() {
-    if (listItems.length === 0) {
-      return;
-    }
+  function flushUnorderedList() {
+    if (unorderedItems.length === 0) return;
 
     html.push(
-      `<ul>${listItems
-        .map(
-          (item) =>
-            `<li>${escapeHtml(item)}</li>`,
-        )
+      `<ul>${unorderedItems
+        .map((item) => `<li>${renderInlineFormatting(item)}</li>`)
         .join("")}</ul>`,
     );
-    listItems = [];
+    unorderedItems = [];
+  }
+
+  function flushOrderedList() {
+    if (orderedItems.length === 0) return;
+
+    html.push(
+      `<ol>${orderedItems
+        .map((item) => `<li>${renderInlineFormatting(item)}</li>`)
+        .join("")}</ol>`,
+    );
+    orderedItems = [];
+  }
+
+  function flushBlocks() {
+    flushParagraph();
+    flushUnorderedList();
+    flushOrderedList();
   }
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
     if (!line) {
-      flushParagraph();
-      flushList();
+      flushBlocks();
       continue;
     }
 
-    const markdownHeading =
-      line.match(/^(#{1,3})\s+(.+)$/);
-
-    const numberedHeading =
-      line.match(
-        /^(\d+(?:\.\d+)*)[.)]?\s+(.+)$/,
-      );
-
-    const bullet =
-      line.match(/^[-*•]\s+(.+)$/);
+    const markdownHeading = line.match(/^(#{1,3})\s+(.+)$/);
+    const numberedHeading = line.match(/^(\d+(?:\.\d+)*)[.)]?\s+(.+)$/);
+    const bullet = line.match(/^[-*•]\s+(.+)$/);
+    const orderedBullet = line.match(/^\d+[.)]\s+(.+)$/);
 
     if (markdownHeading) {
-      flushParagraph();
-      flushList();
-
-      const level = Math.min(
-        markdownHeading[1].length + 1,
-        4,
-      );
-
+      flushBlocks();
+      const level = Math.min(markdownHeading[1].length + 1, 4);
       html.push(
-        `<h${level}>${escapeHtml(
-          markdownHeading[2],
-        )}</h${level}>`,
+        `<h${level}>${renderInlineFormatting(markdownHeading[2])}</h${level}>`,
       );
       continue;
     }
 
     if (numberedHeading) {
-      flushParagraph();
-      flushList();
-
+      flushBlocks();
+      const depth = numberedHeading[1].split(".").length;
+      const level = depth === 1 ? 2 : depth === 2 ? 3 : 4;
       html.push(
-        `<h2>${escapeHtml(
+        `<h${level}>${renderInlineFormatting(
           `${numberedHeading[1]}. ${numberedHeading[2]}`,
-        )}</h2>`,
+        )}</h${level}>`,
       );
       continue;
     }
 
     if (bullet) {
       flushParagraph();
-      listItems.push(
-        bullet[1].trim(),
-      );
+      flushOrderedList();
+      unorderedItems.push(bullet[1].trim());
       continue;
     }
 
-    flushList();
+    if (orderedBullet) {
+      flushParagraph();
+      flushUnorderedList();
+      orderedItems.push(orderedBullet[1].trim());
+      continue;
+    }
+
+    flushUnorderedList();
+    flushOrderedList();
     paragraph.push(line);
   }
 
-  flushParagraph();
-  flushList();
-
+  flushBlocks();
   return html.join("\n");
 }
 
 function htmlToNormalText(value: string) {
-  if (!value) {
-    return "";
-  }
+  if (!value) return "";
 
   return value
-    .replace(
-      /<h[1-6][^>]*>(.*?)<\/h[1-6]>/gi,
-      "$1\n",
-    )
-    .replace(
-      /<li[^>]*>(.*?)<\/li>/gi,
-      "- $1\n",
-    )
-    .replace(
-      /<\/p>/gi,
-      "\n\n",
-    )
-    .replace(
-      /<br\s*\/?>/gi,
-      "\n",
-    )
-    .replace(
-      /<[^>]+>/g,
-      "",
-    )
+    .replace(/<strong[^>]*>(.*?)<\/strong>/gi, "**$1**")
+    .replace(/<b[^>]*>(.*?)<\/b>/gi, "**$1**")
+    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, "## $1\n")
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, "### $1\n")
+    .replace(/<h4[^>]*>(.*?)<\/h4>/gi, "#### $1\n")
+    .replace(/<li[^>]*>(.*?)<\/li>/gi, "- $1\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
     .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
@@ -416,6 +416,103 @@ export default function ApplicationTermsAdminClient() {
       ),
     [editor.contentText],
   );
+
+
+  function updateContentText(nextValue: string) {
+    setEditor((current) => ({
+      ...current,
+      contentText: nextValue,
+    }));
+  }
+
+  function formatSelection(prefix: string, suffix = prefix) {
+    const textarea = document.getElementById(
+      "application-terms-content",
+    ) as HTMLTextAreaElement | null;
+
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = editor.contentText;
+    const selected = value.slice(start, end);
+    const nextValue =
+      value.slice(0, start) +
+      prefix +
+      selected +
+      suffix +
+      value.slice(end);
+
+    updateContentText(nextValue);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(
+        start + prefix.length,
+        end + prefix.length,
+      );
+    });
+  }
+
+  function formatSelectedLines(transform: (line: string) => string) {
+    const textarea = document.getElementById(
+      "application-terms-content",
+    ) as HTMLTextAreaElement | null;
+
+    if (!textarea) return;
+
+    const value = editor.contentText;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    const nextBreak = value.indexOf("\n", end);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const block = value.slice(lineStart, lineEnd);
+    const transformed = block
+      .split("\n")
+      .map(transform)
+      .join("\n");
+
+    const nextValue =
+      value.slice(0, lineStart) +
+      transformed +
+      value.slice(lineEnd);
+
+    updateContentText(nextValue);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(
+        lineStart,
+        lineStart + transformed.length,
+      );
+    });
+  }
+
+  function applyHeading(level: 2 | 3 | 4) {
+    const prefix = level === 2 ? "## " : level === 3 ? "### " : "#### ";
+    formatSelectedLines((line) => {
+      const clean = line.replace(/^#{1,4}\s+/, "").replace(/^\d+(?:\.\d+)*[.)]?\s+/, "");
+      return `${prefix}${clean}`;
+    });
+  }
+
+  function applyBullets() {
+    formatSelectedLines((line) => {
+      const clean = line.replace(/^[-*•]\s+/, "").replace(/^\d+[.)]\s+/, "");
+      return clean.trim() ? `- ${clean}` : "- ";
+    });
+  }
+
+  function applyNumberedList() {
+    let number = 0;
+    formatSelectedLines((line) => {
+      const clean = line.replace(/^[-*•]\s+/, "").replace(/^\d+[.)]\s+/, "");
+      if (!clean.trim()) return line;
+      number += 1;
+      return `${number}. ${clean}`;
+    });
+  }
 
   function editTerms(
     row: EventApplicationTerms,
@@ -744,27 +841,50 @@ export default function ApplicationTermsAdminClient() {
                   Terms wording
                 </label>
                 <p className="mt-1 text-xs leading-5 text-white/45">
-                  Write the terms as normal text. Put numbered section headings on their own line, such as “1. Application”. Start bullet points with a dash. HTML is created automatically when you save.
+                  Select text and use the formatting tools below. You can create section headings, subheadings, smaller subheadings, bold text, bullet lists and numbered lists. The live preview shows exactly how applicants will see it.
                 </p>
 
+                <div className="mt-3 flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-black/25 p-2">
+                  <button type="button" onClick={() => applyHeading(2)} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Section heading">
+                    <Heading2 className="h-4 w-4" /> Heading
+                  </button>
+                  <button type="button" onClick={() => applyHeading(3)} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Subheading">
+                    <Heading3 className="h-4 w-4" /> Subheading
+                  </button>
+                  <button type="button" onClick={() => applyHeading(4)} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Small subheading">
+                    <Pilcrow className="h-4 w-4" /> Small heading
+                  </button>
+                  <button type="button" onClick={() => formatSelection("**")} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Bold selected text">
+                    <Bold className="h-4 w-4" /> Bold
+                  </button>
+                  <button type="button" onClick={applyBullets} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Bullet list">
+                    <List className="h-4 w-4" /> Bullets
+                  </button>
+                  <button type="button" onClick={applyNumberedList} className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-black hover:bg-white/15" title="Numbered list">
+                    <ListOrdered className="h-4 w-4" /> Numbered
+                  </button>
+                </div>
+
+                <div className="mt-2 rounded-xl border border-purple-300/10 bg-purple-500/[0.05] px-3 py-2 text-[11px] leading-5 text-white/50">
+                  Tip: you can also type <span className="font-black text-white/70">## Heading</span>, <span className="font-black text-white/70">### Subheading</span> or wrap words in <span className="font-black text-white/70">**double stars**</span> for bold text.
+                </div>
+
                 <textarea
+                  id="application-terms-content"
                   value={editor.contentText}
                   onChange={(event) =>
-                    setEditor((current) => ({
-                      ...current,
-                      contentText:
-                        event.target.value,
-                    }))
+                    updateContentText(event.target.value)
                   }
                   placeholder={[
-                    "1. Application",
-                    "Applications are reviewed by Burton Pride.",
+                    "## 1. Application",
+                    "Applications are reviewed by **Burton Pride**.",
                     "",
-                    "2. Fees",
-                    "Payment must be made by the deadline.",
+                    "### 1.1 Application review",
+                    "We may request more information before making a decision.",
                     "",
-                    "- Follow staff instructions",
-                    "- Provide the required documents",
+                    "#### Important documents",
+                    "- Public Liability Insurance",
+                    "- Food Hygiene certificate where required",
                   ].join("\n")}
                   className="mt-3 min-h-[30rem] w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm leading-7 outline-none focus:border-purple-300/50 focus:ring-4 focus:ring-purple-500/10"
                 />
@@ -799,10 +919,19 @@ export default function ApplicationTermsAdminClient() {
                         [&_h3]:text-lg
                         [&_h3]:font-black
                         [&_h3]:text-white
+                        [&_h4]:mt-4
+                        [&_h4]:text-base
+                        [&_h4]:font-extrabold
+                        [&_h4]:text-purple-100
+                        [&_strong]:font-black
+                        [&_strong]:text-white
                         [&_p]:whitespace-normal
                         [&_ul]:list-disc
                         [&_ul]:space-y-2
                         [&_ul]:pl-6
+                        [&_ol]:list-decimal
+                        [&_ol]:space-y-2
+                        [&_ol]:pl-6
                       "
                       dangerouslySetInnerHTML={{
                         __html:
