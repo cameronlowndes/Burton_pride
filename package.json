@@ -27,6 +27,7 @@
     "@tiptap/starter-kit": "^3.22.2",
     "@uploadthing/react": "^7.3.3",
     "@vercel/analytics": "^1.5.0",
+    "@vercel/functions": "^3.9.1",
     "animate.css": "^4.1.1",
     "autoprefixer": "^10.4.21",
     "bcryptjs": "^3.0.3",

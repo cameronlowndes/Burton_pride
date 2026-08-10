@@ -408,6 +408,53 @@ const TermsPage = () => {
           </ul>
         </section>
 
+        {/* 11. Admin Portal */}
+        <section className="mt-8">
+          <h2 className="mb-3 text-2xl font-bold text-gray-900">
+            11. Admin Portal
+          </h2>
+
+          <p className="mb-3 leading-7 text-gray-700">
+            The Burton Pride C.I.C. Admin Portal is a private and restricted
+            system for authorised committee members, directors and approved
+            administrators only.
+          </p>
+
+          <p className="mb-3 leading-7 text-gray-700">
+            Access must be approved by Burton Pride C.I.C. Authorised users must
+            keep their login details secure, must not share their account with
+            another person, and may be required to complete two-step
+            verification before access is granted.
+          </p>
+
+          <p className="mb-2 leading-7 text-gray-700">
+            For security, accountability and protection of Burton Pride systems,
+            the Admin Portal may record:
+          </p>
+
+          <ul className="list-disc space-y-2 pl-6 leading-7 text-gray-700">
+            <li>Successful and failed login attempts</li>
+            <li>IP addresses</li>
+            <li>Approximate location based on IP address</li>
+            <li>Device, operating system and browser information</li>
+            <li>Two-step verification and security activity</li>
+            <li>Administrative and audit activity within the Admin Portal</li>
+          </ul>
+
+          <p className="mt-3 leading-7 text-gray-700">
+            This information is used only for legitimate security,
+            accountability, administration and system-protection purposes.
+            Unauthorised access, attempted access, account sharing or attempts
+            to bypass Admin Portal security are prohibited.
+          </p>
+
+          <p className="mt-3 leading-7 text-gray-700">
+            Full Admin Portal Terms, security requirements and acceptable-use
+            rules are provided directly to authorised administrators within the
+            Burton Pride Admin Portal.
+          </p>
+        </section>
+
         {/* Contact - part of the official PDF terms */}
         <section className="mt-8">
           <h2 className="mb-3 text-2xl font-bold text-gray-900">Contact</h2>

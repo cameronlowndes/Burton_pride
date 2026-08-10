@@ -26,11 +26,24 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
+  MapPin,
+  MonitorSmartphone,
   Timer,
   Users,
 } from "lucide-react";
 
 type TwoFactorMethod = "email" | "totp";
+
+type LoginSecurityContext = {
+  riskLevel?: AuditRiskLevel;
+  newDevice?: boolean;
+  deviceTrusted?: boolean;
+  requiresDeviceApproval?: boolean;
+  trustedDeviceCount?: number;
+  maxTrustedDevices?: number;
+  approximateLocation?: string | null;
+  deviceLabel?: string | null;
+};
 
 type LoginResponse = {
   ok?: boolean;
@@ -46,6 +59,7 @@ type LoginResponse = {
   preferredMethod?: TwoFactorMethod;
   maskedEmail?: string;
   expiresInSeconds?: number;
+  security?: LoginSecurityContext;
 };
 
 type VerifyTwoFactorResponse = {
@@ -54,6 +68,7 @@ type VerifyTwoFactorResponse = {
   message?: string;
   code?: string;
   attemptsRemaining?: number;
+  security?: LoginSecurityContext;
 };
 
 type LoginError = {
@@ -148,12 +163,12 @@ const restrictedAccessCards = [
   },
   {
     title: "Private area",
-    text: "Access is monitored to help protect this restricted space.",
+    text: "Login, device and security activity is monitored to protect this restricted space.",
     icon: Lock,
   },
   {
     title: "Use safely",
-    text: "Sign out on shared devices and keep login details private.",
+    text: "Use only approved devices, keep MFA private and sign out when finished.",
     icon: Users,
   },
 ];
@@ -321,6 +336,39 @@ function compactBoolean(value: boolean) {
   return value ? "yes" : "no";
 }
 
+function normaliseSecurityContext(
+  value: LoginSecurityContext | undefined,
+): LoginSecurityContext | null {
+  if (!value || typeof value !== "object") return null;
+
+  const maxTrustedDevices =
+    typeof value.maxTrustedDevices === "number" && value.maxTrustedDevices > 0
+      ? Math.floor(value.maxTrustedDevices)
+      : 3;
+
+  const trustedDeviceCount =
+    typeof value.trustedDeviceCount === "number" && value.trustedDeviceCount >= 0
+      ? Math.floor(value.trustedDeviceCount)
+      : undefined;
+
+  return {
+    riskLevel: value.riskLevel,
+    newDevice: Boolean(value.newDevice),
+    deviceTrusted: Boolean(value.deviceTrusted),
+    requiresDeviceApproval: Boolean(value.requiresDeviceApproval),
+    trustedDeviceCount,
+    maxTrustedDevices,
+    approximateLocation:
+      typeof value.approximateLocation === "string"
+        ? value.approximateLocation.slice(0, 120)
+        : null,
+    deviceLabel:
+      typeof value.deviceLabel === "string"
+        ? value.deviceLabel.slice(0, 120)
+        : null,
+  };
+}
+
 export default function LoginPage() {
   const [nextPath, setNextPath] = useState(DEFAULT_REDIRECT);
   const [skipAutoSessionCheck, setSkipAutoSessionCheck] = useState(false);
@@ -337,6 +385,8 @@ export default function LoginPage() {
     useState<TwoFactorMethod>("email");
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
+  const [securityContext, setSecurityContext] =
+    useState<LoginSecurityContext | null>(null);
   const [twoFactorExpiresAt, setTwoFactorExpiresAt] = useState<number | null>(
     null,
   );
@@ -830,6 +880,9 @@ export default function LoginPage() {
         ? Date.now() - submitStartedAtRef.current
         : null;
 
+      const returnedSecurityContext = normaliseSecurityContext(json?.security);
+      setSecurityContext(returnedSecurityContext);
+
       if (!response.ok || !json?.ok) {
         registerFailedAttempt(response.status);
         setError(parseLoginError(response.status));
@@ -851,6 +904,32 @@ export default function LoginPage() {
 
       setFailedAttempts(0);
       setLockedUntil(null);
+
+      if (returnedSecurityContext?.requiresDeviceApproval) {
+        setPassword("");
+        setError({
+          title: "Device approval required",
+          message:
+            "This account has reached its trusted-device limit or this device needs approval. Remove an existing trusted device or contact an authorised admin lead.",
+        });
+
+        void reportAudit({
+          action: "login_device_approval_required",
+          status: "blocked",
+          risk_level: returnedSecurityContext.riskLevel || "high",
+          target_type: "restricted_login",
+          target_label: "Restricted Login",
+          metadata: {
+            new_device: returnedSecurityContext.newDevice,
+            trusted_device_count:
+              returnedSecurityContext.trustedDeviceCount ?? null,
+            max_trusted_devices:
+              returnedSecurityContext.maxTrustedDevices ?? 3,
+          },
+        });
+
+        return;
+      }
 
       if (!json.requiresTwoFactor) {
         setPassword("");
@@ -1029,6 +1108,11 @@ export default function LoginPage() {
         | VerifyTwoFactorResponse
         | null;
 
+      const verifiedSecurityContext = normaliseSecurityContext(json?.security);
+      if (verifiedSecurityContext) {
+        setSecurityContext(verifiedSecurityContext);
+      }
+
       if (!response.ok || !json?.ok) {
         setTwoFactorCode("");
 
@@ -1081,6 +1165,12 @@ export default function LoginPage() {
         risk_level: "low",
         metadata: {
           method: selectedMethod,
+          new_device:
+            verifiedSecurityContext?.newDevice ?? securityContext?.newDevice ?? null,
+          device_trusted:
+            verifiedSecurityContext?.deviceTrusted ??
+            securityContext?.deviceTrusted ??
+            null,
         },
       });
 
@@ -1199,6 +1289,7 @@ export default function LoginPage() {
     setTwoFactorMethods([]);
     setTwoFactorCode("");
     setMaskedEmail("");
+    setSecurityContext(null);
     setTwoFactorExpiresAt(null);
     setError(null);
     setNotice(null);
@@ -1569,6 +1660,51 @@ export default function LoginPage() {
                     </div>
                   </div>
 
+                  {securityContext ? (
+                    <div className="rounded-3xl border border-white/10 bg-white/[0.05] p-5">
+                      <div className="flex items-start gap-3">
+                        <MonitorSmartphone className="mt-0.5 h-5 w-5 shrink-0 text-purple-100" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-black text-white">Security check</p>
+                            {securityContext.newDevice ? (
+                              <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-amber-100">
+                                New device
+                              </span>
+                            ) : securityContext.deviceTrusted ? (
+                              <span className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-100">
+                                Trusted device
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {securityContext.deviceLabel ? (
+                            <p className="mt-2 text-xs leading-5 text-white/55">
+                              Device: {securityContext.deviceLabel}
+                            </p>
+                          ) : null}
+
+                          {securityContext.approximateLocation ? (
+                            <p className="mt-1 flex items-center gap-1.5 text-xs leading-5 text-white/55">
+                              <MapPin className="h-3.5 w-3.5 shrink-0" />
+                              Approximate location: {securityContext.approximateLocation}
+                            </p>
+                          ) : null}
+
+                          {typeof securityContext.trustedDeviceCount === "number" ? (
+                            <p className="mt-1 text-xs leading-5 text-white/55">
+                              Trusted devices: {securityContext.trustedDeviceCount} / {securityContext.maxTrustedDevices || 3}
+                            </p>
+                          ) : null}
+
+                          <p className="mt-2 text-[11px] leading-5 text-white/40">
+                            Device and location information is supplied by the secure server and is used only as a security signal. Location is approximate.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {twoFactorMethods.length > 1 ? (
                     <div>
                       <p className="mb-3 text-sm font-bold text-white/85">
@@ -1761,8 +1897,20 @@ export default function LoginPage() {
                 </div>
               </div>
 
+              <div className="mt-5 rounded-2xl border border-purple-300/15 bg-purple-500/[0.07] p-4">
+                <div className="flex gap-3">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-purple-100" />
+                  <p className="text-xs leading-5 text-white/50">
+                    For security and accountability, successful and failed login
+                    attempts may record server-detected IP address, approximate
+                    location, device/browser information and two-step verification
+                    activity. Unauthorised access is prohibited.
+                  </p>
+                </div>
+              </div>
+
               <p className="mt-8 text-center text-xs leading-5 text-white/35">
-                Burton Pride C.I.C · Restricted access
+                Burton Pride C.I.C · Restricted access · Security monitored
               </p>
             </div>
           </section>

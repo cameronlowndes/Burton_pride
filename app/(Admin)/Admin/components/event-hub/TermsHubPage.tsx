@@ -675,7 +675,7 @@ export default function ApplicationTermsAdminClient() {
                 Applications Hub
               </div>
               <h1 className="mt-4 text-3xl font-black sm:text-4xl">
-                Application terms
+                Terms Hub
               </h1>
               <p className="mt-2 max-w-4xl text-sm leading-6 text-white/60">
                 Create, edit and publish terms for each Event Hub event. Acceptance records keep a permanent snapshot of the exact version agreed to by each applicant.

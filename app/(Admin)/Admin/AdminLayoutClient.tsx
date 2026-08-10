@@ -309,8 +309,8 @@ function AdminStatusScreen({
           : Loader2;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="relative min-h-screen overflow-hidden bg-[#050816] text-white before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]">
+      <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
         <div
           className={[
             "max-w-lg rounded-3xl border p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl",
@@ -645,7 +645,7 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
    */
   if (isAuthPage) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="relative min-h-screen overflow-hidden bg-[#050816] text-white before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]">
         {children}
       </div>
     );
@@ -714,8 +714,10 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   const displayName = adminName || adminEmail || "Committee Member";
 
   return (
-    <div className="min-h-screen w-full max-w-none overflow-x-hidden bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen w-full max-w-none flex-col md:flex-row">
+    <div className="relative min-h-screen w-full max-w-none overflow-x-hidden bg-[#050816] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]" />
+      <div className="pointer-events-none absolute left-[58%] top-[28%] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full bg-purple-500/10 blur-3xl" />
+      <div className="relative z-10 flex min-h-screen w-full max-w-none flex-col md:flex-row">
         {showAdminNav ? (
           <AdminSidebar
             permissions={safePermissions}
@@ -727,7 +729,7 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
 
         <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           {showAdminNav ? (
-            <header className="hidden h-16 w-full shrink-0 items-center justify-between border-b border-white/10 bg-white/10 px-5 shadow-sm backdrop-blur-xl md:flex lg:px-6">
+            <header className="hidden h-16 w-full shrink-0 items-center justify-between border-b border-white/10 bg-[#0b1020]/75 px-5 shadow-sm backdrop-blur-xl md:flex lg:px-6">
               <div>
                 <div className="font-semibold text-white/90">Admin Portal</div>
                 {refreshing ? (

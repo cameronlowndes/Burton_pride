@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertCircle,
@@ -34,6 +35,7 @@ import {
   ShieldX,
   SlidersHorizontal,
   Sparkles,
+  Smartphone,
   UserRound,
   X,
 } from "lucide-react";
@@ -136,6 +138,8 @@ const fallbackAreas = [
   "raffle",
   "site_pages",
   "admin_portal",
+  "security",
+  "trusted_devices",
 ];
 
 const fallbackStatuses = ["success", "failed", "blocked", "error", "unknown"];
@@ -177,6 +181,8 @@ const areaLabels: Record<string, string> = {
   raffle: "Raffle",
   site_pages: "Site Pages",
   admin_portal: "Admin Portal",
+  security: "Security",
+  trusted_devices: "Trusted Devices",
 };
 
 function normalise(value: unknown) {
@@ -347,13 +353,38 @@ function getActionLabel(action: unknown) {
     stock_order_updated: "Updated Purchase Order",
     stock_delivery_received: "Received Stock Delivery",
     stock_report_exported: "Exported Stock Report",
+    admin_login_password_failed: "Failed Admin Login",
+    admin_login_rate_limited: "Login Rate Limited",
+    admin_login_new_device_two_factor_required: "New Device Needs Two-Step Verification",
+    admin_login_new_device_blocked: "New Device Blocked",
+    admin_two_factor_verification_failed: "Two-Step Verification Failed",
+    admin_two_factor_login_success: "Admin Login Completed",
+    admin_two_factor_login_success_new_trusted_device: "New Trusted Device Added",
+    admin_two_factor_login_success_trusted_device: "Trusted Device Login",
+    admin_two_factor_verified_device_limit_blocked: "Three-Device Limit Blocked Login",
+    admin_two_factor_pending_session_mismatch: "Two-Step Session Mismatch",
+    admin_two_factor_supabase_identity_mismatch: "Admin Identity Mismatch",
+    admin_authenticator_enabled: "Authenticator App Enabled",
+    admin_authenticator_removed: "Authenticator App Removed",
+    trusted_device_revoked: "Trusted Device Revoked",
+    trusted_device_limit_reached: "Trusted Device Limit Reached",
+    admin_session_revoked: "Admin Session Revoked",
   };
 
   return labels[key] || titleCase(action);
 }
 
 function getAdminLabel(log: AuditLog) {
-  return log.admin_name || log.admin_email || "Unknown admin";
+  const actorType = lower(log.metadata?.actor_type);
+
+  if (
+    actorType === "unauthenticated_attempt" ||
+    (!log.admin_name && !log.admin_email && lower(log.area) === "auth")
+  ) {
+    return "Unauthenticated Login Attempt";
+  }
+
+  return log.admin_name || log.admin_email || "System / Unresolved Admin";
 }
 
 function getAuditActivitySummary(log: AuditLog) {
@@ -423,6 +454,22 @@ function getSecurityMeaning(log: AuditLog) {
 
   if (action.includes("lockout")) {
     return "The sign-in protection paused further attempts after repeated failures.";
+  }
+
+  if (action.includes("trusted_device") && action.includes("limit")) {
+    return "The account already has the maximum of three trusted devices. A device must be revoked before another can be approved.";
+  }
+
+  if (action.includes("new_device")) {
+    return "A new or unrecognised device was detected and stronger verification was required.";
+  }
+
+  if (action.includes("two_factor") || action.includes("authenticator")) {
+    return "Two-step verification or authenticator security activity was recorded.";
+  }
+
+  if (action.includes("identity_mismatch") || action.includes("session_mismatch")) {
+    return "The security identity or pending session did not match what the server expected.";
   }
 
   if (status === "blocked") {
@@ -1192,7 +1239,11 @@ export default function AdminAuditLogsClient() {
           logStatus === "error" ||
           logAction.includes("permission_denied") ||
           logAction.includes("login") ||
-          logAction.includes("lockout")
+          logAction.includes("lockout") ||
+          logAction.includes("trusted_device") ||
+          logAction.includes("two_factor") ||
+          logAction.includes("authenticator") ||
+          logAction.includes("identity_mismatch")
         )
       ) {
         return false;
@@ -1586,7 +1637,11 @@ export default function AdminAuditLogsClient() {
   const sortLabel = `${titleCase(sortKey)} ${sortDirection.toUpperCase()}`;
 
   return (
-    <main className="min-h-screen w-full max-w-none overflow-x-visible text-white">
+    <main className="relative min-h-screen w-full max-w-none overflow-hidden bg-[#050816] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]" />
+      <div className="pointer-events-none absolute left-1/2 top-1/3 h-[38rem] w-[38rem] -translate-x-1/2 rounded-full bg-purple-500/10 blur-3xl" />
+
+      <div className="relative z-10 w-full px-4 py-6 sm:px-6 lg:px-8">
       <Toasts toasts={toasts} removeToast={removeToast} />
       <LogDetailDrawer log={selectedLog} onClose={closeLog} onToast={addToast} />
 
@@ -1606,10 +1661,10 @@ export default function AdminAuditLogsClient() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
-                Review login attempts, lockouts, permission denials, page views,
-                Stock Control usage, exports and sensitive admin actions across
-                Burton Pride admin apps. The Stock Control records show which
-                administrator opened or used the app.
+                Review login attempts, two-step verification, new-device checks,
+                three-device-limit blocks, permission denials, exports and sensitive
+                admin activity across Burton Pride systems. Unauthenticated login
+                attempts are shown separately instead of being labelled as an unknown admin.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -1633,6 +1688,14 @@ export default function AdminAuditLogsClient() {
             </div>
 
             <div className="flex flex-wrap gap-3">
+              <Link
+                href="/Admin/Dashboard/Settings/TrustedDevices"
+                className="inline-flex items-center gap-2 rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-3 text-sm font-black text-purple-50 transition hover:bg-purple-500/25"
+              >
+                <Smartphone className="h-4 w-4" />
+                Trusted devices
+              </Link>
+
               <button
                 type="button"
                 onClick={() => {
@@ -2247,6 +2310,7 @@ export default function AdminAuditLogsClient() {
           </p>
         </div>
       </div>
+          </div>
     </main>
   );
 }
