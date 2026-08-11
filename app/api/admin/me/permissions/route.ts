@@ -1,28 +1,21 @@
-import { cookies } from "next/headers";
+import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
+
+import { createServerClient } from "@supabase/ssr";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
+
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ROUTE_NAME = "GET /api/admin/me/permissions";
+const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
+const REQUIRED_AAL = "aal2";
+const MAX_TRUSTED_DEVICES = 3;
+const REQUIRED_PORTAL_PERMISSION = "admin:dashboard:view" as const;
 
-const ADMIN_ID_COOKIE = "burton_admin_id";
-const ADMIN_EMAIL_COOKIE = "burton_admin_email";
-const SESSION_COOKIE = "burton_admin_session";
-
-const ADMIN_COOKIE_NAMES = [
-  ADMIN_ID_COOKIE,
-  ADMIN_EMAIL_COOKIE,
-  SESSION_COOKIE,
-  "burton_admin_role",
-  "burton_admin_permissions",
-  "admin_session",
-  "admin_id",
-  "admin_email",
-];
-
-type AdminRole = "main_admin" | "admin" | "editor";
 
 const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -64,13 +57,83 @@ const ALL_PERMISSION_KEYS = [
   "site_pages:manage",
 
   "audit_logs:view",
-];
+  "event_audit:view",
+  "event_audit:view_all_events",
+  "event_audit:view_security",
 
-function getString(value: unknown) {
+  "security:manage_devices",
+  "security:manage_mfa",
+  "security:manage_admins",
+  "security:view_login_history",
+] as const;
+
+type PermissionKey = (typeof ALL_PERMISSION_KEYS)[number];
+type AdminRole = "main_admin" | "admin" | "editor";
+type RiskLevel = "low" | "medium" | "high" | "critical";
+type AuditResult = "success" | "denied" | "error";
+
+type AdminRow = {
+  id: string;
+  auth_user_id: string | null;
+  email: string | null;
+  full_name: string | null;
+  name?: string | null;
+  role: string | null;
+  is_active: boolean | null;
+  is_main_admin: boolean | null;
+  permissions: unknown;
+};
+
+type TrustedDeviceRow = {
+  id: string;
+  admin_id: string;
+  device_token_hash: string;
+  device_name: string | null;
+  browser: string | null;
+  operating_system: string | null;
+  device_type: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  trusted_at: string;
+  revoked_at: string | null;
+};
+
+type SecuritySessionRow = {
+  id: string;
+  admin_id: string;
+  trusted_device_id: string | null;
+  auth_session_ref: string;
+  aal: string | null;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+};
+
+type RequestContext = {
+  ipAddress: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  userAgent: string | null;
+};
+
+type DenialReason =
+  | "unauthorized"
+  | "mfa_required"
+  | "admin_not_authorized"
+  | "portal_permission_required"
+  | "trusted_device_required"
+  | "trusted_device_limit_violation"
+  | "session_revoked"
+  | "security_service_unavailable";
+
+function getString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normaliseEmail(value: unknown) {
+function normaliseEmail(value: unknown): string {
   return getString(value).toLowerCase();
 }
 
@@ -90,13 +153,11 @@ function normaliseRole(value: unknown): AdminRole | null {
   return null;
 }
 
-function uniqueStrings(values: string[]) {
-  return Array.from(
-    new Set(values.map((value) => value.trim()).filter(Boolean))
-  );
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function permissionValueIsAllowed(value: unknown) {
+function permissionValueIsAllowed(value: unknown): boolean {
   return (
     value === true ||
     value === "true" ||
@@ -107,386 +168,698 @@ function permissionValueIsAllowed(value: unknown) {
   );
 }
 
-function permissionsToKeys(permissions: unknown): string[] {
-  if (!permissions) return [];
+function permissionsToKeys(permissions: unknown): PermissionKey[] {
+  let values: string[] = [];
 
   if (Array.isArray(permissions)) {
-    return uniqueStrings(
-      permissions.filter((item): item is string => typeof item === "string")
+    values = permissions.filter(
+      (item): item is string => typeof item === "string",
     );
-  }
-
-  if (typeof permissions === "string") {
-    return uniqueStrings(
-      permissions
-        .split(",")
-        .map((permission) => permission.trim())
-        .filter(Boolean)
-    );
-  }
-
-  if (typeof permissions !== "object") return [];
-
-  return uniqueStrings(
-    Object.entries(permissions)
+  } else if (typeof permissions === "string") {
+    values = permissions.split(",");
+  } else if (permissions && typeof permissions === "object") {
+    values = Object.entries(permissions)
       .filter(([, allowed]) => permissionValueIsAllowed(allowed))
-      .map(([key]) => key)
+      .map(([key]) => key);
+  }
+
+  const allowList = new Set<string>(ALL_PERMISSION_KEYS);
+
+  return uniqueStrings(values).filter(
+    (permission): permission is PermissionKey => allowList.has(permission),
   );
 }
 
-function addDefaultPermissions(args: {
-  role: AdminRole | null;
-  isMainAdmin: boolean;
-  permissions: string[];
-}) {
-  const { role, isMainAdmin } = args;
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
-  if (isMainAdmin || role === "main_admin") {
-    return ALL_PERMISSION_KEYS;
+function safeDecodeHeader(value: string | null): string | null {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    return decodeURIComponent(trimmed).slice(0, 150);
+  } catch {
+    return trimmed.slice(0, 150);
   }
+}
 
-  const next = [...args.permissions];
+function normaliseIp(value: string | null): string | null {
+  if (!value) return null;
 
-  /**
-   * This keeps normal admins able to enter the dashboard if they have
-   * any admin access but their old permissions object missed this key.
+  const candidate = value.split(",")[0]?.trim() ?? "";
+  if (!candidate) return null;
+
+  const withoutPort =
+    candidate.startsWith("[") && candidate.includes("]")
+      ? candidate.slice(1, candidate.indexOf("]"))
+      : candidate;
+
+  return isIP(withoutPort) ? withoutPort : null;
+}
+
+async function getRequestContext(): Promise<RequestContext> {
+  const headerStore = await headers();
+
+  /*
+   * Only trust these forwarding/location headers when your production proxy or
+   * hosting platform overwrites them. Never accept IP/location from request
+   * body/query parameters as authoritative security data.
    */
-  if (!next.includes("admin:dashboard:view")) {
-    next.unshift("admin:dashboard:view");
-  }
+  const ipAddress =
+    normaliseIp(headerStore.get("x-real-ip")) ??
+    normaliseIp(headerStore.get("x-forwarded-for"));
 
-  return uniqueStrings(next);
-}
-
-function isExpiredDate(value: unknown) {
-  const dateValue = getString(value);
-
-  if (!dateValue) return false;
-
-  const timestamp = Date.parse(dateValue);
-
-  if (Number.isNaN(timestamp)) return false;
-
-  return timestamp <= Date.now();
-}
-
-function clearCookie(response: NextResponse, name: string) {
-  response.cookies.set({
-    name,
-    value: "",
-    path: "/",
-    maxAge: 0,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-  });
-}
-
-function clearAdminCookies(response: NextResponse, cookieNames: string[] = []) {
-  const names = uniqueStrings([...ADMIN_COOKIE_NAMES, ...cookieNames]);
-
-  for (const name of names) {
-    clearCookie(response, name);
-  }
-}
-
-function noStoreHeaders() {
   return {
-    "Cache-Control": "no-store, no-cache, must-revalidate",
+    ipAddress,
+    city: safeDecodeHeader(headerStore.get("x-vercel-ip-city")),
+    region: safeDecodeHeader(headerStore.get("x-vercel-ip-country-region")),
+    country: safeDecodeHeader(headerStore.get("x-vercel-ip-country")),
+    userAgent: getString(headerStore.get("user-agent")).slice(0, 1000) || null,
+  };
+}
+
+function securityHeaders(): Record<string, string> {
+  return {
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
     Pragma: "no-cache",
     Expires: "0",
+    Vary: "Cookie",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
   };
 }
 
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
-  options?: {
-    clearCookies?: boolean;
-    extraCookieNamesToClear?: string[];
-  }
-) {
-  const response = NextResponse.json(body, {
+): NextResponse {
+  return NextResponse.json(body, {
     status,
-    headers: noStoreHeaders(),
+    headers: securityHeaders(),
   });
-
-  if (options?.clearCookies) {
-    clearAdminCookies(response, options.extraCookieNamesToClear);
-  }
-
-  return response;
 }
 
-function safeErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unexpected server error.";
-}
+function denied(
+  status: number,
+  reason: DenialReason,
+  extra: Record<string, unknown> = {},
+): NextResponse {
+  const messages: Record<DenialReason, string> = {
+    unauthorized: "Your admin session is not valid.",
+    mfa_required: "Multi-factor authentication is required.",
+    admin_not_authorized: "This account is not authorised for the Admin Portal.",
+    portal_permission_required: "You do not have permission to access the Admin Portal.",
+    trusted_device_required:
+      "This device must be verified before Admin Portal access is allowed.",
+    trusted_device_limit_violation:
+      "The trusted-device security limit requires administrator review.",
+    session_revoked: "This admin session is no longer active.",
+    security_service_unavailable:
+      "The security service could not verify this request.",
+  };
 
-function getStoredSessionTokens(admin: Record<string, unknown>) {
-  return uniqueStrings([
-    getString(admin.session_token),
-    getString(admin.admin_session_token),
-    getString(admin.current_session_token),
-    getString(admin.active_session_token),
-  ]);
-}
-
-function getSessionExpiry(admin: Record<string, unknown>) {
-  return (
-    admin.session_expires_at ??
-    admin.admin_session_expires_at ??
-    admin.current_session_expires_at ??
-    null
+  return jsonResponse(
+    {
+      ok: false,
+      authenticated: !["unauthorized", "session_revoked"].includes(reason),
+      authorized: false,
+      error: messages[reason],
+      reason,
+      ...extra,
+    },
+    status,
   );
 }
 
+async function createAuthenticatedSupabaseClient() {
+  const cookieStore = await cookies();
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error("Supabase public authentication configuration is missing.");
+  }
+
+  const client = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        for (const { name, value, options } of cookiesToSet) {
+          try {
+            cookieStore.set(name, value, options);
+          } catch {
+            /*
+             * Do not weaken authentication if a read-only cookie context is
+             * encountered. getUser() remains the authoritative verification.
+             */
+          }
+        }
+      },
+    },
+  });
+
+  return { client, cookieStore };
+}
+
+async function writeSecurityEvent(args: {
+  actorType: "authenticated_admin" | "authenticated_user" | "system";
+  admin?: AdminRow | null;
+  authUserId?: string | null;
+  action: string;
+  result: AuditResult;
+  riskLevel: RiskLevel;
+  context: RequestContext;
+  trustedDeviceId?: string | null;
+  sessionId?: string | null;
+  aal?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  const role = args.admin ? normaliseRole(args.admin.role) : null;
+
+  const { error } = await supabaseAdmin.from("admin_security_events").insert({
+    id: randomUUID(),
+    actor_type: args.actorType,
+    admin_id: args.admin?.id ?? null,
+    auth_user_id: args.authUserId ?? args.admin?.auth_user_id ?? null,
+    admin_name: args.admin?.full_name ?? args.admin?.name ?? null,
+    admin_role: role,
+    action: args.action,
+    area: "admin_permissions",
+    route: ROUTE_NAME,
+    http_method: "GET",
+    result: args.result,
+    risk_level: args.riskLevel,
+    ip_address: args.context.ipAddress,
+    city: args.context.city,
+    region: args.context.region,
+    country: args.context.country,
+    user_agent: args.context.userAgent,
+    trusted_device_id: args.trustedDeviceId ?? null,
+    security_session_id: args.sessionId ?? null,
+    aal: args.aal ?? null,
+    metadata: args.metadata ?? {},
+  });
+
+  if (error) {
+    // Deliberately log only the provider error code, not raw DB details to users.
+    console.error(`${ROUTE_NAME} security audit write failed`, {
+      code: error.code,
+    });
+  }
+}
+
+function isExpired(isoDate: string | null): boolean {
+  if (!isoDate) return false;
+
+  const timestamp = Date.parse(isoDate);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+function sessionExpiresAt(expiresAtSeconds: number | undefined): string | null {
+  if (!expiresAtSeconds || !Number.isFinite(expiresAtSeconds)) return null;
+  return new Date(expiresAtSeconds * 1000).toISOString();
+}
+
 function buildAdminPayload(args: {
-  admin: Record<string, unknown>;
-  role: AdminRole | null;
-  isMainAdmin: boolean;
-  permissions: string[];
+  admin: AdminRow;
+  role: AdminRole;
+  permissions: PermissionKey[];
 }) {
-  const { admin, role, isMainAdmin, permissions } = args;
+  const { admin, role, permissions } = args;
 
   return {
-    id: getString(admin.id),
+    id: admin.id,
     email: normaliseEmail(admin.email),
-    full_name:
-      getString(admin.full_name) ||
-      getString(admin.fullName) ||
-      getString(admin.name) ||
-      null,
+    full_name: getString(admin.full_name) || getString(admin.name) || null,
     role,
     is_active: admin.is_active === true,
-    is_main_admin: isMainAdmin,
+    is_main_admin: admin.is_main_admin === true || role === "main_admin",
     permissions,
   };
 }
 
-async function getCookieStore() {
-  return await cookies();
-}
-
-export async function GET() {
-  let extraCookieNamesToClear: string[] = [];
+export async function GET(): Promise<NextResponse> {
+  const context = await getRequestContext();
 
   try {
-    const cookieStore = await getCookieStore();
+    const { client: supabase, cookieStore } =
+      await createAuthenticatedSupabaseClient();
 
-    extraCookieNamesToClear = cookieStore
-      .getAll()
-      .map((cookie) => cookie.name)
-      .filter((name) => {
-        return (
-          name.startsWith("sb-") ||
-          name.toLowerCase().includes("supabase") ||
-          name.toLowerCase().includes("auth-token")
-        );
+    /*
+     * 1. AUTHORITATIVE IDENTITY
+     * Validate the actual Supabase Auth user on the server. Legacy Burton
+     * admin-id/email/role/permissions cookies are intentionally ignored.
+     */
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      await writeSecurityEvent({
+        actorType: "system",
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "medium",
+        context,
+        metadata: { reason: "no_valid_supabase_user" },
       });
 
-    const adminId = getString(cookieStore.get(ADMIN_ID_COOKIE)?.value);
-    const adminEmailCookie = normaliseEmail(
-      cookieStore.get(ADMIN_EMAIL_COOKIE)?.value
-    );
-    const sessionToken = getString(cookieStore.get(SESSION_COOKIE)?.value);
-
-    if (!adminId || !adminEmailCookie || !sessionToken) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Unauthorized",
-          reason: "missing_custom_admin_session",
-          message:
-            "No active Burton Pride admin session was received by the admin API.",
-          likelyFix:
-            "Sign out and sign back in using the Admin Portal login page.",
-          route: ROUTE_NAME,
-        },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
+      return denied(401, "unauthorized");
     }
 
-    const { data: admin, error: adminError } = await supabaseAdmin
+    /* 2. MANDATORY MFA / AAL2 */
+    const { data: aalData, error: aalError } =
+      await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+
+    if (aalError) {
+      console.error(`${ROUTE_NAME} AAL check failed`, { code: aalError.code });
+      return denied(503, "security_service_unavailable");
+    }
+
+    const currentAal = aalData?.currentLevel ?? null;
+
+    if (currentAal !== REQUIRED_AAL) {
+      await writeSecurityEvent({
+        actorType: "authenticated_user",
+        authUserId: user.id,
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "medium",
+        context,
+        aal: currentAal,
+        metadata: { reason: "mfa_assurance_too_low" },
+      });
+
+      return denied(403, "mfa_required", {
+        requires_mfa: true,
+        current_aal: currentAal,
+        required_aal: REQUIRED_AAL,
+      });
+    }
+
+    /*
+     * 3. SERVER-SIDE ADMIN MAPPING
+     * Resolve the Burton Pride admin exclusively through auth_user_id.
+     */
+    const { data: adminData, error: adminError } = await supabaseAdmin
       .from("admin_users")
-      .select("*")
-      .eq("id", adminId)
+      .select(
+        "id, auth_user_id, email, full_name, name, role, is_active, is_main_admin, permissions",
+      )
+      .eq("auth_user_id", user.id)
       .maybeSingle();
 
     if (adminError) {
-      console.error(`${ROUTE_NAME} database error:`, adminError);
-
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: adminError.message,
-          reason: "admin_database_error",
-          message: "The admin API could not read the admin_users table.",
-          route: ROUTE_NAME,
-        },
-        500
-      );
+      console.error(`${ROUTE_NAME} admin lookup failed`, {
+        code: adminError.code,
+      });
+      return denied(503, "security_service_unavailable");
     }
 
-    if (!admin) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Admin account was not found",
-          reason: "admin_record_missing",
-          message:
-            "The admin session cookie exists, but no matching admin row was found.",
-          likelyFix:
-            "The session is stale. Sign in again using the Admin Portal login page.",
-          route: ROUTE_NAME,
+    const admin = (adminData ?? null) as AdminRow | null;
+
+    if (!admin || admin.is_active !== true) {
+      await writeSecurityEvent({
+        actorType: "authenticated_user",
+        authUserId: user.id,
+        admin,
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "high",
+        context,
+        aal: currentAal,
+        metadata: {
+          reason: !admin ? "admin_mapping_missing" : "admin_inactive",
         },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
+      });
+
+      return denied(403, "admin_not_authorized");
     }
 
-    const adminRecord = admin as Record<string, unknown>;
-    const adminEmail = normaliseEmail(adminRecord.email);
+    const role = normaliseRole(admin.role);
 
-    if (adminRecord.is_active !== true) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Admin account is inactive",
-          reason: "admin_record_inactive",
-          message:
-            "Your admin account exists, but it is not currently active.",
-          likelyFix:
-            "Ask a main admin to check public.admin_users and make sure is_active is true.",
-          route: ROUTE_NAME,
-        },
-        403,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
+    if (!role) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "high",
+        context,
+        aal: currentAal,
+        metadata: { reason: "invalid_admin_role" },
+      });
+
+      return denied(403, "admin_not_authorized");
     }
 
-    if (!adminEmail || adminEmail !== adminEmailCookie) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Admin session email mismatch",
-          reason: "admin_cookie_email_mismatch",
-          message:
-            "The admin session cookies do not match the active admin account.",
-          likelyFix:
-            "The session is stale. Sign out and sign back in.",
-          route: ROUTE_NAME,
-        },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
-    }
-
-    /**
-     * If your admin_users table stores a session token, validate it.
-     * This keeps backwards compatibility: if no token column exists in the row,
-     * the old cookie session still works.
+    /*
+     * 4. EXPLICIT PERMISSIONS ONLY
+     * No role wildcard and no automatic dashboard permission are granted.
      */
-    const storedSessionTokens = getStoredSessionTokens(adminRecord);
+    const permissions = permissionsToKeys(admin.permissions);
+
+    if (!permissions.includes(REQUIRED_PORTAL_PERMISSION)) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "medium",
+        context,
+        aal: currentAal,
+        metadata: { reason: "dashboard_permission_missing" },
+      });
+
+      return denied(403, "portal_permission_required");
+    }
+
+    /* 5. ENFORCE MAXIMUM THREE ACTIVE TRUSTED DEVICES */
+    const { count: activeTrustedDeviceCount, error: countError } =
+      await supabaseAdmin
+        .from("admin_trusted_devices")
+        .select("id", { count: "exact", head: true })
+        .eq("admin_id", admin.id)
+        .is("revoked_at", null);
+
+    if (countError) {
+      console.error(`${ROUTE_NAME} trusted-device count failed`, {
+        code: countError.code,
+      });
+      return denied(503, "security_service_unavailable");
+    }
+
+    if ((activeTrustedDeviceCount ?? 0) > MAX_TRUSTED_DEVICES) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "trusted_device_limit_violation",
+        result: "denied",
+        riskLevel: "critical",
+        context,
+        aal: currentAal,
+        metadata: {
+          active_trusted_devices: activeTrustedDeviceCount,
+          maximum_allowed: MAX_TRUSTED_DEVICES,
+        },
+      });
+
+      return denied(403, "trusted_device_limit_violation");
+    }
+
+    /* 6. VERIFY CRYPTOGRAPHIC TRUSTED-DEVICE TOKEN */
+    const trustedDeviceToken = getString(
+      cookieStore.get(TRUSTED_DEVICE_COOKIE)?.value,
+    );
+
+    if (!trustedDeviceToken) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "new_device_detected",
+        result: "denied",
+        riskLevel: "medium",
+        context,
+        aal: currentAal,
+        metadata: {
+          reason: "trusted_device_cookie_missing",
+          active_trusted_devices: activeTrustedDeviceCount ?? 0,
+        },
+      });
+
+      return denied(403, "trusted_device_required", {
+        requires_trusted_device: true,
+        trusted_devices_used: activeTrustedDeviceCount ?? 0,
+        trusted_devices_max: MAX_TRUSTED_DEVICES,
+      });
+    }
+
+    const trustedDeviceHash = sha256(trustedDeviceToken);
+
+    const { data: trustedDeviceData, error: trustedDeviceError } =
+      await supabaseAdmin
+        .from("admin_trusted_devices")
+        .select(
+          "id, admin_id, device_token_hash, device_name, browser, operating_system, device_type, first_seen_at, last_seen_at, trusted_at, revoked_at",
+        )
+        .eq("admin_id", admin.id)
+        .eq("device_token_hash", trustedDeviceHash)
+        .is("revoked_at", null)
+        .maybeSingle();
+
+    if (trustedDeviceError) {
+      console.error(`${ROUTE_NAME} trusted-device lookup failed`, {
+        code: trustedDeviceError.code,
+      });
+      return denied(503, "security_service_unavailable");
+    }
+
+    const trustedDevice =
+      (trustedDeviceData ?? null) as TrustedDeviceRow | null;
+
+    if (!trustedDevice) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "new_device_detected",
+        result: "denied",
+        riskLevel: "high",
+        context,
+        aal: currentAal,
+        metadata: { reason: "trusted_device_not_recognised" },
+      });
+
+      return denied(403, "trusted_device_required", {
+        requires_trusted_device: true,
+        trusted_devices_used: activeTrustedDeviceCount ?? 0,
+        trusted_devices_max: MAX_TRUSTED_DEVICES,
+      });
+    }
+
+    /*
+     * 7. SESSION REFERENCE + SERVER-SIDE REVOCATION
+     * getUser() above is the authentication authority. getSession() is used
+     * only after that validation to derive a non-secret session reference.
+     */
+    const {
+      data: { session },
+      error: sessionReadError,
+    } = await supabase.auth.getSession();
 
     if (
-      storedSessionTokens.length > 0 &&
-      !storedSessionTokens.includes(sessionToken)
+      sessionReadError ||
+      !session ||
+      !session.access_token ||
+      session.user.id !== user.id
     ) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Admin session has expired",
-          reason: "admin_session_token_mismatch",
-          message:
-            "The admin session token no longer matches the active admin account.",
-          likelyFix: "Sign in again using the Admin Portal login page.",
-          route: ROUTE_NAME,
-        },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
+      return denied(401, "unauthorized");
     }
 
-    if (isExpiredDate(getSessionExpiry(adminRecord))) {
-      return jsonResponse(
-        {
-          ok: false,
-          authenticated: false,
-          error: "Admin session has expired",
-          reason: "admin_session_expired",
-          message: "Your admin session has expired.",
-          likelyFix: "Sign in again using the Admin Portal login page.",
-          route: ROUTE_NAME,
-        },
-        401,
-        {
-          clearCookies: true,
-          extraCookieNamesToClear,
-        }
-      );
+    const authSessionRef = sha256(session.access_token);
+    const expiresAt = sessionExpiresAt(session.expires_at);
+
+    if (isExpired(expiresAt)) {
+      return denied(401, "unauthorized");
     }
 
-    const role = normaliseRole(adminRecord.role);
-    const isMainAdmin =
-      adminRecord.is_main_admin === true || role === "main_admin";
+    const { data: securitySessionData, error: securitySessionError } =
+      await supabaseAdmin
+        .from("admin_security_sessions")
+        .select(
+          "id, admin_id, trusted_device_id, auth_session_ref, aal, created_at, last_seen_at, expires_at, revoked_at, revoke_reason",
+        )
+        .eq("auth_session_ref", authSessionRef)
+        .maybeSingle();
 
-    const permissions = addDefaultPermissions({
-      role,
-      isMainAdmin,
-      permissions: permissionsToKeys(adminRecord.permissions),
-    });
+    if (securitySessionError) {
+      console.error(`${ROUTE_NAME} security-session lookup failed`, {
+        code: securitySessionError.code,
+      });
+      return denied(503, "security_service_unavailable");
+    }
 
-    const adminPayload = buildAdminPayload({
-      admin: adminRecord,
-      role,
-      isMainAdmin,
-      permissions,
-    });
+    let securitySession =
+      (securitySessionData ?? null) as SecuritySessionRow | null;
+
+    if (
+      securitySession?.revoked_at ||
+      isExpired(securitySession?.expires_at ?? null)
+    ) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "session_revoked_access_denied",
+        result: "denied",
+        riskLevel: "high",
+        context,
+        trustedDeviceId: trustedDevice.id,
+        sessionId: securitySession?.id ?? null,
+        aal: currentAal,
+      });
+
+      return denied(401, "session_revoked");
+    }
+
+    if (
+      securitySession &&
+      (securitySession.admin_id !== admin.id ||
+        securitySession.trusted_device_id !== trustedDevice.id)
+    ) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "security_session_binding_mismatch",
+        result: "denied",
+        riskLevel: "critical",
+        context,
+        trustedDeviceId: trustedDevice.id,
+        sessionId: securitySession.id,
+        aal: currentAal,
+      });
+
+      return denied(401, "session_revoked");
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (!securitySession) {
+      const { data: insertedSession, error: insertSessionError } =
+        await supabaseAdmin
+          .from("admin_security_sessions")
+          .insert({
+            id: randomUUID(),
+            admin_id: admin.id,
+            trusted_device_id: trustedDevice.id,
+            auth_session_ref: authSessionRef,
+            ip_address: context.ipAddress,
+            city: context.city,
+            region: context.region,
+            country: context.country,
+            user_agent: context.userAgent,
+            aal: currentAal,
+            created_at: nowIso,
+            last_seen_at: nowIso,
+            expires_at: expiresAt,
+          })
+          .select(
+            "id, admin_id, trusted_device_id, auth_session_ref, aal, created_at, last_seen_at, expires_at, revoked_at, revoke_reason",
+          )
+          .single();
+
+      if (insertSessionError || !insertedSession) {
+        console.error(`${ROUTE_NAME} security-session create failed`, {
+          code: insertSessionError?.code,
+        });
+        return denied(503, "security_service_unavailable");
+      }
+
+      securitySession = insertedSession as SecuritySessionRow;
+    } else {
+      const { error: updateSessionError } = await supabaseAdmin
+        .from("admin_security_sessions")
+        .update({
+          trusted_device_id: trustedDevice.id,
+          ip_address: context.ipAddress,
+          city: context.city,
+          region: context.region,
+          country: context.country,
+          user_agent: context.userAgent,
+          aal: currentAal,
+          last_seen_at: nowIso,
+          expires_at: expiresAt,
+        })
+        .eq("id", securitySession.id)
+        .is("revoked_at", null);
+
+      if (updateSessionError) {
+        console.error(`${ROUTE_NAME} security-session update failed`, {
+          code: updateSessionError.code,
+        });
+        return denied(503, "security_service_unavailable");
+      }
+    }
+
+    /* 8. UPDATE TRUSTED-DEVICE ACTIVITY AFTER ALL SECURITY CHECKS PASS */
+    const { error: deviceUpdateError } = await supabaseAdmin
+      .from("admin_trusted_devices")
+      .update({
+        last_seen_at: nowIso,
+        last_ip: context.ipAddress,
+        last_city: context.city,
+        last_region: context.region,
+        last_country: context.country,
+        last_session_id: securitySession.id,
+        updated_at: nowIso,
+      })
+      .eq("id", trustedDevice.id)
+      .eq("admin_id", admin.id)
+      .is("revoked_at", null);
+
+    if (deviceUpdateError) {
+      // Access has already been securely verified; activity write failure should
+      // be visible to operators but must not expose DB details to the client.
+      console.error(`${ROUTE_NAME} trusted-device activity update failed`, {
+        code: deviceUpdateError.code,
+      });
+    }
+
+    const adminPayload = buildAdminPayload({ admin, role, permissions });
+
+    /*
+     * Avoid logging every successful permission poll to prevent audit flooding.
+     * Successful verification is still represented by the security-session and
+     * trusted-device last_seen_at values. Denials/errors above are audited.
+     */
 
     return jsonResponse({
       ok: true,
       authenticated: true,
+      authorized: true,
       admin: adminPayload,
       user: adminPayload,
       permissions,
+      security: {
+        aal: currentAal,
+        mfa_verified: true,
+        trusted_device_id: trustedDevice.id,
+        trusted_devices_used: activeTrustedDeviceCount ?? 0,
+        trusted_devices_max: MAX_TRUSTED_DEVICES,
+        session_id: securitySession.id,
+        session_expires_at: expiresAt,
+        session_revoked: false,
+      },
       route: ROUTE_NAME,
     });
   } catch (error: unknown) {
-    console.error(`${ROUTE_NAME} error:`, error);
+    console.error(`${ROUTE_NAME} unexpected error`, {
+      name: error instanceof Error ? error.name : "UnknownError",
+    });
 
-    return jsonResponse(
-      {
-        ok: false,
-        authenticated: false,
-        error: safeErrorMessage(error),
-        reason: "unexpected_admin_api_error",
-        message: "The admin API crashed while checking the admin account.",
-        likelyFix:
-          "Check the cookies set by the login route and check public.admin_users.",
-        route: ROUTE_NAME,
-      },
-      500
-    );
+    await writeSecurityEvent({
+      actorType: "system",
+      action: "permission_context_error",
+      result: "error",
+      riskLevel: "high",
+      context,
+      metadata: { reason: "unexpected_server_error" },
+    }).catch(() => undefined);
+
+    return denied(503, "security_service_unavailable");
   }
 }

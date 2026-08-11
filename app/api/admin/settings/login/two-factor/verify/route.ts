@@ -1,6 +1,7 @@
 import {
   createHash,
   randomBytes,
+  randomUUID,
   timingSafeEqual,
 } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
@@ -21,6 +22,8 @@ const ADMIN_ROLE_COOKIE = "burton_admin_role";
 const ADMIN_PERMISSIONS_COOKIE = "burton_admin_permissions";
 const PENDING_TWO_FACTOR_COOKIE = "burton_admin_2fa_pending";
 const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
+const ADMIN_SECURITY_SESSION_COOKIE =
+  "burton_admin_security_session";
 
 const SESSION_MAX_AGE = 60 * 60 * 12;
 const TRUSTED_DEVICE_MAX_AGE = 60 * 60 * 24 * 90;
@@ -226,6 +229,21 @@ function setTrustedDeviceCookie(
   });
 }
 
+function setSecuritySessionCookie(
+  response: NextResponse,
+  rawSessionRef: string,
+): void {
+  response.cookies.set({
+    name: ADMIN_SECURITY_SESSION_COOKIE,
+    value: rawSessionRef,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: SESSION_MAX_AGE,
+  });
+}
+
 function clearPendingTwoFactorCookie(
   response: NextResponse,
 ): void {
@@ -245,6 +263,20 @@ function clearTrustedDeviceCookie(
 ): void {
   response.cookies.set({
     name: TRUSTED_DEVICE_COOKIE,
+    value: "",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+function clearSecuritySessionCookie(
+  response: NextResponse,
+): void {
+  response.cookies.set({
+    name: ADMIN_SECURITY_SESSION_COOKIE,
     value: "",
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -834,6 +866,141 @@ async function storeSessionToken(
   console.warn(
     `${ROUTE_NAME}: session token columns are unavailable; using cookie-only session.`,
   );
+}
+
+type CreatedSecuritySession = {
+  id: string;
+  rawSessionRef: string;
+  expiresAt: string;
+};
+
+async function createAdminSecuritySession(params: {
+  adminId: string;
+  trustedDeviceId: string;
+  aal: "aal2";
+  security: SecurityContext;
+}): Promise<CreatedSecuritySession> {
+  const rawSessionRef =
+    randomBytes(32).toString(
+      "base64url",
+    );
+
+  const sessionRefHash =
+    hashWithPepper(
+      rawSessionRef,
+    );
+
+  const sessionId =
+    randomUUID();
+
+  const now =
+    new Date().toISOString();
+
+  const expiresAt =
+    new Date(
+      Date.now() +
+        SESSION_MAX_AGE * 1000,
+    ).toISOString();
+
+  const insertPayload = {
+    id: sessionId,
+    admin_id: params.adminId,
+    trusted_device_id:
+      params.trustedDeviceId,
+    auth_session_ref:
+      sessionRefHash,
+
+    /*
+     * Security/session context.
+     *
+     * Empty IP values are stored as NULL because
+     * admin_security_sessions.ip_address may be
+     * a Postgres inet column.
+     */
+    ip_address:
+      cleanString(
+        params.security.ipAddress,
+      ) || null,
+
+    city:
+      params.security.city,
+
+    region:
+      params.security.region,
+
+    country:
+      params.security.country,
+
+    user_agent:
+      cleanString(
+        params.security.userAgent,
+      ) || null,
+
+    aal: params.aal,
+
+    created_at: now,
+    last_seen_at: now,
+    expires_at: expiresAt,
+
+    revoked_at: null,
+    revoke_reason: null,
+  };
+
+  const { data, error } =
+    await supabaseAdmin
+      .from(
+        "admin_security_sessions",
+      )
+      .insert(insertPayload)
+      .select("id")
+      .single<{ id: string }>();
+
+  if (error) {
+    /*
+     * Keep the detailed database error server-side.
+     * Do not return schema/constraint details to the
+     * browser.
+     */
+    console.error(
+      `${ROUTE_NAME} security session create failed`,
+      {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        adminId:
+          params.adminId,
+        trustedDeviceId:
+          params.trustedDeviceId,
+      },
+    );
+
+    throw new Error(
+      "Could not create admin security session.",
+    );
+  }
+
+  if (!data?.id) {
+    console.error(
+      `${ROUTE_NAME} security session create returned no row`,
+      {
+        adminId:
+          params.adminId,
+        trustedDeviceId:
+          params.trustedDeviceId,
+      },
+    );
+
+    throw new Error(
+      "Could not create admin security session.",
+    );
+  }
+
+  return {
+    id: data.id,
+    rawSessionRef,
+    expiresAt,
+  };
 }
 
 async function verifyEmailCode(params: {
@@ -1865,7 +2032,49 @@ export async function POST(
     }
 
     /*
-     * MFA succeeded. Only now may a new
+     * The protected middleware requires a real Supabase AAL2 session.
+     * Application-level email OTP is retained as a recovery/fallback flow,
+     * but it must not mint a normal Admin Portal security session while
+     * the middleware requires AAL2.
+     */
+    if (assuranceLevel !== "aal2") {
+      await markChallengeConsumed(
+        challenge.id,
+      );
+
+      await recordAudit({
+        adminId: admin.id,
+        adminEmail,
+        action:
+          "admin_two_factor_strong_assurance_required",
+        status: "blocked",
+        riskLevel: "high",
+        security,
+        metadata: {
+          challenge_id:
+            challenge.id,
+          method,
+          assurance_level:
+            assuranceLevel,
+          required_assurance_level:
+            "aal2",
+        },
+      });
+
+      return failed(
+        403,
+        "strong_mfa_required",
+        {
+          requiresTwoFactor: true,
+          requiredAssuranceLevel:
+            "aal2",
+        },
+        pendingCookies,
+      );
+    }
+
+    /*
+     * MFA succeeded at AAL2. Only now may a new
      * device be trusted.
      */
     const trustedDevice =
@@ -1937,6 +2146,40 @@ export async function POST(
       challenge.id,
     );
 
+    if (!trustedDevice.deviceId) {
+      const response = failed(
+        500,
+        "trusted_device_session_binding_failed",
+        {},
+        pendingCookies,
+      );
+
+      clearSecuritySessionCookie(
+        response,
+      );
+
+      return response;
+    }
+
+    /*
+     * Create the revocable Burton Pride security session expected by
+     * lib/supabase/middleware.ts. The browser receives only the raw random
+     * reference; the database stores the peppered SHA-256 hash.
+     */
+    const securitySession =
+      await createAdminSecuritySession({
+        adminId: admin.id,
+        trustedDeviceId:
+          trustedDevice.deviceId,
+        aal: "aal2",
+        security,
+      });
+
+    /*
+     * Legacy compatibility session. This is no longer the primary security
+     * boundary; middleware validates Supabase identity, AAL2, trusted device
+     * and admin_security_sessions before protected access is allowed.
+     */
     const sessionToken =
       randomBytes(32).toString(
         "hex",
@@ -1971,10 +2214,15 @@ export async function POST(
                 "main_admin",
             permissions,
           },
-          security:
-            securityResponse(
+          security: {
+            ...securityResponse(
               trustedDevice,
             ),
+            assuranceLevel:
+              "aal2",
+            securitySessionExpiresAt:
+              securitySession.expiresAt,
+          },
         },
         200,
         pendingCookies,
@@ -1996,6 +2244,11 @@ export async function POST(
       response,
       ADMIN_SESSION_COOKIE,
       sessionToken,
+    );
+
+    setSecuritySessionCookie(
+      response,
+      securitySession.rawSessionRef,
     );
 
     setAdminCookie(
@@ -2053,6 +2306,10 @@ export async function POST(
         method,
         assurance_level:
           assuranceLevel,
+        security_session_id:
+          securitySession.id,
+        security_session_expires_at:
+          securitySession.expiresAt,
         trusted_device_supported:
           trustedDevice.supported,
         trusted_device_created:
