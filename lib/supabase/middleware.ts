@@ -241,7 +241,6 @@ function hashWithPepper(
 function isExpired(
   value: string | null | undefined,
 ) {
-  // Fail closed: a restricted admin session must always have a valid expiry.
   if (!value) {
     return true;
   }
@@ -419,7 +418,7 @@ async function getSecuritySession(
   trustedDeviceId: string,
   rawSessionRef: string,
 ): Promise<LookupResult<SecuritySession>> {
-  // The browser holds the raw session reference; the database stores only its hash.
+
   const sessionRefHash =
     hashWithPepper(rawSessionRef);
 
@@ -609,12 +608,6 @@ export async function updateSession(
       request,
     });
 
-  /**
-   * Authenticated SSR client.
-   *
-   * Use this ONLY for the user's Supabase authentication state and MFA/AAL.
-   * Do not use it for privileged security-table verification because RLS applies.
-   */
   const supabase =
     createServerClient(
       supabaseUrl,
@@ -656,9 +649,6 @@ export async function updateSession(
       },
     );
 
-  /**
-   * Keep Supabase session refresh working even on non-admin pages.
-   */
   const {
     data: { user },
     error: userError,
@@ -668,18 +658,12 @@ export async function updateSession(
     return response;
   }
 
-  /**
-   * Login and MFA endpoints must remain reachable before authentication completes.
-   */
   if (isPublicAdminPath(pathname)) {
     return addAdminSecurityHeaders(
       response,
     );
   }
 
-  /**
-   * 1. AUTHENTICATED SUPABASE USER
-   */
   if (userError || !user) {
     return denyAdminRequest(
       request,
@@ -688,10 +672,6 @@ export async function updateSession(
       "authentication_required",
     );
   }
-
-  /**
-   * 2. MANDATORY MFA / AAL2
-   */
   const assurance =
     await getCurrentAal(supabase);
 
@@ -706,13 +686,6 @@ export async function updateSession(
       "mfa_required",
     );
   }
-
-  /**
-   * Privileged server-only client.
-   *
-   * This client has no browser session attached and is used only after getUser()
-   * and AAL2 have already proved the caller's identity and MFA state.
-   */
   const securityAdmin =
     createSecurityAdminClient();
 
@@ -722,12 +695,6 @@ export async function updateSession(
     );
   }
 
-  /**
-   * 3. ACTIVE BURTON PRIDE ADMIN
-   *
-   * Identity comes exclusively from Supabase user.id.
-   * No browser-supplied admin ID, email, role or permission is trusted.
-   */
   const adminLookup =
     await getAdminUserBySupabaseId(
       securityAdmin,
@@ -755,9 +722,6 @@ export async function updateSession(
     );
   }
 
-  /**
-   * 4. TRUSTED DEVICE
-   */
   const rawDeviceToken =
     request.cookies.get(
       ADMIN_DEVICE_COOKIE,
@@ -780,8 +744,7 @@ export async function updateSession(
     );
 
   if (trustedDeviceLookup.failed) {
-    // Database/RLS/configuration failure must not be treated as an invalid device.
-    // Returning 503 prevents redirect loops when the security table cannot be read.
+   
     return securityServiceUnavailable(
       request,
     );
@@ -799,10 +762,7 @@ export async function updateSession(
     );
   }
 
-  /**
-   * Defence in depth: reject inconsistent state if more than 3 active devices exist.
-   * The actual fourth-device prevention should also be enforced atomically during enrolment.
-   */
+ 
   const trustedDeviceCount =
     await countActiveTrustedDevices(
       securityAdmin,
@@ -832,9 +792,7 @@ export async function updateSession(
     );
   }
 
-  /**
-   * 5. REVOCABLE BURTON PRIDE SECURITY SESSION
-   */
+
   const rawSessionRef =
     request.cookies.get(
       ADMIN_SECURITY_SESSION_COOKIE,
@@ -911,26 +869,7 @@ export async function updateSession(
     );
   }
 
-  /**
-   * SECURITY BOUNDARY COMPLETE
-   *
-   * At this point:
-   * - Supabase user is valid
-   * - Supabase MFA/AAL2 is valid
-   * - admin_users mapping is valid
-   * - admin is active
-   * - trusted device token hash matches
-   * - trusted device is not revoked
-   * - <= 3 active devices exist
-   * - Burton security-session reference hash matches
-   * - security session is not revoked
-   * - security session has a valid future expiry
-   * - security session explicitly records AAL2
-   *
-   * IMPORTANT:
-   * Individual protected API routes must STILL enforce their specific permission
-   * and step-up authentication for high-risk operations.
-   */
+
 
   return addAdminSecurityHeaders(
     response,

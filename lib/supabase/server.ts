@@ -80,14 +80,7 @@ function normaliseEmail(email: string | null | undefined) {
     .toLowerCase();
 }
 
-/**
- * Main Supabase server client.
- *
- * Important:
- * - This uses the ANON key only.
- * - Do not use the Supabase service role key here.
- * - Service role should stay in a separate admin-only server helper.
- */
+
 export async function createClient() {
   const cookieStore = await cookies();
   const { url, anonKey } = getSupabaseEnv();
@@ -108,29 +101,16 @@ export async function createClient() {
             );
           });
         } catch {
-          /**
-           * This can happen inside Server Components where cookie writing is not
-           * allowed. Middleware should refresh auth cookies on normal requests.
-           *
-           * Do not log cookie values here.
-           */
         }
       },
     },
   });
 }
 
-/**
- * Alias used by older files.
- */
+
 export const createSupabaseServerClient = createClient;
 
-/**
- * Gets the current Supabase Auth user safely.
- *
- * Use this in server components or route handlers when you only need to know
- * whether someone is signed in.
- */
+
 export async function getCurrentUser(): Promise<CurrentUserResult> {
   const supabase = await createClient();
 
@@ -154,12 +134,6 @@ export async function getCurrentUser(): Promise<CurrentUserResult> {
   };
 }
 
-/**
- * Checks whether the current Supabase user is an active Burton Pride admin.
- *
- * Use this inside sensitive admin server pages and API routes.
- * Middleware is the front gate, but each important API route should still check.
- */
 export async function getActiveAdminUser(): Promise<ActiveAdminResult> {
   const { supabase, user } = await getCurrentUser();
 
@@ -220,16 +194,7 @@ export async function getActiveAdminUser(): Promise<ActiveAdminResult> {
   };
 }
 
-/**
- * Main-admin check.
- *
- * Use this before dangerous actions like:
- * - managing admin users
- * - deleting records
- * - changing permissions
- * - locking/unlocking years
- * - viewing full audit/security pages
- */
+
 export async function requireMainAdmin() {
   const result = await getActiveAdminUser();
 
@@ -246,12 +211,7 @@ export async function requireMainAdmin() {
   };
 }
 
-/**
- * Permission helper.
- *
- * Example:
- * const result = await requirePermission("money:export");
- */
+
 export async function requirePermission(permissionKey: string) {
   const result = await getActiveAdminUser();
 
@@ -278,11 +238,7 @@ export async function requirePermission(permissionKey: string) {
   };
 }
 
-/**
- * Safe email match helper.
- *
- * Use only when you need to compare the logged-in user email with the admin row.
- */
+
 export function adminEmailMatchesAuthUser(admin: BurtonAdminUser, user: User) {
   return normaliseEmail(admin.email) === normaliseEmail(user.email);
 }
