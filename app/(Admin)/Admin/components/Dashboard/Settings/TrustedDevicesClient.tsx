@@ -15,6 +15,7 @@ import {
   ShieldX,
   Smartphone,
   Trash2,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -46,7 +47,35 @@ type DevicesResponse = {
 type ErrorResponse = {
   ok?: false;
   error?: string;
+  reason?: string;
+  requestId?: string;
 };
+
+
+function safeApiError(
+  response: Response,
+  json: ErrorResponse | null,
+  fallback: string,
+) {
+  const requestId =
+    typeof json?.requestId === "string" && json.requestId.trim()
+      ? json.requestId.trim()
+      : "";
+
+  let message = fallback;
+
+  if (response.status === 401) {
+    message = "Your admin session has expired. Please sign in again.";
+  } else if (response.status === 403) {
+    message = "You do not have permission to manage trusted devices.";
+  } else if (response.status === 429) {
+    message = "Too many requests were made. Please wait and try again.";
+  } else if (response.status >= 500) {
+    message = "The security service is temporarily unavailable.";
+  }
+
+  return requestId ? `${message} Reference: ${requestId}` : message;
+}
 
 function formatDate(value: string) {
   try {
@@ -70,6 +99,9 @@ export default function TrustedDevicesClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [deviceToRevoke, setDeviceToRevoke] =
+    useState<TrustedDevice | null>(null);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const loadDevices = useCallback(async () => {
     try {
@@ -91,8 +123,11 @@ export default function TrustedDevicesClient() {
 
       if (!response.ok || !json || json.ok !== true) {
         throw new Error(
-          (json as ErrorResponse | null)?.error ||
+          safeApiError(
+            response,
+            json as ErrorResponse | null,
             "Unable to load trusted devices.",
+          ),
         );
       }
 
@@ -122,15 +157,10 @@ export default function TrustedDevicesClient() {
   );
 
   async function revokeDevice(device: TrustedDevice) {
-    const message = device.currentDevice
-      ? "Revoke this current trusted device? You may need to complete two-step verification again on this device."
-      : `Revoke ${device.name}? It will need two-step verification before it can become trusted again.`;
-
-    if (!window.confirm(message)) return;
-
     try {
       setRevokingId(device.id);
       setError("");
+      setSuccessMessage("");
 
       const response = await fetch(
         "/api/admin/settings/security/trusted-devices",
@@ -153,9 +183,21 @@ export default function TrustedDevicesClient() {
         | null;
 
       if (!response.ok || !json?.ok) {
-        throw new Error(json?.error || "Unable to revoke trusted device.");
+        throw new Error(
+          safeApiError(
+            response,
+            json as ErrorResponse | null,
+            "Unable to revoke trusted device.",
+          ),
+        );
       }
 
+      setDeviceToRevoke(null);
+      setSuccessMessage(
+        device.currentDevice
+          ? "This device has been revoked. You may be asked to complete two-step verification again."
+          : `${device.name} has been revoked successfully.`,
+      );
       await loadDevices();
     } catch (err) {
       setError(
@@ -229,6 +271,20 @@ export default function TrustedDevicesClient() {
         <div className="rounded-3xl border border-white/10 bg-white/10 p-8 text-center backdrop-blur-xl">
           <Loader2 className="mx-auto h-8 w-8 animate-spin" />
           <p className="mt-3 font-black">Loading trusted devices...</p>
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="mb-6 rounded-3xl border border-emerald-300/25 bg-emerald-500/10 p-5 text-emerald-50">
+          <div className="flex gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-black">Trusted device updated</p>
+              <p className="mt-1 text-sm leading-6 text-emerald-50/85">
+                {successMessage}
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -382,7 +438,10 @@ export default function TrustedDevicesClient() {
 
                         <button
                           type="button"
-                          onClick={() => void revokeDevice(device)}
+                          onClick={() => {
+                            setSuccessMessage("");
+                            setDeviceToRevoke(device);
+                          }}
                           disabled={revokingId === device.id}
                           className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:opacity-50"
                         >
@@ -465,6 +524,111 @@ export default function TrustedDevicesClient() {
             </section>
           ) : null}
         </>
+      ) : null}
+
+      {deviceToRevoke ? (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="revoke-device-title"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !revokingId
+            ) {
+              setDeviceToRevoke(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-[2rem] border border-red-300/20 bg-[#101126] shadow-2xl">
+            <div className="border-b border-white/10 p-5 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-100">
+                    <ShieldX className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200/70">
+                      Security confirmation
+                    </p>
+                    <h2
+                      id="revoke-device-title"
+                      className="mt-1 text-xl font-black text-white"
+                    >
+                      Revoke trusted device?
+                    </h2>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDeviceToRevoke(null)}
+                  disabled={Boolean(revokingId)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-2 text-white/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 sm:p-6">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-sm font-black text-white">
+                  {deviceToRevoke.name}
+                </p>
+                <p className="mt-1 text-sm text-white/55">
+                  {deviceToRevoke.browser || "Unknown browser"} ·{" "}
+                  {deviceToRevoke.operatingSystem || "Unknown OS"}
+                </p>
+                {deviceToRevoke.approximateLocation ? (
+                  <p className="mt-2 text-xs text-white/40">
+                    {deviceToRevoke.approximateLocation}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4 text-amber-50">
+                <div className="flex gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <p className="text-sm leading-6">
+                    {deviceToRevoke.currentDevice
+                      ? "This is your current device. Revoking it may require you to complete two-step verification again."
+                      : "This device will no longer be trusted and will need two-step verification before it can become trusted again."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDeviceToRevoke(null)}
+                  disabled={Boolean(revokingId)}
+                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Keep device
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void revokeDevice(deviceToRevoke)}
+                  disabled={Boolean(revokingId)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/15 px-5 py-3 text-sm font-black text-red-50 transition hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {revokingId === deviceToRevoke.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  {revokingId === deviceToRevoke.id
+                    ? "Revoking..."
+                    : "Revoke device"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </main>
   );

@@ -137,6 +137,7 @@ export default function HomeClient() {
         <motion.section
           className="
             relative
+            mt-16
             flex
             min-h-[calc(100dvh-7rem)]
             flex-col
@@ -154,6 +155,7 @@ export default function HomeClient() {
             backdrop-blur-md
             transition-colors
             duration-300
+            sm:mt-0
             sm:min-h-0
             sm:rounded-[2rem]
             sm:px-8
