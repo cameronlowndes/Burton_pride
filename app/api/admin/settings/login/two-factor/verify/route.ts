@@ -938,6 +938,24 @@ async function createAdminSecuritySession(params: {
 
     aal: params.aal,
 
+    /*
+     * A successful two-step verification establishes a fresh AAL2
+     * security window. These fields are also used by the six-hour
+     * "Are you still here?" session-presence control.
+     *
+     * IMPORTANT:
+     * requires_reauthentication MUST be cleared here. Otherwise the
+     * admin can successfully complete MFA, return to the Admin Portal,
+     * and immediately be redirected back to MFA again.
+     */
+    last_mfa_at: now,
+    last_presence_at: now,
+    next_presence_check_at: new Date(
+      Date.now() + 6 * 60 * 60 * 1000,
+    ).toISOString(),
+    requires_reauthentication: false,
+    reauth_reason: null,
+
     created_at: now,
     last_seen_at: now,
     expires_at: expiresAt,
@@ -1444,7 +1462,17 @@ async function ensureTrustedDeviceAfterMfa(params: {
       reused: true,
       trusted: true,
       deviceId: existing.id,
-      rawDeviceToken: null,
+
+      /*
+       * Re-issue the existing trusted-device token after every successful
+       * MFA verification. The old code returned null here, so
+       * setTrustedDeviceCookie() was skipped for reused devices.
+       *
+       * That could leave /api/admin/me without the
+       * burton_admin_trusted_device cookie and cause:
+       * "This device must be verified before Admin Portal access is allowed."
+       */
+      rawDeviceToken: existingRawToken,
       trustedDeviceCount:
         countState.count,
       maxTrustedDevices:
@@ -2273,13 +2301,31 @@ export async function POST(
       },
     );
 
-    if (
-      trustedDevice.rawDeviceToken
-    ) {
+    /*
+     * A successful MFA login must leave the browser with the same raw
+     * trusted-device token whose peppered hash exists in
+     * admin_trusted_devices. This is required by /api/admin/me.
+     *
+     * New devices return a new raw token. Reused devices now return the
+     * existing raw cookie token so its lifetime is refreshed as well.
+     */
+    if (trustedDevice.rawDeviceToken) {
       setTrustedDeviceCookie(
         response,
-        trustedDevice
-          .rawDeviceToken,
+        trustedDevice.rawDeviceToken,
+      );
+    } else {
+      console.error(
+        `${ROUTE_NAME}: successful MFA did not provide a trusted-device token`,
+        {
+          adminId: admin.id,
+          trustedDeviceId:
+            trustedDevice.deviceId,
+          trustedDeviceCreated:
+            trustedDevice.created,
+          trustedDeviceReused:
+            trustedDevice.reused,
+        },
       );
     }
 

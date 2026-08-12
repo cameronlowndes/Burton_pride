@@ -10,12 +10,14 @@ import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ROUTE_NAME = "GET /api/admin/me";
+const ROUTE_NAME = "GET /api/admin/me/permissions";
 const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
 const ADMIN_SECURITY_SESSION_COOKIE =
   "burton_admin_security_session";
 const REQUIRED_AAL = "aal2";
 const MAX_TRUSTED_DEVICES = 3;
+const REQUIRED_PORTAL_PERMISSION = "admin:dashboard:view" as const;
+
 
 const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -119,6 +121,16 @@ type RequestContext = {
   userAgent: string | null;
 };
 
+type DenialReason =
+  | "unauthorized"
+  | "mfa_required"
+  | "admin_not_authorized"
+  | "portal_permission_required"
+  | "trusted_device_required"
+  | "trusted_device_limit_violation"
+  | "session_revoked"
+  | "security_service_unavailable";
+
 function getString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -173,16 +185,15 @@ function permissionsToKeys(permissions: unknown): PermissionKey[] {
       .map(([key]) => key);
   }
 
-  const allowed = new Set<string>(ALL_PERMISSION_KEYS);
+  const allowList = new Set<string>(ALL_PERMISSION_KEYS);
 
   return uniqueStrings(values).filter(
-    (permission): permission is PermissionKey => allowed.has(permission),
+    (permission): permission is PermissionKey => allowList.has(permission),
   );
 }
 
 function hashWithPepper(value: string): string {
-  const pepper =
-    process.env.ADMIN_2FA_PEPPER;
+  const pepper = process.env.ADMIN_2FA_PEPPER;
 
   if (!pepper || pepper.length < 32) {
     throw new Error(
@@ -225,8 +236,11 @@ function normaliseIp(value: string | null): string | null {
 async function getRequestContext(): Promise<RequestContext> {
   const headerStore = await headers();
 
-  // These values are only useful when your deployment platform/proxy is trusted
-  // to overwrite them. Do not accept an IP/location from the JSON request body.
+  /*
+   * Only trust these forwarding/location headers when your production proxy or
+   * hosting platform overwrites them. Never accept IP/location from request
+   * body/query parameters as authoritative security data.
+   */
   const ipAddress =
     normaliseIp(headerStore.get("x-real-ip")) ??
     normaliseIp(headerStore.get("x-forwarded-for"));
@@ -236,7 +250,7 @@ async function getRequestContext(): Promise<RequestContext> {
     city: safeDecodeHeader(headerStore.get("x-vercel-ip-city")),
     region: safeDecodeHeader(headerStore.get("x-vercel-ip-country-region")),
     country: safeDecodeHeader(headerStore.get("x-vercel-ip-country")),
-    userAgent: getString(headerStore.get("user-agent"))?.slice(0, 1000) || null,
+    userAgent: getString(headerStore.get("user-agent")).slice(0, 1000) || null,
   };
 }
 
@@ -245,6 +259,7 @@ function securityHeaders(): Record<string, string> {
     "Cache-Control": "no-store, no-cache, must-revalidate, private",
     Pragma: "no-cache",
     Expires: "0",
+    Vary: "Cookie",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "X-Robots-Tag": "noindex, nofollow, noarchive",
@@ -263,30 +278,27 @@ function jsonResponse(
 
 function denied(
   status: number,
-  reason:
-    | "unauthorized"
-    | "mfa_required"
-    | "admin_not_authorized"
-    | "trusted_device_required"
-    | "trusted_device_limit_violation"
-    | "session_revoked"
-    | "security_service_unavailable",
+  reason: DenialReason,
   extra: Record<string, unknown> = {},
 ): NextResponse {
-  const messages: Record<typeof reason, string> = {
+  const messages: Record<DenialReason, string> = {
     unauthorized: "Your admin session is not valid.",
     mfa_required: "Multi-factor authentication is required.",
     admin_not_authorized: "This account is not authorised for the Admin Portal.",
-    trusted_device_required: "This device must be verified before Admin Portal access is allowed.",
-    trusted_device_limit_violation: "The trusted-device security limit requires administrator review.",
+    portal_permission_required: "You do not have permission to access the Admin Portal.",
+    trusted_device_required:
+      "This device must be verified before Admin Portal access is allowed.",
+    trusted_device_limit_violation:
+      "The trusted-device security limit requires administrator review.",
     session_revoked: "This admin session is no longer active.",
-    security_service_unavailable: "The security service could not verify this request.",
+    security_service_unavailable:
+      "The security service could not verify this request.",
   };
 
   return jsonResponse(
     {
       ok: false,
-      authenticated: reason !== "unauthorized",
+      authenticated: !["unauthorized", "session_revoked"].includes(reason),
       authorized: false,
       error: messages[reason],
       reason,
@@ -316,9 +328,10 @@ async function createAuthenticatedSupabaseClient() {
           try {
             cookieStore.set(name, value, options);
           } catch {
-            // A read-only cookie context can occur in some server rendering paths.
-            // Route handlers normally permit writes; failure here does not cause us
-            // to trust an unverified session.
+            /*
+             * Do not weaken authentication if a read-only cookie context is
+             * encountered. getUser() remains the authoritative verification.
+             */
           }
         }
       },
@@ -351,7 +364,7 @@ async function writeSecurityEvent(args: {
     admin_name: args.admin?.full_name ?? args.admin?.name ?? null,
     admin_role: role,
     action: args.action,
-    area: "admin_authentication",
+    area: "admin_permissions",
     route: ROUTE_NAME,
     http_method: "GET",
     result: args.result,
@@ -368,6 +381,7 @@ async function writeSecurityEvent(args: {
   });
 
   if (error) {
+    // Deliberately log only the provider error code, not raw DB details to users.
     console.error(`${ROUTE_NAME} security audit write failed`, {
       code: error.code,
     });
@@ -375,16 +389,15 @@ async function writeSecurityEvent(args: {
 }
 
 function isExpired(isoDate: string | null): boolean {
-  if (!isoDate) return true;
+  if (!isoDate) return false;
 
-  const timestamp =
-    Date.parse(isoDate);
+  const timestamp = Date.parse(isoDate);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
 
-  if (!Number.isFinite(timestamp)) {
-    return true;
-  }
-
-  return timestamp <= Date.now();
+function sessionExpiresAt(expiresAtSeconds: number | undefined): string | null {
+  if (!expiresAtSeconds || !Number.isFinite(expiresAtSeconds)) return null;
+  return new Date(expiresAtSeconds * 1000).toISOString();
 }
 
 function buildAdminPayload(args: {
@@ -412,9 +425,11 @@ export async function GET(): Promise<NextResponse> {
     const { client: supabase, cookieStore } =
       await createAuthenticatedSupabaseClient();
 
-    // 1) Authoritative authentication: validate the Supabase user server-side.
-    // Never use burton_admin_id, burton_admin_email, role or permission cookies
-    // as proof of identity or authorisation.
+    /*
+     * 1. AUTHORITATIVE IDENTITY
+     * Validate the actual Supabase Auth user on the server. Legacy Burton
+     * admin-id/email/role/permissions cookies are intentionally ignored.
+     */
     const {
       data: { user },
       error: userError,
@@ -423,7 +438,7 @@ export async function GET(): Promise<NextResponse> {
     if (userError || !user) {
       await writeSecurityEvent({
         actorType: "system",
-        action: "admin_session_check_denied",
+        action: "permission_context_denied",
         result: "denied",
         riskLevel: "medium",
         context,
@@ -433,7 +448,7 @@ export async function GET(): Promise<NextResponse> {
       return denied(401, "unauthorized");
     }
 
-    // 2) Require strong MFA assurance for every Admin Portal session.
+    /* 2. MANDATORY MFA / AAL2 */
     const { data: aalData, error: aalError } =
       await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
 
@@ -448,7 +463,7 @@ export async function GET(): Promise<NextResponse> {
       await writeSecurityEvent({
         actorType: "authenticated_user",
         authUserId: user.id,
-        action: "admin_session_check_denied",
+        action: "permission_context_denied",
         result: "denied",
         riskLevel: "medium",
         context,
@@ -463,8 +478,10 @@ export async function GET(): Promise<NextResponse> {
       });
     }
 
-    // 3) Resolve Burton Pride identity from the immutable authenticated user ID.
-    // No fallback to browser-supplied admin ID/email is allowed.
+    /*
+     * 3. SERVER-SIDE ADMIN MAPPING
+     * Resolve the Burton Pride admin exclusively through auth_user_id.
+     */
     const { data: adminData, error: adminError } = await supabaseAdmin
       .from("admin_users")
       .select(
@@ -487,7 +504,7 @@ export async function GET(): Promise<NextResponse> {
         actorType: "authenticated_user",
         authUserId: user.id,
         admin,
-        action: "admin_session_check_denied",
+        action: "permission_context_denied",
         result: "denied",
         riskLevel: "high",
         context,
@@ -501,12 +518,13 @@ export async function GET(): Promise<NextResponse> {
     }
 
     const role = normaliseRole(admin.role);
+
     if (!role) {
       await writeSecurityEvent({
         actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action: "admin_session_check_denied",
+        action: "permission_context_denied",
         result: "denied",
         riskLevel: "high",
         context,
@@ -517,7 +535,29 @@ export async function GET(): Promise<NextResponse> {
       return denied(403, "admin_not_authorized");
     }
 
-    // 4) Enforce the maximum of three active trusted devices.
+    /*
+     * 4. EXPLICIT PERMISSIONS ONLY
+     * No role wildcard and no automatic dashboard permission are granted.
+     */
+    const permissions = permissionsToKeys(admin.permissions);
+
+    if (!permissions.includes(REQUIRED_PORTAL_PERMISSION)) {
+      await writeSecurityEvent({
+        actorType: "authenticated_admin",
+        authUserId: user.id,
+        admin,
+        action: "permission_context_denied",
+        result: "denied",
+        riskLevel: "medium",
+        context,
+        aal: currentAal,
+        metadata: { reason: "dashboard_permission_missing" },
+      });
+
+      return denied(403, "portal_permission_required");
+    }
+
+    /* 5. ENFORCE MAXIMUM THREE ACTIVE TRUSTED DEVICES */
     const { count: activeTrustedDeviceCount, error: countError } =
       await supabaseAdmin
         .from("admin_trusted_devices")
@@ -551,8 +591,7 @@ export async function GET(): Promise<NextResponse> {
       return denied(403, "trusted_device_limit_violation");
     }
 
-    // 5) Verify the cryptographic trusted-device token.
-    // The browser keeps the random token; the database keeps only its SHA-256 hash.
+    /* 6. VERIFY CRYPTOGRAPHIC TRUSTED-DEVICE TOKEN */
     const trustedDeviceToken = getString(
       cookieStore.get(TRUSTED_DEVICE_COOKIE)?.value,
     );
@@ -581,9 +620,7 @@ export async function GET(): Promise<NextResponse> {
     }
 
     const trustedDeviceHash =
-      hashWithPepper(
-        trustedDeviceToken,
-      );
+      hashWithPepper(trustedDeviceToken);
 
     const { data: trustedDeviceData, error: trustedDeviceError } =
       await supabaseAdmin
@@ -626,81 +663,65 @@ export async function GET(): Promise<NextResponse> {
       });
     }
 
-    // 6) Validate the Burton Pride revocable security-session cookie.
-    //
-    // The MFA verify route creates a random raw session reference, stores only
-    // hashWithPepper(rawSessionRef) in admin_security_sessions, and sends the
-    // raw reference in an HttpOnly cookie. This route must use the exact same
-    // format; it must NOT derive auth_session_ref from the Supabase access token.
-    const rawSecuritySessionRef =
-      getString(
-        cookieStore.get(
-          ADMIN_SECURITY_SESSION_COOKIE,
-        )?.value,
-      );
+    /*
+     * 7. SESSION REFERENCE + SERVER-SIDE REVOCATION
+     *
+     * IMPORTANT:
+     * The two-factor verify route creates a cryptographically random
+     * raw session reference, stores hashWithPepper(rawSessionRef) in
+     * admin_security_sessions, and sends the raw reference in the
+     * burton_admin_security_session HttpOnly cookie.
+     *
+     * This permissions route MUST validate that same cookie. It must
+     * not derive auth_session_ref from the Supabase access token,
+     * because that creates a second incompatible session identity and
+     * can cause an Admin -> 2FA -> Admin redirect loop.
+     */
+    const rawSecuritySessionRef = getString(
+      cookieStore.get(
+        ADMIN_SECURITY_SESSION_COOKIE,
+      )?.value,
+    );
 
     if (!rawSecuritySessionRef) {
       await writeSecurityEvent({
         actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action:
-          "security_session_cookie_missing",
+        action: "security_session_cookie_missing",
         result: "denied",
         riskLevel: "high",
         context,
-        trustedDeviceId:
-          trustedDevice.id,
+        trustedDeviceId: trustedDevice.id,
         aal: currentAal,
       });
 
-      return denied(
-        401,
-        "session_revoked",
-      );
+      return denied(401, "session_revoked");
     }
 
-    const authSessionRef =
-      hashWithPepper(
-        rawSecuritySessionRef,
-      );
+    const authSessionRef = hashWithPepper(
+      rawSecuritySessionRef,
+    );
 
-    // 7) Enforce server-side session inventory, binding, AAL and revocation.
     const {
       data: securitySessionData,
       error: securitySessionError,
-    } =
-      await supabaseAdmin
-        .from(
-          "admin_security_sessions",
-        )
-        .select(
-          "id, admin_id, trusted_device_id, auth_session_ref, aal, created_at, last_seen_at, expires_at, revoked_at, revoke_reason",
-        )
-        .eq(
-          "admin_id",
-          admin.id,
-        )
-        .eq(
-          "trusted_device_id",
-          trustedDevice.id,
-        )
-        .eq(
-          "auth_session_ref",
-          authSessionRef,
-        )
-        .is(
-          "revoked_at",
-          null,
-        )
-        .maybeSingle();
+    } = await supabaseAdmin
+      .from("admin_security_sessions")
+      .select(
+        "id, admin_id, trusted_device_id, auth_session_ref, aal, created_at, last_seen_at, expires_at, revoked_at, revoke_reason",
+      )
+      .eq("admin_id", admin.id)
+      .eq("trusted_device_id", trustedDevice.id)
+      .eq("auth_session_ref", authSessionRef)
+      .is("revoked_at", null)
+      .maybeSingle();
 
     if (securitySessionError) {
       console.error(
         `${ROUTE_NAME} security-session lookup failed`,
         {
-          code:
-            securitySessionError.code,
+          code: securitySessionError.code,
         },
       );
 
@@ -716,167 +737,113 @@ export async function GET(): Promise<NextResponse> {
 
     if (!securitySession) {
       await writeSecurityEvent({
-        actorType:
-          "authenticated_admin",
+        actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action:
-          "security_session_not_found",
+        action: "security_session_not_found",
         result: "denied",
         riskLevel: "high",
         context,
-        trustedDeviceId:
-          trustedDevice.id,
+        trustedDeviceId: trustedDevice.id,
         aal: currentAal,
       });
 
-      return denied(
-        401,
-        "session_revoked",
-      );
+      return denied(401, "session_revoked");
     }
 
     if (
-      securitySession.admin_id !==
-        admin.id ||
-      securitySession
-        .trusted_device_id !==
-        trustedDevice.id
+      securitySession.admin_id !== admin.id ||
+      securitySession.trusted_device_id !== trustedDevice.id
     ) {
       await writeSecurityEvent({
-        actorType:
-          "authenticated_admin",
+        actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action:
-          "security_session_binding_mismatch",
+        action: "security_session_binding_mismatch",
         result: "denied",
         riskLevel: "critical",
         context,
-        trustedDeviceId:
-          trustedDevice.id,
-        sessionId:
-          securitySession.id,
+        trustedDeviceId: trustedDevice.id,
+        sessionId: securitySession.id,
         aal: currentAal,
       });
 
-      return denied(
-        401,
-        "session_revoked",
-      );
+      return denied(401, "session_revoked");
     }
 
     if (
       securitySession.revoked_at ||
-      isExpired(
-        securitySession.expires_at,
-      )
+      isExpired(securitySession.expires_at)
     ) {
       await writeSecurityEvent({
-        actorType:
-          "authenticated_admin",
+        actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action:
-          "session_revoked_access_denied",
+        action: "session_revoked_access_denied",
         result: "denied",
         riskLevel: "high",
         context,
-        trustedDeviceId:
-          trustedDevice.id,
-        sessionId:
-          securitySession.id,
+        trustedDeviceId: trustedDevice.id,
+        sessionId: securitySession.id,
         aal: currentAal,
       });
 
-      return denied(
-        401,
-        "session_revoked",
-      );
+      return denied(401, "session_revoked");
     }
 
-    if (
-      securitySession.aal !==
-      "aal2"
-    ) {
+    if (securitySession.aal !== "aal2") {
       await writeSecurityEvent({
-        actorType:
-          "authenticated_admin",
+        actorType: "authenticated_admin",
         authUserId: user.id,
         admin,
-        action:
-          "security_session_aal_invalid",
+        action: "security_session_aal_invalid",
         result: "denied",
         riskLevel: "high",
         context,
-        trustedDeviceId:
-          trustedDevice.id,
-        sessionId:
-          securitySession.id,
+        trustedDeviceId: trustedDevice.id,
+        sessionId: securitySession.id,
         aal: currentAal,
         metadata: {
-          stored_aal:
-            securitySession.aal,
+          stored_aal: securitySession.aal,
           required_aal: "aal2",
         },
       });
 
-      return denied(
-        403,
-        "mfa_required",
-        {
-          requires_mfa: true,
-          current_aal:
-            currentAal,
-          required_aal: "aal2",
-        },
-      );
+      return denied(403, "mfa_required", {
+        requires_mfa: true,
+        current_aal: currentAal,
+        required_aal: "aal2",
+      });
     }
 
-    const nowIso =
-      new Date().toISOString();
+    const nowIso = new Date().toISOString();
 
-    const {
-      error: updateSessionError,
-    } =
+    const { error: updateSessionError } =
       await supabaseAdmin
-        .from(
-          "admin_security_sessions",
-        )
+        .from("admin_security_sessions")
         .update({
-          ip_address:
-            context.ipAddress,
+          trusted_device_id: trustedDevice.id,
+          ip_address: context.ipAddress,
           city: context.city,
           region: context.region,
-          country:
-            context.country,
-          user_agent:
-            context.userAgent,
+          country: context.country,
+          user_agent: context.userAgent,
+          aal: "aal2",
           last_seen_at: nowIso,
         })
-        .eq(
-          "id",
-          securitySession.id,
-        )
-        .eq(
-          "admin_id",
-          admin.id,
-        )
+        .eq("id", securitySession.id)
+        .eq("admin_id", admin.id)
         .eq(
           "trusted_device_id",
           trustedDevice.id,
         )
-        .is(
-          "revoked_at",
-          null,
-        );
+        .is("revoked_at", null);
 
     if (updateSessionError) {
       console.error(
         `${ROUTE_NAME} security-session update failed`,
         {
-          code:
-            updateSessionError.code,
+          code: updateSessionError.code,
         },
       );
 
@@ -886,7 +853,7 @@ export async function GET(): Promise<NextResponse> {
       );
     }
 
-    // Update trusted-device activity only after all trust/session checks succeed.
+    /* 8. UPDATE TRUSTED-DEVICE ACTIVITY AFTER ALL SECURITY CHECKS PASS */
     const { error: deviceUpdateError } = await supabaseAdmin
       .from("admin_trusted_devices")
       .update({
@@ -903,26 +870,20 @@ export async function GET(): Promise<NextResponse> {
       .is("revoked_at", null);
 
     if (deviceUpdateError) {
+      // Access has already been securely verified; activity write failure should
+      // be visible to operators but must not expose DB details to the client.
       console.error(`${ROUTE_NAME} trusted-device activity update failed`, {
         code: deviceUpdateError.code,
       });
     }
 
-    const permissions = permissionsToKeys(admin.permissions);
     const adminPayload = buildAdminPayload({ admin, role, permissions });
 
-    await writeSecurityEvent({
-      actorType: "authenticated_admin",
-      authUserId: user.id,
-      admin,
-      action: "admin_session_verified",
-      result: "success",
-      riskLevel: "low",
-      context,
-      trustedDeviceId: trustedDevice.id,
-      sessionId: securitySession.id,
-      aal: currentAal,
-    });
+    /*
+     * Avoid logging every successful permission poll to prevent audit flooding.
+     * Successful verification is still represented by the security-session and
+     * trusted-device last_seen_at values. Denials/errors above are audited.
+     */
 
     return jsonResponse({
       ok: true,
@@ -934,29 +895,14 @@ export async function GET(): Promise<NextResponse> {
       security: {
         aal: currentAal,
         mfa_verified: true,
-        trusted_device: {
-          id: trustedDevice.id,
-          name: trustedDevice.device_name,
-          browser: trustedDevice.browser,
-          operating_system: trustedDevice.operating_system,
-          device_type: trustedDevice.device_type,
-          trusted_at: trustedDevice.trusted_at,
-          last_seen_at: nowIso,
-        },
+        trusted_device_id: trustedDevice.id,
         trusted_devices_used: activeTrustedDeviceCount ?? 0,
         trusted_devices_max: MAX_TRUSTED_DEVICES,
-        session: {
-          id: securitySession.id,
-          expires_at:
-            securitySession.expires_at,
-          revoked: false,
-        },
-        approximate_location: {
-          city: context.city,
-          region: context.region,
-          country: context.country,
-        },
+        session_id: securitySession.id,
+        session_expires_at: securitySession.expires_at,
+        session_revoked: false,
       },
+      route: ROUTE_NAME,
     });
   } catch (error: unknown) {
     console.error(`${ROUTE_NAME} unexpected error`, {
@@ -965,7 +911,7 @@ export async function GET(): Promise<NextResponse> {
 
     await writeSecurityEvent({
       actorType: "system",
-      action: "admin_session_check_error",
+      action: "permission_context_error",
       result: "error",
       riskLevel: "high",
       context,
