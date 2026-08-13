@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 
-import AuthenticatorSetupClient from "../../../../components/Dashboard/Settings/AuthenticatorSetupClient";
+import AdminAuditLogsClient from "../../../../components/Dashboard/Settings/security/AdminAuditLogsClient";
 
 export const metadata: Metadata = {
-    title: "Burton Pride Admin Portal Sidebar Manager",
-    description:
-    "Restricted Burton Pride Admin Portal page for setting up and managing the sidebar content and layout.",
+  title: "Admin Portal Audit Logs",
+  description:
+    "Restricted Burton Pride Admin Portal page for reviewing security records, administrator activity and audit events.",
   robots: {
     index: false,
     follow: false,
@@ -23,6 +23,6 @@ export const metadata: Metadata = {
   referrer: "no-referrer",
 };
 
-export default function AuthenticatorSetupPage() {
-  return <AuthenticatorSetupClient />;
+export default function AdminAuditLogsPage() {
+  return <AdminAuditLogsClient />;
 }

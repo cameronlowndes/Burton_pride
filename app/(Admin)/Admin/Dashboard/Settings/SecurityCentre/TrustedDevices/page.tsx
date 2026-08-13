@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getCurrentAdminPermissions } from "@/lib/adminPermissions";
 
-import TrustedDevicesClient from "../../../components/Dashboard/Settings/TrustedDevicesClient";
+import TrustedDevicesClient from "../../../../components/Dashboard/Settings/security/TrustedDevicesClient";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

@@ -74,6 +74,16 @@ type VerifyTwoFactorResponse = {
 type LoginError = {
   title: string;
   message: string;
+  debug?: {
+    endpoint?: string;
+    httpStatus?: number;
+    code?: string | null;
+    reason?: string | null;
+    apiError?: string | null;
+    apiMessage?: string | null;
+    attemptsRemaining?: number | null;
+    details?: Record<string, unknown>;
+  };
 };
 
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
@@ -89,6 +99,21 @@ type AuditEvent = {
   target_id?: string | null;
   target_label?: string | null;
   metadata?: Record<string, unknown>;
+};
+
+type LoginHistoryEvent = {
+  result:
+    | "success"
+    | "failed"
+    | "blocked"
+    | "challenge";
+  riskLevel: AuditRiskLevel;
+  reason?: string | null;
+  mfaMethod?: TwoFactorMethod | null;
+  aal?: string | null;
+  trustedDevice?: boolean | null;
+  currentSession?: boolean | null;
+  security?: LoginSecurityContext | null;
 };
 
 type ClientAuditState = {
@@ -124,6 +149,8 @@ const INTERNAL_ENDPOINTS = {
   verifyTwoFactor: "/api/admin/settings/login/two-factor/verify",
   resendTwoFactor: "/api/admin/settings/login/two-factor/resend",
   report: "/api/admin/audit-log/report",
+  loginHistoryReport:
+    "/api/admin/settings/security/login-history",
   session: "/api/admin/me",
 } as const;
 
@@ -134,6 +161,9 @@ const MAX_PASSWORD_LENGTH = 128;
 const TWO_FACTOR_CODE_LENGTH = 6;
 const LOCAL_MAX_ATTEMPTS = 5;
 const LOCAL_LOCKOUT_MS = 5 * 60 * 1000;
+
+const DEBUG_LOGIN_ERRORS =
+  process.env.NODE_ENV === "development";
 
 const GENERIC_LOGIN_ERROR: LoginError = {
   title: "Sign in failed",
@@ -278,11 +308,80 @@ function emailLooksValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function parseLoginError(status: number): LoginError {
-  if (status === 429) return TOO_MANY_ATTEMPTS_ERROR;
-  if (status === 401 || status === 403) return GENERIC_LOGIN_ERROR;
-  if (status >= 500) return GENERIC_SERVICE_ERROR;
-  return GENERIC_LOGIN_ERROR;
+function parseLoginError(
+  status: number,
+  json?: LoginResponse | VerifyTwoFactorResponse | null,
+  endpoint?: string,
+): LoginError {
+  const base =
+    status === 429
+      ? TOO_MANY_ATTEMPTS_ERROR
+      : status >= 500
+        ? GENERIC_SERVICE_ERROR
+        : GENERIC_LOGIN_ERROR;
+
+  if (!DEBUG_LOGIN_ERRORS) {
+    return base;
+  }
+
+  const raw = json as
+    | (LoginResponse & {
+        reason?: string;
+        details?: Record<string, unknown>;
+      })
+    | (VerifyTwoFactorResponse & {
+        reason?: string;
+        details?: Record<string, unknown>;
+      })
+    | null
+    | undefined;
+
+  return {
+    ...base,
+    debug: {
+      endpoint,
+      httpStatus: status,
+      code:
+        typeof raw?.code === "string"
+          ? raw.code
+          : null,
+      reason:
+        typeof raw?.reason === "string"
+          ? raw.reason
+          : null,
+      apiError:
+        typeof raw?.error === "string"
+          ? raw.error
+          : null,
+      apiMessage:
+        typeof raw?.message === "string"
+          ? raw.message
+          : null,
+      attemptsRemaining:
+        typeof (raw as any)?.attemptsRemaining === "number"
+          ? (raw as any).attemptsRemaining
+          : null,
+      details:
+        raw?.details &&
+        typeof raw.details === "object"
+          ? raw.details
+          : undefined,
+    },
+  };
+}
+
+function withDebugError(
+  base: LoginError,
+  debug: NonNullable<LoginError["debug"]>,
+): LoginError {
+  if (!DEBUG_LOGIN_ERRORS) {
+    return base;
+  }
+
+  return {
+    ...base,
+    debug,
+  };
 }
 
 async function readLoginJson(response: Response): Promise<LoginResponse | null> {
@@ -366,6 +465,68 @@ function normaliseSecurityContext(
       typeof value.deviceLabel === "string"
         ? value.deviceLabel.slice(0, 120)
         : null,
+  };
+}
+
+
+function getClientDeviceInfo() {
+  if (typeof navigator === "undefined") {
+    return {
+      browser: null,
+      operatingSystem: null,
+      deviceType: null,
+    };
+  }
+
+  const userAgent = navigator.userAgent || "";
+  const platform =
+    navigator.platform ||
+    "";
+
+  let browser = "Unknown browser";
+
+  if (/Edg\//i.test(userAgent)) {
+    browser = "Microsoft Edge";
+  } else if (/OPR\//i.test(userAgent)) {
+    browser = "Opera";
+  } else if (/Chrome\//i.test(userAgent)) {
+    browser = "Google Chrome";
+  } else if (/Firefox\//i.test(userAgent)) {
+    browser = "Mozilla Firefox";
+  } else if (/Safari\//i.test(userAgent)) {
+    browser = "Safari";
+  }
+
+  let operatingSystem =
+    platform || "Unknown";
+
+  if (/Windows NT/i.test(userAgent)) {
+    operatingSystem = "Windows";
+  } else if (/Android/i.test(userAgent)) {
+    operatingSystem = "Android";
+  } else if (
+    /iPhone|iPad|iPod/i.test(userAgent)
+  ) {
+    operatingSystem = "iOS / iPadOS";
+  } else if (/Mac OS X/i.test(userAgent)) {
+    operatingSystem = "macOS";
+  } else if (/Linux/i.test(userAgent)) {
+    operatingSystem = "Linux";
+  }
+
+  const deviceType =
+    /Mobi|Android|iPhone|iPod/i.test(
+      userAgent,
+    )
+      ? "Mobile"
+      : /iPad|Tablet/i.test(userAgent)
+        ? "Tablet"
+        : "Desktop";
+
+  return {
+    browser,
+    operatingSystem,
+    deviceType,
   };
 }
 
@@ -492,6 +653,84 @@ export default function LoginPage() {
       }
     },
     [cleanEmail, failedAttempts, isLocallyLocked],
+  );
+
+  const reportLoginHistory = useCallback(
+    async (
+      event: LoginHistoryEvent,
+    ) => {
+      const device =
+        getClientDeviceInfo();
+
+      const security =
+        event.security ??
+        securityContext;
+
+      const payload = {
+        adminEmail:
+          cleanEmail || null,
+        result: event.result,
+        riskLevel:
+          event.riskLevel,
+        reason:
+          event.reason
+            ?.slice(0, 200) ??
+          null,
+        browser:
+          device.browser,
+        operatingSystem:
+          device.operatingSystem,
+        deviceType:
+          device.deviceType,
+        approximateLocation:
+          security
+            ?.approximateLocation ??
+          null,
+        deviceLabel:
+          security?.deviceLabel ??
+          null,
+        mfaMethod:
+          event.mfaMethod ??
+          null,
+        aal:
+          event.aal ?? null,
+        trustedDevice:
+          event.trustedDevice ??
+          security
+            ?.deviceTrusted ??
+          null,
+        currentSession:
+          event.currentSession ??
+          false,
+      };
+
+      try {
+        await fetch(
+          INTERNAL_ENDPOINTS
+            .loginHistoryReport,
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "include",
+            keepalive: true,
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body:
+              JSON.stringify(
+                payload,
+              ),
+          },
+        );
+      } catch {
+        // Login must never fail because history reporting failed.
+      }
+    },
+    [
+      cleanEmail,
+      securityContext,
+    ],
   );
 
   useEffect(() => {
@@ -885,7 +1124,13 @@ export default function LoginPage() {
 
       if (!response.ok || !json?.ok) {
         registerFailedAttempt(response.status);
-        setError(parseLoginError(response.status));
+        setError(
+          parseLoginError(
+            response.status,
+            json,
+            INTERNAL_ENDPOINTS.login,
+          ),
+        );
 
         void reportAudit({
           action: "login_attempt_failed_client",
@@ -897,6 +1142,23 @@ export default function LoginPage() {
             result: "failed",
             duration_ms: durationMs,
           },
+        });
+
+        void reportLoginHistory({
+          result:
+            response.status === 429
+              ? "blocked"
+              : "failed",
+          riskLevel:
+            response.status === 429
+              ? "high"
+              : "medium",
+          reason:
+            response.status === 429
+              ? "rate_limited"
+              : "password_or_account_rejected",
+          security:
+            returnedSecurityContext,
         });
 
         return;
@@ -928,6 +1190,20 @@ export default function LoginPage() {
           },
         });
 
+        void reportLoginHistory({
+          result: "blocked",
+          riskLevel:
+            returnedSecurityContext
+              .riskLevel || "high",
+          reason:
+            "device_approval_required",
+          security:
+            returnedSecurityContext,
+          trustedDevice:
+            returnedSecurityContext
+              .deviceTrusted ?? false,
+        });
+
         return;
       }
 
@@ -949,6 +1225,15 @@ export default function LoginPage() {
             reason: "two_factor_required_for_all_admins",
             duration_ms: durationMs,
           },
+        });
+
+        void reportLoginHistory({
+          result: "blocked",
+          riskLevel: "high",
+          reason:
+            "two_factor_required_for_all_admins",
+          security:
+            returnedSecurityContext,
         });
 
         return;
@@ -979,6 +1264,15 @@ export default function LoginPage() {
             has_challenge: Boolean(returnedChallengeId),
             method_count: methods.length,
           },
+        });
+
+        void reportLoginHistory({
+          result: "blocked",
+          riskLevel: "high",
+          reason:
+            "two_factor_configuration_missing",
+          security:
+            returnedSecurityContext,
         });
 
         return;
@@ -1012,13 +1306,46 @@ export default function LoginPage() {
         },
       });
 
+      void reportLoginHistory({
+        result: "challenge",
+        riskLevel:
+          returnedSecurityContext
+            ?.riskLevel ??
+          "medium",
+        reason:
+          "password_accepted_mfa_required",
+        mfaMethod: preferred,
+        security:
+          returnedSecurityContext,
+        trustedDevice:
+          returnedSecurityContext
+            ?.deviceTrusted ??
+          null,
+      });
+
       return;
     } catch {
       const durationMs = submitStartedAtRef.current
         ? Date.now() - submitStartedAtRef.current
         : null;
 
-      setError(GENERIC_SERVICE_ERROR);
+      setError(
+        withDebugError(
+          GENERIC_SERVICE_ERROR,
+          {
+            endpoint:
+              INTERNAL_ENDPOINTS.login,
+            reason:
+              "network_or_fetch_failure",
+            details: {
+              phase:
+                "password_login_request",
+              note:
+                "The browser could not complete the login API request or parse a usable response.",
+            },
+          },
+        ),
+      );
 
       void reportAudit({
         action: "login_attempt_connection_failed_client",
@@ -1118,25 +1445,83 @@ export default function LoginPage() {
 
         if (response.status === 410) {
           setTwoFactorExpiresAt(Date.now());
-          setError({
-            title: "Security code expired",
-            message:
-              selectedMethod === "email"
-                ? "Send a new email code and try again."
-                : "Enter the newest code from your authenticator app.",
-          });
+          setError(
+            withDebugError(
+              {
+                title: "Security code expired",
+                message:
+                  selectedMethod === "email"
+                    ? "Send a new email code and try again."
+                    : "Enter the newest code from your authenticator app.",
+              },
+              {
+                endpoint:
+                  INTERNAL_ENDPOINTS.verifyTwoFactor,
+                httpStatus:
+                  response.status,
+                code:
+                  json?.code ?? null,
+                reason:
+                  (
+                    json as
+                      | (VerifyTwoFactorResponse & {
+                          reason?: string;
+                        })
+                      | null
+                  )?.reason ?? "challenge_expired",
+                apiError:
+                  json?.error ?? null,
+                apiMessage:
+                  json?.message ?? null,
+                attemptsRemaining:
+                  json?.attemptsRemaining ?? null,
+              },
+            ),
+          );
         } else if (response.status === 429) {
-          setError(TOO_MANY_ATTEMPTS_ERROR);
+          setError(
+            parseLoginError(
+              response.status,
+              json,
+              INTERNAL_ENDPOINTS.verifyTwoFactor,
+            ),
+          );
         } else {
-          setError({
-            title: "Code not accepted",
-            message:
-              typeof json?.attemptsRemaining === "number"
-                ? `Check the code and try again. ${json.attemptsRemaining} attempt${
-                    json.attemptsRemaining === 1 ? "" : "s"
-                  } remaining.`
-                : "Check the code and try again.",
-          });
+          setError(
+            withDebugError(
+              {
+                title: "Code not accepted",
+                message:
+                  typeof json?.attemptsRemaining === "number"
+                    ? `Check the code and try again. ${json.attemptsRemaining} attempt${
+                        json.attemptsRemaining === 1 ? "" : "s"
+                      } remaining.`
+                    : "Check the code and try again.",
+              },
+              {
+                endpoint:
+                  INTERNAL_ENDPOINTS.verifyTwoFactor,
+                httpStatus:
+                  response.status,
+                code:
+                  json?.code ?? null,
+                reason:
+                  (
+                    json as
+                      | (VerifyTwoFactorResponse & {
+                          reason?: string;
+                        })
+                      | null
+                  )?.reason ?? "mfa_verification_rejected",
+                apiError:
+                  json?.error ?? null,
+                apiMessage:
+                  json?.message ?? null,
+                attemptsRemaining:
+                  json?.attemptsRemaining ?? null,
+              },
+            ),
+          );
         }
 
         void reportAudit({
@@ -1151,6 +1536,28 @@ export default function LoginPage() {
           metadata: {
             method: selectedMethod,
           },
+        });
+
+        void reportLoginHistory({
+          result:
+            response.status === 429
+              ? "blocked"
+              : "failed",
+          riskLevel:
+            response.status === 429
+              ? "high"
+              : "medium",
+          reason:
+            response.status === 410
+              ? "mfa_code_expired"
+              : response.status === 429
+                ? "mfa_rate_limited"
+                : "mfa_code_rejected",
+          mfaMethod:
+            selectedMethod,
+          security:
+            verifiedSecurityContext ??
+            securityContext,
         });
 
         return;
@@ -1174,9 +1581,50 @@ export default function LoginPage() {
         },
       });
 
+      void reportLoginHistory({
+        result: "success",
+        riskLevel:
+          verifiedSecurityContext
+            ?.riskLevel ??
+          securityContext
+            ?.riskLevel ??
+          "low",
+        reason:
+          "mfa_verified",
+        mfaMethod:
+          selectedMethod,
+        aal: "aal2",
+        security:
+          verifiedSecurityContext ??
+          securityContext,
+        trustedDevice:
+          verifiedSecurityContext
+            ?.deviceTrusted ??
+          securityContext
+            ?.deviceTrusted ??
+          null,
+        currentSession: true,
+      });
+
       window.location.replace(nextPath);
     } catch {
-      setError(GENERIC_SERVICE_ERROR);
+      setError(
+        withDebugError(
+          GENERIC_SERVICE_ERROR,
+          {
+            endpoint:
+              INTERNAL_ENDPOINTS.verifyTwoFactor,
+            reason:
+              "network_or_fetch_failure",
+            details: {
+              phase:
+                "two_factor_verification_request",
+              method:
+                selectedMethod,
+            },
+          },
+        ),
+      );
 
       void reportAudit({
         action: "login_two_factor_verify_connection_failed",
@@ -1226,11 +1674,32 @@ export default function LoginPage() {
       if (!response.ok || !json?.ok) {
         setError(
           response.status === 429
-            ? TOO_MANY_ATTEMPTS_ERROR
-            : {
-                title: "Code could not be sent",
-                message: "Please wait a moment and try again.",
-              },
+            ? parseLoginError(
+                response.status,
+                json,
+                INTERNAL_ENDPOINTS.resendTwoFactor,
+              )
+            : withDebugError(
+                {
+                  title: "Code could not be sent",
+                  message:
+                    "Please wait a moment and try again.",
+                },
+                {
+                  endpoint:
+                    INTERNAL_ENDPOINTS.resendTwoFactor,
+                  httpStatus:
+                    response.status,
+                  code:
+                    json?.code ?? null,
+                  apiError:
+                    json?.error ?? null,
+                  apiMessage:
+                    json?.message ?? null,
+                  reason:
+                    "resend_request_rejected",
+                },
+              ),
         );
         return;
       }
@@ -1259,7 +1728,21 @@ export default function LoginPage() {
         risk_level: "medium",
       });
     } catch {
-      setError(GENERIC_SERVICE_ERROR);
+      setError(
+        withDebugError(
+          GENERIC_SERVICE_ERROR,
+          {
+            endpoint:
+              INTERNAL_ENDPOINTS.resendTwoFactor,
+            reason:
+              "network_or_fetch_failure",
+            details: {
+              phase:
+                "two_factor_resend_request",
+            },
+          },
+        ),
+      );
     } finally {
       setResendingCode(false);
     }
@@ -1921,6 +2404,31 @@ export default function LoginPage() {
 }
 
 function LoginErrorPanel({ error }: { error: LoginError }) {
+  const debugEntries =
+    error.debug
+      ? Object.entries({
+          Endpoint:
+            error.debug.endpoint,
+          "HTTP status":
+            error.debug.httpStatus,
+          Code:
+            error.debug.code,
+          Reason:
+            error.debug.reason,
+          "API error":
+            error.debug.apiError,
+          "API message":
+            error.debug.apiMessage,
+          "Attempts remaining":
+            error.debug.attemptsRemaining,
+        }).filter(
+          ([, value]) =>
+            value !== undefined &&
+            value !== null &&
+            value !== "",
+        )
+      : [];
+
   return (
     <div
       role="alert"
@@ -1929,12 +2437,67 @@ function LoginErrorPanel({ error }: { error: LoginError }) {
     >
       <div className="flex gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        <div>
-          <p className="font-black">{error.title}</p>
-          <p className="mt-1 leading-6 text-red-50/90">{error.message}</p>
+
+        <div className="min-w-0 flex-1">
+          <p className="font-black">
+            {error.title}
+          </p>
+
+          <p className="mt-1 leading-6 text-red-50/90">
+            {error.message}
+          </p>
+
+          {DEBUG_LOGIN_ERRORS &&
+          error.debug ? (
+            <div className="mt-4 overflow-hidden rounded-xl border border-red-300/20 bg-black/30">
+              <div className="border-b border-red-300/10 px-3 py-2">
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-red-100/80">
+                  Development debugging details
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-red-50/45">
+                  Visible only when NODE_ENV is development.
+                  Passwords, MFA codes, cookies, tokens and secrets are not shown.
+                </p>
+              </div>
+
+              {debugEntries.length > 0 ? (
+                <dl className="divide-y divide-white/5">
+                  {debugEntries.map(
+                    ([label, value]) => (
+                      <div
+                        key={label}
+                        className="grid gap-1 px-3 py-2 sm:grid-cols-[150px_1fr]"
+                      >
+                        <dt className="text-xs font-black text-red-100/55">
+                          {label}
+                        </dt>
+                        <dd className="break-all font-mono text-xs text-red-50/85">
+                          {String(value)}
+                        </dd>
+                      </div>
+                    ),
+                  )}
+                </dl>
+              ) : null}
+
+              {error.debug.details ? (
+                <div className="border-t border-white/5 px-3 py-3">
+                  <p className="mb-2 text-xs font-black text-red-100/55">
+                    Extra details
+                  </p>
+                  <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-[11px] leading-5 text-red-50/75">
+                    {JSON.stringify(
+                      error.debug.details,
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
-

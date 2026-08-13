@@ -1,3 +1,18 @@
+/**
+ * Burton Pride Admin Portal
+ *
+ * CORRECT ROUTE:
+ *   app/api/admin/settings/login/route.ts
+ *
+ * This is the PASSWORD LOGIN endpoint.
+ * It accepts:
+ *   { email, password, next }
+ *
+ * Do NOT replace this file with the two-factor verify route.
+ * Two-factor verification belongs at:
+ *   app/api/admin/settings/login/two-factor/verify/route.ts
+ */
+
 import {
   createHash,
   randomBytes,

@@ -430,11 +430,11 @@ export default function AuthenticatorSetupClient() {
     <main className="min-h-screen w-full bg-transparent px-3 py-5 text-white sm:px-5 sm:py-7 lg:px-7">
       <div className="w-full max-w-none">
         <Link
-          href="/Admin/Settings"
+          href="/Admin/Dashboard/Settings/SecurityCentre"
           className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-white/55 transition hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to settings
+          Back to Security Centre
         </Link>
 
         <header className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(115deg,rgba(236,72,153,0.96)_0%,rgba(192,73,226,0.95)_48%,rgba(142,76,246,0.96)_100%)] p-6 shadow-[0_24px_80px_rgba(116,35,190,0.32)] sm:p-8 lg:p-9">

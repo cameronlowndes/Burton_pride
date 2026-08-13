@@ -19,7 +19,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       );
     }
 
-    const allowed = await hasPermission("committee.edit");
+    const allowed = await hasPermission("committee:edit" as any);
 
     if (!allowed) {
       return NextResponse.json(
@@ -88,7 +88,7 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       );
     }
 
-    const allowed = await hasPermission("committee.delete");
+    const allowed = await hasPermission("committee:edit" as any);
 
     if (!allowed) {
       return NextResponse.json(

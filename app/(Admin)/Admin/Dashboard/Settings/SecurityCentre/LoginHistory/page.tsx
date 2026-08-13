@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
-import AdminAuditLogsClient from "../../../components/Dashboard/Settings/AdminAuditLogsClient";
+import LoginHistoryClient from "../../../../components/Dashboard/Settings/security/LoginHistoryClient";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Admin Portal Audit Logs",
+  title: "Recent Sign-ins | Burton Pride Admin Portal",
   description:
-    "Restricted Burton Pride Admin Portal page for reviewing security records, administrator activity and audit events.",
+    "Review Burton Pride Admin Portal sign-in history, MFA status, device information, approximate location and security risk.",
   robots: {
     index: false,
     follow: false,
@@ -23,6 +25,6 @@ export const metadata: Metadata = {
   referrer: "no-referrer",
 };
 
-export default function AdminAuditLogsPage() {
-  return <AdminAuditLogsClient />;
+export default function LoginHistoryPage() {
+  return <LoginHistoryClient />;
 }

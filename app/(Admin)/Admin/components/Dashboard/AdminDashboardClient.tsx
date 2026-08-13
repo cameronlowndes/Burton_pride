@@ -2866,30 +2866,6 @@ export default function AdminDashboardClient() {
             </p>
           </Card>
         </section>
-
-        <section className="rounded-[2rem] border border-yellow-300/20 bg-[#17140d]/90 p-5 shadow-xl backdrop-blur-xl">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-yellow-300/20 text-yellow-100">
-              <AlertTriangle className="h-6 w-6" />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <h2 className="text-xl font-black text-yellow-50">
-                Admin Dashboard Beta
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-white/75">
-                This dashboard is still in beta, but it is now built to feel
-                more like a proper admin command centre. If you find an issue,
-                report it to{" "}
-                <span className="font-black text-white">
-                  cameronlowndes@gmail.com
-                </span>
-                .
-              </p>
-            </div>
-          </div>
-        </section>
-
         <section className="relative w-full max-w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#11111f]/85 p-4 shadow-2xl backdrop-blur-xl sm:rounded-[2rem] sm:p-8">
           <div className="absolute inset-0 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-blue-500/10" />
           <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-pink-400/15 blur-3xl" />

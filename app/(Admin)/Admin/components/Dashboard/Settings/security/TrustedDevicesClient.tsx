@@ -216,11 +216,11 @@ export default function TrustedDevicesClient() {
 
           <div className="relative">
             <Link
-              href="/Admin/Settings"
+              href="/Admin/Dashboard/Settings/SecurityCentre"
               className="inline-flex items-center gap-2 text-sm font-black text-white/60 transition hover:text-white"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to settings
+              Back to Security Centre
             </Link>
 
             <div className="mt-5 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
