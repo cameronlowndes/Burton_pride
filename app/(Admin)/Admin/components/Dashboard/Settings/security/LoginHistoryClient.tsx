@@ -101,6 +101,25 @@ function formatDate(value?: string | null) {
   }).format(parsed);
 }
 
+function getHistoryTimestamp(
+  item: LoginHistoryItem,
+): number {
+  const raw =
+    item.occurred_at ??
+    item.created_at;
+
+  if (!raw) {
+    return 0;
+  }
+
+  const parsed =
+    new Date(raw).getTime();
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : 0;
+}
+
 function normaliseResult(
   item: LoginHistoryItem,
 ): LoginResult {
@@ -405,56 +424,62 @@ export default function LoginHistoryClient() {
 
   const filteredItems = useMemo(
     () =>
-      items.filter((item) => {
-        const result =
-          normaliseResult(item);
-        const risk =
-          normaliseRisk(
-            item.risk_level,
-          );
+      [...items]
+        .filter((item) => {
+          const result =
+            normaliseResult(item);
+          const risk =
+            normaliseRisk(
+              item.risk_level,
+            );
 
-        if (
-          resultFilter !== "all" &&
-          result !== resultFilter
-        ) {
-          return false;
-        }
+          if (
+            resultFilter !== "all" &&
+            result !== resultFilter
+          ) {
+            return false;
+          }
 
-        if (
-          riskFilter !== "all" &&
-          risk !== riskFilter
-        ) {
-          return false;
-        }
+          if (
+            riskFilter !== "all" &&
+            risk !== riskFilter
+          ) {
+            return false;
+          }
 
-        const query = search
-          .trim()
-          .toLowerCase();
+          const query = search
+            .trim()
+            .toLowerCase();
 
-        if (!query) {
-          return true;
-        }
+          if (!query) {
+            return true;
+          }
 
-        return [
-          item.admin_name,
-          item.admin_email,
-          item.browser,
-          item.operating_system,
-          item.device_type,
-          item.approximate_location,
-          item.city,
-          item.region,
-          item.country,
-          item.mfa_method,
-          item.aal,
-          item.reason,
-          item.ip_masked,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(query);
-      }),
+          return [
+            item.admin_name,
+            item.admin_email,
+            item.browser,
+            item.operating_system,
+            item.device_type,
+            item.approximate_location,
+            item.city,
+            item.region,
+            item.country,
+            item.mfa_method,
+            item.aal,
+            item.reason,
+            item.ip_masked,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(query);
+        })
+        .sort(
+          (a, b) =>
+            getHistoryTimestamp(b) -
+            getHistoryTimestamp(a),
+        ),
     [
       items,
       search,

@@ -469,6 +469,41 @@ function normaliseSecurityContext(
 }
 
 
+function shouldCreateTrustedDevice(
+  security: LoginSecurityContext | null | undefined,
+) {
+  if (!security) return false;
+
+  // A trusted-device record must only be created for a genuinely new,
+  // currently untrusted device after the password step has identified it.
+  if (security.newDevice !== true) return false;
+  if (security.deviceTrusted === true) return false;
+  if (security.requiresDeviceApproval === true) return false;
+
+  const maxTrustedDevices =
+    typeof security.maxTrustedDevices === "number" && security.maxTrustedDevices > 0
+      ? Math.floor(security.maxTrustedDevices)
+      : 3;
+
+  const trustedDeviceCount =
+    typeof security.trustedDeviceCount === "number" &&
+    security.trustedDeviceCount >= 0
+      ? Math.floor(security.trustedDeviceCount)
+      : null;
+
+  // If the server supplied a device count, never ask it to create another
+  // trusted device once the limit has already been reached.
+  if (
+    trustedDeviceCount !== null &&
+    trustedDeviceCount >= maxTrustedDevices
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+
 function getClientDeviceInfo() {
   if (typeof navigator === "undefined") {
     return {
@@ -574,6 +609,7 @@ export default function LoginPage() {
   const hasReportedPageReadyRef = useRef(false);
   const hasReportedLockoutEndRef = useRef(false);
   const submitStartedAtRef = useRef<number | null>(null);
+  const twoFactorVerifyInFlightRef = useRef(false);
 
   const cleanEmail = useMemo(() => email.trim().toLowerCase(), [email]);
   const lockoutRemainingMs = lockedUntil ? lockedUntil - now : 0;
@@ -702,6 +738,9 @@ export default function LoginPage() {
         currentSession:
           event.currentSession ??
           false,
+        // Login-history reporting is audit-only. It must never create or
+        // register a trusted device as a side effect.
+        createTrustedDevice: false,
       };
 
       try {
@@ -1111,6 +1150,9 @@ export default function LoginPage() {
           email: cleanEmail,
           password,
           next: nextPath,
+          // Password verification must never create a trusted-device record.
+          // Device trust is considered only after successful MFA below.
+          createTrustedDevice: false,
         }),
       });
 
@@ -1368,7 +1410,7 @@ export default function LoginPage() {
   ) {
     event.preventDefault();
 
-    if (loading) return;
+    if (loading || twoFactorVerifyInFlightRef.current) return;
 
     const cleanCode = twoFactorCode.replace(/\D/g, "").slice(
       0,
@@ -1405,6 +1447,9 @@ export default function LoginPage() {
       return;
     }
 
+    const createTrustedDevice = shouldCreateTrustedDevice(securityContext);
+
+    twoFactorVerifyInFlightRef.current = true;
     setLoading(true);
 
     void reportAudit({
@@ -1413,6 +1458,7 @@ export default function LoginPage() {
       risk_level: "medium",
       metadata: {
         method: selectedMethod,
+        trusted_device_creation_requested: createTrustedDevice,
       },
     });
 
@@ -1428,6 +1474,10 @@ export default function LoginPage() {
           challengeId,
           method: selectedMethod,
           code: cleanCode,
+          // This is the only request from this page that may ask the server
+          // to create a trusted-device record, and only when the current
+          // security context proves that it is needed.
+          createTrustedDevice,
         }),
       });
 
@@ -1578,6 +1628,7 @@ export default function LoginPage() {
             verifiedSecurityContext?.deviceTrusted ??
             securityContext?.deviceTrusted ??
             null,
+          trusted_device_creation_requested: createTrustedDevice,
         },
       });
 
@@ -1635,6 +1686,7 @@ export default function LoginPage() {
         },
       });
     } finally {
+      twoFactorVerifyInFlightRef.current = false;
       setLoading(false);
     }
   }
@@ -1664,6 +1716,8 @@ export default function LoginPage() {
         body: JSON.stringify({
           challengeId,
           method: "email",
+          // Resending an MFA code is not a trusted-device registration event.
+          createTrustedDevice: false,
         }),
       });
 

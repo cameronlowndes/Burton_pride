@@ -21,6 +21,7 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { Resend } from "resend";
+import { geolocation, ipAddress } from "@vercel/functions";
 
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
@@ -463,21 +464,42 @@ function firstHeader(
 }
 
 function getRequestIp(request: NextRequest): string {
+  /*
+   * Prefer Vercel's supported helper. It reads the platform-provided
+   * request IP headers and is more reliable on a Vercel deployment.
+   */
+  const vercelIp = cleanString(
+    ipAddress(request),
+  );
+
+  if (vercelIp) {
+    return vercelIp;
+  }
+
+  /*
+   * Fall back to common trusted proxy headers.
+   */
   const direct = firstHeader(request, [
     "cf-connecting-ip",
     "x-real-ip",
     "x-client-ip",
   ]);
 
-  if (direct) return direct;
+  if (direct) {
+    return direct;
+  }
 
   const forwarded = cleanString(
     request.headers.get("x-forwarded-for"),
   );
 
-  if (!forwarded) return "";
+  if (!forwarded) {
+    return "";
+  }
 
-  return cleanString(forwarded.split(",")[0]);
+  return cleanString(
+    forwarded.split(",")[0],
+  );
 }
 
 function decodeHeaderValue(value: string): string {
@@ -528,59 +550,112 @@ function buildApproximateLocation(
 function getRequestSecurityContext(
   request: NextRequest,
 ): RequestSecurityContext {
-  const ipAddress = getRequestIp(request);
-  const userAgent = cleanString(request.headers.get("user-agent"));
+  const ipAddressValue =
+    getRequestIp(request);
 
-  // These headers are populated by some trusted hosting/proxy providers.
-  // They are only context; never treat them as exact physical location.
-  const city = decodeHeaderValue(
-    firstHeader(request, [
-      "x-vercel-ip-city",
-      "cf-ipcity",
-      "x-appengine-city",
-    ]),
-  );
+  const userAgent =
+    cleanString(
+      request.headers.get(
+        "user-agent",
+      ),
+    );
 
-  const region = decodeHeaderValue(
-    firstHeader(request, [
-      "x-vercel-ip-country-region",
-      "cf-region",
-      "x-appengine-region",
-    ]),
-  );
+  /*
+   * Vercel's geolocation() helper is the primary source of approximate
+   * location on deployed requests.
+   *
+   * countryRegion is the visitor's geographic state/region.
+   * Do NOT use geo.region for this field: geo.region is the Vercel compute
+   * region that handled the request.
+   */
+  const geo =
+    geolocation(request);
+
+  const city =
+    cleanString(geo.city) ||
+    decodeHeaderValue(
+      firstHeader(request, [
+        "x-vercel-ip-city",
+        "cf-ipcity",
+        "x-appengine-city",
+      ]),
+    );
+
+  const region =
+    cleanString(
+      geo.countryRegion,
+    ) ||
+    decodeHeaderValue(
+      firstHeader(request, [
+        "x-vercel-ip-country-region",
+        "cf-region",
+        "x-appengine-region",
+      ]),
+    );
 
   const country =
+    cleanString(geo.country) ||
     decodeHeaderValue(
       firstHeader(request, [
         "x-vercel-ip-country",
         "cf-ipcountry",
         "x-appengine-country",
       ]),
-    ) || "";
+    );
 
   const countryCode =
-    cleanString(
-      firstHeader(request, [
-        "x-vercel-ip-country",
-        "cf-ipcountry",
-      ]),
+    (
+      cleanString(geo.country) ||
+      cleanString(
+        firstHeader(request, [
+          "x-vercel-ip-country",
+          "cf-ipcountry",
+        ]),
+      )
     ).toUpperCase() || null;
 
   return {
-    ipAddress,
-    ipHash: ipAddress ? hashWithPepper(ipAddress) : null,
+    ipAddress:
+      ipAddressValue,
+
+    ipHash:
+      ipAddressValue
+        ? hashWithPepper(
+            ipAddressValue,
+          )
+        : null,
+
     userAgent,
-    userAgentHash: userAgent ? hashWithPepper(userAgent) : null,
-    city: city || null,
-    region: region || null,
-    country: country || null,
+
+    userAgentHash:
+      userAgent
+        ? hashWithPepper(
+            userAgent,
+          )
+        : null,
+
+    city:
+      city || null,
+
+    region:
+      region || null,
+
+    country:
+      country || null,
+
     countryCode,
-    approximateLocation: buildApproximateLocation(
-      city,
-      region,
-      country,
-    ),
-    deviceLabel: detectDeviceLabel(userAgent),
+
+    approximateLocation:
+      buildApproximateLocation(
+        city,
+        region,
+        country,
+      ),
+
+    deviceLabel:
+      detectDeviceLabel(
+        userAgent,
+      ),
   };
 }
 
@@ -719,25 +794,68 @@ async function resolveDeviceSecurityState(params: {
         : "low";
 
   if (trustedDevice?.id) {
-    const updateResult = await supabaseAdmin
-      .from("admin_trusted_devices")
-      .update({
-        last_seen_at: new Date().toISOString(),
-        last_ip: params.security.ipAddress || null,
-        last_city: params.security.city,
-        last_region: params.security.region,
-        last_country: params.security.country,
-      })
-      .eq("id", trustedDevice.id);
+    /*
+     * Always refresh the last-used timestamp, but only replace IP/location
+     * fields when this request actually supplied a value.
+     *
+     * This is important because local development, some proxies, privacy
+     * relays and some network requests may not include geo information.
+     * Writing null here would erase a previously known location.
+     */
+    const trustedDeviceUpdate: Record<
+      string,
+      unknown
+    > = {
+      last_seen_at:
+        new Date().toISOString(),
+    };
+
+    if (
+      params.security.ipAddress
+    ) {
+      trustedDeviceUpdate.last_ip =
+        params.security.ipAddress;
+    }
+
+    if (params.security.city) {
+      trustedDeviceUpdate.last_city =
+        params.security.city;
+    }
+
+    if (params.security.region) {
+      trustedDeviceUpdate.last_region =
+        params.security.region;
+    }
+
+    if (params.security.country) {
+      trustedDeviceUpdate.last_country =
+        params.security.country;
+    }
+
+    const updateResult =
+      await supabaseAdmin
+        .from(
+          "admin_trusted_devices",
+        )
+        .update(
+          trustedDeviceUpdate,
+        )
+        .eq(
+          "id",
+          trustedDevice.id,
+        );
 
     if (
       updateResult.error &&
-      !isMissingTableOrColumn(updateResult.error, [
-        "last_ip",
-        "last_city",
-        "last_region",
-        "last_country",
-      ])
+      !isMissingTableOrColumn(
+        updateResult.error,
+        [
+          "last_ip",
+          "last_city",
+          "last_region",
+          "last_country",
+        ],
+      )
     ) {
       console.warn(
         `${ROUTE_NAME} trusted device context update failed:`,
@@ -1124,9 +1242,16 @@ function deviceSecurityResponse(
     requiresDeviceApproval: state.requiresDeviceApproval,
     trustedDeviceCount: state.trustedDeviceCount,
     maxTrustedDevices: state.maxTrustedDevices,
-    approximateLocation: state.approximateLocation,
-    deviceLabel: state.deviceLabel,
-    trustedDeviceSupported: state.supported,
+    approximateLocation:
+      state.approximateLocation,
+    locationAvailable:
+      Boolean(
+        state.approximateLocation,
+      ),
+    deviceLabel:
+      state.deviceLabel,
+    trustedDeviceSupported:
+      state.supported,
   };
 }
 

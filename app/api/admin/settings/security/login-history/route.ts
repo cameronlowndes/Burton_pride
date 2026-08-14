@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { geolocation, ipAddress } from "@vercel/functions";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -70,6 +71,9 @@ type LoginHistoryPostBody = {
   operatingSystem?: unknown;
   deviceType?: unknown;
   approximateLocation?: unknown;
+  city?: unknown;
+  region?: unknown;
+  country?: unknown;
   mfaMethod?: unknown;
   aal?: unknown;
   trustedDevice?: unknown;
@@ -298,6 +302,16 @@ function firstHeader(
 function getRequestIp(
   request: NextRequest,
 ) {
+  const vercelIp =
+    cleanString(
+      ipAddress(request),
+      80,
+    );
+
+  if (vercelIp) {
+    return vercelIp;
+  }
+
   const direct = firstHeader(
     request,
     [
@@ -377,7 +391,14 @@ function decodeHeaderValue(
 function getApproximateLocation(
   request: NextRequest,
 ) {
+  const geo =
+    geolocation(request);
+
   const city =
+    cleanString(
+      geo.city,
+      100,
+    ) ||
     decodeHeaderValue(
       firstHeader(
         request,
@@ -387,9 +408,13 @@ function getApproximateLocation(
           "x-appengine-city",
         ],
       ),
-    ) || "";
+    );
 
   const region =
+    cleanString(
+      geo.countryRegion,
+      100,
+    ) ||
     decodeHeaderValue(
       firstHeader(
         request,
@@ -399,9 +424,13 @@ function getApproximateLocation(
           "x-appengine-region",
         ],
       ),
-    ) || "";
+    );
 
   const country =
+    cleanString(
+      geo.country,
+      100,
+    ) ||
     decodeHeaderValue(
       firstHeader(
         request,
@@ -411,7 +440,7 @@ function getApproximateLocation(
           "x-appengine-country",
         ],
       ),
-    ) || "";
+    );
 
   const parts = [
     city,
@@ -419,14 +448,20 @@ function getApproximateLocation(
     country,
   ]
     .map((item) =>
-      cleanString(item, 100),
+      cleanString(
+        item,
+        100,
+      ),
     )
     .filter(Boolean);
 
   return {
-    city: city || null,
-    region: region || null,
-    country: country || null,
+    city:
+      city || null,
+    region:
+      region || null,
+    country:
+      country || null,
     approximateLocation:
       parts.length > 0
         ? Array.from(
@@ -734,25 +769,43 @@ export async function POST(
           ) || null,
 
         /*
-         * Prefer trusted proxy/platform location headers.
-         * Only fall back to the client's approximate label
-         * if those headers are unavailable.
+         * Prefer trusted server/platform location.
+         *
+         * Browser-supplied values are display-only fallbacks.
+         * They are never used for access-control decisions.
          */
         approximate_location:
-          location
-            .approximateLocation ??
+          (
+            location.approximateLocation ||
+            cleanString(
+              body.approximateLocation,
+              150,
+            )
+          ) || null,
+
+        city:
+          location.city ||
           cleanString(
-            body.approximateLocation,
-            150,
+            body.city,
+            100,
           ) ||
           null,
 
-        city:
-          location.city,
         region:
-          location.region,
+          location.region ||
+          cleanString(
+            body.region,
+            100,
+          ) ||
+          null,
+
         country:
-          location.country,
+          location.country ||
+          cleanString(
+            body.country,
+            100,
+          ) ||
+          null,
 
         /*
          * Raw IP remains server/database-side.
@@ -860,6 +913,12 @@ export async function POST(
       {
         ok: true,
         recorded: true,
+        locationAvailable:
+          Boolean(
+            location.approximateLocation,
+          ),
+        approximateLocation:
+          location.approximateLocation,
       },
       201,
     );

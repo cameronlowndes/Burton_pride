@@ -98,7 +98,7 @@ type SidebarLoadState = {
 };
 
 const SIDEBAR_API = "/api/admin/sidebar";
-const LOGOUT_API = "/api/admin/logout";
+const LOGOUT_API = "/api/admin/settings/logout";
 const LOGIN_AFTER_LOGOUT = "/Admin/Login?loggedOut=1";
 const STORAGE_COLLAPSED_KEY = "burton_admin_sidebar_collapsed";
 
@@ -120,6 +120,7 @@ const CLIENT_COOKIE_PATHS = [
   "/Admin",
   "/Admin/Dashboard",
   "/Admin/Login",
+  "/Admin/Settings",
   "/api",
   "/api/admin",
 ];

@@ -485,6 +485,228 @@ function approximateLocation(
     : null;
 }
 
+async function backfillMissingTrustedDeviceLocations(
+  adminId: string,
+): Promise<number> {
+  /*
+   * This backfills older trusted-device rows that were created before
+   * reliable location capture was added.
+   *
+   * We do NOT invent a location. A missing row is only filled from the most
+   * recent trusted-device row belonging to the same administrator with the
+   * same browser + operating system + device type and an already-known
+   * approximate location.
+   *
+   * This is a display/history fallback. It must never be used as an
+   * authentication or authorisation signal.
+   */
+  const { data, error } =
+    await supabaseAdmin
+      .from("admin_trusted_devices")
+      .select(
+        [
+          "id",
+          "admin_id",
+          "browser",
+          "operating_system",
+          "device_type",
+          "last_seen_at",
+          "trusted_at",
+          "first_seen_at",
+          "last_ip",
+          "last_city",
+          "last_region",
+          "last_country",
+          "revoked_at",
+        ].join(","),
+      )
+      .eq(
+        "admin_id",
+        adminId,
+      )
+      .order(
+        "last_seen_at",
+        {
+          ascending: false,
+          nullsFirst: false,
+        },
+      )
+      .returns<
+        Array<{
+          id: string;
+          admin_id: string;
+          browser: string | null;
+          operating_system: string | null;
+          device_type: string | null;
+          last_seen_at: string | null;
+          trusted_at: string | null;
+          first_seen_at: string | null;
+          last_ip: string | null;
+          last_city: string | null;
+          last_region: string | null;
+          last_country: string | null;
+          revoked_at: string | null;
+        }>
+      >();
+
+  if (error) {
+    console.warn(
+      `${ROUTE} location backfill read failed:`,
+      error.message,
+    );
+
+    return 0;
+  }
+
+  const rows = data || [];
+
+  const knownByFingerprint =
+    new Map<
+      string,
+      {
+        last_ip: string | null;
+        last_city: string | null;
+        last_region: string | null;
+        last_country: string | null;
+      }
+    >();
+
+  function fingerprint(row: {
+    browser: string | null;
+    operating_system: string | null;
+    device_type: string | null;
+  }) {
+    return [
+      cleanString(row.browser).toLowerCase(),
+      cleanString(row.operating_system).toLowerCase(),
+      cleanString(row.device_type).toLowerCase(),
+    ].join("|");
+  }
+
+  /*
+   * Because rows are already newest -> oldest, the first known location for a
+   * fingerprint is the most recent known location.
+   */
+  for (const row of rows) {
+    const key =
+      fingerprint(row);
+
+    if (
+      !key ||
+      knownByFingerprint.has(key)
+    ) {
+      continue;
+    }
+
+    if (
+      row.last_city ||
+      row.last_region ||
+      row.last_country
+    ) {
+      knownByFingerprint.set(
+        key,
+        {
+          last_ip:
+            row.last_ip,
+          last_city:
+            row.last_city,
+          last_region:
+            row.last_region,
+          last_country:
+            row.last_country,
+        },
+      );
+    }
+  }
+
+  let updatedCount = 0;
+
+  for (const row of rows) {
+    const hasLocation =
+      Boolean(
+        row.last_city ||
+        row.last_region ||
+        row.last_country,
+      );
+
+    if (hasLocation) {
+      continue;
+    }
+
+    const fallback =
+      knownByFingerprint.get(
+        fingerprint(row),
+      );
+
+    if (!fallback) {
+      continue;
+    }
+
+    const updatePayload: Record<
+      string,
+      unknown
+    > = {
+      updated_at:
+        new Date().toISOString(),
+    };
+
+    if (fallback.last_ip) {
+      updatePayload.last_ip =
+        fallback.last_ip;
+    }
+
+    if (fallback.last_city) {
+      updatePayload.last_city =
+        fallback.last_city;
+    }
+
+    if (fallback.last_region) {
+      updatePayload.last_region =
+        fallback.last_region;
+    }
+
+    if (fallback.last_country) {
+      updatePayload.last_country =
+        fallback.last_country;
+    }
+
+    const { error: updateError } =
+      await supabaseAdmin
+        .from(
+          "admin_trusted_devices",
+        )
+        .update(
+          updatePayload,
+        )
+        .eq(
+          "id",
+          row.id,
+        )
+        .eq(
+          "admin_id",
+          adminId,
+        );
+
+    if (updateError) {
+      console.warn(
+        `${ROUTE} location backfill update failed:`,
+        {
+          deviceId:
+            row.id,
+          message:
+            updateError.message,
+        },
+      );
+
+      continue;
+    }
+
+    updatedCount += 1;
+  }
+
+  return updatedCount;
+}
+
 function publicDevice(
   device: TrustedDeviceRow,
   currentTokenHash:
@@ -548,6 +770,304 @@ function publicDevice(
         .device_token_hash ===
         currentTokenHash,
   };
+}
+
+async function resolveAutomaticLocationFallback(
+  params: {
+    adminId: string;
+    security:
+      RequestSecurityContext;
+  },
+): Promise<RequestSecurityContext> {
+  /*
+   * The live Vercel/proxy location always wins.
+   */
+  if (
+    params.security.city ||
+    params.security.region ||
+    params.security.country
+  ) {
+    return params.security;
+  }
+
+  /*
+   * First fallback:
+   * Use the newest previously-known location from a trusted device belonging
+   * to this same administrator and matching browser / OS / device type.
+   *
+   * This means temporary missing Vercel geo headers do not turn a known
+   * device back into "Not available".
+   */
+  const trustedResult =
+    await supabaseAdmin
+      .from(
+        "admin_trusted_devices",
+      )
+      .select(
+        [
+          "last_city",
+          "last_region",
+          "last_country",
+          "last_ip",
+          "last_seen_at",
+          "trusted_at",
+        ].join(","),
+      )
+      .eq(
+        "admin_id",
+        params.adminId,
+      )
+      .eq(
+        "browser",
+        params.security.browser,
+      )
+      .eq(
+        "operating_system",
+        params.security
+          .operatingSystem,
+      )
+      .eq(
+        "device_type",
+        params.security.deviceType,
+      )
+      .is(
+        "revoked_at",
+        null,
+      )
+      .or(
+        "last_city.not.is.null,last_region.not.is.null,last_country.not.is.null",
+      )
+      .order(
+        "last_seen_at",
+        {
+          ascending: false,
+          nullsFirst: false,
+        },
+      )
+      .limit(1)
+      .maybeSingle<{
+        last_city:
+          | string
+          | null;
+        last_region:
+          | string
+          | null;
+        last_country:
+          | string
+          | null;
+        last_ip:
+          | string
+          | null;
+        last_seen_at:
+          | string
+          | null;
+        trusted_at:
+          | string
+          | null;
+      }>();
+
+  if (
+    !trustedResult.error &&
+    trustedResult.data &&
+    (
+      trustedResult.data
+        .last_city ||
+      trustedResult.data
+        .last_region ||
+      trustedResult.data
+        .last_country
+    )
+  ) {
+    const city =
+      cleanString(
+        trustedResult.data
+          .last_city,
+      );
+
+    const region =
+      cleanString(
+        trustedResult.data
+          .last_region,
+      );
+
+    const country =
+      cleanString(
+        trustedResult.data
+          .last_country,
+      );
+
+    return {
+      ...params.security,
+
+      ipAddress:
+        params.security
+          .ipAddress ||
+        cleanString(
+          trustedResult.data
+            .last_ip,
+        ),
+
+      city:
+        city || null,
+
+      region:
+        region || null,
+
+      country:
+        country || null,
+
+      approximateLocation:
+        buildApproximateLocation(
+          city,
+          region,
+          country,
+        ),
+    };
+  }
+
+  if (trustedResult.error) {
+    console.warn(
+      `${ROUTE} trusted-device automatic location fallback failed:`,
+      trustedResult.error.message,
+    );
+  }
+
+  /*
+   * Second fallback:
+   * Look at the administrator's newest login-history event which already has
+   * a known location.
+   *
+   * Login history is never used as authentication evidence. This is only for
+   * restoring approximate display metadata when the live request does not
+   * contain geo headers.
+   */
+  const loginHistoryResult =
+    await supabaseAdmin
+      .from(
+        "admin_login_history",
+      )
+      .select(
+        [
+          "city",
+          "region",
+          "country",
+          "ip_address",
+          "occurred_at",
+          "created_at",
+        ].join(","),
+      )
+      .eq(
+        "admin_id",
+        params.adminId,
+      )
+      .or(
+        "city.not.is.null,region.not.is.null,country.not.is.null",
+      )
+      .order(
+        "occurred_at",
+        {
+          ascending: false,
+          nullsFirst: false,
+        },
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false,
+          nullsFirst: false,
+        },
+      )
+      .limit(1)
+      .maybeSingle<{
+        city:
+          | string
+          | null;
+        region:
+          | string
+          | null;
+        country:
+          | string
+          | null;
+        ip_address:
+          | string
+          | null;
+        occurred_at:
+          | string
+          | null;
+        created_at:
+          | string
+          | null;
+      }>();
+
+  if (
+    !loginHistoryResult.error &&
+    loginHistoryResult.data &&
+    (
+      loginHistoryResult.data.city ||
+      loginHistoryResult.data.region ||
+      loginHistoryResult.data.country
+    )
+  ) {
+    const city =
+      cleanString(
+        loginHistoryResult.data.city,
+      );
+
+    const region =
+      cleanString(
+        loginHistoryResult.data.region,
+      );
+
+    const country =
+      cleanString(
+        loginHistoryResult.data.country,
+      );
+
+    return {
+      ...params.security,
+
+      ipAddress:
+        params.security
+          .ipAddress ||
+        cleanString(
+          loginHistoryResult.data
+            .ip_address,
+        ),
+
+      city:
+        city || null,
+
+      region:
+        region || null,
+
+      country:
+        country || null,
+
+      approximateLocation:
+        buildApproximateLocation(
+          city,
+          region,
+          country,
+        ),
+    };
+  }
+
+  if (loginHistoryResult.error) {
+    /*
+     * Do not fail the Security Centre if the optional login-history table does
+     * not exist yet or is temporarily unavailable.
+     */
+    console.warn(
+      `${ROUTE} login-history automatic location fallback failed:`,
+      loginHistoryResult.error.message,
+    );
+  }
+
+  /*
+   * No legitimate location has ever been captured.
+   * Keep the values empty rather than inventing a town.
+   */
+  return params.security;
 }
 
 async function updateCurrentDeviceLocation(
@@ -701,10 +1221,22 @@ export async function GET(
           )
         : null;
 
-    const security =
+    let security =
       getRequestSecurityContext(
         request,
       );
+
+    /*
+     * If Vercel/proxy geo is unavailable on this request, automatically
+     * recover the newest legitimate saved location. No manual SQL update is
+     * required.
+     */
+    security =
+      await resolveAutomaticLocationFallback({
+        adminId:
+          admin.id,
+        security,
+      });
 
     /*
      * Backfill/update the current
@@ -753,6 +1285,22 @@ export async function GET(
         });
       }
     }
+
+    /*
+     * Backfill historical rows that are missing location.
+     *
+     * Example:
+     * If an older "Chrome on Linux" row has no town, but the newest
+     * "Chrome on Linux" row for this administrator has Burton / UK saved,
+     * copy that latest known approximate location to the older row.
+     *
+     * This is only a display/history fallback and is never used to decide
+     * whether the device is trusted.
+     */
+    const backfilledLocationCount =
+      await backfillMissingTrustedDeviceLocations(
+        admin.id,
+      );
 
     /*
      * Read after the update so the
@@ -861,6 +1409,16 @@ export async function GET(
           security
             .approximateLocation,
         ),
+
+      locationAutomaticallyResolved:
+        Boolean(
+          security.city ||
+          security.region ||
+          security.country,
+        ),
+
+      locationBackfilledCount:
+        backfilledLocationCount,
 
       devices,
     });
