@@ -209,7 +209,7 @@ export default function TrustedDevicesClient() {
   }
 
   return (
-    <main className="min-h-screen w-full max-w-none text-white">
+    <main className="min-h-screen w-full max-w-none overflow-x-hidden text-white">
       <div className="mb-8 overflow-hidden rounded-[2rem] border border-white/10 bg-white/10 shadow-2xl backdrop-blur-xl">
         <div className="relative p-6 lg:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_20%,rgba(236,72,153,0.2),transparent_30%),radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.18),transparent_32%)]" />
@@ -384,7 +384,7 @@ export default function TrustedDevicesClient() {
             </div>
           )}
 
-          <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur-xl lg:p-6">
+          <section className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/10 p-4 shadow-2xl backdrop-blur-xl sm:p-5 lg:p-6">
             <div>
               <h2 className="text-2xl font-black">Active trusted devices</h2>
               <p className="mt-2 text-sm leading-6 text-white/55">
@@ -392,7 +392,7 @@ export default function TrustedDevicesClient() {
               </p>
             </div>
 
-            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+            <div className="mt-5 grid min-w-0 gap-4 xl:grid-cols-2">
               {activeDevices.length === 0 ? (
                 <div className="rounded-3xl border border-white/10 bg-black/20 p-6 text-white/60">
                   No active trusted devices are recorded yet.
@@ -405,14 +405,14 @@ export default function TrustedDevicesClient() {
                     <article
                       key={device.id}
                       className={[
-                        "rounded-3xl border p-5",
+                        "min-w-0 overflow-hidden rounded-3xl border p-4 sm:p-5",
                         device.currentDevice
                           ? "border-emerald-300/25 bg-emerald-500/10"
                           : "border-white/10 bg-black/20",
                       ].join(" ")}
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex min-w-0 gap-3">
+                      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
                           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/10">
                             <Icon className="h-6 w-6" />
                           </div>
@@ -423,13 +423,13 @@ export default function TrustedDevicesClient() {
                                 {device.name}
                               </h3>
                               {device.currentDevice ? (
-                                <span className="rounded-full border border-emerald-300/20 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-100">
+                                <span className="shrink-0 rounded-full border border-emerald-300/20 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-100">
                                   Current device
                                 </span>
                               ) : null}
                             </div>
 
-                            <p className="mt-1 text-sm text-white/50">
+                            <p className="mt-1 break-words text-sm text-white/50">
                               {device.browser || "Unknown browser"} ·{" "}
                               {device.operatingSystem || "Unknown OS"}
                             </p>
@@ -443,7 +443,7 @@ export default function TrustedDevicesClient() {
                             setDeviceToRevoke(device);
                           }}
                           disabled={revokingId === device.id}
-                          className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-3 py-2 text-xs font-black text-red-100 transition hover:bg-red-500/20 disabled:opacity-50"
+                          className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-black text-red-100 transition hover:bg-red-500/20 disabled:opacity-50 sm:w-auto sm:px-3 sm:py-2 sm:text-xs"
                         >
                           {revokingId === device.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -454,41 +454,41 @@ export default function TrustedDevicesClient() {
                         </button>
                       </div>
 
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                      <div className="mt-5 grid min-w-0 gap-3 sm:grid-cols-2">
+                        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                           <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/40">
                             <Globe2 className="h-4 w-4" />
                             Approximate location
                           </div>
-                          <p className="mt-2 text-sm font-bold text-white/75">
+                          <p className="mt-2 break-words text-sm font-bold text-white/75">
                             {device.approximateLocation || "Not available"}
                           </p>
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                           <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-white/40">
                             <Clock className="h-4 w-4" />
                             Last used
                           </div>
-                          <p className="mt-2 text-sm font-bold text-white/75">
+                          <p className="mt-2 break-words text-sm font-bold text-white/75">
                             {formatDate(device.lastSeenAt)}
                           </p>
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                           <p className="text-xs font-black uppercase tracking-wide text-white/40">
                             First seen
                           </p>
-                          <p className="mt-2 text-sm font-bold text-white/75">
+                          <p className="mt-2 break-words text-sm font-bold text-white/75">
                             {formatDate(device.firstSeenAt)}
                           </p>
                         </div>
 
-                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                        <div className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                           <p className="text-xs font-black uppercase tracking-wide text-white/40">
                             Trusted since
                           </p>
-                          <p className="mt-2 text-sm font-bold text-white/75">
+                          <p className="mt-2 break-words text-sm font-bold text-white/75">
                             {formatDate(device.trustedAt)}
                           </p>
                         </div>
@@ -543,8 +543,8 @@ export default function TrustedDevicesClient() {
         >
           <div className="w-full max-w-lg overflow-hidden rounded-[2rem] border border-red-300/20 bg-[#101126] shadow-2xl">
             <div className="border-b border-white/10 p-5 sm:p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex min-w-0 gap-3">
+              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-100">
                     <ShieldX className="h-5 w-5" />
                   </div>

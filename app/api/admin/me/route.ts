@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ROUTE_NAME = "GET /api/admin/me/permissions";
+const ROUTE_NAME = "GET /api/admin/me";
 const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
 const ADMIN_SECURITY_SESSION_COOKIE =
   "burton_admin_security_session";
@@ -128,6 +128,7 @@ type DenialReason =
   | "portal_permission_required"
   | "trusted_device_required"
   | "trusted_device_limit_violation"
+  | "security_session_required"
   | "session_revoked"
   | "security_service_unavailable";
 
@@ -290,6 +291,8 @@ function denied(
       "This device must be verified before Admin Portal access is allowed.",
     trusted_device_limit_violation:
       "The trusted-device security limit requires administrator review.",
+    security_session_required:
+      "Your Admin Portal security session must be verified.",
     session_revoked: "This admin session is no longer active.",
     security_service_unavailable:
       "The security service could not verify this request.",
@@ -430,6 +433,13 @@ export async function GET(): Promise<NextResponse> {
      * Validate the actual Supabase Auth user on the server. Legacy Burton
      * admin-id/email/role/permissions cookies are intentionally ignored.
      */
+    /*
+     * Ask Supabase to restore/refresh the cookie-backed session first.
+     * We DO NOT trust getSession() as the authorization decision; getUser()
+     * below remains the authoritative server-side identity check.
+     */
+    await supabase.auth.getSession();
+
     const {
       data: { user },
       error: userError,
@@ -445,7 +455,17 @@ export async function GET(): Promise<NextResponse> {
         metadata: { reason: "no_valid_supabase_user" },
       });
 
-      return denied(401, "unauthorized");
+      return jsonResponse({
+        ok: true,
+        authenticated: false,
+        authorized: false,
+        admin: null,
+        user: null,
+        permissions: [],
+        reason: "unauthorized",
+        requires_login: true,
+        route: ROUTE_NAME,
+      });
     }
 
     /* 2. MANDATORY MFA / AAL2 */
@@ -690,13 +710,21 @@ export async function GET(): Promise<NextResponse> {
         admin,
         action: "security_session_cookie_missing",
         result: "denied",
-        riskLevel: "high",
+        riskLevel: "medium",
         context,
         trustedDeviceId: trustedDevice.id,
         aal: currentAal,
+        metadata: {
+          reason: "security_session_cookie_missing",
+        },
       });
 
-      return denied(401, "session_revoked");
+      return denied(403, "security_session_required", {
+        authenticated: true,
+        requires_security_session: true,
+        requires_mfa: false,
+        requires_trusted_device: false,
+      });
     }
 
     const authSessionRef = hashWithPepper(
@@ -748,7 +776,13 @@ export async function GET(): Promise<NextResponse> {
         aal: currentAal,
       });
 
-      return denied(401, "session_revoked");
+      return denied(403, "security_session_required", {
+        authenticated: true,
+        requires_login: false,
+        requires_security_session: true,
+        requires_mfa: true,
+        requires_trusted_device: false,
+      });
     }
 
     if (
@@ -768,7 +802,13 @@ export async function GET(): Promise<NextResponse> {
         aal: currentAal,
       });
 
-      return denied(401, "session_revoked");
+      return denied(403, "security_session_required", {
+        authenticated: true,
+        requires_login: false,
+        requires_security_session: true,
+        requires_mfa: true,
+        requires_trusted_device: true,
+      });
     }
 
     if (
@@ -788,7 +828,13 @@ export async function GET(): Promise<NextResponse> {
         aal: currentAal,
       });
 
-      return denied(401, "session_revoked");
+      return denied(403, "security_session_required", {
+        authenticated: true,
+        requires_login: false,
+        requires_security_session: true,
+        requires_mfa: true,
+        requires_trusted_device: false,
+      });
     }
 
     if (securitySession.aal !== "aal2") {

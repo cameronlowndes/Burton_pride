@@ -930,7 +930,7 @@ export default function AdminRaffleClient() {
 
   return (
     <>
-      <main className="raffle-admin-screen min-h-screen bg-[#070716] px-4 py-6 text-white sm:px-6 lg:px-8">
+      <main className="raffle-admin-screen min-h-screen px-4 py-6 text-white sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl space-y-6">
           <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 backdrop-blur">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">

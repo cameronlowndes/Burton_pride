@@ -18,9 +18,11 @@ import {
   Banknote,
   BarChart3,
   Boxes,
+  Bug,
   Building2,
   CalendarDays,
   ChevronDown,
+  CircleHelp,
   ClipboardList,
   Construction,
   CreditCard,
@@ -101,6 +103,8 @@ const SIDEBAR_API = "/api/admin/sidebar";
 const LOGOUT_API = "/api/admin/settings/logout";
 const LOGIN_AFTER_LOGOUT = "/Admin/Login?loggedOut=1";
 const STORAGE_COLLAPSED_KEY = "burton_admin_sidebar_collapsed";
+const SIDEBAR_REQUEST_TIMEOUT_MS = 12_000;
+const SIDEBAR_PRODUCTION_LABEL = "Admin Portal";
 
 const CLIENT_CLEAR_COOKIE_NAMES = [
   "burton_admin_session",
@@ -150,7 +154,7 @@ function isSafeAdminHref(value: string | null | undefined) {
   if (!href || href === "#") return false;
   if (!href.startsWith("/")) return false;
   if (href.startsWith("//")) return false;
-  if (href.includes("\\")) return false;
+  if (href.includes("\\\\\\\\")) return false;
 
   const lower = href.toLowerCase();
 
@@ -251,6 +255,15 @@ function getItemPermission(item: AdminSidebarItem): string | null {
 
   if (label.includes("raffle") || href.includes("raffle")) {
     return "raffle:view";
+  }
+
+  if (
+    label.includes("bug tracker") ||
+    label.includes("report bug") ||
+    href.includes("/admin/bugtracker") ||
+    href.includes("/admin/bug-tracker")
+  ) {
+    return "admin:dashboard:view";
   }
 
   if (
@@ -444,6 +457,10 @@ const iconMap: Record<string, LucideIcon> = {
   banknote: Banknote,
   barchart3: BarChart3,
   boxes: Boxes,
+  bug: Bug,
+  bugtracker: Bug,
+  help: CircleHelp,
+  support: CircleHelp,
   building: Building2,
   building2: Building2,
   calendar: CalendarDays,
@@ -580,6 +597,15 @@ function inferIconForItem(item: AdminSidebarItem): LucideIcon {
     href.includes("stockmanagement")
   ) {
     return Boxes;
+  }
+
+  if (
+    label.includes("bug tracker") ||
+    label.includes("report bug") ||
+    href.includes("/bugtracker") ||
+    href.includes("/bug-tracker")
+  ) {
+    return Bug;
   }
 
   if (
@@ -844,7 +870,7 @@ function clearBrowserStorage() {
 
 async function callLogoutApi() {
   try {
-    await fetch(LOGOUT_API, {
+    const response = await fetch(LOGOUT_API, {
       method: "POST",
       credentials: "include",
       cache: "no-store",
@@ -858,8 +884,11 @@ async function callLogoutApi() {
         logoutAt: new Date().toISOString(),
       }),
     });
+
+    return response.ok;
   } catch {
     // The client still clears visible cookies/storage below.
+    return false;
   }
 }
 
@@ -885,6 +914,7 @@ export default function AdminSidebar({
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const [open, setOpen] = useState(false);
@@ -912,11 +942,22 @@ export default function AdminSidebar({
         debugError: "",
       });
 
+      const timeoutController = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => timeoutController.abort(),
+        SIDEBAR_REQUEST_TIMEOUT_MS,
+      );
+      const abortFromParent = () => timeoutController.abort();
+      signal?.addEventListener("abort", abortFromParent, { once: true });
+
       try {
         const res = await fetch(SIDEBAR_API, {
           cache: "no-store",
           credentials: "include",
-          signal,
+          signal: timeoutController.signal,
+          headers: {
+            Accept: "application/json",
+          },
         });
 
         const text = await res.text();
@@ -965,12 +1006,21 @@ export default function AdminSidebar({
           debugError: "",
         });
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+        if (
+          signal?.aborted &&
+          error instanceof DOMException &&
+          error.name === "AbortError"
+        ) {
           return;
         }
 
-        const message =
-          error instanceof Error
+        const timedOut =
+          timeoutController.signal.aborted &&
+          !signal?.aborted;
+
+        const message = timedOut
+          ? `Sidebar request timed out after ${SIDEBAR_REQUEST_TIMEOUT_MS}ms.`
+          : error instanceof Error
             ? error.message
             : "Failed to load admin sidebar.";
 
@@ -978,9 +1028,14 @@ export default function AdminSidebar({
 
         setLoadState({
           loading: false,
-          publicError: getPublicLoadError(),
+          publicError: timedOut
+            ? "Menu took too long to load. Please try again."
+            : getPublicLoadError(),
           debugError: message,
         });
+      } finally {
+        window.clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", abortFromParent);
       }
     },
     [permissions, adminRole]
@@ -995,6 +1050,10 @@ export default function AdminSidebar({
   }, [loadItems]);
 
   useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
     try {
       const savedValue = window.localStorage.getItem(STORAGE_COLLAPSED_KEY);
       setDesktopCollapsed(savedValue === "true");
@@ -1004,15 +1063,48 @@ export default function AdminSidebar({
   }, []);
 
   useEffect(() => {
+    if (!open) return;
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         closeMobileMenu();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const drawer = mobileDrawerRef.current;
+      if (!drawer) return;
+
+      const focusable = Array.from(
+        drawer.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        mobileCloseButtonRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -1045,6 +1137,26 @@ export default function AdminSidebar({
   const activeHref = useMemo(() => {
     return getActiveHref(pathname, items);
   }, [pathname, items]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+
+    const matchingGroups: Record<string, boolean> = {};
+    topLevelItems
+      .filter((item) => item.item_type === "group")
+      .forEach((item) => {
+        matchingGroups[item.id] = true;
+      });
+
+    setDesktopGroupOpen((previous) => ({
+      ...previous,
+      ...matchingGroups,
+    }));
+    setMobileGroupOpen((previous) => ({
+      ...previous,
+      ...matchingGroups,
+    }));
+  }, [searchQuery, topLevelItems]);
 
   function openMobileMenu() {
     previousFocusRef.current = document.activeElement as HTMLElement | null;
@@ -1121,7 +1233,7 @@ export default function AdminSidebar({
       <aside
         className={clsx(
           "relative hidden min-h-full min-w-0 shrink-0 self-stretch overflow-hidden border-r border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-[width] duration-300 md:flex md:flex-col",
-          desktopCollapsed ? "w-28" : "w-72"
+          desktopCollapsed ? "w-24" : "w-[19rem]"
         )}
         aria-label="Admin sidebar navigation"
       >
@@ -1145,34 +1257,25 @@ export default function AdminSidebar({
         />
       </aside>
 
-      <div
-        className={clsx(
-          "fixed inset-0 z-50 md:hidden",
-          open ? "pointer-events-auto" : "pointer-events-none"
-        )}
-      >
-        <button
-          type="button"
-          aria-label="Close menu overlay"
-          onClick={closeMobileMenu}
-          className={clsx(
-            "absolute inset-0 bg-black/70 transition-opacity",
-            open ? "opacity-100" : "opacity-0"
-          )}
-        />
+      {open ? (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close menu overlay"
+            onClick={closeMobileMenu}
+            className="absolute inset-0 bg-black/70"
+          />
 
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Admin navigation menu"
-          className={clsx(
-            "absolute right-0 top-0 flex h-dvh w-80 max-w-[86vw] flex-col overflow-hidden border-l border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-transform overscroll-contain",
-            open ? "translate-x-0" : "translate-x-full"
-          )}
-        >
-          <SidebarDecor />
+          <div
+            ref={mobileDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Admin navigation menu"
+            className="absolute right-0 top-0 flex h-dvh w-80 max-w-[90vw] flex-col overflow-hidden border-l border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl overscroll-contain"
+          >
+            <SidebarDecor />
 
-          <div className="relative shrink-0 border-b border-white/10 p-4">
+            <div className="relative shrink-0 border-b border-white/10 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-black text-white">Menu</p>
@@ -1193,6 +1296,7 @@ export default function AdminSidebar({
             </div>
 
             <SidebarSearch
+              id="admin-sidebar-search-mobile"
               value={searchQuery}
               onChange={setSearchQuery}
               collapsed={false}
@@ -1225,7 +1329,8 @@ export default function AdminSidebar({
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -1244,8 +1349,8 @@ function SidebarDecor() {
 function SidebarLoading() {
   return (
     <>
-      <div className="sticky top-0 z-40 border-b border-white/10 bg-gradient-to-r from-pink-600 via-purple-600 to-blue-600 backdrop-blur-xl md:hidden">
-        <div className="flex items-center gap-3 px-4 py-3 text-sm text-white/80">
+      <div className="sticky top-0 z-40 border-b border-white/10 bg-gradient-to-r from-pink-600/95 via-purple-700/95 to-blue-700/95 shadow-lg backdrop-blur-xl md:hidden">
+        <div className="flex items-center gap-3 px-4 py-3 text-sm text-white/80" role="status" aria-live="polite">
           <RefreshCw className="h-4 w-4 animate-spin" />
           Loading menu...
         </div>
@@ -1376,8 +1481,11 @@ function MobileTopBar({
             <div className="truncate text-lg font-black text-white">
               Burton Pride
             </div>
-            <div className="truncate text-sm font-medium text-white/75">
-              Committee Admin
+            <div className="flex items-center gap-2 truncate text-sm font-medium text-white/75">
+              <span>{SIDEBAR_PRODUCTION_LABEL}</span>
+              <span className="rounded-full border border-emerald-200/25 bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-50">
+                Live
+              </span>
             </div>
           </div>
         </div>
@@ -1455,6 +1563,7 @@ function SidebarContent({
         </div>
 
         <SidebarSearch
+          id="admin-sidebar-search-desktop"
           value={searchQuery}
           onChange={setSearchQuery}
           collapsed={collapsed}
@@ -1573,8 +1682,11 @@ function BrandHeader({ collapsed }: { collapsed: boolean }) {
           <div className="text-2xl font-black text-white drop-shadow">
             Burton Pride
           </div>
-          <div className="text-sm font-medium text-white/75">
-            Committee Admin
+          <div className="mt-1 flex items-center gap-2 text-sm font-medium text-white/75">
+            <span>{SIDEBAR_PRODUCTION_LABEL}</span>
+            <span className="rounded-full border border-emerald-200/25 bg-emerald-400/15 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-50">
+              Live
+            </span>
           </div>
         </>
       ) : null}
@@ -1583,11 +1695,13 @@ function BrandHeader({ collapsed }: { collapsed: boolean }) {
 }
 
 function SidebarSearch({
+  id,
   value,
   onChange,
   collapsed,
   className,
 }: {
+  id: string;
   value: string;
   onChange: (value: string) => void;
   collapsed: boolean;
@@ -1597,19 +1711,21 @@ function SidebarSearch({
 
   return (
     <div className={className}>
-      <label className="sr-only" htmlFor="admin-sidebar-search">
+      <label className="sr-only" htmlFor={id}>
         Search admin menu
       </label>
 
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-white shadow-inner">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-white shadow-inner transition focus-within:border-white/25 focus-within:bg-black/30 focus-within:ring-2 focus-within:ring-white/10">
         <Search className="h-4 w-4 shrink-0 text-white/45" />
 
         <input
-          id="admin-sidebar-search"
+          id={id}
           type="search"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="Search admin tools..."
+          autoComplete="off"
+          spellCheck={false}
           className="min-w-0 flex-1 bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/35"
         />
 
@@ -1661,7 +1777,7 @@ function DesktopGroup({
   const status = getItemStatus(item);
   const Icon = getIconForItem(item);
   const sharedClassName = clsx(
-    "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition",
+    "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
     active
       ? "bg-white text-purple-700 shadow-lg"
       : groupHasActiveChild
@@ -1803,7 +1919,7 @@ function DesktopNavLink({
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
       className={clsx(
-        "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition",
+        "group flex min-w-0 items-center gap-3 overflow-hidden rounded-2xl px-4 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
         active
           ? "bg-white text-purple-700 shadow-lg"
           : "bg-white/10 text-white hover:bg-white/20",
@@ -2023,7 +2139,7 @@ function MobileGroup({
   const status = getItemStatus(item);
   const Icon = getIconForItem(item);
   const className = clsx(
-    "flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition",
+    "flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
     active
       ? "bg-white text-purple-700 shadow-lg"
       : groupHasActiveChild
@@ -2131,7 +2247,7 @@ function MobileLink({
       rel={item.open_in_new_tab ? "noopener noreferrer" : undefined}
       aria-current={active ? "page" : undefined}
       className={clsx(
-        "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-black transition",
+        "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
         active
           ? "bg-white text-purple-700 shadow-lg"
           : "bg-white/10 text-white hover:bg-white/20"

@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bookmark,
+  Bug,
   ClipboardCheck,
   Download,
   Eye,
@@ -31,6 +32,7 @@ import {
   Globe,
   Heart,
   LayoutDashboard,
+  Loader2,
   Mail,
   MessageSquare,
   MousePointerClick,
@@ -58,6 +60,57 @@ type DashEvent = {
 
 type DashboardPriority = "low" | "medium" | "high" | "critical";
 
+type BugApplication =
+  | "admin_portal"
+  | "money_management"
+  | "stock_control"
+  | "event_hub"
+  | "public_website";
+
+type BugPriority = "minor" | "normal" | "senior";
+
+type DashboardBugForm = {
+  application: BugApplication;
+  priority: BugPriority;
+  title: string;
+  description: string;
+  affected_feature: string;
+  page_url: string;
+  steps_to_reproduce: string;
+  expected_result: string;
+  actual_result: string;
+};
+
+type BugTrackerCreateResponse = {
+  ok?: boolean;
+  report?: {
+    id?: string;
+    reference_number?: string;
+    title?: string;
+  };
+  emailSent?: boolean;
+  emailWarning?: string | null;
+  message?: string;
+  error?: string;
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  requestId?: string;
+  request_id?: string;
+};
+
+const EMPTY_DASHBOARD_BUG_FORM: DashboardBugForm = {
+  application: "admin_portal",
+  priority: "normal",
+  title: "",
+  description: "",
+  affected_feature: "Admin Dashboard",
+  page_url: "",
+  steps_to_reproduce: "",
+  expected_result: "",
+  actual_result: "",
+};
+
 type DashboardResponse = {
   stats: {
     upcomingEvents: number;
@@ -73,6 +126,7 @@ type DashboardResponse = {
   emailHealth?: EmailHealth;
   formsInbox?: FormsInboxHealth;
   sponsorHealth?: SponsorHealth;
+  moneyHealth?: DashboardMoneyHealth;
   dailyCheck?: DailyCheckResult;
 };
 
@@ -333,6 +387,14 @@ const ADMIN_MODULES: ModuleLink[] = [
     badge: "Admin",
     keywords: "settings permissions password admin",
   },
+  {
+    title: "Bug Tracker",
+    desc: "Report, review and manage Admin Portal bugs and technical issues.",
+    href: "/Admin/BugTracker",
+    icon: Bug,
+    badge: "Support",
+    keywords: "bug tracker report issue technical problem error",
+  },
 ];
 
 const PUBLIC_LINKS: ModuleLink[] = [
@@ -516,6 +578,9 @@ function getRoutePermission(href: string) {
   }
 
   if (path.includes("/dashboard/forms")) return "contacts:view";
+  if (path.includes("/bugtracker") || path.includes("/bug-tracker")) {
+    return "admin:dashboard:view";
+  }
   if (path.includes("/dashboard/donations")) return "donations:view";
   if (path.includes("/dashboard/logs")) return "audit_logs:view";
 
@@ -572,7 +637,7 @@ function canUseRouteWithPermissions(
 
 async function reportDashboardAudit(input: AuditReportInput) {
   try {
-    await fetch("/api/admin/audit-log/report", {
+    const response = await fetch("/api/admin/audit-log/report", {
       method: "POST",
       cache: "no-store",
       credentials: "include",
@@ -588,8 +653,11 @@ async function reportDashboardAudit(input: AuditReportInput) {
         ...input,
       }),
     });
+
+    return response.ok;
   } catch {
-    // Audit reporting should never break the dashboard UI.
+    // Audit reporting should never crash the dashboard UI.
+    return false;
   }
 }
 
@@ -1327,6 +1395,7 @@ export default function AdminDashboardClient() {
   const [favouriteTools, setFavouriteTools] = useState<Record<string, boolean>>(
     {},
   );
+  const [localDataHydrated, setLocalDataHydrated] = useState(false);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [meetingMode, setMeetingMode] = useState(false);
   const [auditHealthy, setAuditHealthy] = useState<boolean | null>(null);
@@ -1334,10 +1403,12 @@ export default function AdminDashboardClient() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [dailyCheck, setDailyCheck] = useState<DailyCheckResult | null>(null);
-  const [incidentOpen, setIncidentOpen] = useState(false);
-  const [incidentSummary, setIncidentSummary] = useState("");
-  const [incidentArea, setIncidentArea] = useState("dashboard");
-  const [incidentSeverity, setIncidentSeverity] = useState<DashboardPriority>("medium");
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [bugReportForm, setBugReportForm] = useState<DashboardBugForm>(
+    EMPTY_DASHBOARD_BUG_FORM,
+  );
+  const [bugReportSubmitting, setBugReportSubmitting] = useState(false);
+  const [bugReportError, setBugReportError] = useState("");
 
   const [stats, setStats] = useState<DashboardResponse["stats"]>({
     upcomingEvents: 0,
@@ -1469,10 +1540,10 @@ export default function AdminDashboardClient() {
       { id: "events", title: "Manage Events", desc: "Event planning and public event pages", href: "/Admin/Dashboard/Events", keywords: "events pride planning" },
       { id: "page-editor", title: "Open Page Editor", desc: "Website navigation and pages", href: "/Admin/Dashboard/Settings/PageEditor", keywords: "pages editor navigation" },
       { id: "donations", title: "Check Donations", desc: "Supporters and donation records", href: "/Admin/Dashboard/Donations", keywords: "donations supporters" },
-      { id: "incident", title: "Report Security Issue", desc: "Create a dashboard security incident record", href: "incident://new", keywords: "incident report security issue", priority: "high" as DashboardPriority },
+      { id: "bug-report", title: "Report Bug", desc: "Open the Bug Tracker report form", href: "bug://new", keywords: "bug report problem error issue dashboard", priority: "high" as DashboardPriority },
     ];
 
-    return core.filter((action) => action.href.startsWith("incident://") || canUseRoute(action.href));
+    return core.filter((action) => action.href.startsWith("bug://") || canUseRoute(action.href));
   }, [canUseRoute]);
 
   const filteredCommandActions = useMemo(() => {
@@ -1552,6 +1623,7 @@ export default function AdminDashboardClient() {
       setEmailHealth(json.emailHealth || fallbackEmailHealth());
       setFormsInbox(nextFormsInbox);
       setSponsorHealth(nextSponsorHealth);
+      setMoneyHealth(json.moneyHealth || fallbackMoneyHealth());
       setApiActionItems(Array.isArray(json.actionItems) ? json.actionItems.slice(0, 10) : []);
       if (json.dailyCheck) setDailyCheck(json.dailyCheck);
 
@@ -1652,7 +1724,7 @@ export default function AdminDashboardClient() {
 
       if (key === "escape") {
         setCommandOpen(false);
-        setIncidentOpen(false);
+        setBugReportOpen(false);
         return;
       }
 
@@ -1691,25 +1763,32 @@ export default function AdminDashboardClient() {
     setCompletedTasks(safeBooleanRecord(savedTasks));
     setAdminNotes(safeAdminNotes(savedNotes));
     setFavouriteTools(safeBooleanRecord(savedFavourites));
+    setLocalDataHydrated(true);
   }, [storageKeys]);
 
   useEffect(() => {
+    if (!localDataHydrated) return;
+
     try {
       localStorage.setItem(storageKeys.tasks, JSON.stringify(completedTasks));
     } catch {
       // Ignore localStorage failures
     }
-  }, [completedTasks, storageKeys.tasks]);
+  }, [completedTasks, localDataHydrated, storageKeys.tasks]);
 
   useEffect(() => {
+    if (!localDataHydrated) return;
+
     try {
       localStorage.setItem(storageKeys.notes, JSON.stringify(adminNotes));
     } catch {
       // Ignore localStorage failures
     }
-  }, [adminNotes, storageKeys.notes]);
+  }, [adminNotes, localDataHydrated, storageKeys.notes]);
 
   useEffect(() => {
+    if (!localDataHydrated) return;
+
     try {
       localStorage.setItem(
         storageKeys.favourites,
@@ -1718,7 +1797,7 @@ export default function AdminDashboardClient() {
     } catch {
       // Ignore localStorage failures
     }
-  }, [favouriteTools, storageKeys.favourites]);
+  }, [favouriteTools, localDataHydrated, storageKeys.favourites]);
 
   function toggleTask(taskId: string) {
     setCompletedTasks((prev) => ({
@@ -1870,59 +1949,219 @@ export default function AdminDashboardClient() {
     });
   }
 
-  async function submitIncident() {
-    const summary = incidentSummary.trim();
+  function openBugReport() {
+    setBugReportError("");
+    setBugReportForm((current) => ({
+      ...current,
+      application: current.application || "admin_portal",
+      priority: current.priority || "normal",
+      affected_feature: current.affected_feature || "Admin Dashboard",
+      page_url:
+        current.page_url ||
+        (typeof window !== "undefined" ? window.location.href : ""),
+    }));
+    setBugReportOpen(true);
 
-    if (!summary) {
-      await showAdminSecurityPopup({
-        title: "Incident summary needed",
-        message: "Please add a short summary before reporting a security issue.",
-        confirmLabel: "OK",
-        showCancel: false,
-        tone: "danger",
-      });
+    void reportDashboardAudit({
+      action: "dashboard_bug_report_form_opened",
+      status: "success",
+      risk_level: "low",
+      target_type: "bug_tracker",
+      target_label: "Admin Dashboard",
+    });
+  }
+
+  function closeBugReport() {
+    if (bugReportSubmitting) return;
+    setBugReportOpen(false);
+    setBugReportError("");
+  }
+
+  async function submitBugReport() {
+    const title = bugReportForm.title.trim();
+    const description = bugReportForm.description.trim();
+
+    if (!title || !description) {
+      setBugReportError(
+        !title
+          ? "Add a short title for the bug."
+          : "Add a description explaining what went wrong.",
+      );
       return;
     }
 
-    void reportDashboardAudit({
-      action: "dashboard_security_incident_reported",
-      status: "success",
-      risk_level: incidentSeverity,
-      target_type: "security_incident",
-      target_label: incidentArea,
-      metadata: {
-        incident_area: incidentArea,
-        incident_summary: summary.slice(0, 500),
-        reported_from: "dashboard_incident_button",
-      },
-    });
+    setBugReportSubmitting(true);
+    setBugReportError("");
 
-    setIncidentSummary("");
-    setIncidentArea("dashboard");
-    setIncidentSeverity("medium");
-    setIncidentOpen(false);
+    try {
+      const nav =
+        typeof navigator !== "undefined"
+          ? (navigator as Navigator & {
+              userAgentData?: {
+                brands?: Array<{ brand: string; version: string }>;
+                platform?: string;
+              };
+            })
+          : null;
 
-    await showAdminSecurityPopup({
-      title: "Security issue reported",
-      message: "This has been written to the admin audit logs. A main admin should review it.",
-      confirmLabel: "OK",
-      showCancel: false,
-      tone: "success",
-      details: [`Area: ${incidentArea}`, `Severity: ${incidentSeverity}`],
-    });
+      const browserName =
+        nav?.userAgentData?.brands
+          ?.map((brand) => brand.brand)
+          .filter(Boolean)
+          .join(", ") ||
+        nav?.userAgent ||
+        null;
+
+      const operatingSystem =
+        nav?.userAgentData?.platform ||
+        nav?.platform ||
+        null;
+
+      const deviceType =
+        typeof window !== "undefined"
+          ? window.matchMedia("(max-width: 767px)").matches
+            ? "Mobile / small screen"
+            : window.matchMedia("(max-width: 1023px)").matches
+              ? "Tablet / medium screen"
+              : "Desktop / laptop"
+          : null;
+
+      const response = await fetch("/api/admin/bug-tracker", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          application: bugReportForm.application,
+          priority: bugReportForm.priority,
+          title,
+          description,
+          affected_feature: bugReportForm.affected_feature.trim() || null,
+          page_url:
+            bugReportForm.page_url.trim() ||
+            (typeof window !== "undefined" ? window.location.href : null),
+          steps_to_reproduce:
+            bugReportForm.steps_to_reproduce.trim() || null,
+          expected_result: bugReportForm.expected_result.trim() || null,
+          actual_result: bugReportForm.actual_result.trim() || null,
+          browser_name: browserName,
+          device_type: deviceType,
+          operating_system: operatingSystem,
+          screenshot_url: null,
+          attachment_urls: [],
+        }),
+      });
+
+      const rawBody = await response.text();
+      let result: BugTrackerCreateResponse | null = null;
+
+      if (rawBody) {
+        try {
+          result = JSON.parse(rawBody) as BugTrackerCreateResponse;
+        } catch {
+          result = null;
+        }
+      }
+
+      if (!response.ok || !result?.ok) {
+        const requestId =
+          result?.requestId ||
+          result?.request_id ||
+          response.headers.get("x-request-id");
+
+        const message =
+          result?.error ||
+          result?.message ||
+          `The Bug Tracker could not save this report (HTTP ${response.status}).`;
+
+        const extra = [
+          result?.hint,
+          requestId ? `Reference: ${requestId}` : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        throw new Error(extra ? `${message} ${extra}` : message);
+      }
+
+      const reference =
+        result.report?.reference_number ||
+        result.report?.id ||
+        "Bug report";
+
+      setBugReportOpen(false);
+      setBugReportForm(EMPTY_DASHBOARD_BUG_FORM);
+
+      void reportDashboardAudit({
+        action: "dashboard_bug_report_submitted",
+        status: "success",
+        risk_level:
+          bugReportForm.priority === "senior"
+            ? "high"
+            : bugReportForm.priority === "normal"
+              ? "medium"
+              : "low",
+        target_type: "bug_tracker",
+        target_id: result.report?.id || null,
+        target_label: reference,
+        metadata: {
+          application: bugReportForm.application,
+          priority: bugReportForm.priority,
+          bug_reference: reference,
+          email_sent: result.emailSent === true,
+        },
+      });
+
+      await showAdminSecurityPopup({
+        title: "Bug report submitted",
+        message:
+          result.message ||
+          "The Bug Tracker has saved the report successfully.",
+        confirmLabel: "OK",
+        showCancel: false,
+        tone: "success",
+        details: [
+          `Reference: ${reference}`,
+          `Priority: ${bugReportForm.priority}`,
+          result.emailWarning
+            ? `Email warning: ${result.emailWarning}`
+            : result.emailSent
+              ? "Bug notification email sent."
+              : "The bug report was saved.",
+        ],
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "The bug report could not be submitted.";
+
+      setBugReportError(message);
+
+      void reportDashboardAudit({
+        action: "dashboard_bug_report_submit_failed",
+        status: "error",
+        risk_level: "medium",
+        target_type: "bug_tracker",
+        metadata: {
+          application: bugReportForm.application,
+          priority: bugReportForm.priority,
+        },
+      });
+    } finally {
+      setBugReportSubmitting(false);
+    }
   }
 
   function runCommand(action: CommandAction) {
     setCommandOpen(false);
     setCommandQuery("");
 
-    if (action.href === "incident://new") {
-      setIncidentOpen(true);
-      void reportDashboardAudit({
-        action: "dashboard_command_incident_opened",
-        status: "success",
-        risk_level: "medium",
-      });
+    if (action.href === "bug://new") {
+      openBugReport();
       return;
     }
 
@@ -1932,14 +2171,7 @@ export default function AdminDashboardClient() {
   }
 
   return (
-    <div className="relative min-h-dvh w-full min-w-0 max-w-none overflow-x-hidden bg-[#07070d] px-3 py-4 text-white sm:px-4 sm:py-5 lg:px-4 xl:px-5">
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-[#07070d]">
-        <div className="absolute left-[-12%] top-[-16%] h-[620px] w-[620px] rounded-full bg-purple-700/20 blur-[150px]" />
-        <div className="absolute right-[-10%] top-[4%] h-[560px] w-[560px] rounded-full bg-pink-600/15 blur-[150px]" />
-        <div className="absolute bottom-[-25%] left-[30%] h-[620px] w-[620px] rounded-full bg-sky-700/10 blur-[170px]" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:38px_38px]" />
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#07070d]/10 to-[#07070d]/70" />
-      </div>
+    <div className="relative min-h-dvh w-full min-w-0 max-w-none overflow-x-hidden px-3 py-4 text-white sm:px-4 sm:py-5 lg:px-4 xl:px-5">
       <CommandPalette
         open={commandOpen}
         query={commandQuery}
@@ -1949,16 +2181,14 @@ export default function AdminDashboardClient() {
         onRun={runCommand}
       />
 
-      <IncidentModal
-        open={incidentOpen}
-        summary={incidentSummary}
-        area={incidentArea}
-        severity={incidentSeverity}
-        onSummaryChange={setIncidentSummary}
-        onAreaChange={setIncidentArea}
-        onSeverityChange={setIncidentSeverity}
-        onClose={() => setIncidentOpen(false)}
-        onSubmit={() => void submitIncident()}
+      <BugReportModal
+        open={bugReportOpen}
+        form={bugReportForm}
+        submitting={bugReportSubmitting}
+        error={bugReportError}
+        onChange={setBugReportForm}
+        onClose={closeBugReport}
+        onSubmit={() => void submitBugReport()}
       />
 
       <div className="relative z-10 m-0 w-full min-w-0 max-w-none space-y-5 sm:space-y-6">
@@ -2204,22 +2434,25 @@ export default function AdminDashboardClient() {
           <Card>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-2xl font-black">Incident and command tools</h2>
+                <h2 className="text-2xl font-black">Support and command tools</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Report security issues or open the command palette without using the sidebar.
+                  Report bugs directly to the Bug Tracker or open the command palette.
                 </p>
               </div>
-              <ShieldCheck className="h-6 w-6 text-white/40" />
+              <Bug className="h-6 w-6 text-white/40" />
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <button
                 type="button"
-                onClick={() => setIncidentOpen(true)}
+                onClick={openBugReport}
                 className="rounded-2xl border border-red-300/20 bg-red-500/10 p-5 text-left transition hover:bg-red-500/20"
               >
-                <div className="font-black text-red-50">Report security issue</div>
+                <div className="flex items-center gap-2 font-black text-red-50">
+                  <Bug className="h-4 w-4" />
+                  Report a bug
+                </div>
                 <p className="mt-2 text-xs leading-5 text-red-50/70">
-                  Create a high-priority audit record for anything suspicious.
+                  Open the Bug Tracker form and submit a full technical report.
                 </p>
               </button>
               <button
@@ -2374,8 +2607,14 @@ export default function AdminDashboardClient() {
               />
               <HealthRow
                 title="Dashboard API"
-                desc={dashError ? dashError : "Dashboard API reachable"}
-                ok={!dashError}
+                desc={
+                  dashLoading
+                    ? "Checking dashboard API"
+                    : dashError
+                      ? dashError
+                      : "Dashboard API reachable"
+                }
+                ok={!dashLoading && !dashError}
               />
               <HealthRow
                 title="Events"
@@ -3048,7 +3287,7 @@ function SecurityWatchCard({ data }: { data: DashboardSecurityWatch }) {
         Last activity: {data.lastAdminActivityAt ? formatRelativeTime(data.lastAdminActivityAt) : "not available"}
       </p>
       <SecureLink
-        href="/Admin/Dashboard/Settings/AdminAuditTracker"
+        href="/Admin/Dashboard/Settings/SecurityCentre/AdminAuditTracker"
         className="mt-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-black text-white/70 transition hover:bg-white/20 hover:text-white"
       >
         Open audit logs <ArrowRight className="h-4 w-4" />
@@ -3264,89 +3503,304 @@ function CommandPalette({
   );
 }
 
-function IncidentModal({
+function BugReportModal({
   open,
-  summary,
-  area,
-  severity,
-  onSummaryChange,
-  onAreaChange,
-  onSeverityChange,
+  form,
+  submitting,
+  error,
+  onChange,
   onClose,
   onSubmit,
 }: {
   open: boolean;
-  summary: string;
-  area: string;
-  severity: DashboardPriority;
-  onSummaryChange: (value: string) => void;
-  onAreaChange: (value: string) => void;
-  onSeverityChange: (value: DashboardPriority) => void;
+  form: DashboardBugForm;
+  submitting: boolean;
+  error: string;
+  onChange: (value: DashboardBugForm) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
   if (!open) return null;
 
+  function update<K extends keyof DashboardBugForm>(
+    key: K,
+    value: DashboardBugForm[K],
+  ) {
+    onChange({
+      ...form,
+      [key]: value,
+    });
+  }
+
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xl">
-      <button type="button" aria-label="Close incident modal" className="absolute inset-0 cursor-default" onClick={onClose} />
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-[2rem] border border-white/10 bg-[#11111f] shadow-2xl">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-3 backdrop-blur-xl sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dashboard-bug-report-title"
+    >
+      <button
+        type="button"
+        aria-label="Close bug report"
+        className="absolute inset-0 cursor-default"
+        disabled={submitting}
+        onClick={onClose}
+      />
+
+      <div className="relative max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-[1.5rem] border border-white/10 bg-[#11111f] shadow-2xl sm:rounded-[2rem]">
         <div className="bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 p-1" />
-        <div className="p-6">
+
+        <div className="p-4 sm:p-6">
           <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-red-100/70">Security incident</div>
-              <h2 className="mt-2 text-2xl font-black">Report security issue</h2>
-              <p className="mt-2 text-sm leading-6 text-white/60">
-                This creates a high-priority audit record for main admin review.
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-red-100/70">
+                <Bug className="h-4 w-4" />
+                Burton Pride Bug Tracker
+              </div>
+              <h2
+                id="dashboard-bug-report-title"
+                className="mt-2 text-2xl font-black"
+              >
+                Report a bug
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
+                This report is sent directly to the Admin Portal Bug Tracker.
+                Add enough detail for the problem to be reproduced and fixed.
               </p>
             </div>
-            <button type="button" onClick={onClose} className="rounded-full bg-white/10 px-3 py-2 text-xs font-black text-white/65 hover:bg-white/20">
+
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="shrink-0 rounded-full bg-white/10 px-3 py-2 text-xs font-black text-white/65 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Close
             </button>
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          {error ? (
+            <div className="mt-5 rounded-2xl border border-red-300/25 bg-red-500/10 p-4 text-red-50">
+              <div className="flex gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-black">Bug report could not be submitted</p>
+                  <p className="mt-1 break-words text-sm leading-6 text-red-50/80">
+                    {error}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <label className="block">
-              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">Area</span>
-              <select value={area} onChange={(event) => onAreaChange(event.target.value)} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none">
-                <option className="text-slate-950" value="dashboard">Dashboard</option>
-                <option className="text-slate-950" value="auth">Login / Auth</option>
-                <option className="text-slate-950" value="money">Money</option>
-                <option className="text-slate-950" value="email">Email</option>
-                <option className="text-slate-950" value="public_pages">Public pages</option>
-                <option className="text-slate-950" value="permissions">Permissions</option>
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Application
+              </span>
+              <select
+                value={form.application}
+                onChange={(event) =>
+                  update("application", event.target.value as BugApplication)
+                }
+                disabled={submitting}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-pink-300/50 focus:ring-2 focus:ring-pink-400/20 disabled:opacity-60"
+              >
+                <option className="text-slate-950" value="admin_portal">
+                  Admin Portal
+                </option>
+                <option className="text-slate-950" value="money_management">
+                  Money Management
+                </option>
+                <option className="text-slate-950" value="stock_control">
+                  Stock Control
+                </option>
+                <option className="text-slate-950" value="event_hub">
+                  Event Hub
+                </option>
+                <option className="text-slate-950" value="public_website">
+                  Public Website
+                </option>
               </select>
             </label>
 
             <label className="block">
-              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">Severity</span>
-              <select value={severity} onChange={(event) => onSeverityChange(event.target.value as DashboardPriority)} className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none">
-                <option className="text-slate-950" value="low">Low</option>
-                <option className="text-slate-950" value="medium">Medium</option>
-                <option className="text-slate-950" value="high">High</option>
-                <option className="text-slate-950" value="critical">Critical</option>
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Priority
+              </span>
+              <select
+                value={form.priority}
+                onChange={(event) =>
+                  update("priority", event.target.value as BugPriority)
+                }
+                disabled={submitting}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-bold text-white outline-none focus:border-pink-300/50 focus:ring-2 focus:ring-pink-400/20 disabled:opacity-60"
+              >
+                <option className="text-slate-950" value="minor">
+                  Minor
+                </option>
+                <option className="text-slate-950" value="normal">
+                  Normal
+                </option>
+                <option className="text-slate-950" value="senior">
+                  Senior / Critical
+                </option>
               </select>
             </label>
           </div>
 
           <label className="mt-4 block">
-            <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">Summary</span>
-            <textarea
-              value={summary}
-              onChange={(event) => onSummaryChange(event.target.value.slice(0, 500))}
-              placeholder="Briefly describe what happened..."
-              className="mt-2 min-h-32 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm font-semibold text-white outline-none placeholder:text-white/35"
+            <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Bug title *
+            </span>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(event) => update("title", event.target.value.slice(0, 200))}
+              disabled={submitting}
+              placeholder="Example: Dashboard refresh button does not update figures"
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 focus:ring-2 focus:ring-pink-400/20 disabled:opacity-60"
             />
           </label>
 
-          <div className="mt-5 flex flex-wrap justify-end gap-3">
-            <button type="button" onClick={onClose} className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white/70 hover:bg-white/20">
-              Cancel
-            </button>
-            <button type="button" onClick={onSubmit} className="rounded-2xl bg-red-500 px-4 py-3 text-sm font-black text-white hover:bg-red-400">
-              Report issue
-            </button>
+          <label className="mt-4 block">
+            <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Description *
+            </span>
+            <textarea
+              value={form.description}
+              onChange={(event) =>
+                update("description", event.target.value.slice(0, 10000))
+              }
+              disabled={submitting}
+              placeholder="Explain what went wrong, where it happened and what you were trying to do."
+              className="mt-2 min-h-28 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 focus:ring-2 focus:ring-pink-400/20 disabled:opacity-60"
+            />
+          </label>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Affected feature
+              </span>
+              <input
+                type="text"
+                value={form.affected_feature}
+                onChange={(event) =>
+                  update("affected_feature", event.target.value.slice(0, 200))
+                }
+                disabled={submitting}
+                placeholder="Admin Dashboard"
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 disabled:opacity-60"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Page URL
+              </span>
+              <input
+                type="text"
+                value={form.page_url}
+                onChange={(event) =>
+                  update("page_url", event.target.value.slice(0, 2000))
+                }
+                disabled={submitting}
+                placeholder="Automatically filled from this page"
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 disabled:opacity-60"
+              />
+            </label>
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+              Steps to reproduce
+            </span>
+            <textarea
+              value={form.steps_to_reproduce}
+              onChange={(event) =>
+                update("steps_to_reproduce", event.target.value.slice(0, 10000))
+              }
+              disabled={submitting}
+              placeholder={"1. Open the dashboard\n2. Press ...\n3. The problem happens"}
+              className="mt-2 min-h-28 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 disabled:opacity-60"
+            />
+          </label>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Expected result
+              </span>
+              <textarea
+                value={form.expected_result}
+                onChange={(event) =>
+                  update("expected_result", event.target.value.slice(0, 10000))
+                }
+                disabled={submitting}
+                placeholder="What should have happened?"
+                className="mt-2 min-h-24 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 disabled:opacity-60"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-black uppercase tracking-[0.14em] text-white/45">
+                Actual result
+              </span>
+              <textarea
+                value={form.actual_result}
+                onChange={(event) =>
+                  update("actual_result", event.target.value.slice(0, 10000))
+                }
+                disabled={submitting}
+                placeholder="What actually happened?"
+                className="mt-2 min-h-24 w-full rounded-2xl border border-white/10 bg-black/30 p-4 text-sm font-semibold text-white outline-none placeholder:text-white/35 focus:border-pink-300/50 disabled:opacity-60"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-xs leading-5 text-white/55">
+            Browser, operating system and device type are added automatically
+            when the report is submitted. The signed-in administrator is recorded
+            by the Bug Tracker API.
+          </div>
+
+          <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+            <SecureLink
+              href="/Admin/BugTracker"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white/70 transition hover:bg-white/10 hover:text-white"
+            >
+              Open full Bug Tracker
+              <ArrowRight className="h-4 w-4" />
+            </SecureLink>
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-black text-white/70 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSubmit}
+                disabled={
+                  submitting ||
+                  !form.title.trim() ||
+                  !form.description.trim()
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-500 px-5 py-3 text-sm font-black text-white transition hover:bg-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Bug className="h-4 w-4" />
+                )}
+                {submitting ? "Submitting..." : "Submit bug report"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

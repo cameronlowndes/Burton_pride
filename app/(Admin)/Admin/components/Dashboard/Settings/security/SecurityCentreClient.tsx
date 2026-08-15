@@ -37,12 +37,7 @@ const TRUSTED_DEVICES_API =
 const SESSION_STATUS_API =
   "/api/admin/settings/security/session/status";
 
-/*
- * Security Centre destination routes.
- *
- * Keep the Security Centre as the single entry point and allow each
- * security feature to have its own focused page.
- */
+
 const SECURITY_ROUTES = {
   twoFactor:
     "/Admin/Dashboard/Settings/SecurityCentre/TwoFactor/Authenticator",
@@ -56,8 +51,6 @@ const SECURITY_ROUTES = {
   loginHistory:
     "/Admin/Dashboard/Settings/SecurityCentre/LoginHistory",
 
-  notifications:
-    "/Admin/Dashboard/Settings/SecurityCentre/Notifications",
 
   sessionTest:
     "/Admin/Dashboard/Settings/SecurityCentre/SessionTest",
@@ -1006,17 +999,7 @@ export default function SecurityCentreClient() {
               }
             />
 
-            <SecuritySettingCard
-              href={
-                SECURITY_ROUTES
-                  .notifications
-              }
-              title="Security notifications"
-              description="Review security alerts for new devices, credential changes, account changes and suspicious sign-ins."
-              icon={
-                BellRing
-              }
-            />
+         
 
             <SecuritySettingCard
               href={
