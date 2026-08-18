@@ -4074,7 +4074,7 @@ type LoginProductionReadinessItem = {
  * can inspect the UI contract without exposing any runtime secrets. It is not
  * sent to the authentication APIs and does not change authentication logic.
  */
-export const LOGIN_PRODUCTION_READINESS: LoginProductionReadinessItem[] = [
+const LOGIN_PRODUCTION_READINESS: LoginProductionReadinessItem[] = [
   {
     id: "accessibility-001",
     area: "Accessibility",
