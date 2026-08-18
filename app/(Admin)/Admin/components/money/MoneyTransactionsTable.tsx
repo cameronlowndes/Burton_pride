@@ -241,6 +241,16 @@ type MoneyTransactionSavedEventDetail = {
   budgetKey?: string | null;
   budgetLabel?: string | null;
   budgetMode?: "manual" | "auto" | string | null;
+
+  /*
+   * Receipt metadata emitted by MoneyTransactionForm after a successful save.
+   *
+   * The table uses this only to decide whether it needs one short follow-up
+   * refresh after an edited transaction receives a new receipt.
+   */
+  receiptFileCount?: number;
+  receiptFileNames?: string[];
+  receiptAddedDuringEdit?: boolean;
 };
 
 type RefundType = "money_received_back" | "money_sent_back";
@@ -388,7 +398,12 @@ const defaultVisibleColumns: Record<ColumnKey, boolean> = {
   payment: true,
   directDebit: true,
   bank: true,
-  receipt: false,
+
+  /*
+   * Keep receipts visible in the normal Money Tracker table by default.
+   * This makes a newly uploaded receipt immediately obvious after an edit.
+   */
+  receipt: true,
   finance: false,
   checked: true,
   actions: true,
@@ -2333,46 +2348,138 @@ export default function MoneyTransactionsTable({
   const [linkedStockOrdersError, setLinkedStockOrdersError] =
     useState("");
   const [manualRefreshing, setManualRefreshing] = useState(false);
-
-
-  /**
-   * Reload the table as soon as the transaction form reports a successful
-   * save. Manual budget choices are stored by the transaction API, and this
-   * refresh makes the selected budget appear in the table immediately.
-   *
-   * This is event-driven only: no polling, focus refresh or page reload.
-   */
+  const receiptRefreshTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    function handleTransactionSaved(event: Event) {
-      const detail = (event as CustomEvent<MoneyTransactionSavedEventDetail>)
-        .detail;
+    let cancelled = false;
 
+    async function refreshAfterTransactionSave(
+      detail: MoneyTransactionSavedEventDetail,
+    ) {
       if (!onRefreshTransactions) {
         return;
       }
 
-      void Promise.resolve(onRefreshTransactions()).catch((refreshError) => {
+      try {
+        /*
+         * First refresh:
+         * update the transaction row immediately after the save succeeds.
+         */
+        await Promise.resolve(onRefreshTransactions());
+
+        if (cancelled) {
+          return;
+        }
+
+        const receiptCount = Math.max(
+          0,
+          Number(detail.receiptFileCount || 0),
+        );
+
+        const needsReceiptFollowUpRefresh =
+          detail.receiptAddedDuringEdit === true && receiptCount > 0;
+
+        if (!needsReceiptFollowUpRefresh) {
+          return;
+        }
+
+        /*
+         * Editing + new receipt:
+         *
+         * The transaction row can become readable before the new attachment
+         * relation is returned by the next transaction query. A single
+         * immediate refresh can therefore briefly leave the row showing
+         * "Missing receipt".
+         *
+         * Run ONE short follow-up refresh. This is not polling and does not
+         * reload the page. It only reloads the transaction source once more.
+         */
+        if (receiptRefreshTimerRef.current) {
+          window.clearTimeout(receiptRefreshTimerRef.current);
+          receiptRefreshTimerRef.current = null;
+        }
+
+        receiptRefreshTimerRef.current = window.setTimeout(() => {
+          receiptRefreshTimerRef.current = null;
+
+          if (cancelled) {
+            return;
+          }
+
+          void Promise.resolve(onRefreshTransactions())
+            .then(() => {
+              if (cancelled) {
+                return;
+              }
+
+              setToast({
+                type: "success",
+                message:
+                  receiptCount === 1
+                    ? "Transaction updated and the new receipt is now loaded in the table."
+                    : `Transaction updated and ${receiptCount} new receipt files are now loaded in the table.`,
+              });
+            })
+            .catch((refreshError) => {
+              console.error(
+                "Money Transactions receipt follow-up refresh failed",
+                refreshError,
+                detail,
+              );
+
+              if (cancelled) {
+                return;
+              }
+
+              setToast({
+                type: "error",
+                message:
+                  "The transaction was updated, but the new receipt could not be reloaded in the table yet. Press Refresh table to try again.",
+              });
+            });
+        }, 650);
+      } catch (refreshError) {
         console.error(
           "Money Transactions table refresh after save failed",
           refreshError,
           detail,
         );
 
+        if (cancelled) {
+          return;
+        }
+
         setToast({
           type: "error",
           message:
             "The transaction was saved, but the table could not reload automatically. Press Refresh table to try again.",
         });
-      });
+      }
     }
 
-    window.addEventListener("money-transaction-saved", handleTransactionSaved);
+    function handleTransactionSaved(event: Event) {
+      const detail =
+        (event as CustomEvent<MoneyTransactionSavedEventDetail>).detail || {};
+
+      void refreshAfterTransactionSave(detail);
+    }
+
+    window.addEventListener(
+      "money-transaction-saved",
+      handleTransactionSaved,
+    );
 
     return () => {
+      cancelled = true;
+
       window.removeEventListener(
         "money-transaction-saved",
         handleTransactionSaved,
       );
+
+      if (receiptRefreshTimerRef.current) {
+        window.clearTimeout(receiptRefreshTimerRef.current);
+        receiptRefreshTimerRef.current = null;
+      }
     };
   }, [onRefreshTransactions]);
 

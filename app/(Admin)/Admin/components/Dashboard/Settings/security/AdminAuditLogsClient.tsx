@@ -45,20 +45,64 @@ type RiskLevel = "low" | "medium" | "high" | "critical";
 type AuditLog = {
   id: string;
   created_at: string;
+
+  /*
+   * Burton Pride Security Plan - Audit Identity Standard
+   *
+   * New fields are optional so the UI remains backwards-compatible while the
+   * server/database migration is rolled out. Authoritative values must be
+   * resolved by trusted server code, never supplied by the browser.
+   */
+  actor_type?:
+    | "authenticated_admin"
+    | "unauthenticated_attempt"
+    | "service"
+    | "system"
+    | string
+    | null;
+  admin_id?: string | null;
+  auth_user_id?: string | null;
   admin_email: string | null;
   admin_name: string | null;
   admin_role: string | null;
+
   action: string;
   area: string;
   route: string | null;
   method: string | null;
   status: string;
   risk_level: RiskLevel;
+
   target_type: string | null;
   target_id: string | null;
   target_label: string | null;
+
+  // Network context must be server-derived.
   ip_address: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+  network_context?: string | null;
+  location_source?: string | null;
+  location_checked_at?: string | null;
+
+  // Device/session context from the Security Plan audit standard.
+  trusted_device_id?: string | null;
+  device_name?: string | null;
+  device_type?: string | null;
+  browser?: string | null;
+  operating_system?: string | null;
   user_agent: string | null;
+  auth_session_ref?: string | null;
+  aal?: string | null;
+  mfa_method?: string | null;
+
+  // Safe change context for significant operations. Never include secrets.
+  before_data?: Record<string, unknown> | null;
+  after_data?: Record<string, unknown> | null;
+  changed_fields?: Record<string, unknown> | null;
+
   metadata: Record<string, unknown> | null;
 };
 
@@ -119,7 +163,17 @@ type SortKey =
   | "status";
 
 type SortDirection = "asc" | "desc";
-type ReviewMode = "all" | "security" | "stock_control" | "failed" | "my_activity";
+type ReviewMode =
+  | "all"
+  | "security"
+  | "high_risk"
+  | "authentication"
+  | "devices_sessions"
+  | "permissions_changes"
+  | "sensitive_exports"
+  | "failed"
+  | "stock_control"
+  | "my_activity";
 
 const DEFAULT_LIMIT = "150";
 const AUTO_REFRESH_MS = 30000;
@@ -140,9 +194,26 @@ const fallbackAreas = [
   "admin_portal",
   "security",
   "trusted_devices",
+  "sessions",
+  "mfa",
+  "permissions",
+  "security_centre",
+  "account_security",
+  "incident_response",
 ];
 
-const fallbackStatuses = ["success", "failed", "blocked", "error", "unknown"];
+const fallbackStatuses = [
+  "success",
+  "failed",
+  "blocked",
+  "error",
+  "rate_limited",
+  "challenge_created",
+  "revoked",
+  "changed",
+  "denied",
+  "unknown",
+];
 const fallbackMethods = ["CLIENT", "GET", "POST", "PATCH", "PUT", "DELETE"];
 
 const riskWeight: Record<RiskLevel, number> = {
@@ -183,6 +254,12 @@ const areaLabels: Record<string, string> = {
   admin_portal: "Admin Portal",
   security: "Security",
   trusted_devices: "Trusted Devices",
+  sessions: "Sessions",
+  mfa: "MFA",
+  permissions: "Permissions",
+  security_centre: "Security Centre",
+  account_security: "Account Security",
+  incident_response: "Incident Response",
 };
 
 function normalise(value: unknown) {
@@ -369,22 +446,78 @@ function getActionLabel(action: unknown) {
     trusted_device_revoked: "Trusted Device Revoked",
     trusted_device_limit_reached: "Trusted Device Limit Reached",
     admin_session_revoked: "Admin Session Revoked",
+
+    // Security Plan standard event names.
+    login_success: "Login Successful",
+    login_failed: "Login Failed",
+    login_rate_limited: "Login Rate Limited",
+    mfa_challenge_created: "MFA Challenge Created",
+    mfa_verify_failed: "MFA Verification Failed",
+    mfa_verify_success: "MFA Verification Successful",
+    mfa_resend_requested: "MFA Code Resend Requested",
+    mfa_resend_rate_limited: "MFA Resend Rate Limited",
+    new_device_detected: "New Device Detected",
+    trusted_device_added: "Trusted Device Added",
+    session_created: "Admin Session Created",
+    session_revoked: "Admin Session Revoked",
+    all_sessions_revoked: "All Admin Sessions Revoked",
+    permissions_changed: "Permissions Changed",
+    role_changed: "Administrator Role Changed",
+    mfa_reset: "MFA Reset",
+    mfa_factor_changed: "MFA Factor Changed",
+    password_changed: "Password Changed",
+    password_reset: "Password Reset",
+    sensitive_export_created: "Sensitive Export Created",
+    high_risk_action_requested: "High-Risk Action Requested",
+    high_risk_action_blocked: "High-Risk Action Blocked",
+    high_risk_action_completed: "High-Risk Action Completed",
+    step_up_required: "Step-Up Authentication Required",
+    step_up_failed: "Step-Up Authentication Failed",
+    step_up_success: "Step-Up Authentication Successful",
+    admin_account_disabled: "Administrator Account Disabled",
+    admin_account_reenabled: "Administrator Account Re-enabled",
+    security_setting_changed: "Security Setting Changed",
+    audit_logging_changed: "Audit Logging Configuration Changed",
+    account_recovery_changed: "Account Recovery Details Changed",
+    bulk_delete_requested: "Bulk Delete Requested",
+    bulk_delete_completed: "Bulk Delete Completed",
+    security_incident_opened: "Security Incident Opened",
+    security_incident_updated: "Security Incident Updated",
+    security_incident_closed: "Security Incident Closed",
+    backup_restore_started: "Backup Restore Started",
+    backup_restore_completed: "Backup Restore Completed",
   };
 
   return labels[key] || titleCase(action);
 }
 
 function getAdminLabel(log: AuditLog) {
-  const actorType = lower(log.metadata?.actor_type);
+  const actorType =
+    lower(log.actor_type) ||
+    lower(log.metadata?.actor_type);
 
   if (
     actorType === "unauthenticated_attempt" ||
-    (!log.admin_name && !log.admin_email && lower(log.area) === "auth")
+    (!log.admin_name &&
+      !log.admin_email &&
+      lower(log.area) === "auth")
   ) {
     return "Unauthenticated Login Attempt";
   }
 
-  return log.admin_name || log.admin_email || "System / Unresolved Admin";
+  if (actorType === "service") {
+    return log.admin_name || "Burton Pride Service";
+  }
+
+  if (actorType === "system") {
+    return log.admin_name || "Burton Pride System";
+  }
+
+  return (
+    log.admin_name ||
+    log.admin_email ||
+    "System / Unresolved Admin"
+  );
 }
 
 function getAuditActivitySummary(log: AuditLog) {
@@ -431,6 +564,204 @@ function getUserAgentSummary(userAgent: string | null) {
   return value.length > 80 ? `${value.slice(0, 80)}...` : value;
 }
 
+function getActorType(log: AuditLog) {
+  return (
+    lower(log.actor_type) ||
+    lower(log.metadata?.actor_type) ||
+    (log.admin_name || log.admin_email
+      ? "authenticated_admin"
+      : lower(log.area) === "auth"
+        ? "unauthenticated_attempt"
+        : "system")
+  );
+}
+
+function getApproximateLocation(log: AuditLog) {
+  const city =
+    normalise(log.city) ||
+    normalise(log.metadata?.city) ||
+    normalise(log.metadata?.approximate_city) ||
+    normalise(log.metadata?.approximateLocation);
+
+  const region =
+    normalise(log.region) ||
+    normalise(log.metadata?.region) ||
+    normalise(log.metadata?.approximate_region);
+
+  const country =
+    normalise(log.country) ||
+    normalise(log.metadata?.country) ||
+    normalise(log.metadata?.approximate_country);
+
+  const values = [city, region, country].filter(Boolean);
+
+  if (values.length === 0) {
+    return "Approximate location unavailable";
+  }
+
+  return Array.from(new Set(values)).join(", ");
+}
+
+function getDeviceSummary(log: AuditLog) {
+  const deviceName =
+    normalise(log.device_name) ||
+    normalise(log.metadata?.device_name) ||
+    normalise(log.metadata?.deviceLabel);
+
+  const deviceType =
+    normalise(log.device_type) ||
+    normalise(log.metadata?.device_type);
+
+  const browser =
+    normalise(log.browser) ||
+    normalise(log.metadata?.browser);
+
+  const os =
+    normalise(log.operating_system) ||
+    normalise(log.metadata?.operating_system) ||
+    normalise(log.metadata?.os);
+
+  const direct = [deviceName, deviceType, browser, os]
+    .filter(Boolean);
+
+  if (direct.length > 0) {
+    return Array.from(new Set(direct)).join(" · ");
+  }
+
+  return getUserAgentSummary(log.user_agent);
+}
+
+function getMfaAssurance(log: AuditLog) {
+  return (
+    normalise(log.aal) ||
+    normalise(log.metadata?.aal) ||
+    normalise(log.metadata?.mfa_assurance_level) ||
+    "Not recorded"
+  );
+}
+
+function getMfaMethod(log: AuditLog) {
+  return (
+    normalise(log.mfa_method) ||
+    normalise(log.metadata?.mfa_method) ||
+    normalise(log.metadata?.method) ||
+    "Not recorded"
+  );
+}
+
+function isSensitiveExportAction(action: unknown) {
+  const value = lower(action);
+
+  return (
+    value.includes("sensitive_export") ||
+    value.includes("exported_csv") ||
+    value.includes("exported_json") ||
+    (value.includes("export") &&
+      (value.includes("money") ||
+        value.includes("personal") ||
+        value.includes("audit")))
+  );
+}
+
+function isPermissionOrSecurityChange(action: unknown) {
+  const value = lower(action);
+
+  return (
+    value.includes("permission") ||
+    value.includes("role_changed") ||
+    value.includes("mfa_reset") ||
+    value.includes("mfa_factor_changed") ||
+    value.includes("password_changed") ||
+    value.includes("password_reset") ||
+    value.includes("security_setting") ||
+    value.includes("account_recovery") ||
+    value.includes("audit_logging") ||
+    value.includes("admin_account_disabled") ||
+    value.includes("admin_account_reenabled")
+  );
+}
+
+function isDeviceOrSessionEvent(action: unknown) {
+  const value = lower(action);
+
+  return (
+    value.includes("trusted_device") ||
+    value.includes("new_device") ||
+    value.includes("session_") ||
+    value.includes("all_sessions")
+  );
+}
+
+function isAuthenticationEvent(log: AuditLog) {
+  const action = lower(log.action);
+  const area = lower(log.area);
+
+  return (
+    area === "auth" ||
+    area === "mfa" ||
+    action.includes("login") ||
+    action.includes("mfa") ||
+    action.includes("two_factor") ||
+    action.includes("authenticator") ||
+    action.includes("step_up")
+  );
+}
+
+function isHighRiskSecurityEvent(log: AuditLog) {
+  const action = lower(log.action);
+  const risk = getRisk(log.risk_level);
+  const status = lower(log.status);
+
+  return (
+    risk === "high" ||
+    risk === "critical" ||
+    status === "blocked" ||
+    action.includes("high_risk") ||
+    action.includes("security_incident") ||
+    action.includes("identity_mismatch") ||
+    action.includes("session_mismatch") ||
+    action.includes("new_country") ||
+    action.includes("permission_denied")
+  );
+}
+
+function hasSecurityPlanIdentity(log: AuditLog) {
+  const actorType = getActorType(log);
+
+  if (actorType === "unauthenticated_attempt") {
+    return Boolean(actorType);
+  }
+
+  if (
+    actorType === "service" ||
+    actorType === "system"
+  ) {
+    return true;
+  }
+
+  return Boolean(
+    normalise(log.admin_id) ||
+      normalise(log.metadata?.admin_id) ||
+      normalise(log.auth_user_id) ||
+      normalise(log.metadata?.auth_user_id),
+  );
+}
+
+function hasSecurityPlanNetworkContext(log: AuditLog) {
+  return Boolean(
+    normalise(log.ip_address) &&
+      (
+        normalise(log.city) ||
+        normalise(log.region) ||
+        normalise(log.country) ||
+        normalise(log.metadata?.city) ||
+        normalise(log.metadata?.region) ||
+        normalise(log.metadata?.country) ||
+        normalise(log.metadata?.approximateLocation)
+      ),
+  );
+}
+
 function getSecurityMeaning(log: AuditLog) {
   const action = lower(log.action);
   const status = lower(log.status);
@@ -470,6 +801,36 @@ function getSecurityMeaning(log: AuditLog) {
 
   if (action.includes("identity_mismatch") || action.includes("session_mismatch")) {
     return "The security identity or pending session did not match what the server expected.";
+  }
+
+  if (action.includes("sensitive_export")) {
+    return "A sensitive dataset was exported. Confirm the export was authorised and that recent strong authentication was present where required.";
+  }
+
+  if (action.includes("permissions_changed") || action.includes("role_changed")) {
+    return "Administrator permissions or role changed. Review the actor, target, before/after values and step-up assurance.";
+  }
+
+  if (
+    action.includes("mfa_reset") ||
+    action.includes("mfa_factor_changed")
+  ) {
+    return "MFA security was changed. The Security Plan treats this as a high-risk action requiring recent re-authentication and full auditing.";
+  }
+
+  if (
+    action.includes("session_revoked") ||
+    action.includes("all_sessions_revoked")
+  ) {
+    return "One or more administrator sessions were revoked as a security action.";
+  }
+
+  if (action.includes("high_risk_action_blocked")) {
+    return "A high-risk operation was stopped because the required security assurance was not satisfied.";
+  }
+
+  if (action.includes("step_up")) {
+    return "Recent strong authentication was requested or completed for a high-risk operation.";
   }
 
   if (status === "blocked") {
@@ -516,13 +877,37 @@ function redactAuditLog(log: AuditLog): AuditLog {
     ...log,
     ip_address: log.ip_address ? "REDACTED" : null,
     user_agent: log.user_agent ? "REDACTED" : null,
+    city: log.city ? "REDACTED" : log.city,
+    region: log.region ? "REDACTED" : log.region,
+    country: log.country ? "REDACTED" : log.country,
+    country_code: log.country_code ? "REDACTED" : log.country_code,
+    network_context:
+      log.network_context ? "REDACTED" : log.network_context,
+    auth_session_ref:
+      log.auth_session_ref ? "REDACTED" : log.auth_session_ref,
+    trusted_device_id:
+      log.trusted_device_id ? "REDACTED" : log.trusted_device_id,
     metadata: log.metadata
       ? {
           ...log.metadata,
           client_ip:
             "client_ip" in log.metadata ? "REDACTED" : undefined,
+          ip_address:
+            "ip_address" in log.metadata ? "REDACTED" : undefined,
           user_agent:
             "user_agent" in log.metadata ? "REDACTED" : undefined,
+          city:
+            "city" in log.metadata ? "REDACTED" : undefined,
+          region:
+            "region" in log.metadata ? "REDACTED" : undefined,
+          country:
+            "country" in log.metadata ? "REDACTED" : undefined,
+          auth_session_ref:
+            "auth_session_ref" in log.metadata ? "REDACTED" : undefined,
+          session_id:
+            "session_id" in log.metadata ? "REDACTED" : undefined,
+          trusted_device_id:
+            "trusted_device_id" in log.metadata ? "REDACTED" : undefined,
         }
       : null,
   };
@@ -532,6 +917,9 @@ function downloadCsv(logs: AuditLog[], redactSensitive = false) {
   const exportLogs = redactSensitive ? logs.map(redactAuditLog) : logs;
   const headers: Array<keyof AuditLog | "metadata_json"> = [
     "created_at",
+    "actor_type",
+    "admin_id",
+    "auth_user_id",
     "admin_email",
     "admin_name",
     "admin_role",
@@ -545,7 +933,18 @@ function downloadCsv(logs: AuditLog[], redactSensitive = false) {
     "target_id",
     "target_label",
     "ip_address",
+    "city",
+    "region",
+    "country",
+    "trusted_device_id",
+    "device_name",
+    "device_type",
+    "browser",
+    "operating_system",
     "user_agent",
+    "auth_session_ref",
+    "aal",
+    "mfa_method",
     "metadata_json",
   ];
 
@@ -620,6 +1019,30 @@ async function reportAuditEvent(input: AuditReportInput) {
 
 function makeToastId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function SecurityPlanMetric({
+  label,
+  value,
+  helper,
+}: {
+  label: string;
+  value: string | number;
+  helper: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-black text-white">
+        {value}
+      </p>
+      <p className="mt-2 text-xs leading-5 text-white/42">
+        {helper}
+      </p>
+    </div>
+  );
 }
 
 function StatCard({
@@ -1250,6 +1673,41 @@ export default function AdminAuditLogsClient() {
       }
 
       if (
+        reviewMode === "high_risk" &&
+        !isHighRiskSecurityEvent(log)
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "authentication" &&
+        !isAuthenticationEvent(log)
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "devices_sessions" &&
+        !isDeviceOrSessionEvent(log.action)
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "permissions_changes" &&
+        !isPermissionOrSecurityChange(log.action)
+      ) {
+        return false;
+      }
+
+      if (
+        reviewMode === "sensitive_exports" &&
+        !isSensitiveExportAction(log.action)
+      ) {
+        return false;
+      }
+
+      if (
         reviewMode === "stock_control" &&
         !(
           logArea === "stock_control" ||
@@ -1276,6 +1734,9 @@ export default function AdminAuditLogsClient() {
       if (query) {
         const haystack = [
           log.id,
+          log.actor_type,
+          log.admin_id,
+          log.auth_user_id,
           log.admin_email,
           log.admin_name,
           log.admin_role,
@@ -1289,7 +1750,22 @@ export default function AdminAuditLogsClient() {
           log.target_id,
           log.target_label,
           log.ip_address,
+          log.city,
+          log.region,
+          log.country,
+          log.country_code,
+          log.trusted_device_id,
+          log.device_name,
+          log.device_type,
+          log.browser,
+          log.operating_system,
           log.user_agent,
+          log.auth_session_ref,
+          log.aal,
+          log.mfa_method,
+          stringifyDetails(log.before_data),
+          stringifyDetails(log.after_data),
+          stringifyDetails(log.changed_fields),
           stringifyDetails(log.metadata),
         ]
           .join(" ")
@@ -1393,6 +1869,26 @@ export default function AdminAuditLogsClient() {
         failedOrBlocked * 3,
     );
 
+    const securityPlanIdentityReady = source.filter(
+      hasSecurityPlanIdentity,
+    ).length;
+
+    const securityPlanNetworkReady = source.filter(
+      hasSecurityPlanNetworkContext,
+    ).length;
+
+    const deviceSessionEvents = source.filter(
+      (log) => isDeviceOrSessionEvent(log.action),
+    ).length;
+
+    const permissionChangeEvents = source.filter(
+      (log) => isPermissionOrSecurityChange(log.action),
+    ).length;
+
+    const sensitiveExportEvents = source.filter(
+      (log) => isSensitiveExportAction(log.action),
+    ).length;
+
     return {
       total: source.length,
       critical,
@@ -1407,6 +1903,11 @@ export default function AdminAuditLogsClient() {
       uniqueAdmins,
       uniqueIps,
       latestCriticalOrHigh,
+      securityPlanIdentityReady,
+      securityPlanNetworkReady,
+      deviceSessionEvents,
+      permissionChangeEvents,
+      sensitiveExportEvents,
     };
   }, [visibleLogs]);
 
@@ -1497,9 +1998,10 @@ export default function AdminAuditLogsClient() {
     addToast({ tone: "success", message: `CSV exported with ${visibleLogs.length} logs.` });
 
     void reportAuditEvent({
-      action: "audit_logs_exported_csv",
+      action: "sensitive_export_created",
+      area: "audit_logs",
       status: "success",
-      risk_level: "medium",
+      risk_level: redactSensitiveExports ? "medium" : "high",
       metadata: {
         exported_count: visibleLogs.length,
         filters_active: hasFilters,
@@ -1513,9 +2015,10 @@ export default function AdminAuditLogsClient() {
     addToast({ tone: "success", message: `JSON exported with ${visibleLogs.length} logs.` });
 
     void reportAuditEvent({
-      action: "audit_logs_exported_json",
+      action: "sensitive_export_created",
+      area: "audit_logs",
       status: "success",
-      risk_level: "medium",
+      risk_level: redactSensitiveExports ? "medium" : "high",
       metadata: {
         exported_count: visibleLogs.length,
         filters_active: hasFilters,
@@ -1661,10 +2164,11 @@ export default function AdminAuditLogsClient() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
-                Review login attempts, two-step verification, new-device checks,
-                three-device-limit blocks, permission denials, exports and sensitive
-                admin activity across Burton Pride systems. Unauthenticated login
-                attempts are shown separately instead of being labelled as an unknown admin.
+                Security Plan aware review of login attempts, MFA, new-device checks,
+                trusted-device limits, sessions, permission changes, sensitive exports,
+                deletions and other high-risk administration across Burton Pride systems.
+                Unauthenticated login attempts are kept separate instead of being labelled
+                as an unknown administrator.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -1797,6 +2301,64 @@ export default function AdminAuditLogsClient() {
         />
       </div>
 
+      <section className="mb-6 rounded-[2rem] border border-purple-300/15 bg-purple-500/[0.07] p-5 shadow-xl backdrop-blur-xl">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-purple-300/15 bg-purple-500/10 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-purple-50/75">
+              <ShieldCheck className="h-4 w-4" />
+              August 2026 Security Plan
+            </div>
+
+            <h2 className="mt-3 text-xl font-black text-white">
+              Audit standard readiness
+            </h2>
+
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">
+              This page now understands the Security Plan event model. These figures
+              show whether the currently loaded records contain the new identity and
+              network context fields; missing fields must be fixed at the server/API
+              layer rather than filled in by the browser.
+            </p>
+          </div>
+
+          <Pill className="border-purple-300/15 bg-purple-500/10 text-purple-50">
+            Server trust required
+          </Pill>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <SecurityPlanMetric
+            label="Resolved identity"
+            value={`${stats.securityPlanIdentityReady}/${stats.total}`}
+            helper="Actor type plus server-resolved admin/auth identity where applicable."
+          />
+
+          <SecurityPlanMetric
+            label="Network context"
+            value={`${stats.securityPlanNetworkReady}/${stats.total}`}
+            helper="Server IP plus approximate city, region or country."
+          />
+
+          <SecurityPlanMetric
+            label="Device / sessions"
+            value={stats.deviceSessionEvents}
+            helper="Trusted-device, new-device and session lifecycle events."
+          />
+
+          <SecurityPlanMetric
+            label="Security changes"
+            value={stats.permissionChangeEvents}
+            helper="Permissions, roles, MFA, password and security configuration."
+          />
+
+          <SecurityPlanMetric
+            label="Sensitive exports"
+            value={stats.sensitiveExportEvents}
+            helper="Exports requiring security review and possible step-up assurance."
+          />
+        </div>
+      </section>
+
       {stats.latestCriticalOrHigh ? (
         <div className="mb-6 rounded-3xl border border-amber-300/20 bg-amber-500/10 p-5 shadow-xl backdrop-blur-xl">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1830,8 +2392,9 @@ export default function AdminAuditLogsClient() {
                 Review workspace
               </div>
               <p className="mt-2 text-sm leading-6 text-white/55">
-                Switch between all activity, security incidents, Stock Control,
-                unsuccessful actions and administrator-focused review.
+                Review the Security Plan areas directly: authentication, MFA,
+                high-risk activity, trusted devices and sessions, permission/security
+                changes, sensitive exports, failures and normal operational activity.
               </p>
             </div>
 
@@ -1839,8 +2402,13 @@ export default function AdminAuditLogsClient() {
               {[
                 ["all", "All activity"],
                 ["security", "Security review"],
-                ["stock_control", "Stock Control"],
+                ["high_risk", "High / critical"],
+                ["authentication", "Login & MFA"],
+                ["devices_sessions", "Devices & sessions"],
+                ["permissions_changes", "Security changes"],
+                ["sensitive_exports", "Sensitive exports"],
                 ["failed", "Failed / blocked"],
+                ["stock_control", "Stock Control"],
                 ["my_activity", "Admin activity"],
               ].map(([value, label]) => (
                 <button
@@ -2239,6 +2807,10 @@ export default function AdminAuditLogsClient() {
                             {titleCase(log.admin_role)}
                           </div>
                         ) : null}
+
+                        <div className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-white/25">
+                          {titleCase(getActorType(log))}
+                        </div>
                       </td>
 
                       <td className="px-5 py-5">
@@ -2283,12 +2855,38 @@ export default function AdminAuditLogsClient() {
                           <Globe2 className="h-4 w-4 text-white/35" />
                           <span>{getIpLabel(log.ip_address)}</span>
                         </div>
-                        <div className="mt-2 flex items-center gap-2 text-white/35">
-                          <Monitor className="h-4 w-4" />
-                          <span className="max-w-[12rem] truncate" title={getUserAgentSummary(log.user_agent)}>
-                            {getUserAgentSummary(log.user_agent)}
+
+                        <div
+                          className="mt-2 flex items-center gap-2 text-white/40"
+                          title={getApproximateLocation(log)}
+                        >
+                          <Globe2 className="h-4 w-4" />
+                          <span className="max-w-[14rem] truncate">
+                            {getApproximateLocation(log)}
                           </span>
                         </div>
+
+                        <div className="mt-2 flex items-center gap-2 text-white/35">
+                          <Monitor className="h-4 w-4" />
+                          <span
+                            className="max-w-[14rem] truncate"
+                            title={getDeviceSummary(log)}
+                          >
+                            {getDeviceSummary(log)}
+                          </span>
+                        </div>
+
+                        {getMfaAssurance(log) !== "Not recorded" ? (
+                          <div className="mt-2 flex items-center gap-2 text-white/35">
+                            <Fingerprint className="h-4 w-4" />
+                            <span>
+                              {getMfaAssurance(log)}
+                              {getMfaMethod(log) !== "Not recorded"
+                                ? ` · ${getMfaMethod(log)}`
+                                : ""}
+                            </span>
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -2303,10 +2901,11 @@ export default function AdminAuditLogsClient() {
         <div className="flex gap-3">
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-white/50" />
           <p>
-            Security note: exports and detailed log views are themselves reported
-            back into the audit system. Safe exports are enabled by default and
-            redact IP addresses and browser details. Only disable redaction when
-            an authorised security investigation genuinely requires those fields.
+            Security Plan note: this page can display and review the new audit fields,
+            but authoritative identity, IP/location, MFA assurance, device/session
+            references and critical security events must come from trusted server code.
+            Exports and detailed log views are themselves audited. Safe exports remain
+            enabled by default and redact network, device and session identifiers.
           </p>
         </div>
       </div>

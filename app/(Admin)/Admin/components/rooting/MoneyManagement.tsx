@@ -22,6 +22,7 @@ import {
   Home,
   LayoutDashboard,
   Loader2,
+  LogOut,
   Mail,
   Menu,
   PanelLeftClose,
@@ -40,10 +41,11 @@ import {
 } from "lucide-react";
 
 const MONEY_SIDEBAR_API = "/api/admin/money-sidebar";
+const ADMIN_LOGOUT_API = "/api/admin/settings/logout";
 const MONEY_ROOT = "/Admin/MoneyManagement";
 const ADMIN_DASHBOARD = "/Admin/Dashboard";
 const StockManagement = "/Admin/StockManagement";
-const EVENT_HUB = "/Admin/BurtonPrideEventHub";
+const EVENT_HUB = "/Admin/EventHub";
 const EMAIL_CENTRE = "/Admin/Email/Sending";
 const COLLAPSED_STORAGE_KEY = "burton_money_sidebar_collapsed";
 
@@ -176,7 +178,7 @@ const fallbackItems: SidebarItem[] = [
     icon: "settings",
     is_enabled: true,
     sort_order: 70,
-    is_coming_soon: true,
+    is_coming_soon: false,
   },
 ];
 
@@ -353,7 +355,7 @@ function getStatusErrorType(statusCode: number): SidebarErrorType {
 function getErrorTitle(type: SidebarErrorType) {
   switch (type) {
     case "network":
-      return "Money menu loaded with backup links";
+      return "Money menu is temporarily unavailable";
     case "unauthorized":
       return "You are not logged in as an admin";
     case "forbidden":
@@ -363,7 +365,7 @@ function getErrorTitle(type: SidebarErrorType) {
     case "method_not_allowed":
       return "Money menu API route does not export GET";
     case "server":
-      return "Money menu loaded with backup links";
+      return "Money menu is temporarily unavailable";
     case "invalid_json":
       return "Money menu API returned invalid JSON";
     case "invalid_response":
@@ -371,7 +373,7 @@ function getErrorTitle(type: SidebarErrorType) {
     case "api_error":
       return "Money menu API returned an error";
     default:
-      return "Money menu loaded with backup links";
+      return "Money menu is temporarily unavailable";
   }
 }
 
@@ -476,7 +478,7 @@ function buildSidebarError(args: {
   const fallbackMessage =
     err instanceof Error
       ? err.message
-      : "The money sidebar failed to load, so backup links are being shown.";
+      : "The Money Management menu could not be loaded. Standard navigation is being shown.";
 
   const message =
     serverError ||
@@ -612,6 +614,7 @@ export default function MoneyManagementSidebar({
   const [reloadKey, setReloadKey] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     try {
@@ -777,6 +780,52 @@ export default function MoneyManagementSidebar({
     return current?.label || "Home";
   }, [activeHref, enabledItems]);
 
+  const handleSignOut = useCallback(async () => {
+    if (signingOut) return;
+
+    setSigningOut(true);
+
+    try {
+      const response = await fetch(ADMIN_LOGOUT_API, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      /*
+       * Always continue to the login page. The server logout route is designed
+       * to clear the authenticated admin session while preserving the trusted
+       * device cookie.
+       *
+       * Log an unexpected response only in development so production users do
+       * not receive internal authentication details.
+       */
+      if (!response.ok && process.env.NODE_ENV === "development") {
+        const responseText = await response.text().catch(() => "");
+
+        console.error("Admin logout request failed:", {
+          status: response.status,
+          statusText: response.statusText,
+          response: responseText.slice(0, 500),
+        });
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("Admin logout request failed:", error);
+      }
+    } finally {
+      /*
+       * A hard navigation is intentional here. It removes any client-side
+       * Money Management state from memory after the authenticated cookies
+       * have been cleared.
+       */
+      window.location.replace("/Admin/Login?loggedOut=1");
+    }
+  }, [signingOut]);
+
   function retryLoadingMenu() {
     setReloadKey((value) => value + 1);
   }
@@ -844,6 +893,8 @@ export default function MoneyManagementSidebar({
           setSearchQuery={setSearchQuery}
           collapsed={desktopCollapsed}
           onToggleCollapsed={toggleDesktopCollapsed}
+          signingOut={signingOut}
+          onSignOut={handleSignOut}
         />
       </aside>
 
@@ -877,7 +928,7 @@ export default function MoneyManagementSidebar({
           aria-modal="true"
           aria-label="Money Management navigation menu"
           className={clsx(
-            "absolute right-0 top-0 flex h-dvh w-80 max-w-[86vw] flex-col overflow-hidden border-l border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-transform overscroll-contain",
+            "absolute right-0 top-0 flex h-dvh w-80 max-w-[86vw] min-w-0 flex-col overflow-hidden border-l border-white/10 bg-gradient-to-b from-pink-600 via-purple-700 to-blue-700 text-white shadow-2xl transition-transform overscroll-contain",
             open ? "translate-x-0" : "translate-x-full"
           )}
         >
@@ -910,7 +961,7 @@ export default function MoneyManagementSidebar({
             />
           </div>
 
-          <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [-webkit-overflow-scrolling:touch]">
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [-webkit-overflow-scrolling:touch]">
             {loading && <SidebarLoading />}
 
             {!loading && loadError ? (
@@ -940,6 +991,12 @@ export default function MoneyManagementSidebar({
               })}
 
             <UtilityLinks mobile />
+
+            <SidebarLogoutButton
+              signingOut={signingOut}
+              onSignOut={handleSignOut}
+              mobile
+            />
 
             <div className="pb-8 pt-6 text-xs font-medium text-white/70">
               Burton Pride C.I.C
@@ -980,6 +1037,8 @@ function DesktopSidebar({
   setSearchQuery,
   collapsed,
   onToggleCollapsed,
+  signingOut,
+  onSignOut,
 }: {
   activeHref: string;
   items: SidebarItem[];
@@ -990,6 +1049,8 @@ function DesktopSidebar({
   setSearchQuery: (value: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  signingOut: boolean;
+  onSignOut: () => void | Promise<void>;
 }) {
   return (
     <div
@@ -1048,7 +1109,7 @@ function DesktopSidebar({
 
       <nav
         className={clsx(
-          "min-h-0 flex-1 space-y-2 overflow-y-auto pr-1",
+          "min-h-0 min-w-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
           collapsed ? "mt-6 pr-0" : "mt-8"
         )}
         aria-label="Money Management navigation"
@@ -1091,15 +1152,21 @@ function DesktopSidebar({
       </nav>
 
       <div className="mt-auto shrink-0 border-t border-white/15 pt-5">
+        <SidebarLogoutButton
+          signingOut={signingOut}
+          onSignOut={onSignOut}
+          collapsed={collapsed}
+        />
+
         {collapsed ? (
           <div
             title="Burton Pride C.I.C"
-            className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-black text-white/70"
+            className="mt-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-black text-white/70"
           >
             BP
           </div>
         ) : (
-          <div>
+          <div className="mt-4">
             <div className="text-xs font-black uppercase tracking-[0.18em] text-white/50">
               Burton Pride
             </div>
@@ -1192,7 +1259,7 @@ function SidebarErrorBox({
       <button
         type="button"
         onClick={onRetry}
-        title="Money menu loaded with backup links. Retry."
+        title="Money menu is temporarily unavailable. Retry."
         className="flex h-11 w-11 items-center justify-center rounded-2xl border border-amber-300/25 bg-amber-500/15 text-amber-50"
       >
         <AlertTriangle className="h-5 w-5" />
@@ -1513,6 +1580,64 @@ function MobileMoneyLink({
   );
 }
 
+function SidebarLogoutButton({
+  signingOut,
+  onSignOut,
+  collapsed = false,
+  mobile = false,
+}: {
+  signingOut: boolean;
+  onSignOut: () => void | Promise<void>;
+  collapsed?: boolean;
+  mobile?: boolean;
+}) {
+  const label = signingOut ? "Logging out..." : "Log out";
+
+  return (
+    <div
+      className={clsx(
+        mobile && "mt-5 border-t border-white/15 pt-5",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => void onSignOut()}
+        disabled={signingOut}
+        aria-busy={signingOut}
+        aria-label={label}
+        title={collapsed ? label : undefined}
+        className={clsx(
+          "group flex items-center rounded-2xl border border-red-200/20 bg-red-500/15 text-sm font-black text-red-50 shadow-sm transition hover:bg-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-100/60 disabled:cursor-wait disabled:opacity-70",
+          collapsed
+            ? "h-11 w-11 justify-center p-0"
+            : "w-full justify-between gap-3 px-4 py-3",
+        )}
+      >
+        <span
+          className={clsx(
+            "flex min-w-0 items-center gap-3",
+            collapsed && "justify-center",
+          )}
+        >
+          {signingOut ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+          ) : (
+            <LogOut className="h-4 w-4 shrink-0" />
+          )}
+
+          {!collapsed ? (
+            <span className="truncate">{label}</span>
+          ) : null}
+        </span>
+
+        {!collapsed && !signingOut ? (
+          <ChevronRight className="h-4 w-4 shrink-0 text-red-50/60 transition group-hover:translate-x-0.5" />
+        ) : null}
+      </button>
+    </div>
+  );
+}
+
 function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
   return (
     <div
@@ -1525,7 +1650,7 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
         Other admin apps
       </p>
 
-      <div className="grid gap-2">
+      <div className="grid min-w-0 gap-2">
         <UtilityLink href={ADMIN_DASHBOARD} icon={Home}>
           Back to Admin Portal
         </UtilityLink>
@@ -1562,7 +1687,7 @@ function UtilityLink({
       href={href}
       target={newTab ? "_blank" : undefined}
       rel={newTab ? "noopener noreferrer" : undefined}
-      className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-black text-white transition hover:bg-white/10"
+      className="flex min-w-0 w-full items-center justify-between gap-3 overflow-hidden rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-black text-white transition hover:bg-white/10"
     >
       <span className="flex min-w-0 items-center gap-3">
         <Icon className="h-4 w-4 shrink-0 text-white/70" />
