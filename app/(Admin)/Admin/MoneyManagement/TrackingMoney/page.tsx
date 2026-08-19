@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
-import TrackingMoney from "../../components/money/TrackingMoney/TrackingMoneyClient";
+import TrackingMoneyClient from "../../components/money/TrackingMoney/TrackingMoneyClient";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export const metadata: Metadata = {
-  title: "Tracking Money   | Burton Pride Admin",
-  description:
-    "This page is the Tracking Money page.",
+  title: "Tracking Money | Burton Pride Admin",
+  description: "This page is the Burton Pride Tracking Money page.",
 
   robots: {
     index: false,
@@ -14,6 +16,6 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DocumentsPage() {
-  return <TrackingMoney />;
+export default function TrackingMoneyPage() {
+  return <TrackingMoneyClient />;
 }

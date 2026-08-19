@@ -1,11 +1,14 @@
+
 import type { Metadata } from "next";
 
-import TrackingMoney from "../components/money/WelcomePage/WelcomePageClient";
+import WelcomePageClient from "../components/money/WelcomePage/WelcomePageClient";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Welcome To Burton Pride Money Management App",
   description:
-    "This page is Welcome page for the money management app for Burton Pride",
+    "Welcome page for the Burton Pride Money Management app.",
 
   robots: {
     index: false,
@@ -14,6 +17,6 @@ export const metadata: Metadata = {
   },
 };
 
-export default function DocumentsPage() {
-  return <TrackingMoney />;
+export default function MoneyManagementWelcomePage() {
+  return <WelcomePageClient />;
 }

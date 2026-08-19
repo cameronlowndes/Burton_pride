@@ -8,30 +8,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function MoneyManagementHomePage() {
-  let admin = null;
+  const admin = await getCurrentAdmin();
 
-  /*
-   * Do not allow a missing/expired admin session to crash this page
-   * with a 401.
-   *
-   * getCurrentAdmin() may return null when the user is signed out.
-   * If it throws because the Supabase session has expired, we also
-   * treat that as "not signed in" rather than breaking the page.
-   */
-  try {
-    admin = await getCurrentAdmin();
-  } catch (error) {
-    console.error(
-      "Money Management: unable to resolve current admin session:",
-      error,
-    );
-
-    admin = null;
-  }
-
-  const userName =
-    admin?.email ||
-    "Money tracker user";
+  const userName = admin?.email || "Money tracker user";
 
   return (
     <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
@@ -125,14 +104,8 @@ export default async function MoneyManagementHomePage() {
 
               <div className="mt-3">
                 <MoneyManagementBugReporter
-                  reporterName={
-                    admin?.email ||
-                    ""
-                  }
-                  reporterEmail={
-                    admin?.email ||
-                    ""
-                  }
+                  reporterName={admin.email || ""}
+                  reporterEmail={admin.email || ""}
                 />
               </div>
             </div>
