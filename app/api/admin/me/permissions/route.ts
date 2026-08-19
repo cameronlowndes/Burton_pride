@@ -14,7 +14,6 @@ const ROUTE_NAME = "GET /api/admin/me/permissions";
 const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
 const REQUIRED_AAL = "aal2";
 const MAX_TRUSTED_DEVICES = 3;
-const REQUIRED_PORTAL_PERMISSION = "admin:dashboard:view" as const;
 
 
 const ALL_PERMISSION_KEYS = [
@@ -123,7 +122,6 @@ type DenialReason =
   | "unauthorized"
   | "mfa_required"
   | "admin_not_authorized"
-  | "portal_permission_required"
   | "trusted_device_required"
   | "trusted_device_limit_violation"
   | "session_revoked"
@@ -273,7 +271,6 @@ function denied(
     unauthorized: "Your admin session is not valid.",
     mfa_required: "Multi-factor authentication is required.",
     admin_not_authorized: "This account is not authorised for the Admin Portal.",
-    portal_permission_required: "You do not have permission to access the Admin Portal.",
     trusted_device_required:
       "This device must be verified before Admin Portal access is allowed.",
     trusted_device_limit_violation:
@@ -524,26 +521,21 @@ export async function GET(): Promise<NextResponse> {
     }
 
     /*
-     * 4. EXPLICIT PERMISSIONS ONLY
-     * No role wildcard and no automatic dashboard permission are granted.
+     * 4. RESOLVE THIS ADMIN'S EXPLICIT PERMISSIONS
+     *
+     * This endpoint is a permission-context endpoint shared by the Admin Portal
+     * and the Money Management App. It must not require
+     * "admin:dashboard:view" just to return the signed-in admin's own
+     * permissions, otherwise a money-only admin receives a 403 while the Money
+     * Management sidebar is loading.
+     *
+     * Access to individual applications/routes must still be enforced by those
+     * applications themselves (for example, Money Management should require
+     * "money:view").
+     *
+     * No role wildcard and no automatic permissions are granted here.
      */
     const permissions = permissionsToKeys(admin.permissions);
-
-    if (!permissions.includes(REQUIRED_PORTAL_PERMISSION)) {
-      await writeSecurityEvent({
-        actorType: "authenticated_admin",
-        authUserId: user.id,
-        admin,
-        action: "permission_context_denied",
-        result: "denied",
-        riskLevel: "medium",
-        context,
-        aal: currentAal,
-        metadata: { reason: "dashboard_permission_missing" },
-      });
-
-      return denied(403, "portal_permission_required");
-    }
 
     /* 5. ENFORCE MAXIMUM THREE ACTIVE TRUSTED DEVICES */
     const { count: activeTrustedDeviceCount, error: countError } =

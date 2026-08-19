@@ -13,17 +13,17 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import MoneyHeader from "../MoneyHeader";
-import MoneyStatsCards from "../MoneySummaryCards";
-import MoneyPageStatus from "../MoneyPageStatus";
-import MoneyDashboardAlerts from "../MoneyDashboardAlerts";
-import MoneyMainGrid from "../MoneyMainGrid";
-import MoneySponsorSection from "../MoneySponsorSection";
-import MoneyMonthlyBreakdown from "../MoneyMonthlyBreakdown";
-import MoneyYearLockPanel from "../MoneyYearLockPanel";
-import MoneyCarryForwardNote from "../MoneyCarryForwardNote";
-import MoneyPageModals from "../MoneyPageModals";
-import WebsitePaymentsSyncCard from "../WebsitePaymentsSyncCard";
+import MoneyHeader from "../../MoneyHeader";
+import MoneyStatsCards from "../../MoneySummaryCards";
+import MoneyPageStatus from "../../MoneyPageStatus";
+import MoneyDashboardAlerts from "../../MoneyDashboardAlerts";
+import MoneyMainGrid from "../../MoneyMainGrid";
+import MoneySponsorSection from "../../MoneySponsorSection";
+import MoneyMonthlyBreakdown from "../../MoneyMonthlyBreakdown";
+import MoneyYearLockPanel from "../../MoneyYearLockPanel";
+import MoneyCarryForwardNote from "../../MoneyCarryForwardNote";
+import MoneyPageModals from "../../MoneyPageModals";
+import WebsitePaymentsSyncCard from "../../WebsitePaymentsSyncCard";
 
 import { useMoneyTransactionsPage } from "@/hooks/useMoneyTransactionsPage";
 

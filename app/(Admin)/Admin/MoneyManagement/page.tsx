@@ -1,7 +1,7 @@
 
 import type { Metadata } from "next";
 
-import WelcomePageClient from "../components/money/WelcomePage/WelcomePageClient";
+import WelcomePageClient from "../components/money/Clients/WelcomePage/WelcomePageClient";
 
 export const dynamic = "force-dynamic";
 

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import TrackingMoneyClient from "../../components/money/TrackingMoney/TrackingMoneyClient";
+import TrackingMoneyClient from "../../components/money/Clients/TrackingMoney/TrackingMoneyClient";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
