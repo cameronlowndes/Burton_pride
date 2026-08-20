@@ -5,7 +5,7 @@ import { Moon, Sun } from "lucide-react";
 
 type SiteTheme = "light" | "dark";
 
-const STORAGE_KEY = "burton-pride-theme";
+const STORAGE_KEY = "burton-pride-site-theme";
 
 function getInitialTheme(): SiteTheme {
   if (typeof window === "undefined") {
@@ -46,23 +46,47 @@ function applyTheme(theme: SiteTheme) {
   root.classList.toggle("dark", isDarkMode);
 
   /*
-   * Burton Pride global theme classes.
-   *
-   * Light mode:
-   * theme-pride
-   *
-   * Dark mode:
-   * theme-dark
+   * Burton Pride theme classes.
    */
   root.classList.toggle("theme-pride", !isDarkMode);
   root.classList.toggle("theme-dark", isDarkMode);
 
+  /*
+   * Store current theme on the HTML element.
+   */
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
+
+  /*
+   * Match the website background immediately.
+   *
+   * Dark mode uses the new Admin Portal-style
+   * deep navy colour.
+   */
+  if (isDarkMode) {
+    root.style.backgroundColor = "#0c1119";
+  } else {
+    root.style.backgroundColor = "#ffffff";
+  }
 
   if (body) {
     body.classList.toggle("burton-pride-light", !isDarkMode);
     body.classList.toggle("burton-pride-dark", isDarkMode);
+
+    /*
+     * Remove any inline background previously applied
+     * before setting the current theme.
+     */
+    body.style.background = "";
+
+    if (isDarkMode) {
+      body.style.background =
+        "linear-gradient(180deg, #0c1119 0%, #0d111a 45%, #13182d 100%)";
+      body.style.color = "#f5f5f5";
+    } else {
+      body.style.background = "#ffffff";
+      body.style.color = "#0f172a";
+    }
   }
 }
 
@@ -76,6 +100,30 @@ export default function SiteThemeToggle() {
     setTheme(initialTheme);
     applyTheme(initialTheme);
     setMounted(true);
+
+    /*
+     * Keep multiple tabs/windows in sync.
+     */
+    function handleStorage(event: StorageEvent) {
+      if (event.key !== STORAGE_KEY) {
+        return;
+      }
+
+      if (event.newValue !== "light" && event.newValue !== "dark") {
+        return;
+      }
+
+      const nextTheme = event.newValue as SiteTheme;
+
+      setTheme(nextTheme);
+      applyTheme(nextTheme);
+    }
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   function toggleTheme() {
@@ -102,12 +150,17 @@ export default function SiteThemeToggle() {
       <div
         aria-hidden="true"
         className="
-          h-11 w-11
+          h-11
+          w-11
           rounded-full
-          border border-white/30
+          border
+          border-slate-200
           bg-white/90
           shadow-lg
           backdrop-blur-md
+
+          dark:border-white/15
+          dark:bg-[#0d111a]/90
         "
       />
     );
@@ -133,10 +186,10 @@ export default function SiteThemeToggle() {
         justify-center
         rounded-full
         border
-        border-white/30
+        border-slate-200
         bg-white/90
         text-slate-950
-        shadow-[0_8px_30px_rgba(0,0,0,0.25)]
+        shadow-[0_8px_30px_rgba(0,0,0,0.20)]
         backdrop-blur-md
         transition
         duration-200
@@ -149,11 +202,11 @@ export default function SiteThemeToggle() {
         focus-visible:ring-pink-300/70
 
         dark:border-white/15
-        dark:bg-black/90
+        dark:bg-[#0d111a]/95
         dark:text-white
         dark:shadow-[0_8px_30px_rgba(0,0,0,0.65)]
 
-        dark:hover:bg-zinc-900
+        dark:hover:bg-[#13182d]
       "
     >
       {isDarkMode ? (

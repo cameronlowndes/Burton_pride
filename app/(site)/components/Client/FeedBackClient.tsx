@@ -21,7 +21,7 @@ export default function FeedBack() {
 
   return (
     <motion.div
-      className="relative flex min-h-screen flex-col items-center overflow-hidden bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 p-8 pb-24 text-white sm:p-16"
+      className="relative flex min-h-screen flex-col items-center overflow-hidden bg-gradient-to-r  p-8 pb-24 text-white sm:p-16"
       initial="hidden"
       animate="visible"
       variants={containerVariants}

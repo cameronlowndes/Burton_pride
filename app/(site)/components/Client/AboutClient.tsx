@@ -1,170 +1,649 @@
 "use client";
 
-
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
 
+const fadeUp = {
+  hidden: {
+    opacity: 0,
+    y: 20,
+  },
+  visible: {
+    opacity: 1,
+    y: 0,
+  },
+};
+
 export default function AboutClient() {
+  const prefersReducedMotion = useReducedMotion();
+
+  const transition = prefersReducedMotion
+    ? { duration: 0 }
+    : {
+        duration: 0.55,
+        ease: "easeOut" as const,
+      };
+
   return (
-    <motion.div
-      className="flex min-h-screen flex-col items-center bg-gradient-to-r px-6 py-12 text-white sm:px-12"
-      initial="hidden"
+    <motion.main
+      className="
+        min-h-screen
+        px-4
+        pb-20
+        pt-28
+
+        text-slate-950
+        dark:text-white
+
+        sm:px-6
+        sm:pt-32
+
+        lg:px-8
+      "
+      initial={prefersReducedMotion ? false : "hidden"}
       animate="visible"
       variants={{
         hidden: {},
         visible: {
-          transition: { staggerChildren: 0.25 },
+          transition: prefersReducedMotion
+            ? {}
+            : {
+                staggerChildren: 0.08,
+              },
         },
       }}
     >
-      {/* About Section */}
-      <motion.section
-        className="mt-10 flex max-w-4xl flex-col items-center gap-8 text-center"
-        variants={{
-          hidden: { opacity: 0, y: 40 },
-          visible: { opacity: 1, y: 0 },
-        }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-      >
-        {/* Logo */}
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="h-[200px] w-[200px] overflow-hidden rounded-full border-4 border-white shadow-[0_0_35px_rgba(255,255,255,0.6)]"
+      <div className="mx-auto w-full max-w-5xl">
+        {/* =====================================================
+            INTRO
+            ===================================================== */}
+        <motion.section
+          variants={fadeUp}
+          transition={transition}
+          className="
+            flex
+            flex-col
+            items-center
+            text-center
+          "
         >
-          <Image
-            src="/image/Logo.png"
-            alt="Burton Pride Logo"
-            width={200}
-            height={200}
-            className="h-full w-full rounded-full object-cover"
+          <div
+            className="
+              h-28
+              w-28
+              overflow-hidden
+              rounded-full
+              border-4
+              border-white
+              shadow-2xl
+              shadow-pink-500/30
+
+              sm:h-36
+              sm:w-36
+            "
+          >
+            <Image
+              src="/image/Logo.png"
+              alt="Burton Pride logo"
+              width={144}
+              height={144}
+              priority
+              className="h-full w-full object-cover"
+            />
+          </div>
+
+          <p
+            className="
+              mt-6
+              text-sm
+              font-black
+              uppercase
+              tracking-[0.18em]
+
+              text-yellow-700
+              dark:text-yellow-300
+            "
+          >
+            Grassroots • Community Led
+          </p>
+
+          <h1
+            className="
+              mt-3
+              text-balance
+              text-4xl
+              font-black
+              leading-tight
+
+              text-slate-950
+              dark:text-white
+
+              sm:text-5xl
+
+              lg:text-6xl
+            "
+          >
+            About Burton Pride
+          </h1>
+
+          <p
+            className="
+              mx-auto
+              mt-5
+              max-w-3xl
+              text-base
+              leading-7
+
+              text-slate-800
+              dark:text-white/85
+
+              sm:text-lg
+              sm:leading-8
+            "
+          >
+            Burton Pride is a grassroots Pride organisation built by the
+            community, for the community. We are here to celebrate LGBTQIA+
+            people, support our local community and help create spaces where
+            everyone feels welcome.
+          </p>
+        </motion.section>
+
+        {/* =====================================================
+            WHO WE ARE
+            ===================================================== */}
+        <motion.section
+          variants={fadeUp}
+          transition={transition}
+          className="
+            mt-12
+            rounded-3xl
+            border
+            p-6
+            shadow-xl
+            backdrop-blur-md
+
+            border-white/40
+            bg-white/75
+            text-slate-950
+
+            sm:p-8
+
+            dark:border-white/10
+            dark:bg-[#111827]/85
+            dark:text-white
+          "
+        >
+          <h2
+            className="
+              text-3xl
+              font-black
+
+              text-slate-950
+              dark:text-white
+
+              sm:text-4xl
+            "
+          >
+            Who we are
+          </h2>
+
+          <div
+            className="
+              mt-6
+              space-y-5
+              text-base
+              leading-7
+
+              text-slate-800
+              dark:text-white/85
+
+              sm:text-lg
+              sm:leading-8
+            "
+          >
+            <p>
+              Burton Pride is proud to be a fully{" "}
+              <strong className="text-slate-950 dark:text-white">
+                grassroots-led organisation
+              </strong>
+              , built by the community for the community. We stand alongside
+              and support the{" "}
+              <strong className="text-slate-950 dark:text-white">
+                LGBTQIA+
+              </strong>{" "}
+              community in Burton and beyond, creating inclusive spaces where
+              people can feel safe, valued and respected.
+            </p>
+
+            <p>
+              Pride is about celebration, but for us it is also about standing
+              together. The world can feel uncertain at times, especially when
+              conversations around LGBTQIA+ rights and protections are changing.
+              We believe it is important that people in our community know they
+              are not alone.
+            </p>
+
+            <p>
+              There are ongoing discussions around rights and protections,
+              including the{" "}
+              <strong className="text-slate-950 dark:text-white">
+                Equality Act 2010
+              </strong>
+              . Burton Pride believes equality, dignity and respect should never
+              be taken for granted.
+            </p>
+
+            <p>
+              We will continue to speak up when equality is at risk and support
+              our community wherever we can. Burton Pride exists to celebrate
+              people, bring people together and help make Burton a more
+              welcoming place for everyone.
+            </p>
+          </div>
+        </motion.section>
+
+        {/* =====================================================
+            OUR MISSION
+            ===================================================== */}
+        <motion.section
+          variants={fadeUp}
+          transition={transition}
+          className="
+            mt-8
+            border-l-4
+            px-5
+            py-4
+
+            border-yellow-500
+
+            sm:px-7
+
+            dark:border-yellow-300
+          "
+        >
+          <h2
+            className="
+              text-3xl
+              font-black
+
+              text-slate-950
+              dark:text-white
+
+              sm:text-4xl
+            "
+          >
+            Our Mission
+          </h2>
+
+          <div
+            className="
+              mt-5
+              space-y-5
+              text-base
+              leading-7
+
+              text-slate-800
+              dark:text-white/85
+
+              sm:text-lg
+              sm:leading-8
+            "
+          >
+            <p>
+              Our mission is simple: to stand alongside the LGBTQIA+ community,
+              support people when they need it and help create safe, inclusive
+              spaces across Burton upon Trent.
+            </p>
+
+            <p>
+              We are proud to be rooted in our local community. What makes us
+              Pride is not just one event or one day of the year. It is the
+              people who show up, support each other and keep pushing for a
+              fairer and more inclusive community.
+            </p>
+
+            <p>
+              Burton Pride stands for equality, dignity and unity. We want every
+              LGBTQIA+ person to feel seen, respected and welcome.
+            </p>
+          </div>
+        </motion.section>
+
+        {/* =====================================================
+            WHAT WE STAND FOR
+            ===================================================== */}
+        <motion.section
+          variants={fadeUp}
+          transition={transition}
+          className="mt-12"
+        >
+          <h2
+            className="
+              text-center
+              text-3xl
+              font-black
+
+              text-slate-950
+              dark:text-white
+
+              sm:text-4xl
+            "
+          >
+            What we stand for
+          </h2>
+
+          <div
+            className="
+              mt-7
+              grid
+              gap-6
+
+              md:grid-cols-3
+            "
+          >
+            <div
+              className="
+                rounded-2xl
+                bg-white/55
+                p-5
+                backdrop-blur-sm
+
+                dark:bg-white/[0.04]
+              "
+            >
+              <h3
+                className="
+                  text-xl
+                  font-black
+
+                  text-pink-700
+                  dark:text-pink-300
+                "
+              >
+                Equality
+              </h3>
+
+              <p
+                className="
+                  mt-2
+                  leading-7
+
+                  text-slate-800
+                  dark:text-white/75
+                "
+              >
+                Everyone should be treated fairly and have the same rights,
+                protections and opportunities.
+              </p>
+            </div>
+
+            <div
+              className="
+                rounded-2xl
+                bg-white/55
+                p-5
+                backdrop-blur-sm
+
+                dark:bg-white/[0.04]
+              "
+            >
+              <h3
+                className="
+                  text-xl
+                  font-black
+
+                  text-purple-700
+                  dark:text-purple-300
+                "
+              >
+                Community
+              </h3>
+
+              <p
+                className="
+                  mt-2
+                  leading-7
+
+                  text-slate-800
+                  dark:text-white/75
+                "
+              >
+                Burton Pride belongs to the people who support it, attend it,
+                volunteer and help build it.
+              </p>
+            </div>
+
+            <div
+              className="
+                rounded-2xl
+                bg-white/55
+                p-5
+                backdrop-blur-sm
+
+                dark:bg-white/[0.04]
+              "
+            >
+              <h3
+                className="
+                  text-xl
+                  font-black
+
+                  text-blue-700
+                  dark:text-blue-300
+                "
+              >
+                Inclusion
+              </h3>
+
+              <p
+                className="
+                  mt-2
+                  leading-7
+
+                  text-slate-800
+                  dark:text-white/75
+                "
+              >
+                We want people to feel welcome, respected and able to be
+                themselves without fear of judgement.
+              </p>
+            </div>
+          </div>
+        </motion.section>
+
+        {/* =====================================================
+            GET INVOLVED
+            ===================================================== */}
+        <motion.section
+          variants={fadeUp}
+          transition={transition}
+          className="
+            relative
+            mt-14
+            overflow-hidden
+            rounded-3xl
+            bg-gradient-to-r
+            from-pink-500
+            via-purple-600
+            to-blue-600
+            px-6
+            py-10
+            text-center
+            text-white
+            shadow-2xl
+
+            sm:px-10
+            sm:py-12
+          "
+        >
+          <div
+            aria-hidden="true"
+            className="
+              pointer-events-none
+              absolute
+              -left-16
+              -top-16
+              h-48
+              w-48
+              rounded-full
+              bg-white/15
+              blur-3xl
+            "
           />
-        </motion.div>
 
-        {/* Title */}
-        <motion.h1
-          className="text-4xl font-extrabold text-white drop-shadow-lg sm:text-6xl"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-        >
-          About Burton Pride
-        </motion.h1>
+          <div
+            aria-hidden="true"
+            className="
+              pointer-events-none
+              absolute
+              -bottom-20
+              -right-16
+              h-56
+              w-56
+              rounded-full
+              bg-blue-300/20
+              blur-3xl
+            "
+          />
 
-        {/* Description */}
-        <motion.div
-          className="space-y-6 rounded-2xl border border-white/40 bg-white/10 p-6 text-lg leading-relaxed shadow-[0_8px_30px_rgba(0,0,0,0.4)] backdrop-blur-md transition hover:scale-[1.02] hover:shadow-[0_8px_40px_rgba(255,255,255,0.6)] sm:text-xl"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-        >
-          <p>
-            Burton Pride is proud to be a fully{" "}
-            <span className="font-semibold">grassroots-led organisation</span>,
-            built by the community for the community. We stand alongside and
-            support the <span className="font-semibold">LGBTQIA+</span>{" "}
-            community in Burton and beyond, creating inclusive spaces where
-            everyone feels safe, valued, and respected.
-          </p>
+          <div className="relative">
+            <h2
+              className="
+                text-3xl
+                font-black
+                text-white
 
-          <p>
-            In a time when the world feels like it is changing rapidly, and when
-            conversations around rights and protections are becoming increasingly
-            uncertain, we believe it is more important than ever to stand
-            together. There are growing discussions about potential changes to
-            the <span className="font-semibold">Equality Act 2010</span>,
-            legislation that provides essential protections against
-            discrimination for LGBTQIA+ people and many others across the UK.
-          </p>
+                sm:text-4xl
+              "
+            >
+              Get Involved
+            </h2>
 
-          <p>
-            As a grassroots Pride organisation, we believe it is our
-            responsibility to speak up when equality is at risk. Burton Pride
-            exists not only to celebrate love and diversity, but also to champion
-            fairness, dignity, and equal rights for all. We are here to unite our
-            community and make it clear that inclusion is not optional — it is
-            fundamental.
-          </p>
-        </motion.div>
-      </motion.section>
+            <p
+              className="
+                mx-auto
+                mt-4
+                max-w-3xl
+                text-base
+                leading-7
+                text-white/95
 
-      {/* Mission Section */}
-      <motion.section
-        className="mt-20 w-full max-w-4xl rounded-2xl border-2 border-white/40 bg-white/10 p-8 text-center shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-md transition hover:scale-[1.02] hover:shadow-[0_8px_40px_rgba(255,255,255,0.6)]"
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.8 }}
-      >
-        <h2 className="mb-6 text-3xl font-bold text-white drop-shadow-lg sm:text-4xl">
-          Our Mission
-        </h2>
+                sm:text-lg
+              "
+            >
+              Burton Pride is powered by the community. Whether you follow us
+              online, come along to an event, volunteer, donate or simply tell
+              someone about us, it all helps.
+            </p>
 
-        <p className="text-lg leading-relaxed sm:text-xl">
-          Burton Pride’s mission is to stand firmly alongside the{" "}
-          <span className="font-semibold">LGBTQIA+</span> community, especially
-          during challenging times. As conversations around rights, policies,
-          and protections continue to evolve, we recognise that many people
-          within our community may feel uncertain and concerned about their
-          future and the safeguards that protect them.
-          <br />
-          <br />
-          We are proud to be a fully{" "}
-          <span className="font-semibold">grassroots-led organisation</span>,
-          rooted in our local community. What makes us Pride is not just
-          celebration — it is solidarity. We exist to support, uplift, and stand
-          with the LGBTQIA+ community, ensuring that every individual feels
-          seen, valued, and protected.
-          <br />
-          <br />
-          Burton Pride stands for <span className="font-semibold">equality</span>
-          , <span className="font-semibold">dignity</span>, and{" "}
-          <span className="font-semibold">unity</span>. We will always stand side
-          by side with our community, advocating for fairness and creating safe,
-          inclusive spaces where everyone belongs.
-        </p>
-      </motion.section>
+            <p
+              className="
+                mx-auto
+                mt-4
+                max-w-3xl
+                text-base
+                leading-7
+                text-white/90
 
-      {/* Get Involved Section */}
-      <motion.section
-        className="mt-20 w-full max-w-4xl rounded-2xl border-2 border-white/40 bg-white/10 p-8 text-center shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-md transition hover:scale-[1.02] hover:shadow-[0_8px_40px_rgba(255,255,255,0.6)]"
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1 }}
-      >
-        <h2 className="mb-6 text-3xl font-bold text-white drop-shadow-lg sm:text-4xl">
-          Get Involved
-        </h2>
+                sm:text-lg
+              "
+            >
+              Every bit of support helps us keep building something positive
+              for LGBTQIA+ people in Burton.
+            </p>
 
-        <p className="mb-8 text-lg leading-relaxed sm:text-xl">
-          However you choose to get involved — whether that’s supporting us on
-          social media, turning up at our events, standing with us at a protest,
-          or making a donation to Burton Pride — every form of support truly
-          makes a difference.
-          <br />
-          <br />
-          As a fully grassroots{" "}
-          <span className="font-semibold">LGBTQIA+</span> organisation, our
-          strength comes from our community. We are incredibly proud of the
-          people who stand beside us, raise their voices, give their time, and
-          contribute what they can.
-          <br />
-          <br />
-          Every share, every donation, every protest attended, and every act of
-          solidarity helps us continue our work and protect what matters most —{" "}
-          <span className="font-semibold">equality</span>,{" "}
-          <span className="font-semibold">dignity</span>, and{" "}
-          <span className="font-semibold">inclusion</span> for all.
-        </p>
+            <div
+              className="
+                mt-7
+                flex
+                flex-col
+                justify-center
+                gap-3
 
-        <Link
-          href="/ContactUS"
-          className="inline-block rounded-full bg-white px-8 py-4 text-lg font-bold text-black shadow-lg transition hover:scale-105"
-        >
-          🌈 Contact Us
-        </Link>
-      </motion.section>
-    </motion.div>
+                sm:flex-row
+                sm:flex-wrap
+              "
+            >
+              <Link
+                href="/ContactUS"
+                className="
+                  inline-flex
+                  min-h-12
+                  items-center
+                  justify-center
+                  rounded-full
+                  bg-yellow-300
+                  px-7
+                  py-3
+                  text-sm
+                  font-black
+                  text-purple-950
+                  shadow-xl
+                  transition
+
+                  hover:scale-105
+                  hover:bg-white
+                "
+              >
+                🌈 Contact Us
+              </Link>
+
+              <Link
+                href="/JoinUS/Volunteer"
+                className="
+                  inline-flex
+                  min-h-12
+                  items-center
+                  justify-center
+                  rounded-full
+                  border
+                  border-white/30
+                  bg-white/15
+                  px-7
+                  py-3
+                  text-sm
+                  font-black
+                  text-white
+                  backdrop-blur-md
+                  transition
+
+                  hover:bg-white
+                  hover:text-purple-700
+                "
+              >
+                Volunteer
+              </Link>
+
+              <Link
+                href="/DonateToUs"
+                className="
+                  inline-flex
+                  min-h-12
+                  items-center
+                  justify-center
+                  rounded-full
+                  border
+                  border-white/30
+                  bg-white/15
+                  px-7
+                  py-3
+                  text-sm
+                  font-black
+                  text-white
+                  backdrop-blur-md
+                  transition
+
+                  hover:bg-white
+                  hover:text-pink-600
+                "
+              >
+                Donate
+              </Link>
+            </div>
+          </div>
+        </motion.section>
+      </div>
+    </motion.main>
   );
 }
