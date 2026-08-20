@@ -1,4 +1,4 @@
-import MoneyRefundTracker from "../../../components/money/Refunds/MoneyRefundTracker";
+import MoneyRefundTracker from "../../../components/money/Clients/Refunds/MoneyRefundTracker";
 import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";

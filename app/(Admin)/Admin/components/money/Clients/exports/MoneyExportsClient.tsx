@@ -65,6 +65,8 @@ type ExportItem = {
   colour: string;
   buttonColour: string;
   recommended?: boolean;
+  disabled?: boolean;
+  disabledMessage?: string;
 };
 
 type PageStatus =
@@ -408,6 +410,10 @@ function printSingleExportItem(
   selectedYear: number,
   defaultYear: number
 ) {
+  if (item.disabled || item.key === "bank-balance-checks") {
+    return;
+  }
+
   openPrintExport({
     exportKey: item.key,
     exportTitle: item.title,
@@ -870,6 +876,18 @@ export default function MoneyExportsClient({
   }, [exportItems, search, selectedCategory]);
 
   async function downloadExport(item: ExportItem) {
+    if (item.disabled || item.key === "bank-balance-checks") {
+      setStatus({
+        type: "error",
+        title: "Feature temporarily unavailable",
+        message:
+          item.disabledMessage ||
+          "This feature is currently being fixed and will be available again soon.",
+      });
+
+      return;
+    }
+
     const route = buildUrlWithYear(item.url, selectedYear);
     const expectedFileName = fileNameWithYear(
       item.fileName,
@@ -1308,7 +1326,7 @@ export default function MoneyExportsClient({
               {!easyMode && (
                 <div className="mt-5 flex flex-wrap gap-3">
                   <Link
-                    href="/Admin/MoneyManagement/TrackingMoney/Exports/Logs"
+                    href="/Admin/MoneyManagement/TrackingMoney/Exports/ExportLogs"
                     className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-black text-white transition hover:bg-white/15"
                   >
                     <History className="h-4 w-4" />
@@ -1441,7 +1459,7 @@ export default function MoneyExportsClient({
                 </button>
 
                 <Link
-                  href="/Admin/Money/ExportLogs"
+                  href="/Admin/MoneyManagement/TrackingMoney/Exports/ExportLogs"
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white transition hover:bg-white/15"
                 >
                   <History className="h-4 w-4" />
@@ -1544,6 +1562,8 @@ export default function MoneyExportsClient({
             const category = getCategory(item);
             const contents = getExportContents(item);
             const route = buildUrlWithYear(item.url, selectedYear);
+            const isDisabled =
+              item.disabled || item.key === "bank-balance-checks";
 
             return (
               <article
@@ -1629,34 +1649,88 @@ export default function MoneyExportsClient({
                 <div className="flex-1" />
 
                 <div className="money-print-button-area">
+                  {isDisabled && (
+                    <div className="relative mt-5 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
+
+                        <div className="min-w-0">
+                          <p className="text-sm font-black text-amber-100">
+                            Feature being fixed
+                          </p>
+
+                          <p className="mt-1 text-sm leading-6 text-white/70">
+                            {item.disabledMessage ||
+                              "This feature is currently being fixed and will be available again soon."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => downloadExport(item)}
-                    disabled={!!downloadingKey}
+                    onClick={() => {
+                      if (isDisabled) return;
+                      downloadExport(item);
+                    }}
+                    disabled={!!downloadingKey || isDisabled}
+                    aria-disabled={isDisabled}
+                    title={
+                      isDisabled
+                        ? "This feature is currently being fixed and will be available again soon."
+                        : undefined
+                    }
                     className={classNames(
                       "relative mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-lg transition disabled:cursor-not-allowed disabled:opacity-50",
-                      item.buttonColour
+                      isDisabled
+                        ? "border border-white/10 bg-slate-700/70 text-white/40"
+                        : item.buttonColour
                     )}
                   >
                     {isDownloading ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isDisabled ? (
+                      <AlertTriangle className="h-4 w-4" />
                     ) : (
                       <Download className="h-4 w-4" />
                     )}
 
-                    {isDownloading ? "Downloading..." : item.buttonText}
+                    {isDownloading
+                      ? "Downloading..."
+                      : isDisabled
+                        ? "Temporarily unavailable"
+                        : item.buttonText}
                   </button>
 
                   {!easyMode && (
                     <button
                       type="button"
-                      onClick={() =>
-                        printSingleExportItem(item, selectedYear, defaultYear)
+                      onClick={() => {
+                        if (isDisabled) return;
+
+                        printSingleExportItem(
+                          item,
+                          selectedYear,
+                          defaultYear
+                        );
+                      }}
+                      disabled={isDisabled}
+                      aria-disabled={isDisabled}
+                      title={
+                        isDisabled
+                          ? "This feature is currently being fixed and will be available again soon."
+                          : undefined
                       }
-                      className="relative mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-black text-white shadow-lg transition hover:bg-white/15"
+                      className={classNames(
+                        "relative mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black shadow-lg transition",
+                        isDisabled
+                          ? "cursor-not-allowed border-white/10 bg-white/5 text-white/30 opacity-50"
+                          : "border-white/10 bg-white/10 text-white hover:bg-white/15"
+                      )}
                     >
                       <Printer className="h-4 w-4" />
-                      Print version
+                      {isDisabled ? "Print unavailable" : "Print version"}
                     </button>
                   )}
                 </div>

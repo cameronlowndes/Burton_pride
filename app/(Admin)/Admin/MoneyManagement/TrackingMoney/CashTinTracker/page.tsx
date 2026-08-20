@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Cash Tracking",
   description:
-    "This is PAge for doing Cash pot day",
+    "This is Page for doing Cash pot day",
 
   robots: {
     index: false,
