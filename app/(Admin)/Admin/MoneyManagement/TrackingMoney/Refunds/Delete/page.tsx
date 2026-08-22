@@ -1,4 +1,4 @@
-import HiddenRefundsPageClient from "../../../../components/money/Refunds/Delete/HiddenRefundsPageClient";
+import HiddenRefundsPageClient from "../../../../components/money/Clients/Refunds/Delete/HiddenRefundsPageClient";
 import { requireAdmin } from "@/lib/adminPermissions";
 
 export const runtime = "nodejs";

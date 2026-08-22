@@ -1483,7 +1483,21 @@ async function createTransactionFromPayload({
   invoiceFiles: File[];
 }) {
   const title =
-    clean(payload.title);
+    clean(
+      payload.title ||
+      payload.transaction_title ||
+      payload.application_title
+    );
+
+  const transactionReference =
+    clean(
+      payload.transactionReference ||
+      payload.transaction_reference ||
+      payload.paymentReference ||
+      payload.payment_reference ||
+      payload.applicationReference ||
+      payload.application_reference
+    );
 
   const description =
     clean(payload.description);
@@ -1611,6 +1625,8 @@ async function createTransactionFromPayload({
 
         received: {
           title,
+          transactionReference:
+            transactionReference || null,
           type,
           amount:
             amountPounds,
@@ -1721,6 +1737,9 @@ async function createTransactionFromPayload({
 
   const insertData = {
     title,
+
+    transaction_reference:
+      transactionReference || null,
 
     description:
       cleanOrNull(description),
@@ -2628,6 +2647,34 @@ export async function POST(req: NextRequest) {
         clean(
           formData.get(
             "title"
+          ) ||
+          formData.get(
+            "transaction_title"
+          ) ||
+          formData.get(
+            "application_title"
+          )
+        ),
+
+      transactionReference:
+        clean(
+          formData.get(
+            "transactionReference"
+          ) ||
+          formData.get(
+            "transaction_reference"
+          ) ||
+          formData.get(
+            "paymentReference"
+          ) ||
+          formData.get(
+            "payment_reference"
+          ) ||
+          formData.get(
+            "applicationReference"
+          ) ||
+          formData.get(
+            "application_reference"
           )
         ),
 

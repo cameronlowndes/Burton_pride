@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -6,13 +7,38 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 
-import MoneyExportsClient from "../../../components/money/exports/MoneyExportsClient";
-import FundingReportExportButton from "../../../components/money/exports/FundingReportExportButton";
+import MoneyExportsClient from "../../../components/money/Clients/exports/MoneyExportsClient";
+import FundingReportExportButton from "../../../components/money/Clients/exports/FundingReportExportButton";
 import { requireAdmin } from "@/lib/adminPermissions";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export const metadata: Metadata = {
+  title: "Money Export Centre | Burton Pride Admin",
+  description:
+    "Private Burton Pride Money Management export centre for financial reports and accounting exports.",
+
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      nositelinkssearchbox: true,
+      "max-image-preview": "none",
+      "max-snippet": 0,
+      "max-video-preview": 0,
+    },
+  },
+
+  referrer: "no-referrer",
+};
 
 type ExportIconKey =
   | "archive"
@@ -64,6 +90,7 @@ function fundingTypeLabel(type?: string | null) {
   if (type === "grant") return "Grant";
   if (type === "loan") return "Loan";
   if (type === "other") return "Other funding";
+
   return "Sponsor";
 }
 
@@ -73,10 +100,15 @@ async function loadFundingRecords() {
     .select(
       "id, sponsor_name, contact_name, email, funding_type, agreed_amount_pence, received_amount_pence, is_active"
     )
-    .order("sponsor_name", { ascending: true });
+    .order("sponsor_name", {
+      ascending: true,
+    });
 
   if (error) {
-    console.error("Could not load funding records for export page:", error);
+    console.error(
+      "Could not load funding records for export page:",
+      error
+    );
 
     return {
       records: [] as FundingExportRecord[],
@@ -103,8 +135,10 @@ export default async function MoneyExportsPage() {
 
   const currentYear = new Date().getFullYear();
 
-  const { records: fundingRecords, error: fundingLoadError } =
-    await loadFundingRecords();
+  const {
+    records: fundingRecords,
+    error: fundingLoadError,
+  } = await loadFundingRecords();
 
   const exportItems: ExportItem[] = [
     {
@@ -118,7 +152,8 @@ export default async function MoneyExportsPage() {
       iconKey: "archive",
       colour:
         "border-emerald-400/30 bg-emerald-500/10 text-emerald-100 shadow-emerald-950/20",
-      buttonColour: "bg-emerald-400 text-emerald-950 hover:bg-emerald-300",
+      buttonColour:
+        "bg-emerald-400 text-emerald-950 hover:bg-emerald-300",
       recommended: true,
     },
     {
@@ -132,7 +167,8 @@ export default async function MoneyExportsPage() {
       iconKey: "report",
       colour:
         "border-blue-400/30 bg-blue-500/10 text-blue-100 shadow-blue-950/20",
-      buttonColour: "bg-blue-400 text-blue-950 hover:bg-blue-300",
+      buttonColour:
+        "bg-blue-400 text-blue-950 hover:bg-blue-300",
     },
     {
       key: "transaction-list",
@@ -145,7 +181,8 @@ export default async function MoneyExportsPage() {
       iconKey: "spreadsheet",
       colour:
         "border-cyan-400/30 bg-cyan-500/10 text-cyan-100 shadow-cyan-950/20",
-      buttonColour: "bg-cyan-400 text-cyan-950 hover:bg-cyan-300",
+      buttonColour:
+        "bg-cyan-400 text-cyan-950 hover:bg-cyan-300",
     },
     {
       key: "receipts",
@@ -158,7 +195,8 @@ export default async function MoneyExportsPage() {
       iconKey: "receipt",
       colour:
         "border-orange-400/30 bg-orange-500/10 text-orange-100 shadow-orange-950/20",
-      buttonColour: "bg-orange-400 text-orange-950 hover:bg-orange-300",
+      buttonColour:
+        "bg-orange-400 text-orange-950 hover:bg-orange-300",
     },
     {
       key: "audit-logs",
@@ -171,7 +209,8 @@ export default async function MoneyExportsPage() {
       iconKey: "history",
       colour:
         "border-purple-400/30 bg-purple-500/10 text-purple-100 shadow-purple-950/20",
-      buttonColour: "bg-purple-400 text-purple-950 hover:bg-purple-300",
+      buttonColour:
+        "bg-purple-400 text-purple-950 hover:bg-purple-300",
     },
     {
       key: "personal-funds",
@@ -184,7 +223,8 @@ export default async function MoneyExportsPage() {
       iconKey: "personal",
       colour:
         "border-pink-400/30 bg-pink-500/10 text-pink-100 shadow-pink-950/20",
-      buttonColour: "bg-pink-400 text-pink-950 hover:bg-pink-300",
+      buttonColour:
+        "bg-pink-400 text-pink-950 hover:bg-pink-300",
     },
     {
       key: "csv-import-history",
@@ -197,7 +237,8 @@ export default async function MoneyExportsPage() {
       iconKey: "upload",
       colour:
         "border-indigo-400/30 bg-indigo-500/10 text-indigo-100 shadow-indigo-950/20",
-      buttonColour: "bg-indigo-400 text-indigo-950 hover:bg-indigo-300",
+      buttonColour:
+        "bg-indigo-400 text-indigo-950 hover:bg-indigo-300",
     },
     {
       key: "bank-balance-checks",
@@ -210,7 +251,8 @@ export default async function MoneyExportsPage() {
       iconKey: "bank",
       colour:
         "border-teal-400/30 bg-teal-500/10 text-teal-100 shadow-teal-950/20",
-      buttonColour: "bg-teal-400 text-teal-950 hover:bg-teal-300",
+      buttonColour:
+        "bg-teal-400 text-teal-950 hover:bg-teal-300",
     },
     {
       key: "refunds",
@@ -246,14 +288,18 @@ export default async function MoneyExportsPage() {
             </h1>
 
             <p className="mt-3 max-w-5xl text-base text-white/70">
-              Download different reports from the money tracker. Use the
-              accountant pack if you want everything together in one ZIP file,
-              or use the smaller buttons for one specific report.
+              Download different reports from the money tracker.
+              Use the accountant pack if you want everything
+              together in one ZIP file, or use the smaller buttons
+              for one specific report.
             </p>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/10 p-4 text-sm text-white/70 shadow-2xl backdrop-blur-xl">
-            <div className="font-black text-white">Current export year</div>
+            <div className="font-black text-white">
+              Current export year
+            </div>
+
             <div className="mt-1 text-3xl font-black text-emerald-200">
               {currentYear}
             </div>
@@ -273,14 +319,18 @@ export default async function MoneyExportsPage() {
               </h2>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-white/65">
-                Use these buttons when you need a separate report for one
-                funding record. Each button uses the funding report API route
-                and sends the funding ID plus the year.
+                Use these buttons when you need a separate report
+                for one funding record. Each button uses the funding
+                report API route and sends the funding ID plus the
+                year.
               </p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm">
-              <div className="font-black text-white">Export year</div>
+              <div className="font-black text-white">
+                Export year
+              </div>
+
               <div className="mt-1 text-2xl font-black text-yellow-100">
                 {currentYear}
               </div>
@@ -292,24 +342,32 @@ export default async function MoneyExportsPage() {
               Could not load funding records from money_sponsors.
               {"\n"}
               {fundingLoadError.message}
-              {fundingLoadError.hint ? `\nHint: ${fundingLoadError.hint}` : ""}
-              {fundingLoadError.code ? `\nCode: ${fundingLoadError.code}` : ""}
+
+              {fundingLoadError.hint
+                ? `\nHint: ${fundingLoadError.hint}`
+                : ""}
+
+              {fundingLoadError.code
+                ? `\nCode: ${fundingLoadError.code}`
+                : ""}
             </div>
           )}
 
-          {!fundingLoadError && fundingRecords.length === 0 && (
-            <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/30 p-5 text-sm text-white/65">
-              No funding records found yet. Once sponsors, grants, loans or
-              other funding records are added, their individual export buttons
-              will show here.
-            </div>
-          )}
+          {!fundingLoadError &&
+            fundingRecords.length === 0 && (
+              <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/30 p-5 text-sm text-white/65">
+                No funding records found yet. Once sponsors,
+                grants, loans or other funding records are added,
+                their individual export buttons will show here.
+              </div>
+            )}
 
           {fundingRecords.length > 0 && (
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {fundingRecords.map((funding) => {
                 const name =
-                  funding.sponsor_name || "Unnamed funding record";
+                  funding.sponsor_name ||
+                  "Unnamed funding record";
 
                 const amount =
                   funding.received_amount_pence ??
@@ -327,7 +385,9 @@ export default async function MoneyExportsPage() {
                       </div>
 
                       <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-black text-white/70">
-                        {fundingTypeLabel(funding.funding_type)}
+                        {fundingTypeLabel(
+                          funding.funding_type
+                        )}
                       </span>
                     </div>
 

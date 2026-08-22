@@ -1,3 +1,18 @@
+/**
+ * Burton Pride Admin Portal
+ *
+ * CORRECT ROUTE:
+ *   app/api/admin/settings/login/route.ts
+ *
+ * This is the PASSWORD LOGIN endpoint.
+ * It accepts:
+ *   { email, password, next }
+ *
+ * Do NOT replace this file with the two-factor verify route.
+ * Two-factor verification belongs at:
+ *   app/api/admin/settings/login/two-factor/verify/route.ts
+ */
+
 import {
   createHash,
   randomBytes,
@@ -6,6 +21,7 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { Resend } from "resend";
+import { geolocation, ipAddress } from "@vercel/functions";
 
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
@@ -21,12 +37,18 @@ const ADMIN_ROLE_COOKIE = "burton_admin_role";
 const ADMIN_PERMISSIONS_COOKIE = "burton_admin_permissions";
 
 const PENDING_TWO_FACTOR_COOKIE = "burton_admin_2fa_pending";
+const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
+
 const SESSION_MAX_AGE = 60 * 60 * 12;
 const TWO_FACTOR_MAX_AGE = 60 * 10;
+const TRUSTED_DEVICE_MAX_AGE = 60 * 60 * 24 * 90;
+
 const MAX_TWO_FACTOR_ATTEMPTS = 5;
 const MAX_TWO_FACTOR_RESENDS = 3;
+const MAX_TRUSTED_DEVICES = 3;
 
 type TwoFactorMethod = "email" | "totp";
+type AuditRiskLevel = "low" | "medium" | "high" | "critical";
 
 type PendingCookie = {
   name: string;
@@ -60,6 +82,45 @@ type ChallengeRecord = {
   admin_id: string;
   method: TwoFactorMethod;
   expires_at: string;
+};
+
+type RequestSecurityContext = {
+  ipAddress: string;
+  ipHash: string | null;
+  userAgent: string;
+  userAgentHash: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  countryCode: string | null;
+  approximateLocation: string | null;
+  deviceLabel: string;
+};
+
+type TrustedDeviceRecord = {
+  id: string;
+  admin_id: string;
+  device_name?: string | null;
+  browser?: string | null;
+  operating_system?: string | null;
+  device_type?: string | null;
+  device_token_hash?: string | null;
+  revoked_at?: string | null;
+  last_seen_at?: string | null;
+};
+
+type DeviceSecurityState = {
+  supported: boolean;
+  newDevice: boolean;
+  deviceTrusted: boolean;
+  requiresDeviceApproval: boolean;
+  trustedDeviceCount: number;
+  maxTrustedDevices: number;
+  trustedDeviceId: string | null;
+  deviceLabel: string;
+  approximateLocation: string | null;
+  riskLevel: AuditRiskLevel;
+  riskReasons: string[];
 };
 
 function cleanString(value: unknown): string {
@@ -204,9 +265,21 @@ function setPendingTwoFactorCookie(
     value: pendingToken,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     maxAge: TWO_FACTOR_MAX_AGE,
+  });
+}
+
+function clearPendingTwoFactorCookie(response: NextResponse): void {
+  response.cookies.set({
+    name: PENDING_TWO_FACTOR_COOKIE,
+    value: "",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: 0,
   });
 }
 
@@ -232,6 +305,8 @@ function clearAdminCookies(response: NextResponse): void {
       maxAge: 0,
     });
   }
+
+  clearPendingTwoFactorCookie(response);
 }
 
 function createJsonResponse(
@@ -253,6 +328,7 @@ function genericFailed(
   pendingCookies: PendingCookie[],
   status = 401,
   reason = "sign_in_failed",
+  extra?: Record<string, unknown>,
 ): NextResponse {
   const response = createJsonResponse(
     {
@@ -260,6 +336,7 @@ function genericFailed(
       authenticated: false,
       message: "Sign in failed.",
       reason,
+      ...(extra || {}),
     },
     status,
     pendingCookies,
@@ -368,10 +445,445 @@ function preferredTwoFactorMethod(
     return preferred;
   }
 
+  // Prefer authenticator if both exist.
+  if (methods.includes("totp")) return "totp";
+
   return methods[0] ?? "email";
 }
 
-async function invalidateOldChallenges(adminId: string): Promise<void> {
+function firstHeader(
+  request: NextRequest,
+  names: string[],
+): string {
+  for (const name of names) {
+    const value = cleanString(request.headers.get(name));
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function getRequestIp(request: NextRequest): string {
+  /*
+   * Prefer Vercel's supported helper. It reads the platform-provided
+   * request IP headers and is more reliable on a Vercel deployment.
+   */
+  const vercelIp = cleanString(
+    ipAddress(request),
+  );
+
+  if (vercelIp) {
+    return vercelIp;
+  }
+
+  /*
+   * Fall back to common trusted proxy headers.
+   */
+  const direct = firstHeader(request, [
+    "cf-connecting-ip",
+    "x-real-ip",
+    "x-client-ip",
+  ]);
+
+  if (direct) {
+    return direct;
+  }
+
+  const forwarded = cleanString(
+    request.headers.get("x-forwarded-for"),
+  );
+
+  if (!forwarded) {
+    return "";
+  }
+
+  return cleanString(
+    forwarded.split(",")[0],
+  );
+}
+
+function decodeHeaderValue(value: string): string {
+  if (!value) return "";
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function detectDeviceLabel(userAgent: string): string {
+  const ua = userAgent.toLowerCase();
+
+  let browser = "Browser";
+  let os = "Device";
+
+  if (ua.includes("edg/")) browser = "Microsoft Edge";
+  else if (ua.includes("chrome/") && !ua.includes("chromium/")) {
+    browser = "Chrome";
+  } else if (ua.includes("firefox/")) browser = "Firefox";
+  else if (ua.includes("safari/") && !ua.includes("chrome/")) {
+    browser = "Safari";
+  }
+
+  if (ua.includes("windows")) os = "Windows";
+  else if (ua.includes("android")) os = "Android";
+  else if (ua.includes("iphone") || ua.includes("ipad")) os = "iOS";
+  else if (ua.includes("mac os") || ua.includes("macintosh")) os = "macOS";
+  else if (ua.includes("linux")) os = "Linux";
+
+  return `${browser} on ${os}`;
+}
+
+function buildApproximateLocation(
+  city: string,
+  region: string,
+  country: string,
+): string | null {
+  const parts = [city, region, country]
+    .map((item) => cleanString(item))
+    .filter(Boolean);
+
+  return parts.length ? Array.from(new Set(parts)).join(", ") : null;
+}
+
+function getRequestSecurityContext(
+  request: NextRequest,
+): RequestSecurityContext {
+  const ipAddressValue =
+    getRequestIp(request);
+
+  const userAgent =
+    cleanString(
+      request.headers.get(
+        "user-agent",
+      ),
+    );
+
+  /*
+   * Vercel's geolocation() helper is the primary source of approximate
+   * location on deployed requests.
+   *
+   * countryRegion is the visitor's geographic state/region.
+   * Do NOT use geo.region for this field: geo.region is the Vercel compute
+   * region that handled the request.
+   */
+  const geo =
+    geolocation(request);
+
+  const city =
+    cleanString(geo.city) ||
+    decodeHeaderValue(
+      firstHeader(request, [
+        "x-vercel-ip-city",
+        "cf-ipcity",
+        "x-appengine-city",
+      ]),
+    );
+
+  const region =
+    cleanString(
+      geo.countryRegion,
+    ) ||
+    decodeHeaderValue(
+      firstHeader(request, [
+        "x-vercel-ip-country-region",
+        "cf-region",
+        "x-appengine-region",
+      ]),
+    );
+
+  const country =
+    cleanString(geo.country) ||
+    decodeHeaderValue(
+      firstHeader(request, [
+        "x-vercel-ip-country",
+        "cf-ipcountry",
+        "x-appengine-country",
+      ]),
+    );
+
+  const countryCode =
+    (
+      cleanString(geo.country) ||
+      cleanString(
+        firstHeader(request, [
+          "x-vercel-ip-country",
+          "cf-ipcountry",
+        ]),
+      )
+    ).toUpperCase() || null;
+
+  return {
+    ipAddress:
+      ipAddressValue,
+
+    ipHash:
+      ipAddressValue
+        ? hashWithPepper(
+            ipAddressValue,
+          )
+        : null,
+
+    userAgent,
+
+    userAgentHash:
+      userAgent
+        ? hashWithPepper(
+            userAgent,
+          )
+        : null,
+
+    city:
+      city || null,
+
+    region:
+      region || null,
+
+    country:
+      country || null,
+
+    countryCode,
+
+    approximateLocation:
+      buildApproximateLocation(
+        city,
+        region,
+        country,
+      ),
+
+    deviceLabel:
+      detectDeviceLabel(
+        userAgent,
+      ),
+  };
+}
+
+function isMissingTableOrColumn(error: {
+  code?: string | null;
+  message?: string | null;
+} | null | undefined, names: string[]): boolean {
+  if (!error) return false;
+
+  const message = cleanString(error.message).toLowerCase();
+
+  return (
+    error.code === "42P01" ||
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    error.code === "PGRST205" ||
+    names.some((name) => message.includes(name.toLowerCase()))
+  );
+}
+
+function getTrustedDeviceCookieToken(
+  request: NextRequest,
+): string {
+  return cleanString(request.cookies.get(TRUSTED_DEVICE_COOKIE)?.value);
+}
+
+async function resolveDeviceSecurityState(params: {
+  request: NextRequest;
+  adminId: string;
+  security: RequestSecurityContext;
+}): Promise<DeviceSecurityState> {
+  const rawDeviceToken = getTrustedDeviceCookieToken(params.request);
+  const tokenHash = rawDeviceToken
+    ? hashWithPepper(rawDeviceToken)
+    : null;
+
+  const fallback: DeviceSecurityState = {
+    supported: false,
+    newDevice: true,
+    deviceTrusted: false,
+    requiresDeviceApproval: false,
+    trustedDeviceCount: 0,
+    maxTrustedDevices: MAX_TRUSTED_DEVICES,
+    trustedDeviceId: null,
+    deviceLabel: params.security.deviceLabel,
+    approximateLocation: params.security.approximateLocation,
+    riskLevel: "medium",
+    riskReasons: ["trusted_device_storage_not_available"],
+  };
+
+  const countResult = await supabaseAdmin
+    .from("admin_trusted_devices")
+    .select("id", {
+      count: "exact",
+      head: true,
+    })
+    .eq("admin_id", params.adminId)
+    .is("revoked_at", null);
+
+  if (countResult.error) {
+    if (
+      isMissingTableOrColumn(countResult.error, [
+        "admin_trusted_devices",
+        "revoked_at",
+      ])
+    ) {
+      return fallback;
+    }
+
+    throw new Error(
+      `Could not count trusted devices: ${countResult.error.message}`,
+    );
+  }
+
+  const trustedDeviceCount = countResult.count || 0;
+
+  let trustedDevice: TrustedDeviceRecord | null = null;
+
+  if (tokenHash) {
+    const deviceResult = await supabaseAdmin
+      .from("admin_trusted_devices")
+      .select(
+        [
+          "id",
+          "admin_id",
+          "device_name",
+          "browser",
+          "operating_system",
+          "device_type",
+          "device_token_hash",
+          "revoked_at",
+          "last_seen_at",
+        ].join(","),
+      )
+      .eq("admin_id", params.adminId)
+      .eq("device_token_hash", tokenHash)
+      .is("revoked_at", null)
+      .maybeSingle<TrustedDeviceRecord>();
+
+    if (deviceResult.error) {
+      if (
+        isMissingTableOrColumn(deviceResult.error, [
+          "admin_trusted_devices",
+          "device_token_hash",
+          "revoked_at",
+        ])
+      ) {
+        return fallback;
+      }
+
+      throw new Error(
+        `Could not resolve trusted device: ${deviceResult.error.message}`,
+      );
+    }
+
+    trustedDevice = deviceResult.data || null;
+  }
+
+  const deviceTrusted = Boolean(trustedDevice);
+  const newDevice = !deviceTrusted;
+  const requiresDeviceApproval =
+    newDevice && trustedDeviceCount >= MAX_TRUSTED_DEVICES;
+
+  const riskReasons: string[] = [];
+
+  if (newDevice) riskReasons.push("new_device");
+  if (requiresDeviceApproval) {
+    riskReasons.push("trusted_device_limit_reached");
+  }
+
+  const riskLevel: AuditRiskLevel =
+    requiresDeviceApproval
+      ? "high"
+      : newDevice
+        ? "medium"
+        : "low";
+
+  if (trustedDevice?.id) {
+    /*
+     * Always refresh the last-used timestamp, but only replace IP/location
+     * fields when this request actually supplied a value.
+     *
+     * This is important because local development, some proxies, privacy
+     * relays and some network requests may not include geo information.
+     * Writing null here would erase a previously known location.
+     */
+    const trustedDeviceUpdate: Record<
+      string,
+      unknown
+    > = {
+      last_seen_at:
+        new Date().toISOString(),
+    };
+
+    if (
+      params.security.ipAddress
+    ) {
+      trustedDeviceUpdate.last_ip =
+        params.security.ipAddress;
+    }
+
+    if (params.security.city) {
+      trustedDeviceUpdate.last_city =
+        params.security.city;
+    }
+
+    if (params.security.region) {
+      trustedDeviceUpdate.last_region =
+        params.security.region;
+    }
+
+    if (params.security.country) {
+      trustedDeviceUpdate.last_country =
+        params.security.country;
+    }
+
+    const updateResult =
+      await supabaseAdmin
+        .from(
+          "admin_trusted_devices",
+        )
+        .update(
+          trustedDeviceUpdate,
+        )
+        .eq(
+          "id",
+          trustedDevice.id,
+        );
+
+    if (
+      updateResult.error &&
+      !isMissingTableOrColumn(
+        updateResult.error,
+        [
+          "last_ip",
+          "last_city",
+          "last_region",
+          "last_country",
+        ],
+      )
+    ) {
+      console.warn(
+        `${ROUTE_NAME} trusted device context update failed:`,
+        updateResult.error.message,
+      );
+    }
+  }
+
+  return {
+    supported: true,
+    newDevice,
+    deviceTrusted,
+    requiresDeviceApproval,
+    trustedDeviceCount,
+    maxTrustedDevices: MAX_TRUSTED_DEVICES,
+    trustedDeviceId: trustedDevice?.id || null,
+    deviceLabel:
+      cleanString(trustedDevice?.device_name) ||
+      params.security.deviceLabel,
+    approximateLocation: params.security.approximateLocation,
+    riskLevel,
+    riskReasons,
+  };
+}
+
+async function invalidateOldChallenges(
+  adminId: string,
+): Promise<void> {
   const now = new Date().toISOString();
 
   const { error } = await supabaseAdmin
@@ -394,37 +906,34 @@ async function createChallenge(params: {
   method: TwoFactorMethod;
   codeHash: string | null;
   pendingSessionHash: string;
-  request: NextRequest;
+  security: RequestSecurityContext;
+  deviceSecurity: DeviceSecurityState;
 }): Promise<ChallengeRecord> {
   const expiresAt = new Date(
     Date.now() + TWO_FACTOR_MAX_AGE * 1000,
   ).toISOString();
 
-  const forwardedFor = params.request.headers.get("x-forwarded-for");
-  const ipAddress = forwardedFor?.split(",")[0]?.trim() || "";
-  const userAgent = params.request.headers.get("user-agent") || "";
+  const insertPayload: Record<string, unknown> = {
+    admin_id: params.adminId,
+    method: params.method,
+    code_hash: params.codeHash,
+    pending_session_hash: params.pendingSessionHash,
+    expires_at: expiresAt,
+    attempts: 0,
+    max_attempts: MAX_TWO_FACTOR_ATTEMPTS,
+    resend_count: 0,
+    consumed_at: null,
+    last_sent_at:
+      params.method === "email"
+        ? new Date().toISOString()
+        : null,
+    ip_hash: params.security.ipHash,
+    user_agent_hash: params.security.userAgentHash,
+  };
 
   const { data, error } = await supabaseAdmin
     .from("admin_two_factor_challenges")
-    .insert({
-      admin_id: params.adminId,
-      method: params.method,
-      code_hash: params.codeHash,
-      pending_session_hash: params.pendingSessionHash,
-      expires_at: expiresAt,
-      attempts: 0,
-      max_attempts: MAX_TWO_FACTOR_ATTEMPTS,
-      resend_count: 0,
-      consumed_at: null,
-      last_sent_at:
-        params.method === "email"
-          ? new Date().toISOString()
-          : null,
-      ip_hash: ipAddress ? hashWithPepper(ipAddress) : null,
-      user_agent_hash: userAgent
-        ? hashWithPepper(userAgent)
-        : null,
-    })
+    .insert(insertPayload)
     .select("id,admin_id,method,expires_at")
     .single<ChallengeRecord>();
 
@@ -517,10 +1026,46 @@ async function recordLoginAudit(params: {
   adminEmail?: string | null;
   action: string;
   status: string;
-  riskLevel: "low" | "medium" | "high" | "critical";
+  riskLevel: AuditRiskLevel;
+  security?: RequestSecurityContext;
+  deviceSecurity?: DeviceSecurityState;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
   try {
+    const securityMetadata: Record<string, unknown> = params.security
+      ? {
+          ip_hash: params.security.ipHash,
+          approximate_city: params.security.city,
+          approximate_region: params.security.region,
+          approximate_country: params.security.country,
+          approximate_location: params.security.approximateLocation,
+          device_label: params.security.deviceLabel,
+          user_agent_hash: params.security.userAgentHash,
+        }
+      : {};
+
+    const deviceMetadata: Record<string, unknown> =
+      params.deviceSecurity
+        ? {
+            trusted_device_supported:
+              params.deviceSecurity.supported,
+            trusted_device_id:
+              params.deviceSecurity.trustedDeviceId,
+            new_device:
+              params.deviceSecurity.newDevice,
+            device_trusted:
+              params.deviceSecurity.deviceTrusted,
+            requires_device_approval:
+              params.deviceSecurity.requiresDeviceApproval,
+            trusted_device_count:
+              params.deviceSecurity.trustedDeviceCount,
+            max_trusted_devices:
+              params.deviceSecurity.maxTrustedDevices,
+            risk_reasons:
+              params.deviceSecurity.riskReasons,
+          }
+        : {};
+
     const { error } = await supabaseAdmin
       .from("admin_audit_logs")
       .insert({
@@ -534,148 +1079,204 @@ async function recordLoginAudit(params: {
         risk_level: params.riskLevel,
         target_type: "restricted_login",
         target_label: "Restricted Login",
-        metadata: params.metadata || {},
+        metadata: {
+          ...securityMetadata,
+          ...deviceMetadata,
+          ...(params.metadata || {}),
+        },
         created_at: new Date().toISOString(),
       });
 
     if (error) {
-      console.warn(`${ROUTE_NAME} audit insert failed:`, error.message);
+      console.warn(
+        `${ROUTE_NAME} audit insert failed:`,
+        error.message,
+      );
     }
   } catch (error) {
     console.warn(`${ROUTE_NAME} audit insert threw:`, error);
   }
 }
 
-async function storeSessionToken(
-  adminId: string,
-  sessionToken: string,
-): Promise<void> {
-  const tokenResult = await supabaseAdmin
-    .from("admin_users")
-    .update({
-      session_token: sessionToken,
-    })
-    .eq("id", adminId);
+async function storeLoginAttempt(params: {
+  security: RequestSecurityContext;
+  result:
+    | "success"
+    | "failed"
+    | "rate_limited"
+    | "blocked";
+  riskLevel: AuditRiskLevel;
+  attemptedIdentity?: string | null;
+  adminId?: string | null;
+  reason?: string | null;
+}): Promise<void> {
+  const attemptedIdentityHash = params.attemptedIdentity
+    ? hashWithPepper(params.attemptedIdentity.toLowerCase())
+    : null;
 
-  if (tokenResult.error) {
-    const message = tokenResult.error.message.toLowerCase();
-    const missingColumn =
-      tokenResult.error.code === "42703" ||
-      tokenResult.error.code === "PGRST204" ||
-      message.includes("session_token");
+  const { error } = await supabaseAdmin
+    .from("admin_login_attempts")
+    .insert({
+      admin_id: params.adminId || null,
+      attempted_identity_hash: attemptedIdentityHash,
+      ip_hash: params.security.ipHash,
+      user_agent_hash: params.security.userAgentHash,
+      approximate_city: params.security.city,
+      approximate_region: params.security.region,
+      approximate_country: params.security.country,
+      result: params.result,
+      risk_level: params.riskLevel,
+      reason: params.reason || null,
+      created_at: new Date().toISOString(),
+    });
 
-    if (!missingColumn) {
-      throw new Error(
-        `Could not store admin session token: ${tokenResult.error.message}`,
-      );
-    }
-
+  if (
+    error &&
+    !isMissingTableOrColumn(error, [
+      "admin_login_attempts",
+      "attempted_identity_hash",
+      "approximate_city",
+    ])
+  ) {
     console.warn(
-      `${ROUTE_NAME}: admin_users.session_token is not available; using cookie-only session.`,
-    );
-
-    return;
-  }
-
-  const expiresAt = new Date(
-    Date.now() + SESSION_MAX_AGE * 1000,
-  ).toISOString();
-
-  const expiryResult = await supabaseAdmin
-    .from("admin_users")
-    .update({
-      session_expires_at: expiresAt,
-    })
-    .eq("id", adminId);
-
-  if (expiryResult.error) {
-    const message = expiryResult.error.message.toLowerCase();
-    const missingColumn =
-      expiryResult.error.code === "42703" ||
-      expiryResult.error.code === "PGRST204" ||
-      message.includes("session_expires_at");
-
-    if (!missingColumn) {
-      throw new Error(
-        `Could not store admin session expiry: ${expiryResult.error.message}`,
-      );
-    }
-
-    console.warn(
-      `${ROUTE_NAME}: admin_users.session_expires_at is not available.`,
+      `${ROUTE_NAME} login attempt insert failed:`,
+      error.message,
     );
   }
 }
 
-function completeLoginResponse(params: {
-  pendingCookies: PendingCookie[];
-  admin: AdminUser;
-  adminId: string;
-  adminEmail: string;
-  adminRole: string;
-  permissions: string[];
-  nextPath: string;
-  sessionToken: string;
-}): NextResponse {
-  const response = createJsonResponse(
-    {
-      ok: true,
-      authenticated: true,
-      requiresTwoFactor: false,
-      redirectTo: params.nextPath,
-      admin: {
-        id: params.adminId,
-        email: params.adminEmail,
-        role: params.adminRole,
-        is_main_admin:
-          params.admin.is_main_admin === true ||
-          params.adminRole === "main_admin",
-        permissions: params.permissions,
-      },
-    },
-    200,
-    params.pendingCookies,
+async function countRecentFailedAttempts(params: {
+  email: string;
+  security: RequestSecurityContext;
+}): Promise<{
+  supported: boolean;
+  accountFailures: number;
+  ipFailures: number;
+}> {
+  const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const attemptedIdentityHash = hashWithPepper(
+    params.email.toLowerCase(),
   );
 
-  setAdminCookie(response, ADMIN_ID_COOKIE, params.adminId);
-  setAdminCookie(response, ADMIN_EMAIL_COOKIE, params.adminEmail);
-  setAdminCookie(
-    response,
-    ADMIN_SESSION_COOKIE,
-    params.sessionToken,
-  );
+  const accountResult = await supabaseAdmin
+    .from("admin_login_attempts")
+    .select("id", {
+      count: "exact",
+      head: true,
+    })
+    .eq("attempted_identity_hash", attemptedIdentityHash)
+    .eq("result", "failed")
+    .gte("created_at", since);
 
-  setAdminCookie(
-    response,
-    ADMIN_ROLE_COOKIE,
-    params.adminRole,
-    {
-      httpOnly: false,
-    },
-  );
+  if (accountResult.error) {
+    if (
+      isMissingTableOrColumn(accountResult.error, [
+        "admin_login_attempts",
+        "attempted_identity_hash",
+      ])
+    ) {
+      return {
+        supported: false,
+        accountFailures: 0,
+        ipFailures: 0,
+      };
+    }
 
-  setAdminCookie(
-    response,
-    ADMIN_PERMISSIONS_COOKIE,
-    encodeURIComponent(JSON.stringify(params.permissions)),
-    {
-      httpOnly: false,
-    },
-  );
+    throw new Error(
+      `Could not check account login rate: ${accountResult.error.message}`,
+    );
+  }
 
-  return response;
+  let ipFailures = 0;
+
+  if (params.security.ipHash) {
+    const ipResult = await supabaseAdmin
+      .from("admin_login_attempts")
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .eq("ip_hash", params.security.ipHash)
+      .eq("result", "failed")
+      .gte("created_at", since);
+
+    if (
+      ipResult.error &&
+      !isMissingTableOrColumn(ipResult.error, [
+        "admin_login_attempts",
+        "ip_hash",
+      ])
+    ) {
+      throw new Error(
+        `Could not check IP login rate: ${ipResult.error.message}`,
+      );
+    }
+
+    ipFailures = ipResult.count || 0;
+  }
+
+  return {
+    supported: true,
+    accountFailures: accountResult.count || 0,
+    ipFailures,
+  };
+}
+
+function rateLimitExceeded(state: {
+  accountFailures: number;
+  ipFailures: number;
+}): boolean {
+  return (
+    state.accountFailures >= 5 ||
+    state.ipFailures >= 10
+  );
+}
+
+function deviceSecurityResponse(
+  state: DeviceSecurityState,
+): Record<string, unknown> {
+  return {
+    riskLevel: state.riskLevel,
+    newDevice: state.newDevice,
+    deviceTrusted: state.deviceTrusted,
+    requiresDeviceApproval: state.requiresDeviceApproval,
+    trustedDeviceCount: state.trustedDeviceCount,
+    maxTrustedDevices: state.maxTrustedDevices,
+    approximateLocation:
+      state.approximateLocation,
+    locationAvailable:
+      Boolean(
+        state.approximateLocation,
+      ),
+    deviceLabel:
+      state.deviceLabel,
+    trustedDeviceSupported:
+      state.supported,
+  };
 }
 
 export async function POST(
   request: NextRequest,
 ): Promise<NextResponse> {
   const pendingCookies: PendingCookie[] = [];
+  const security = getRequestSecurityContext(request);
 
   let body: LoginBody;
 
   try {
     body = (await request.json()) as LoginBody;
   } catch {
+    await recordLoginAudit({
+      action: "admin_login_invalid_json",
+      status: "blocked",
+      riskLevel: "medium",
+      security,
+      metadata: {
+        actor_type: "unauthenticated_attempt",
+        reason: "invalid_json_body",
+      },
+    });
+
     return genericFailed(
       pendingCookies,
       400,
@@ -688,6 +1289,17 @@ export async function POST(
   const nextPath = getSafeNextPath(body.next);
 
   if (!email || !password) {
+    await recordLoginAudit({
+      action: "admin_login_validation_failed",
+      status: "blocked",
+      riskLevel: "medium",
+      security,
+      metadata: {
+        actor_type: "unauthenticated_attempt",
+        reason: "missing_email_or_password",
+      },
+    });
+
     return genericFailed(
       pendingCookies,
       400,
@@ -696,6 +1308,17 @@ export async function POST(
   }
 
   if (!emailLooksValid(email)) {
+    await recordLoginAudit({
+      action: "admin_login_validation_failed",
+      status: "blocked",
+      riskLevel: "medium",
+      security,
+      metadata: {
+        actor_type: "unauthenticated_attempt",
+        reason: "invalid_email_format",
+      },
+    });
+
     return genericFailed(
       pendingCookies,
       400,
@@ -704,6 +1327,17 @@ export async function POST(
   }
 
   if (email.length > 254 || password.length > 128) {
+    await recordLoginAudit({
+      action: "admin_login_validation_failed",
+      status: "blocked",
+      riskLevel: "medium",
+      security,
+      metadata: {
+        actor_type: "unauthenticated_attempt",
+        reason: "credentials_too_long",
+      },
+    });
+
     return genericFailed(
       pendingCookies,
       400,
@@ -712,6 +1346,42 @@ export async function POST(
   }
 
   try {
+    const rateState = await countRecentFailedAttempts({
+      email,
+      security,
+    });
+
+    if (
+      rateState.supported &&
+      rateLimitExceeded(rateState)
+    ) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        result: "rate_limited",
+        riskLevel: "high",
+        reason: "server_rate_limit",
+      });
+
+      await recordLoginAudit({
+        action: "admin_login_rate_limited",
+        status: "rate_limited",
+        riskLevel: "high",
+        security,
+        metadata: {
+          actor_type: "unauthenticated_attempt",
+          account_failures_5m: rateState.accountFailures,
+          ip_failures_5m: rateState.ipFailures,
+        },
+      });
+
+      return genericFailed(
+        pendingCookies,
+        429,
+        "rate_limited",
+      );
+    }
+
     const supabase = createLoginSupabaseClient(
       request,
       pendingCookies,
@@ -726,11 +1396,21 @@ export async function POST(
     const user = signInData.user;
 
     if (signInError || !user) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        result: "failed",
+        riskLevel: "medium",
+        reason: "invalid_credentials",
+      });
+
       await recordLoginAudit({
         action: "admin_login_password_failed",
         status: "rejected",
         riskLevel: "medium",
+        security,
         metadata: {
+          actor_type: "unauthenticated_attempt",
           reason: "invalid_credentials",
         },
       });
@@ -807,6 +1487,25 @@ export async function POST(
     }
 
     if (!adminUser) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        result: "blocked",
+        riskLevel: "high",
+        reason: "admin_record_missing",
+      });
+
+      await recordLoginAudit({
+        action: "admin_login_admin_record_missing",
+        status: "blocked",
+        riskLevel: "high",
+        security,
+        metadata: {
+          actor_type: "unauthenticated_attempt",
+          reason: "admin_record_missing",
+        },
+      });
+
       await clearSupabaseSession(supabase);
 
       return genericFailed(
@@ -817,12 +1516,25 @@ export async function POST(
     }
 
     if (adminUser.is_active !== true) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        adminId: adminUser.id,
+        result: "blocked",
+        riskLevel: "high",
+        reason: "admin_inactive",
+      });
+
       await recordLoginAudit({
         adminId: adminUser.id,
         adminEmail: adminUser.email,
         action: "admin_login_inactive_account",
         status: "blocked",
         riskLevel: "high",
+        security,
+        metadata: {
+          actor_type: "authenticated_identity_blocked",
+        },
       });
 
       await clearSupabaseSession(supabase);
@@ -837,8 +1549,11 @@ export async function POST(
     const adminId = cleanString(adminUser.id);
     const adminEmail =
       cleanEmail(adminUser.email) || cleanEmail(user.email);
-    const adminRole = cleanString(adminUser.role) || "editor";
-    const permissions = permissionKeys(adminUser.permissions);
+    const adminRole =
+      cleanString(adminUser.role) || "editor";
+    const permissions = permissionKeys(
+      adminUser.permissions,
+    );
 
     if (!adminId || !adminEmail) {
       await clearSupabaseSession(supabase);
@@ -873,6 +1588,18 @@ export async function POST(
         );
       }
     } else if (adminUser.supabase_user_id !== user.id) {
+      await recordLoginAudit({
+        adminId,
+        adminEmail,
+        action: "admin_login_identity_mismatch",
+        status: "blocked",
+        riskLevel: "critical",
+        security,
+        metadata: {
+          actor_type: "authenticated_identity_blocked",
+        },
+      });
+
       await clearSupabaseSession(supabase);
 
       return genericFailed(
@@ -883,17 +1610,34 @@ export async function POST(
     }
 
     const methods = enabledTwoFactorMethods(adminUser);
-    const requiresTwoFactor =
-      adminUser.two_factor_enabled === true &&
-      methods.length > 0;
 
-    if (adminUser.two_factor_enabled === true && methods.length === 0) {
+    // New policy: MFA is mandatory for every administrator.
+    if (
+      adminUser.two_factor_enabled !== true ||
+      methods.length === 0
+    ) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        adminId,
+        result: "blocked",
+        riskLevel: "high",
+        reason: "two_factor_required",
+      });
+
       await recordLoginAudit({
         adminId,
         adminEmail,
-        action: "admin_login_two_factor_misconfigured",
+        action: "admin_login_two_factor_required_but_missing",
         status: "blocked",
         riskLevel: "high",
+        security,
+        metadata: {
+          actor_type: "authenticated_identity_blocked",
+          two_factor_enabled:
+            adminUser.two_factor_enabled === true,
+          available_methods: methods,
+        },
       });
 
       await clearSupabaseSession(supabase);
@@ -901,140 +1645,170 @@ export async function POST(
       return genericFailed(
         pendingCookies,
         403,
-        "two_factor_not_configured",
+        "two_factor_required",
+        {
+          requiresTwoFactor: true,
+          methods: [],
+        },
       );
     }
 
-    if (requiresTwoFactor) {
-      const preferredMethod = preferredTwoFactorMethod(
-        adminUser,
-        methods,
-      );
-      const pendingToken = randomBytes(32).toString("base64url");
-      const pendingSessionHash = hashWithPepper(pendingToken);
-
-      await invalidateOldChallenges(adminId);
-
-      let rawEmailCode: string | null = null;
-      let codeHash: string | null = null;
-
-      if (preferredMethod === "email") {
-        rawEmailCode = createSixDigitCode();
-        codeHash = hashWithPepper(rawEmailCode);
-      }
-
-      const challenge = await createChallenge({
-        adminId,
-        method: preferredMethod,
-        codeHash,
-        pendingSessionHash,
+    const deviceSecurity =
+      await resolveDeviceSecurityState({
         request,
+        adminId,
+        security,
       });
 
-      if (preferredMethod === "email" && rawEmailCode) {
-        try {
-          await sendSecurityCodeEmail({
-            email: adminEmail,
-            code: rawEmailCode,
-            challengeId: challenge.id,
-          });
-        } catch (error) {
-          console.error(`${ROUTE_NAME} email challenge failed:`, error);
-
-          await supabaseAdmin
-            .from("admin_two_factor_challenges")
-            .update({
-              consumed_at: new Date().toISOString(),
-            })
-            .eq("id", challenge.id);
-
-          await clearSupabaseSession(supabase);
-
-          return genericFailed(
-            pendingCookies,
-            503,
-            "two_factor_email_failed",
-          );
-        }
-      }
-
-      const response = createJsonResponse(
-        {
-          ok: true,
-          authenticated: false,
-          requiresTwoFactor: true,
-          challengeId: challenge.id,
-          methods,
-          preferredMethod,
-          maskedEmail: methods.includes("email")
-            ? maskEmail(adminEmail)
-            : undefined,
-          expiresInSeconds: TWO_FACTOR_MAX_AGE,
-          redirectTo: nextPath,
-        },
-        200,
-        pendingCookies,
-      );
-
-      clearAdminCookies(response);
-      setPendingTwoFactorCookie(response, pendingToken);
+    if (deviceSecurity.requiresDeviceApproval) {
+      await storeLoginAttempt({
+        security,
+        attemptedIdentity: email,
+        adminId,
+        result: "blocked",
+        riskLevel: "high",
+        reason: "trusted_device_limit_reached",
+      });
 
       await recordLoginAudit({
         adminId,
         adminEmail,
-        action: "admin_login_two_factor_required",
-        status: "challenge_created",
-        riskLevel: "medium",
+        action: "admin_login_new_device_blocked",
+        status: "blocked",
+        riskLevel: "high",
+        security,
+        deviceSecurity,
         metadata: {
-          method: preferredMethod,
-          available_methods: methods,
-          challenge_id: challenge.id,
+          actor_type: "authenticated_identity_blocked",
+          reason: "trusted_device_limit_reached",
         },
       });
-
-      return response;
-    }
-
-    /*
-     * Compatibility path for admins who have not yet been enrolled in
-     * two-step verification. Remove this path when two-factor becomes
-     * mandatory for every administrator.
-     */
-    const sessionToken = randomBytes(32).toString("hex");
-
-    try {
-      await storeSessionToken(adminId, sessionToken);
-    } catch (error) {
-      console.error(`${ROUTE_NAME} session storage failed:`, error);
 
       await clearSupabaseSession(supabase);
 
       return genericFailed(
         pendingCookies,
-        500,
-        "session_storage_failed",
+        403,
+        "device_approval_required",
+        {
+          requiresDeviceApproval: true,
+          security: deviceSecurityResponse(
+            deviceSecurity,
+          ),
+        },
       );
     }
 
-    const response = completeLoginResponse({
-      pendingCookies,
-      admin: adminUser,
+    const preferredMethod = preferredTwoFactorMethod(
+      adminUser,
+      methods,
+    );
+
+    const pendingToken =
+      randomBytes(32).toString("base64url");
+    const pendingSessionHash =
+      hashWithPepper(pendingToken);
+
+    await invalidateOldChallenges(adminId);
+
+    let rawEmailCode: string | null = null;
+    let codeHash: string | null = null;
+
+    if (preferredMethod === "email") {
+      rawEmailCode = createSixDigitCode();
+      codeHash = hashWithPepper(rawEmailCode);
+    }
+
+    const challenge = await createChallenge({
       adminId,
-      adminEmail,
-      adminRole,
-      permissions,
-      nextPath,
-      sessionToken,
+      method: preferredMethod,
+      codeHash,
+      pendingSessionHash,
+      security,
+      deviceSecurity,
+    });
+
+    if (preferredMethod === "email" && rawEmailCode) {
+      try {
+        await sendSecurityCodeEmail({
+          email: adminEmail,
+          code: rawEmailCode,
+          challengeId: challenge.id,
+        });
+      } catch (error) {
+        console.error(
+          `${ROUTE_NAME} email challenge failed:`,
+          error,
+        );
+
+        await supabaseAdmin
+          .from("admin_two_factor_challenges")
+          .update({
+            consumed_at: new Date().toISOString(),
+          })
+          .eq("id", challenge.id);
+
+        await clearSupabaseSession(supabase);
+
+        return genericFailed(
+          pendingCookies,
+          503,
+          "two_factor_email_failed",
+        );
+      }
+    }
+
+    const response = createJsonResponse(
+      {
+        ok: true,
+        authenticated: false,
+        requiresTwoFactor: true,
+        challengeId: challenge.id,
+        methods,
+        preferredMethod,
+        maskedEmail: methods.includes("email")
+          ? maskEmail(adminEmail)
+          : undefined,
+        expiresInSeconds: TWO_FACTOR_MAX_AGE,
+        redirectTo: nextPath,
+        security: deviceSecurityResponse(
+          deviceSecurity,
+        ),
+      },
+      200,
+      pendingCookies,
+    );
+
+    clearAdminCookies(response);
+    setPendingTwoFactorCookie(
+      response,
+      pendingToken,
+    );
+
+    await storeLoginAttempt({
+      security,
+      attemptedIdentity: email,
+      adminId,
+      result: "success",
+      riskLevel: deviceSecurity.riskLevel,
+      reason: "password_accepted_mfa_required",
     });
 
     await recordLoginAudit({
       adminId,
       adminEmail,
-      action: "admin_login_success_without_two_factor",
-      status: "success",
-      riskLevel: "medium",
+      action: deviceSecurity.newDevice
+        ? "admin_login_new_device_two_factor_required"
+        : "admin_login_two_factor_required",
+      status: "challenge_created",
+      riskLevel: deviceSecurity.riskLevel,
+      security,
+      deviceSecurity,
       metadata: {
-        two_factor_enabled: false,
+        actor_type: "authenticated_admin",
+        method: preferredMethod,
+        available_methods: methods,
+        challenge_id: challenge.id,
       },
     });
 
@@ -1045,6 +1819,16 @@ export async function POST(
         error instanceof Error
           ? error.message
           : "Unknown error",
+    });
+
+    await recordLoginAudit({
+      action: "admin_login_unexpected_error",
+      status: "service_error",
+      riskLevel: "high",
+      security,
+      metadata: {
+        actor_type: "system",
+      },
     });
 
     return genericFailed(

@@ -336,7 +336,7 @@ function getPriorityClasses(priority: BugPriority) {
     case "minor":
       return {
         card:
-          "border-emerald-300/20 bg-gradient-to-br from-emerald-500/[0.08] via-white/[0.025] to-cyan-500/[0.04]",
+          "border-emerald-300/20 bg-[#172733]",
         badge:
           "bg-emerald-500/15 text-emerald-100 ring-emerald-300/25",
         icon: "text-emerald-300",
@@ -346,7 +346,7 @@ function getPriorityClasses(priority: BugPriority) {
     case "normal":
       return {
         card:
-          "border-amber-300/20 bg-gradient-to-br from-amber-500/[0.08] via-white/[0.025] to-orange-500/[0.04]",
+          "border-amber-300/20 bg-[#242033]",
         badge: "bg-amber-500/15 text-amber-100 ring-amber-300/25",
         icon: "text-amber-300",
         dot: "bg-amber-400",
@@ -355,7 +355,7 @@ function getPriorityClasses(priority: BugPriority) {
     case "senior":
       return {
         card:
-          "border-red-300/30 bg-gradient-to-br from-red-500/[0.10] via-white/[0.025] to-pink-500/[0.05] shadow-lg shadow-red-950/20",
+          "border-red-300/30 bg-[#241a32] shadow-lg shadow-red-950/20",
         badge: "bg-red-500/20 text-red-100 ring-red-300/30",
         icon: "text-red-300",
         dot: "bg-red-400",
@@ -413,17 +413,17 @@ function SummaryCard({
 }) {
   const toneClasses = {
     slate:
-      "border-white/10 bg-gradient-to-br from-white/[0.07] via-white/[0.035] to-transparent",
+      "border-white/10 bg-[#151a32]",
     purple:
-      "border-purple-300/20 bg-gradient-to-br from-purple-500/[0.12] via-fuchsia-500/[0.04] to-transparent",
+      "border-purple-300/20 bg-[#1b1f3f]",
     red:
-      "border-red-300/20 bg-gradient-to-br from-red-500/[0.11] via-pink-500/[0.04] to-transparent",
+      "border-red-300/20 bg-[#241a32]",
     amber:
-      "border-amber-300/20 bg-gradient-to-br from-amber-500/[0.11] via-orange-500/[0.04] to-transparent",
+      "border-amber-300/20 bg-[#242033]",
     emerald:
-      "border-emerald-300/20 bg-gradient-to-br from-emerald-500/[0.11] via-cyan-500/[0.04] to-transparent",
+      "border-emerald-300/20 bg-[#172733]",
     sky:
-      "border-sky-300/20 bg-gradient-to-br from-sky-500/[0.11] via-blue-500/[0.04] to-transparent",
+      "border-sky-300/20 bg-[#17233a]",
   };
 
   return (
@@ -901,19 +901,8 @@ export default function BugTrackerClient({
   }
 
   return (
-    <div className="relative space-y-6">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
-      >
-        <div className="absolute -left-24 top-24 h-72 w-72 rounded-full bg-red-500/10 blur-3xl" />
-        <div className="absolute left-[18%] top-8 h-72 w-72 rounded-full bg-orange-500/10 blur-3xl" />
-        <div className="absolute left-[36%] top-28 h-72 w-72 rounded-full bg-yellow-400/10 blur-3xl" />
-        <div className="absolute right-[30%] top-10 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
-        <div className="absolute right-[12%] top-28 h-72 w-72 rounded-full bg-sky-500/10 blur-3xl" />
-        <div className="absolute -right-24 top-8 h-72 w-72 rounded-full bg-purple-500/10 blur-3xl" />
-      </div>
-      <section className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-xl shadow-black/10 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
+    <div className="relative min-h-screen space-y-6 p-4 text-white sm:p-5 lg:p-6">
+      <section className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#151a32]/95 p-4 shadow-xl shadow-black/10 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.15em] text-purple-200/70">
             Admin Portal
@@ -1001,10 +990,10 @@ export default function BugTrackerClient({
         
       </section>
 
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/15 backdrop-blur-2xl sm:p-5">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#151a32]/95 p-4 shadow-2xl shadow-black/15 backdrop-blur-2xl sm:p-5">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-red-400/50 via-yellow-300/50 via-emerald-400/50 via-sky-400/50 to-purple-400/50"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/45 to-transparent"
         />
         <div
           aria-hidden="true"
@@ -1074,10 +1063,7 @@ export default function BugTrackerClient({
                 justify-center
                 gap-2
                 rounded-xl
-                bg-gradient-to-r
-                from-pink-500
-                via-purple-600
-                to-sky-500
+                bg-purple-600
                 px-5
                 text-sm
                 font-black
@@ -1359,10 +1345,10 @@ export default function BugTrackerClient({
         </section>
       ) : null}
 
-      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/15 backdrop-blur-2xl">
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#151a32]/95 shadow-2xl shadow-black/15 backdrop-blur-2xl">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-red-400/50 via-yellow-300/50 via-emerald-400/50 via-sky-400/50 to-purple-400/50"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-purple-300/45 to-transparent"
         />
         <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
@@ -1435,7 +1421,7 @@ export default function BugTrackerClient({
               <button
                 type="button"
                 onClick={openReportModal}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-pink-500 via-purple-600 to-sky-500 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-purple-950/30 ring-1 ring-white/10 transition hover:brightness-110"
+                className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-purple-950/30 ring-1 ring-white/10 transition hover:brightness-110"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
                 Report First Bug
@@ -1661,7 +1647,7 @@ export default function BugTrackerClient({
         )}
       </section>
 
-      <section className="relative overflow-hidden rounded-3xl border border-emerald-300/15 bg-white/[0.04] shadow-2xl shadow-black/15 backdrop-blur-2xl">
+      <section className="relative overflow-hidden rounded-3xl border border-emerald-300/15 bg-[#151a32]/95 shadow-2xl shadow-black/15 backdrop-blur-2xl">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/70 to-transparent"
@@ -1811,7 +1797,7 @@ export default function BugTrackerClient({
           }}
         >
           <div className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-white/20 bg-slate-950 shadow-2xl shadow-black/50">
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 px-5 py-5 sm:px-7">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[#151a32] px-5 py-5 sm:px-7">
               <div className="flex items-start gap-3">
                 <div className="rounded-2xl bg-white/10 p-3 ring-1 ring-white/15">
                   <Bug className="h-6 w-6 text-white" aria-hidden="true" />
@@ -1891,7 +1877,7 @@ export default function BugTrackerClient({
                     <button
                       type="button"
                       onClick={closeReportModal}
-                      className="rounded-xl bg-gradient-to-r from-pink-500 via-purple-600 to-sky-500 px-5 py-2.5 text-sm font-black text-white hover:brightness-110"
+                      className="rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-black text-white hover:brightness-110"
                     >
                       Close
                     </button>
@@ -2069,7 +2055,7 @@ export default function BugTrackerClient({
                   </label>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <div className="rounded-2xl border border-white/10 bg-[#151a32]/95 p-4">
                   <div className="flex items-start gap-3">
                     <FileText className="mt-0.5 h-5 w-5 shrink-0 text-purple-200" />
                     <div>
@@ -2108,7 +2094,7 @@ export default function BugTrackerClient({
                     type="button"
                     onClick={() => void submitBugReport()}
                     disabled={submittingReport}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-pink-500 via-purple-600 to-sky-500 px-6 text-sm font-black text-white shadow-lg shadow-purple-950/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-6 text-sm font-black text-white shadow-lg shadow-purple-950/30 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {submittingReport ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

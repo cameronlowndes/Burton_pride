@@ -5,8 +5,16 @@ import Link from "next/link";
 import {
   AnimatePresence,
   motion,
+  useReducedMotion,
   type Variants,
 } from "framer-motion";
+import {
+  Mail,
+  MessageCircleMore,
+  Sparkles,
+  UsersRound,
+  X,
+} from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -43,14 +51,14 @@ type CommitteeApiResponse = {
 const fadeUp: Variants = {
   hidden: {
     opacity: 0,
-    y: 24,
+    y: 20,
   },
   visible: (index: number = 0) => ({
     opacity: 1,
     y: 0,
     transition: {
-      delay: index * 0.08,
-      duration: 0.55,
+      delay: index * 0.06,
+      duration: 0.5,
       ease: "easeOut",
     },
   }),
@@ -66,7 +74,7 @@ function slugifyName(value: string) {
 function clamp(
   number: number,
   minimum: number,
-  maximum: number
+  maximum: number,
 ) {
   return Math.min(Math.max(number, minimum), maximum);
 }
@@ -96,18 +104,36 @@ function TeamStoryModal({
   open: boolean;
   onClose: () => void;
 }) {
-  if (!member) {
-    return null;
-  }
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
 
   return (
     <AnimatePresence>
-      {open ? (
+      {open && member ? (
         <motion.div
           className="
             fixed
             inset-0
-            z-50
+            z-[99999]
             flex
             items-center
             justify-center
@@ -115,14 +141,11 @@ function TeamStoryModal({
             p-4
             backdrop-blur-md
             sm:p-6
-
-            dark:bg-black/90
           "
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          role="presentation"
         >
           <motion.div
             initial={{
@@ -149,41 +172,27 @@ function TeamStoryModal({
               relative
               max-h-[90vh]
               w-full
-              max-w-4xl
+              max-w-3xl
               overflow-y-auto
-              rounded-[32px]
+              rounded-[28px]
               border
-              border-white/20
-              bg-gradient-to-br
-              from-violet-700/95
-              via-purple-700/95
-              to-fuchsia-700/95
+              border-white/50
+              bg-white
               p-6
-              text-white
-              shadow-[0_24px_80px_rgba(0,0,0,0.45)]
-              backdrop-blur-xl
+              text-slate-900
+              shadow-[0_30px_100px_rgba(15,23,42,0.35)]
+
               sm:p-8
 
               dark:border-white/10
-              dark:bg-none
-              dark:bg-zinc-950
-              dark:shadow-[0_24px_100px_rgba(0,0,0,0.9)]
+              dark:bg-[#0d111a]
+              dark:text-white
+              dark:shadow-[0_30px_100px_rgba(0,0,0,0.8)]
             "
             role="dialog"
             aria-modal="true"
             aria-labelledby="team-story-title"
           >
-            <div
-              className="
-                pointer-events-none
-                absolute
-                inset-0
-                bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.12),transparent_30%)]
-
-                dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_35%)]
-              "
-            />
-
             <button
               type="button"
               onClick={onClose}
@@ -192,45 +201,46 @@ function TeamStoryModal({
                 right-4
                 top-4
                 z-20
+                flex
+                h-11
+                w-11
+                items-center
+                justify-center
                 rounded-full
                 border
-                border-white/20
-                bg-white/15
-                px-4
-                py-2
-                text-sm
-                font-semibold
-                text-white
-                backdrop-blur
+                border-slate-200
+                bg-white
+                text-slate-700
+                shadow-sm
                 transition
-                hover:bg-white/25
-                focus:outline-none
-                focus-visible:ring-2
-                focus-visible:ring-white
+                hover:bg-slate-100
 
                 dark:border-white/10
                 dark:bg-white/[0.06]
+                dark:text-white
                 dark:hover:bg-white/[0.12]
               "
+              aria-label="Close story"
             >
-              Close
+              <X className="h-5 w-5" />
             </button>
 
-            <div className="relative z-10 flex flex-col items-center text-center">
+            <div className="flex flex-col items-center text-center">
               <div
                 className="
                   relative
-                  mb-5
                   h-28
                   w-28
                   overflow-hidden
                   rounded-full
                   border-4
-                  border-white/70
-                  shadow-[0_0_30px_rgba(255,255,255,0.18)]
+                  border-white
+                  shadow-xl
+                  ring-4
+                  ring-pink-100
 
-                  dark:border-white/20
-                  dark:shadow-[0_0_30px_rgba(255,255,255,0.08)]
+                  dark:border-[#0d111a]
+                  dark:ring-white/10
                 "
               >
                 <Image
@@ -246,63 +256,67 @@ function TeamStoryModal({
                 />
               </div>
 
+              <p
+                className="
+                  mt-5
+                  text-xs
+                  font-black
+                  uppercase
+                  tracking-[0.16em]
+                  text-purple-700
+
+                  dark:text-purple-300
+                "
+              >
+                {member.section_title}
+              </p>
+
               <h2
                 id="team-story-title"
                 className="
+                  mt-2
                   text-3xl
-                  font-extrabold
-                  text-white
-                  drop-shadow
+                  font-black
+                  text-slate-950
+
                   sm:text-4xl
+
+                  dark:text-white
                 "
               >
                 {member.full_name}
               </h2>
 
-              <p className="mt-2 text-lg font-semibold text-white/85">
+              <p
+                className="
+                  mt-2
+                  text-base
+                  font-semibold
+                  text-slate-600
+
+                  dark:text-white/70
+                "
+              >
                 {member.role}
               </p>
 
-              <div className="mt-4 flex flex-wrap justify-center gap-3">
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {member.pronouns ? (
                   <span
                     className="
                       rounded-full
-                      border
-                      border-pink-200/30
-                      bg-white/15
+                      bg-pink-50
                       px-4
                       py-2
                       text-sm
-                      font-semibold
-                      text-white
+                      font-bold
+                      text-pink-700
 
-                      dark:border-white/10
-                      dark:bg-white/[0.06]
+                      dark:bg-pink-500/10
+                      dark:text-pink-300
                     "
                   >
                     {member.pronouns}
-                  </span>
-                ) : null}
-
-                {member.section_title ? (
-                  <span
-                    className="
-                      rounded-full
-                      border
-                      border-white/20
-                      bg-white/15
-                      px-4
-                      py-2
-                      text-sm
-                      font-semibold
-                      text-white/95
-
-                      dark:border-white/10
-                      dark:bg-white/[0.06]
-                    "
-                  >
-                    {member.section_title}
                   </span>
                 ) : null}
               </div>
@@ -312,29 +326,43 @@ function TeamStoryModal({
                   href={`mailto:${member.email}`}
                   className="
                     mt-5
-                    rounded-2xl
+                    inline-flex
+                    items-center
+                    gap-2
+                    rounded-full
                     border
-                    border-white/25
-                    bg-black/20
+                    border-slate-200
+                    bg-slate-50
                     px-5
                     py-3
                     text-sm
-                    font-semibold
-                    text-white
+                    font-bold
+                    text-slate-700
                     transition
-                    hover:bg-black/30
+                    hover:bg-slate-100
 
                     dark:border-white/10
-                    dark:bg-black
-                    dark:hover:bg-zinc-900
+                    dark:bg-white/[0.05]
+                    dark:text-white
+                    dark:hover:bg-white/[0.1]
                   "
                 >
+                  <Mail className="h-4 w-4" />
                   {member.email}
                 </a>
               ) : null}
 
               {member.story_title ? (
-                <h3 className="mt-8 text-2xl font-bold text-white">
+                <h3
+                  className="
+                    mt-8
+                    text-2xl
+                    font-black
+                    text-slate-950
+
+                    dark:text-white
+                  "
+                >
                   {member.story_title}
                 </h3>
               ) : null}
@@ -342,16 +370,15 @@ function TeamStoryModal({
 
             <div
               className="
-                relative
-                z-10
                 mt-6
                 space-y-5
                 text-base
                 leading-8
-                text-white/90
+                text-slate-700
+
                 sm:text-lg
 
-                dark:text-zinc-200
+                dark:text-white/80
               "
             >
               {(member.story ?? "")
@@ -364,7 +391,7 @@ function TeamStoryModal({
                 ))}
 
               {!member.story?.trim() ? (
-                <p className="italic text-white/70 dark:text-zinc-400">
+                <p className="italic text-slate-500 dark:text-white/50">
                   Story coming soon.
                 </p>
               ) : null}
@@ -386,30 +413,39 @@ function CardButtons({
   const hasStory = Boolean(member.story?.trim());
 
   return (
-    <div className="mt-auto flex flex-col gap-3 pt-6">
+    <div
+      className="
+        mt-auto
+        grid
+        gap-3
+        pt-5
+
+        sm:grid-cols-2
+      "
+    >
       <Link
         href={`/team/${slugifyName(member.full_name)}`}
         className="
           inline-flex
+          min-h-11
           items-center
           justify-center
           rounded-full
           border
-          border-white/25
-          bg-white/10
-          px-6
+          border-slate-200
+          bg-white
+          px-5
           py-3
           text-sm
-          font-bold
-          text-white
+          font-black
+          text-slate-800
+          shadow-sm
           transition
-          hover:bg-white/20
-          focus:outline-none
-          focus-visible:ring-2
-          focus-visible:ring-white
+          hover:bg-slate-50
 
-          dark:border-white/15
+          dark:border-white/10
           dark:bg-white/[0.05]
+          dark:text-white
           dark:hover:bg-white/[0.1]
         "
       >
@@ -422,32 +458,26 @@ function CardButtons({
           onClick={() => onOpenStory(member)}
           className="
             inline-flex
+            min-h-11
             items-center
             justify-center
+            gap-2
             rounded-full
-            bg-gradient-to-r
-            from-pink-600
-            via-fuchsia-600
-            to-rose-700
-            px-6
+            bg-purple-600
+            px-5
             py-3
             text-sm
-            font-bold
+            font-black
             text-white
             shadow-lg
             transition
-            hover:scale-[1.01]
-            focus:outline-none
-            focus-visible:ring-2
-            focus-visible:ring-white
+            hover:bg-purple-500
 
-            dark:bg-none
-            dark:bg-zinc-800
-            dark:ring-1
-            dark:ring-white/15
-            dark:hover:bg-zinc-700
+            dark:bg-purple-500
+            dark:hover:bg-purple-400
           "
         >
+          <MessageCircleMore className="h-4 w-4" />
           Read Story
         </button>
       ) : (
@@ -456,22 +486,23 @@ function CardButtons({
           disabled
           className="
             inline-flex
+            min-h-11
             cursor-not-allowed
             items-center
             justify-center
             rounded-full
             border
-            border-white/15
-            bg-white/10
-            px-6
+            border-slate-200
+            bg-slate-100
+            px-5
             py-3
             text-sm
             font-bold
-            text-white/60
+            text-slate-400
 
             dark:border-white/10
             dark:bg-white/[0.03]
-            dark:text-white/40
+            dark:text-white/30
           "
         >
           Story Coming Soon
@@ -504,34 +535,30 @@ function CommitteeMemberCard({
     >
       <article
         className="
+          group
           flex
           h-full
           flex-col
           overflow-hidden
-          rounded-[32px]
+          rounded-[28px]
           border
-          border-violet-300/40
-          bg-gradient-to-br
-          from-violet-500
-          via-purple-500
-          to-fuchsia-500
-          text-white
-          shadow-[0_20px_60px_rgba(0,0,0,0.14)]
+          border-white/60
+          bg-white/90
+          text-slate-950
+          shadow-[0_18px_50px_rgba(15,23,42,0.12)]
+          backdrop-blur-md
           transition
           duration-300
           hover:-translate-y-1
-          hover:shadow-[0_24px_70px_rgba(0,0,0,0.18)]
+          hover:shadow-[0_24px_70px_rgba(15,23,42,0.18)]
 
           dark:border-white/10
-          dark:bg-none
-          dark:bg-zinc-950
-          dark:shadow-[0_20px_60px_rgba(0,0,0,0.65)]
-          dark:hover:border-white/20
-          dark:hover:bg-zinc-900
-          dark:hover:shadow-[0_24px_80px_rgba(0,0,0,0.85)]
+          dark:bg-[#111827]/90
+          dark:text-white
+          dark:shadow-[0_20px_60px_rgba(0,0,0,0.5)]
         "
       >
-        <div className="relative aspect-[4/3] w-full bg-zinc-900">
+        <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-200 dark:bg-[#090d14]">
           <Image
             src={member.image_url || "/image/Logo.png"}
             alt={member.full_name}
@@ -542,29 +569,78 @@ function CommitteeMemberCard({
               objectFit: "cover",
               objectPosition: getImagePosition(member),
             }}
+            className="transition duration-500 group-hover:scale-[1.03]"
           />
 
           <div
             className="
               absolute
-              inset-0
+              inset-x-0
+              bottom-0
+              h-24
               bg-gradient-to-t
-              from-black/30
-              via-black/5
+              from-black/60
               to-transparent
-
-              dark:from-black/70
-              dark:via-black/10
             "
           />
+
+          <div
+            className="
+              absolute
+              bottom-4
+              left-4
+              right-4
+              flex
+              items-end
+              justify-between
+              gap-3
+            "
+          >
+            <span
+              className="
+                rounded-full
+                bg-white/90
+                px-3
+                py-1.5
+                text-xs
+                font-black
+                text-purple-700
+                shadow-md
+                backdrop-blur
+
+                dark:bg-black/60
+                dark:text-purple-200
+              "
+            >
+              {member.section_title}
+            </span>
+          </div>
         </div>
 
-        <div className="flex flex-1 flex-col p-6 text-white">
-          <h3 className="text-2xl font-extrabold leading-tight text-white">
+        <div className="flex flex-1 flex-col p-6">
+          <h3
+            className="
+              text-2xl
+              font-black
+              leading-tight
+              text-slate-950
+
+              dark:text-white
+            "
+          >
             {member.full_name}
           </h3>
 
-          <p className="mt-2 text-base font-semibold text-white/90">
+          <p
+            className="
+              mt-2
+              text-base
+              font-bold
+              text-purple-700
+
+              dark:text-purple-300
+            "
+          >
             {member.role}
           </p>
 
@@ -574,17 +650,15 @@ function CommitteeMemberCard({
                 className="
                   inline-flex
                   rounded-full
-                  border
-                  border-white/20
-                  bg-white/10
-                  px-4
-                  py-2
-                  text-sm
-                  font-semibold
-                  text-white
+                  bg-pink-50
+                  px-3
+                  py-1.5
+                  text-xs
+                  font-bold
+                  text-pink-700
 
-                  dark:border-white/10
-                  dark:bg-white/[0.05]
+                  dark:bg-pink-500/10
+                  dark:text-pink-300
                 "
               >
                 {member.pronouns}
@@ -600,23 +674,27 @@ function CommitteeMemberCard({
                 inline-flex
                 w-fit
                 max-w-full
-                rounded-2xl
+                items-center
+                gap-2
+                rounded-full
                 border
-                border-white/20
-                bg-black/15
+                border-slate-200
+                bg-slate-50
                 px-4
-                py-3
+                py-2.5
                 text-sm
                 font-semibold
-                text-white/95
+                text-slate-700
                 transition
-                hover:bg-black/25
+                hover:bg-slate-100
 
                 dark:border-white/10
-                dark:bg-black
-                dark:hover:bg-zinc-900
+                dark:bg-white/[0.05]
+                dark:text-white/80
+                dark:hover:bg-white/[0.1]
               "
             >
+              <Mail className="h-4 w-4 shrink-0" />
               <span className="truncate">{member.email}</span>
             </a>
           ) : null}
@@ -632,6 +710,8 @@ function CommitteeMemberCard({
 }
 
 export default function MeetUsContent() {
+  const prefersReducedMotion = useReducedMotion();
+
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -657,14 +737,14 @@ export default function MeetUsContent() {
 
         if (!response.ok || !data.ok) {
           throw new Error(
-            data.error || "Failed to load committee members"
+            data.error || "Failed to load committee members",
           );
         }
 
         setMembers(
           (data.members ?? []).filter(
-            (member) => member.is_published
-          )
+            (member) => member.is_published,
+          ),
         );
       } catch (error) {
         if (
@@ -677,7 +757,7 @@ export default function MeetUsContent() {
         setError(
           error instanceof Error
             ? error.message
-            : "Failed to load members"
+            : "Failed to load members",
         );
       } finally {
         if (!controller.signal.aborted) {
@@ -711,118 +791,139 @@ export default function MeetUsContent() {
         members: [...groupedMembers].sort(
           (firstMember, secondMember) =>
             (firstMember.display_order ?? 999) -
-            (secondMember.display_order ?? 999)
+            (secondMember.display_order ?? 999),
         ),
-      })
+      }),
     );
   }, [members]);
 
   const boardSection = sections.find(
-    (section) => section.title === "Committed Board"
+    (section) => section.title === "Committed Board",
   );
 
   const otherSections = sections.filter(
-    (section) => section.title !== "Committed Board"
+    (section) => section.title !== "Committed Board",
   );
+
+  const totalMembers = members.length;
 
   return (
     <>
-      <div
+      <main
         className="
           min-h-screen
           px-4
           pb-24
-          pt-8
-          text-slate-900
-          transition-colors
-          duration-300
-          sm:px-8
-          lg:px-12
+          pt-28
+          text-slate-950
+
+          sm:px-6
+          sm:pt-32
+
+          lg:px-8
 
           dark:text-white
         "
       >
         <div className="mx-auto max-w-7xl">
+          {/* HERO */}
           <motion.header
-            initial={{
-              opacity: 0,
-              y: 22,
-            }}
+            initial={
+              prefersReducedMotion
+                ? false
+                : {
+                    opacity: 0,
+                    y: 20,
+                  }
+            }
             animate={{
               opacity: 1,
               y: 0,
             }}
             transition={{
-              duration: 0.6,
+              duration: prefersReducedMotion ? 0 : 0.55,
               ease: "easeOut",
             }}
             className="
-              relative
-              mt-16
-              overflow-hidden
-              rounded-[36px]
+              grid
+              gap-8
+              rounded-[32px]
               border
-              border-slate-200
-              bg-gradient-to-br
-              from-violet-500
-              via-purple-500
-              to-fuchsia-500
-              px-6
-              py-12
-              text-white
-              shadow-[0_25px_80px_rgba(0,0,0,0.12)]
-              sm:mt-10
-              sm:px-10
-              sm:py-16
-              lg:px-14
+              border-white/60
+              bg-white/85
+              p-6
+              shadow-xl
+              backdrop-blur-md
+
+              sm:p-8
+
+              lg:grid-cols-[0.75fr_1.25fr]
+              lg:items-center
+              lg:p-10
 
               dark:border-white/10
-              dark:bg-none
-              dark:bg-zinc-950
-              dark:shadow-[0_25px_90px_rgba(0,0,0,0.75)]
+              dark:bg-[#111827]/90
+              dark:shadow-black/30
             "
           >
-            <div className="relative z-10 flex flex-col items-center text-center">
+            <div className="flex justify-center lg:justify-start">
               <div
                 className="
-                  mb-6
+                  relative
+                  h-40
+                  w-40
                   overflow-hidden
                   rounded-full
                   border-4
-                  border-white/80
-                  shadow-[0_0_45px_rgba(255,255,255,0.35)]
+                  border-white
+                  shadow-2xl
+                  ring-8
+                  ring-pink-100
 
-                  dark:border-white/20
-                  dark:shadow-[0_0_45px_rgba(255,255,255,0.08)]
+                  sm:h-48
+                  sm:w-48
+
+                  dark:border-[#111827]
+                  dark:ring-white/10
                 "
               >
                 <Image
                   src="/image/Logo.png"
                   alt="Burton Pride Team"
-                  width={150}
-                  height={150}
+                  fill
                   priority
-                  className="
-                    h-[130px]
-                    w-[130px]
-                    rounded-full
-                    object-cover
-                    sm:h-[150px]
-                    sm:w-[150px]
-                  "
+                  className="object-cover"
                 />
               </div>
+            </div>
+
+            <div className="text-center lg:text-left">
+              <p
+                className="
+                  text-sm
+                  font-black
+                  uppercase
+                  tracking-[0.18em]
+                  text-purple-700
+
+                  dark:text-purple-300
+                "
+              >
+                The people behind Burton Pride
+              </p>
 
               <h1
                 className="
-                  mt-4
-                  max-w-5xl
+                  mt-3
                   text-4xl
                   font-black
                   leading-tight
-                  text-white
+                  text-slate-950
+
                   sm:text-5xl
                   lg:text-6xl
+
+                  dark:text-white
                 "
               >
                 Meet the Burton Pride Team
@@ -830,43 +931,142 @@ export default function MeetUsContent() {
 
               <p
                 className="
-                  mt-6
+                  mt-5
                   max-w-3xl
                   text-base
-                  leading-8
-                  text-white/90
-                  sm:text-lg
+                  leading-7
+                  text-slate-700
 
-                  dark:text-zinc-300
+                  sm:text-lg
+                  sm:leading-8
+
+                  dark:text-white/75
                 "
               >
-                Meet the people behind Burton Pride, learn more about
-                our team, and discover the stories that help shape our
-                community.
+                Burton Pride is run by local people who care about the
+                community. Meet the team, find out what everyone does, and read
+                the stories behind the people helping to keep Pride moving.
               </p>
+
+              {!loading && !error && totalMembers > 0 ? (
+                <div
+                  className="
+                    mt-6
+                    inline-flex
+                    items-center
+                    gap-2
+                    rounded-full
+                    bg-purple-50
+                    px-4
+                    py-2
+                    text-sm
+                    font-black
+                    text-purple-700
+
+                    dark:bg-purple-500/10
+                    dark:text-purple-300
+                  "
+                >
+                  <UsersRound className="h-4 w-4" />
+                  {totalMembers} team {totalMembers === 1 ? "member" : "members"}
+                </div>
+              ) : null}
             </div>
           </motion.header>
+
+          {/* SMALL INTRO NOTE */}
+          <motion.section
+            initial={
+              prefersReducedMotion
+                ? false
+                : {
+                    opacity: 0,
+                    y: 18,
+                  }
+            }
+            whileInView={{
+              opacity: 1,
+              y: 0,
+            }}
+            viewport={{ once: true }}
+            transition={{
+              duration: prefersReducedMotion ? 0 : 0.5,
+            }}
+            className="
+              mt-8
+              flex
+              items-start
+              gap-4
+              rounded-3xl
+              border
+              border-white/50
+              bg-white/70
+              p-5
+              shadow-sm
+              backdrop-blur-md
+
+              sm:p-6
+
+              dark:border-white/10
+              dark:bg-white/[0.04]
+            "
+          >
+            <div
+              className="
+                mt-0.5
+                flex
+                h-10
+                w-10
+                shrink-0
+                items-center
+                justify-center
+                rounded-2xl
+                bg-yellow-100
+                text-yellow-700
+
+                dark:bg-yellow-300/10
+                dark:text-yellow-300
+              "
+            >
+              <Sparkles className="h-5 w-5" />
+            </div>
+
+            <p
+              className="
+                text-sm
+                leading-6
+                text-slate-700
+
+                sm:text-base
+
+                dark:text-white/70
+              "
+            >
+              We&apos;re a grassroots team, so everyone brings something
+              different. Some people focus on events, others on community work,
+              planning, fundraising, or keeping things running behind the scenes.
+            </p>
+          </motion.section>
 
           {loading ? (
             <div
               className="
-                mt-12
+                mt-10
                 rounded-3xl
                 border
-                border-slate-200
-                bg-slate-50
+                border-white/50
+                bg-white/80
                 px-6
-                py-5
+                py-8
                 text-center
-                text-lg
-                text-slate-900
+                text-base
+                font-semibold
+                text-slate-700
                 shadow-sm
-                transition-colors
 
                 dark:border-white/10
-                dark:bg-zinc-950
-                dark:text-white
-                dark:shadow-[0_10px_40px_rgba(0,0,0,0.5)]
+                dark:bg-[#111827]/80
+                dark:text-white/70
               "
               role="status"
             >
@@ -877,20 +1077,20 @@ export default function MeetUsContent() {
           {error ? (
             <div
               className="
-                mt-12
+                mt-10
                 rounded-3xl
                 border
                 border-red-200
                 bg-red-50
                 px-6
-                py-5
+                py-6
                 text-center
-                text-lg
+                text-base
+                font-semibold
                 text-red-700
-                shadow-sm
 
-                dark:border-red-500/25
-                dark:bg-red-950/40
+                dark:border-red-500/20
+                dark:bg-red-950/30
                 dark:text-red-200
               "
               role="alert"
@@ -900,14 +1100,29 @@ export default function MeetUsContent() {
           ) : null}
 
           {!loading && !error && boardSection ? (
-            <section className="mt-16">
-              <div className="mb-8 text-center">
+            <section className="mt-14">
+              <div className="mb-7">
+                <p
+                  className="
+                    text-sm
+                    font-black
+                    uppercase
+                    tracking-[0.16em]
+                    text-purple-700
+
+                    dark:text-purple-300
+                  "
+                >
+                  Leadership
+                </p>
+
                 <h2
                   className="
                     mt-2
                     text-3xl
                     font-black
-                    text-slate-900
+                    text-slate-950
+
                     sm:text-4xl
 
                     dark:text-white
@@ -917,7 +1132,7 @@ export default function MeetUsContent() {
                 </h2>
               </div>
 
-              <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
                 {boardSection.members.map(
                   (member, index) => (
                     <CommitteeMemberCard
@@ -926,7 +1141,7 @@ export default function MeetUsContent() {
                       index={index}
                       onOpenStory={setActiveStoryMember}
                     />
-                  )
+                  ),
                 )}
               </div>
             </section>
@@ -936,15 +1151,15 @@ export default function MeetUsContent() {
             ? otherSections.map((section, sectionIndex) => (
                 <section
                   key={`${section.title}-${sectionIndex}`}
-                  className="mt-20"
+                  className="mt-16"
                 >
-                  <div className="mb-8 text-center">
+                  <div className="mb-7">
                     <h2
                       className="
-                        mt-2
                         text-3xl
                         font-black
-                        text-slate-900
+                        text-slate-950
+
                         sm:text-4xl
 
                         dark:text-white
@@ -954,7 +1169,7 @@ export default function MeetUsContent() {
                     </h2>
                   </div>
 
-                  <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
                     {section.members.map(
                       (member, index) => (
                         <CommitteeMemberCard
@@ -963,7 +1178,7 @@ export default function MeetUsContent() {
                           index={index + 100}
                           onOpenStory={setActiveStoryMember}
                         />
-                      )
+                      ),
                     )}
                   </div>
                 </section>
@@ -973,131 +1188,149 @@ export default function MeetUsContent() {
           {!loading && !error && sections.length === 0 ? (
             <div
               className="
-                mt-16
+                mt-14
                 rounded-3xl
                 border
-                border-slate-200
-                bg-slate-50
+                border-white/50
+                bg-white/80
                 px-6
                 py-10
                 text-center
-                text-lg
+                text-base
                 text-slate-700
 
                 dark:border-white/10
-                dark:bg-zinc-950
-                dark:text-zinc-300
+                dark:bg-[#111827]/80
+                dark:text-white/70
               "
             >
               No published team members are currently available.
             </div>
           ) : null}
 
+          {/* CONTACT CTA */}
           <motion.section
-            initial={{
-              opacity: 0,
-              y: 24,
-            }}
+            initial={
+              prefersReducedMotion
+                ? false
+                : {
+                    opacity: 0,
+                    y: 20,
+                  }
+            }
             whileInView={{
               opacity: 1,
               y: 0,
             }}
             viewport={{ once: true }}
             transition={{
-              duration: 0.55,
-              ease: "easeOut",
+              duration: prefersReducedMotion ? 0 : 0.5,
             }}
             className="
-              mt-20
+              relative
+              mt-16
               overflow-hidden
-              rounded-[34px]
-              border
-              border-slate-200
-              bg-slate-50
-              p-8
+              rounded-[30px]
+              bg-gradient-to-r
+              from-pink-500
+              via-purple-600
+              to-blue-600
+              px-6
+              py-10
               text-center
-              shadow-sm
-              transition-colors
-              sm:p-10
-              lg:p-12
+              text-white
+              shadow-2xl
 
-              dark:border-white/10
-              dark:bg-zinc-950
-              dark:text-white
-              dark:shadow-[0_20px_60px_rgba(0,0,0,0.65)]
+              sm:px-10
+              sm:py-12
             "
           >
-            <h2
+            <div
+              aria-hidden="true"
               className="
-                text-3xl
-                font-black
-                text-slate-900
-                sm:text-4xl
-                lg:text-5xl
-
-                dark:text-white
+                pointer-events-none
+                absolute
+                -left-20
+                -top-20
+                h-56
+                w-56
+                rounded-full
+                bg-white/15
+                blur-3xl
               "
-            >
-              Want to Connect?
-            </h2>
+            />
 
-            <p
+            <div
+              aria-hidden="true"
               className="
-                mx-auto
-                mt-5
-                max-w-3xl
-                text-base
-                leading-8
-                text-slate-600
-                sm:text-lg
-
-                dark:text-zinc-300
+                pointer-events-none
+                absolute
+                -bottom-20
+                -right-20
+                h-64
+                w-64
+                rounded-full
+                bg-blue-300/20
+                blur-3xl
               "
-            >
-              Reach out to us for collaborations, volunteering,
-              sponsorship, partnerships, or general enquiries.
-            </p>
+            />
 
-            <div className="mt-8 flex justify-center">
+            <div className="relative">
+              <h2
+                className="
+                  text-3xl
+                  font-black
+
+                  sm:text-4xl
+                "
+              >
+                Want to talk to the team?
+              </h2>
+
+              <p
+                className="
+                  mx-auto
+                  mt-4
+                  max-w-2xl
+                  text-base
+                  leading-7
+                  text-white/90
+
+                  sm:text-lg
+                "
+              >
+                Get in touch about volunteering, collaborations, sponsorship,
+                community projects or anything else you&apos;d like to speak to
+                Burton Pride about.
+              </p>
+
               <Link
                 href="/ContactUS"
                 className="
+                  mt-7
                   inline-flex
+                  min-h-12
                   items-center
                   justify-center
                   rounded-full
-                  bg-gradient-to-r
-                  from-yellow-300
-                  via-pink-400
-                  to-purple-500
-                  px-8
-                  py-4
-                  text-lg
-                  font-bold
-                  text-black
-                  shadow-lg
+                  bg-yellow-300
+                  px-7
+                  py-3
+                  text-sm
+                  font-black
+                  text-purple-950
+                  shadow-xl
                   transition
-                  hover:scale-[1.03]
-                  hover:shadow-[0_0_35px_rgba(168,85,247,0.18)]
-                  focus:outline-none
-                  focus-visible:ring-2
-                  focus-visible:ring-purple-500
-                  focus-visible:ring-offset-2
-
-                  dark:bg-none
-                  dark:bg-white
-                  dark:text-black
-                  dark:hover:bg-zinc-200
-                  dark:focus-visible:ring-white
-                  dark:focus-visible:ring-offset-black
+                  hover:scale-105
+                  hover:bg-white
                 "
               >
-                🌟 Contact Us
+                Contact Burton Pride
               </Link>
             </div>
           </motion.section>
         </div>
-      </div>
+      </main>
 
       <TeamStoryModal
         member={activeStoryMember}

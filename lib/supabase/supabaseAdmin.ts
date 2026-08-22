@@ -2,22 +2,6 @@ import "server-only";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-/**
- * File suggestion:
- * lib/supabase/supabaseAdmin.ts
- *
- * SECURITY RULE:
- * Never import this file into:
- * - client components
- * - "use client" files
- * - browser code
- * - public pages
- *
- * Only use it in:
- * - route handlers
- * - server actions
- * - server-only admin libraries
- */
 
 type SupabaseJwtPayload = {
   role?: string;

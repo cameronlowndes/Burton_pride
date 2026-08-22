@@ -435,6 +435,31 @@ export default function MoneyPageModals({
   onCloseLoanInterest,
   onSaveLoanInterest,
 }: MoneyPageModalsProps) {
+  /*
+   * Keep sponsor form actions stable while the parent Money page re-renders.
+   *
+   * This prevents MoneyModals from seeing a new onClose/onSave function
+   * reference after every sponsor form keystroke.
+   */
+  const onCloseSponsorFormRef = useRef(onCloseSponsorForm);
+  const onSaveSponsorRef = useRef(onSaveSponsor);
+
+  useEffect(() => {
+    onCloseSponsorFormRef.current = onCloseSponsorForm;
+  }, [onCloseSponsorForm]);
+
+  useEffect(() => {
+    onSaveSponsorRef.current = onSaveSponsor;
+  }, [onSaveSponsor]);
+
+  const stableCloseSponsorForm = useCallback(() => {
+    onCloseSponsorFormRef.current();
+  }, []);
+
+  const stableSaveSponsor = useCallback(async () => {
+    await onSaveSponsorRef.current();
+  }, []);
+
   const closeSupplierDelete = useCallback(() => {
     if (!deletingSupplier) {
       setDeleteSupplierId?.(null);
@@ -467,8 +492,8 @@ export default function MoneyPageModals({
         sponsorForm={sponsorForm}
         setSponsorForm={setSponsorForm}
         savingSponsor={savingSponsor}
-        onCloseSponsorForm={onCloseSponsorForm}
-        onSaveSponsor={onSaveSponsor}
+        onCloseSponsorForm={stableCloseSponsorForm}
+        onSaveSponsor={stableSaveSponsor}
         supplierFormOpen={supplierFormOpen}
         editingSupplier={editingSupplier}
         supplierForm={supplierForm}

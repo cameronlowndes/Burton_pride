@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
+  Clock3,
   Loader2,
   Lock,
   RefreshCw,
@@ -69,13 +77,34 @@ const AUTH_ROUTES = [
   "/admin/change-password",
 ];
 
-const EVENT_HUB_PREFIX = "/admin/burtonprideeventhub";
+const EVENT_HUB_PREFIX = "/admin/eventhub";
 const DASHBOARD_PREFIX = "/admin/dashboard";
 const EMAIL_PREFIX = "/admin/email";
 const MONEY_PREFIX = "/admin/money";
 const MONEY_MANAGEMENT_PREFIX = "/admin/moneymanagement";
 const STOCK_MANAGEMENT_PREFIX = "/admin/stockmanagement";
 const BUG_TRACKER_PREFIX = "/admin/bugtracker";
+
+const ADMIN_PRESENCE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const ADMIN_PRESENCE_RESPONSE_WINDOW_MS = 60 * 1000;
+const ADMIN_SECURITY_STATUS_RETRY_MS = 30 * 1000;
+
+const SESSION_SECURITY_STATUS_API = "/api/admin/settings/security/session/status";
+const SESSION_PRESENCE_API = "/api/admin/settings/security/session/presence";
+const SESSION_REQUIRE_REAUTH_API =
+  "/api/admin/settings/security/session/require-reauth";
+
+type AdminSessionSecurityStatus = {
+  authenticated?: boolean;
+  requires_reauthentication?: boolean;
+  last_mfa_at?: string | null;
+  next_presence_check_at?: string | null;
+};
+
+type AdminPresenceResponse = {
+  ok?: boolean;
+  next_presence_check_at?: string | null;
+};
 
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -126,6 +155,28 @@ function getLoginPath(pathname: string | null | undefined) {
   return `/Admin/Login?next=${encodeURIComponent(next)}`;
 }
 
+function getTwoFactorReauthPath(
+  pathname: string | null | undefined,
+  reason: string,
+) {
+  const next = getSafeNextPath(pathname);
+  const params = new URLSearchParams({
+    next,
+    reason,
+    reauth: "1",
+  });
+
+  return `/Admin/Login/TwoFactor/Verify?${params.toString()}`;
+}
+
+function parseSecurityTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+
+  const parsed = Date.parse(value);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function getAuditArea(pathname: string | null | undefined) {
   const path = normalisePath(pathname);
 
@@ -162,10 +213,7 @@ function getRequiredPermission(pathname: string | null | undefined) {
   if (!path || path === "/") return null;
   if (isAuthRoute(path)) return null;
 
-  /**
-   * Event Hub keeps its own layout/sidebar,
-   * but it is still protected and reported by this Admin layout.
-   */
+ 
   if (isPathOrChild(path, EVENT_HUB_PREFIX)) {
     return "event_hub:view";
   }
@@ -282,6 +330,670 @@ async function reportAdminAudit(input: AuditReportInput) {
   }
 }
 
+
+function AdminSessionPresenceBoundary({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const path = normalisePath(pathname);
+  const isAuthPage = isAuthRoute(path);
+
+  const [showPresenceCheck, setShowPresenceCheck] = useState(false);
+  const [secondsRemaining, setSecondsRemaining] = useState(60);
+  const [confirmingPresence, setConfirmingPresence] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState("");
+
+  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const securityRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimerRef =
+    useRef<ReturnType<typeof setInterval> | null>(null);
+  const responseDeadlineRef = useRef<number | null>(null);
+  const reauthStartedRef = useRef(false);
+  const developmentPresenceTestRef = useRef(false);
+
+  const clearPresenceTimer = useCallback(() => {
+    if (presenceTimerRef.current) {
+      clearTimeout(presenceTimerRef.current);
+      presenceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearSecurityRetryTimer = useCallback(() => {
+    if (securityRetryTimerRef.current) {
+      clearTimeout(securityRetryTimerRef.current);
+      securityRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const clearCountdownTimer = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+  }, []);
+
+  const redirectToTwoFactor = useCallback(
+    (reason: string) => {
+      if (reauthStartedRef.current) return;
+
+      reauthStartedRef.current = true;
+      clearPresenceTimer();
+      clearSecurityRetryTimer();
+      clearCountdownTimer();
+      setShowPresenceCheck(false);
+
+      router.replace(getTwoFactorReauthPath(pathname, reason));
+      router.refresh();
+    },
+    [
+      clearCountdownTimer,
+      clearPresenceTimer,
+      clearSecurityRetryTimer,
+      pathname,
+      router,
+    ],
+  );
+
+  const requireReauthentication = useCallback(
+    async (reason: string) => {
+      if (reauthStartedRef.current) return;
+
+      try {
+        await fetch(SESSION_REQUIRE_REAUTH_API, {
+          method: "POST",
+          cache: "no-store",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            reason,
+            route: pathname || "/Admin/Dashboard",
+          }),
+        });
+      } catch (error) {
+        console.warn(
+          "Could not update admin reauthentication state:",
+          error,
+        );
+      } finally {
+        redirectToTwoFactor(reason);
+      }
+    },
+    [pathname, redirectToTwoFactor],
+  );
+
+  const startPresenceCountdown = useCallback(() => {
+    clearPresenceTimer();
+    clearCountdownTimer();
+
+    const deadline =
+      Date.now() + ADMIN_PRESENCE_RESPONSE_WINDOW_MS;
+
+    responseDeadlineRef.current = deadline;
+
+    setSecondsRemaining(
+      Math.ceil(ADMIN_PRESENCE_RESPONSE_WINDOW_MS / 1000),
+    );
+    setSecurityMessage("");
+    setShowPresenceCheck(true);
+
+    void reportAdminAudit({
+      action: "admin_presence_check_shown",
+      area: getAuditArea(pathname),
+      route: pathname || "/Admin/Dashboard",
+      method: "CLIENT",
+      status: "pending",
+      risk_level: "low",
+      metadata: {
+        response_window_seconds:
+          ADMIN_PRESENCE_RESPONSE_WINDOW_MS / 1000,
+        interval_hours:
+          ADMIN_PRESENCE_CHECK_INTERVAL_MS / 60 / 60 / 1000,
+      },
+    });
+
+    countdownTimerRef.current = setInterval(() => {
+      const activeDeadline = responseDeadlineRef.current;
+
+      if (!activeDeadline) return;
+
+      const remaining = Math.max(
+        0,
+        Math.ceil((activeDeadline - Date.now()) / 1000),
+      );
+
+      setSecondsRemaining(remaining);
+
+      if (remaining <= 0) {
+        clearCountdownTimer();
+
+        void reportAdminAudit({
+          action: "admin_presence_check_timeout",
+          area: getAuditArea(pathname),
+          route: pathname || "/Admin/Dashboard",
+          method: "CLIENT",
+          status: "blocked",
+          risk_level: "medium",
+          metadata: {
+            reason: "no_response_within_60_seconds",
+          },
+        });
+
+        if (
+          process.env.NODE_ENV !== "production" &&
+          developmentPresenceTestRef.current
+        ) {
+          /*
+           * A development UI test must never lock the real admin session.
+           * Close the modal after the one-minute timeout and leave the
+           * server-side MFA/session state untouched.
+           */
+          developmentPresenceTestRef.current = false;
+          responseDeadlineRef.current = null;
+          setShowPresenceCheck(false);
+          setSecurityMessage(
+            "Development test complete: the one-minute timeout fired. The real admin session was not locked.",
+          );
+          return;
+        }
+
+        void requireReauthentication(
+          "presence_check_timeout",
+        );
+      }
+    }, 250);
+  }, [
+    clearCountdownTimer,
+    clearPresenceTimer,
+    pathname,
+    requireReauthentication,
+  ]);
+
+  const schedulePresenceCheck = useCallback(
+    (checkAt: number) => {
+      clearPresenceTimer();
+
+      const delay = Math.max(0, checkAt - Date.now());
+
+      presenceTimerRef.current = setTimeout(() => {
+        startPresenceCountdown();
+      }, delay);
+    },
+    [clearPresenceTimer, startPresenceCountdown],
+  );
+
+  const loadSessionSecurityStatus = useCallback(async () => {
+    if (isAuthPage || reauthStartedRef.current) return;
+
+    try {
+      const response = await fetch(SESSION_SECURITY_STATUS_API, {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        /*
+         * Do not force a 2FA redirect here.
+         *
+         * The normal AdminProvider/AdminLayoutGate owns authentication
+         * redirects. Sending every 401/403 straight to the two-factor page
+         * can create an endless Dashboard -> 2FA -> Dashboard -> 2FA loop
+         * when the security-session API and the login session briefly disagree.
+         */
+        clearPresenceTimer();
+        clearSecurityRetryTimer();
+
+        securityRetryTimerRef.current = setTimeout(() => {
+          if (!reauthStartedRef.current) {
+            void loadSessionSecurityStatus();
+          }
+        }, ADMIN_SECURITY_STATUS_RETRY_MS);
+
+        return;
+      }
+
+      if (!response.ok) {
+        /*
+         * A temporary 404/500 from the presence-check API must not trap an
+         * already authenticated administrator in a reauthentication loop.
+         * Keep the existing admin permission/authentication boundary in
+         * control and retry the optional presence status check shortly.
+         */
+        console.warn(
+          `Security status request failed with ${response.status}.`,
+        );
+
+        clearSecurityRetryTimer();
+
+        securityRetryTimerRef.current = setTimeout(() => {
+          if (!reauthStartedRef.current) {
+            void loadSessionSecurityStatus();
+          }
+        }, ADMIN_SECURITY_STATUS_RETRY_MS);
+
+        return;
+      }
+
+      const data =
+        (await response.json()) as AdminSessionSecurityStatus;
+
+      if (data.authenticated === false) {
+        redirectToTwoFactor("admin_session_not_authenticated");
+        return;
+      }
+
+      if (data.requires_reauthentication) {
+        redirectToTwoFactor("reauthentication_required");
+        return;
+      }
+
+      const nextPresenceCheck = parseSecurityTimestamp(
+        data.next_presence_check_at,
+      );
+
+      if (nextPresenceCheck) {
+        if (nextPresenceCheck <= Date.now()) {
+          startPresenceCountdown();
+          return;
+        }
+
+        schedulePresenceCheck(nextPresenceCheck);
+        return;
+      }
+
+      const lastMfaAt = parseSecurityTimestamp(data.last_mfa_at);
+
+      if (!lastMfaAt) {
+        /*
+         * Fail closed when the server cannot prove when the
+         * administrator last completed MFA.
+         */
+        await requireReauthentication(
+          "mfa_timestamp_unavailable",
+        );
+        return;
+      }
+
+      const calculatedCheckAt =
+        lastMfaAt + ADMIN_PRESENCE_CHECK_INTERVAL_MS;
+
+      if (calculatedCheckAt <= Date.now()) {
+        startPresenceCountdown();
+        return;
+      }
+
+      schedulePresenceCheck(calculatedCheckAt);
+    } catch (error) {
+      console.warn(
+        "Admin session security check failed:",
+        error,
+      );
+
+      /*
+       * Loop protection:
+       * a network error or temporary API failure is NOT treated as proof
+       * that MFA has expired. The existing AdminProvider and server-side
+       * protected APIs remain the authentication boundary.
+       *
+       * Retry the presence check instead of redirecting to 2FA forever.
+       */
+      clearSecurityRetryTimer();
+
+      securityRetryTimerRef.current = setTimeout(() => {
+        if (!reauthStartedRef.current) {
+          void loadSessionSecurityStatus();
+        }
+      }, ADMIN_SECURITY_STATUS_RETRY_MS);
+    }
+  }, [
+    clearPresenceTimer,
+    clearSecurityRetryTimer,
+    isAuthPage,
+    redirectToTwoFactor,
+    requireReauthentication,
+    schedulePresenceCheck,
+    startPresenceCountdown,
+  ]);
+
+  useEffect(() => {
+    if (isAuthPage) {
+      clearPresenceTimer();
+      clearSecurityRetryTimer();
+      clearCountdownTimer();
+      setShowPresenceCheck(false);
+      return;
+    }
+
+    reauthStartedRef.current = false;
+    void loadSessionSecurityStatus();
+
+    return () => {
+      clearPresenceTimer();
+      clearSecurityRetryTimer();
+      clearCountdownTimer();
+    };
+  }, [
+    clearCountdownTimer,
+    clearPresenceTimer,
+    clearSecurityRetryTimer,
+    isAuthPage,
+    loadSessionSecurityStatus,
+  ]);
+
+  useEffect(() => {
+    if (isAuthPage) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (reauthStartedRef.current) return;
+
+      if (showPresenceCheck) {
+        const activeDeadline = responseDeadlineRef.current;
+
+        if (activeDeadline && activeDeadline <= Date.now()) {
+          void requireReauthentication(
+            "presence_check_timeout",
+          );
+        }
+
+        return;
+      }
+
+      void loadSessionSecurityStatus();
+    };
+
+    const handleFocus = () => {
+      if (reauthStartedRef.current) return;
+
+      if (showPresenceCheck) {
+        const activeDeadline = responseDeadlineRef.current;
+
+        if (activeDeadline && activeDeadline <= Date.now()) {
+          void requireReauthentication(
+            "presence_check_timeout",
+          );
+        }
+
+        return;
+      }
+
+      void loadSessionSecurityStatus();
+    };
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [
+    isAuthPage,
+    loadSessionSecurityStatus,
+    requireReauthentication,
+    showPresenceCheck,
+  ]);
+
+  /*
+   * DEVELOPMENT-ONLY SAFE TEST HOOK
+   *
+   * The Security Session Test page dispatches this browser event to exercise
+   * the real 60-second presence modal without changing admin_security_sessions.
+   *
+   * This avoids putting the current server session into a "due" or
+   * "requires_reauthentication" state just to test the UI.
+   */
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (isAuthPage) return;
+
+    const handlePresenceTest = () => {
+      if (reauthStartedRef.current) return;
+      developmentPresenceTestRef.current = true;
+      startPresenceCountdown();
+    };
+
+    window.addEventListener(
+      "burton-admin:test-presence-check",
+      handlePresenceTest,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "burton-admin:test-presence-check",
+        handlePresenceTest,
+      );
+    };
+  }, [isAuthPage, startPresenceCountdown]);
+
+  const handleStillHere = useCallback(async () => {
+    if (confirmingPresence || reauthStartedRef.current) return;
+
+    setConfirmingPresence(true);
+    setSecurityMessage("");
+
+    if (
+      process.env.NODE_ENV !== "production" &&
+      developmentPresenceTestRef.current
+    ) {
+      developmentPresenceTestRef.current = false;
+      clearCountdownTimer();
+      responseDeadlineRef.current = null;
+      setShowPresenceCheck(false);
+      setConfirmingPresence(false);
+      setSecurityMessage("");
+
+      void reportAdminAudit({
+        action: "admin_presence_check_development_test_confirmed",
+        area: getAuditArea(pathname),
+        route: pathname || "/Admin/Dashboard",
+        method: "CLIENT",
+        status: "success",
+        risk_level: "low",
+        metadata: {
+          development_test: true,
+          server_session_changed: false,
+        },
+      });
+
+      return;
+    }
+
+    try {
+      const response = await fetch(SESSION_PRESENCE_API, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          route: pathname || "/Admin/Dashboard",
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        await requireReauthentication(
+          "presence_confirmation_requires_mfa",
+        );
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `Presence confirmation failed with ${response.status}.`,
+        );
+      }
+
+      const data =
+        (await response.json()) as AdminPresenceResponse;
+
+      clearCountdownTimer();
+      responseDeadlineRef.current = null;
+      setShowPresenceCheck(false);
+
+      void reportAdminAudit({
+        action: "admin_presence_check_confirmed",
+        area: getAuditArea(pathname),
+        route: pathname || "/Admin/Dashboard",
+        method: "CLIENT",
+        status: "success",
+        risk_level: "low",
+        metadata: {
+          next_check_hours:
+            ADMIN_PRESENCE_CHECK_INTERVAL_MS / 60 / 60 / 1000,
+        },
+      });
+
+      const serverNextCheck = parseSecurityTimestamp(
+        data.next_presence_check_at,
+      );
+
+      schedulePresenceCheck(
+        serverNextCheck ??
+          Date.now() + ADMIN_PRESENCE_CHECK_INTERVAL_MS,
+      );
+    } catch (error) {
+      console.warn(
+        "Admin presence confirmation failed:",
+        error,
+      );
+
+      setSecurityMessage(
+        "We could not confirm your admin session. For security, two-step verification is required again.",
+      );
+
+      await requireReauthentication(
+        "presence_confirmation_failed",
+      );
+    } finally {
+      setConfirmingPresence(false);
+    }
+  }, [
+    clearCountdownTimer,
+    confirmingPresence,
+    pathname,
+    requireReauthentication,
+    schedulePresenceCheck,
+  ]);
+
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
+  return (
+    <>
+      {children}
+
+      {showPresenceCheck ? (
+        <div
+          className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/80 px-4 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-presence-title"
+          aria-describedby="admin-presence-description"
+        >
+          <div className="w-full max-w-md rounded-3xl border border-purple-300/20 bg-[#090d1d] p-6 text-white shadow-2xl shadow-black/50">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15">
+                <ShieldCheck className="h-6 w-6 text-purple-200" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-purple-200/70">
+                  Security check
+                </p>
+
+                <h2
+                  id="admin-presence-title"
+                  className="mt-1 text-2xl font-black text-white"
+                >
+                  Are you still here?
+                </h2>
+              </div>
+            </div>
+
+            <p
+              id="admin-presence-description"
+              className="mt-4 text-sm leading-6 text-white/75"
+            >
+              Burton Pride checks active admin sessions every six
+              hours. Confirm within one minute to keep using this
+              session. If you do not respond, you will need to enter
+              your two-step verification PIN again.
+            </p>
+
+            <div className="mt-5 flex items-center gap-3 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+              <Clock3 className="h-5 w-5 shrink-0 text-amber-200" />
+
+              <div className="min-w-0">
+                <div className="text-sm font-black text-amber-50">
+                  {secondsRemaining} second
+                  {secondsRemaining === 1 ? "" : "s"} remaining
+                </div>
+
+                <div className="mt-1 text-xs leading-5 text-amber-50/70">
+                  No response means this admin session will be locked
+                  until two-step verification succeeds.
+                </div>
+              </div>
+            </div>
+
+            {securityMessage ? (
+              <div
+                className="mt-4 flex items-start gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 p-3 text-sm leading-5 text-red-50"
+                role="alert"
+              >
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{securityMessage}</span>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void handleStillHere()}
+              disabled={confirmingPresence}
+              autoFocus
+              className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-purple-600 px-4 text-sm font-black text-white transition hover:bg-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-300 focus:ring-offset-2 focus:ring-offset-[#090d1d] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {confirmingPresence ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirming...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="h-4 w-4" />
+                  Yes, I&apos;m still here
+                </>
+              )}
+            </button>
+
+            <p className="mt-4 text-center text-xs text-white/40">
+              Burton Pride Admin Portal security check
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function AdminStatusScreen({
   label,
   title,
@@ -312,8 +1024,8 @@ function AdminStatusScreen({
           : Loader2;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="relative min-h-screen overflow-hidden bg-[#050816] text-white before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]">
+      <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
         <div
           className={[
             "max-w-lg rounded-3xl border p-6 text-center shadow-2xl shadow-black/20 backdrop-blur-xl",
@@ -648,7 +1360,7 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
    */
   if (isAuthPage) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
+      <div className="relative min-h-screen overflow-hidden bg-[#050816] text-white before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]">
         {children}
       </div>
     );
@@ -704,11 +1416,6 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
     return <NoAccessScreen />;
   }
 
-  /**
-   * Money, Email and Event Hub have their own layouts/sidebars.
-   * This layout now protects them and reports audit logs,
-   * but does not force the dashboard sidebar onto them.
-   */
   if (isMoneyRoute || isEmailRoute || isEventHubRoute) {
     return <>{children}</>;
   }
@@ -717,8 +1424,10 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   const displayName = adminName || adminEmail || "Committee Member";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 text-white">
-      <div className="flex min-h-screen flex-col md:flex-row">
+    <div className="relative min-h-screen w-full max-w-none overflow-x-hidden bg-[#050816] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_15%,rgba(236,72,153,0.18),transparent_30%),radial-gradient(circle_at_82%_12%,rgba(59,130,246,0.18),transparent_32%),linear-gradient(135deg,#050816_0%,#160b2d_45%,#06152e_100%)]" />
+      <div className="pointer-events-none absolute left-[58%] top-[28%] h-[42rem] w-[42rem] -translate-x-1/2 rounded-full bg-purple-500/10 blur-3xl" />
+      <div className="relative z-10 flex min-h-screen w-full max-w-none flex-col md:flex-row">
         {showAdminNav ? (
           <AdminSidebar
             permissions={safePermissions}
@@ -728,9 +1437,9 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
           />
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           {showAdminNav ? (
-            <header className="hidden h-16 items-center justify-between border-b border-white/10 bg-white/10 px-8 shadow-sm backdrop-blur-xl md:flex">
+            <header className="hidden h-16 w-full shrink-0 items-center justify-between border-b border-white/10 bg-[#0b1020]/75 px-5 shadow-sm backdrop-blur-xl md:flex lg:px-6">
               <div>
                 <div className="font-semibold text-white/90">Admin Portal</div>
                 {refreshing ? (
@@ -747,8 +1456,10 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
             </header>
           ) : null}
 
-          <main className="flex-1 px-4 py-6 md:px-8 md:py-10">
-            <div className="mx-auto max-w-6xl">{children}</div>
+          <main className="min-w-0 flex-1 overflow-x-hidden px-0 py-0">
+            <div className="w-full min-w-0 max-w-none">
+              {children}
+            </div>
           </main>
         </div>
       </div>
@@ -756,32 +1467,57 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   );
 }
 
-export default function AdminLayoutClient({ children }: { children: ReactNode }) {
+export default function AdminLayoutClient({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const pathname = usePathname();
   const path = normalisePath(pathname);
 
-  /**
-   * Stock Management and Bug Tracker are fully separate admin apps.
+  /*
+   * IMPORTANT:
    *
-   * Nothing in this main Admin layout controls routes under:
-   * /Admin/StockManagement
-   * /Admin/BugTracker
+   * /Admin/BugTracker owns its entire layout itself.
    *
-   * These sections use their own page or nested layout for their sidebar,
-   * authentication, permissions, audit logging, page title, width,
-   * background and styling.
+   * AdminLayoutClient must NOT:
+   * - add a background
+   * - add the Admin sidebar
+   * - add the Admin header
+   * - wrap it with AdminProvider
+   * - wrap it with AdminLayoutGate
+   * - run the AdminSessionPresenceBoundary around it
+   * - apply Admin Portal page spacing
+   * - control its colours, width, overflow or positioning
+   *
+   * This keeps everything inside /Admin/BugTracker controlled only by
+   * the Bug Tracker files themselves.
    */
-  const usesSeparateAdminLayout =
-    isPathOrChild(path, STOCK_MANAGEMENT_PREFIX) ||
-    isPathOrChild(path, BUG_TRACKER_PREFIX);
-
-  if (usesSeparateAdminLayout) {
+  if (isPathOrChild(path, BUG_TRACKER_PREFIX)) {
     return <>{children}</>;
   }
 
+  /*
+   * Stock Management keeps its existing standalone behaviour and
+   * still receives the shared admin session presence security check.
+   */
+  if (isPathOrChild(path, STOCK_MANAGEMENT_PREFIX)) {
+    return (
+      <AdminSessionPresenceBoundary>
+        {children}
+      </AdminSessionPresenceBoundary>
+    );
+  }
+
+  /*
+   * All other standard Admin Portal routes continue through the
+   * normal Admin provider, permission gate and security boundary.
+   */
   return (
     <AdminProvider>
-      <AdminLayoutGate>{children}</AdminLayoutGate>
+      <AdminSessionPresenceBoundary>
+        <AdminLayoutGate>{children}</AdminLayoutGate>
+      </AdminSessionPresenceBoundary>
     </AdminProvider>
   );
 }

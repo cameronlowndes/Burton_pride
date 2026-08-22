@@ -59,10 +59,7 @@ type ApiResult = {
   ok?: boolean;
   message?: string;
   error?: string;
-  reason?: string;
-  likelyFix?: string;
-  details?: unknown;
-  debug?: unknown;
+  requestId?: string;
   admins?: AdminUser[];
 };
 
@@ -696,8 +693,35 @@ async function readJsonResponse(res: Response): Promise<ApiResult> {
   }
 }
 
-function buildSafeApiError(data: ApiResult, fallback: string) {
-  return data?.error || data?.message || fallback;
+function buildSafeApiError(
+  res: Response,
+  data: ApiResult,
+  fallback: string,
+) {
+  // Do not render arbitrary server/database error text in the Admin Portal.
+  // The API should log the detailed error server-side and may return a safe
+  // requestId for authorised troubleshooting.
+  const requestId =
+    typeof data.requestId === "string" && data.requestId.trim()
+      ? data.requestId.trim()
+      : "";
+
+  let message = fallback;
+
+  if (res.status === 401) {
+    message = "Your admin session is no longer valid. Please sign in again.";
+  } else if (res.status === 403) {
+    message =
+      "You do not have permission or sufficient recent authentication for this action.";
+  } else if (res.status === 409) {
+    message =
+      "This change could not be completed because it conflicts with the current admin record.";
+  } else if (res.status === 429) {
+    message =
+      "Too many requests were made. Please wait before trying again.";
+  }
+
+  return requestId ? `${message} Reference: ${requestId}` : message;
 }
 
 function normalisePermissions(value: unknown): string[] {
@@ -710,6 +734,15 @@ function normalisePermissions(value: unknown): string[] {
         .filter((item) => item.length > 0),
     ),
   );
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function filterKnownPermissions(value: unknown): string[] {
+  const allowed = new Set(allPermissionKeys);
+  return normalisePermissions(value).filter((key) => allowed.has(key));
 }
 
 function roleLabel(role: AdminRole) {
@@ -825,13 +858,16 @@ export default function AdminUsersClient() {
       const res = await fetch(`/api/admin/settings/users?t=${Date.now()}`, {
         cache: "no-store",
         credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
       });
 
       const data = await readJsonResponse(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(
-          buildSafeApiError(data, "Failed to load admin users."),
+          buildSafeApiError(res, data, "Failed to load admin users."),
         );
       }
 
@@ -840,7 +876,7 @@ export default function AdminUsersClient() {
         permissions:
           admin.role === "main_admin"
             ? allPermissionKeys
-            : normalisePermissions(admin.permissions),
+            : filterKnownPermissions(admin.permissions),
       }));
 
       setAdmins(nextAdmins);
@@ -922,7 +958,7 @@ export default function AdminUsersClient() {
       [admin.id]:
         admin.role === "main_admin"
           ? allPermissionKeys
-          : normalisePermissions(admin.permissions),
+          : filterKnownPermissions(admin.permissions),
     }));
   }
 
@@ -942,12 +978,19 @@ export default function AdminUsersClient() {
         return;
       }
 
+      if (!isValidEmail(cleanEmail)) {
+        setError("Please enter a valid email address.");
+        return;
+      }
+
       const res = await fetch("/api/admin/settings/users", {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
+        cache: "no-store",
         body: JSON.stringify({
           email: cleanEmail,
           fullName: cleanFullName || null,
@@ -965,7 +1008,7 @@ export default function AdminUsersClient() {
 
       if (!res.ok || !data.ok) {
         throw new Error(
-          buildSafeApiError(data, "Failed to save admin user."),
+          buildSafeApiError(res, data, "Failed to save admin user."),
         );
       }
 
@@ -1009,14 +1052,16 @@ export default function AdminUsersClient() {
           ? allPermissionKeys
           : nextPermissions ||
             draftPermissions[admin.id] ||
-            normalisePermissions(admin.permissions);
+            filterKnownPermissions(admin.permissions);
 
       const res = await fetch("/api/admin/settings/users", {
         method: "PATCH",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
+        cache: "no-store",
         body: JSON.stringify({
           id: admin.id,
           role: nextRole,
@@ -1034,7 +1079,7 @@ export default function AdminUsersClient() {
 
       if (!res.ok || !data.ok) {
         throw new Error(
-          buildSafeApiError(data, "Failed to update admin user."),
+          buildSafeApiError(res, data, "Failed to update admin user."),
         );
       }
 
@@ -1056,7 +1101,7 @@ export default function AdminUsersClient() {
       admin.role === "main_admin"
         ? allPermissionKeys
         : draftPermissions[admin.id] ||
-          normalisePermissions(admin.permissions);
+          filterKnownPermissions(admin.permissions);
 
     await updateAdmin(admin, {}, permissionsToSave);
     setExpandedAdminId(null);
@@ -1248,7 +1293,7 @@ export default function AdminUsersClient() {
 
   return (
     <main className="min-h-screen w-full bg-transparent px-3 py-5 text-white sm:px-5 lg:px-6">
-      <div className="mx-auto w-full max-w-[1600px] space-y-6">
+      <div className="w-full max-w-none space-y-6">
         <section className="rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -1462,7 +1507,7 @@ export default function AdminUsersClient() {
               <div>
                 <p className="text-sm font-bold text-white">Active admin</p>
                 <p className="text-xs text-white/50">
-                  Inactive admins cannot access the Admin Portal.
+                  Inactive admins must be denied by protected server routes.
                 </p>
               </div>
             </label>
@@ -1497,6 +1542,23 @@ export default function AdminUsersClient() {
           </form>
 
           <section className="min-w-0 rounded-3xl border border-white/15 bg-[#0b0b1f]/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <div className="mb-4 rounded-2xl border border-amber-300/20 bg-amber-500/[0.07] p-4">
+              <div className="flex gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-100" />
+                <div>
+                  <p className="text-sm font-black text-white">
+                    Security-sensitive administration
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-white/55">
+                    Role, permission, activation and 2FA changes are high-risk
+                    actions. The API must independently verify the signed-in
+                    administrator, enforce permissions and recent strong
+                    authentication, and create a server-side audit record.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl bg-sky-500/10 p-3 text-sky-100">
@@ -1558,7 +1620,7 @@ export default function AdminUsersClient() {
                 {filteredAdmins.map((admin) => {
                   const adminPermissions =
                     draftPermissions[admin.id] ||
-                    normalisePermissions(admin.permissions);
+                    filterKnownPermissions(admin.permissions);
 
                   return (
                     <div
@@ -1607,10 +1669,14 @@ export default function AdminUsersClient() {
                               }`}
                             >
                               {admin.two_factor_enabled
-                                ? `2FA: ${
-                                    admin.two_factor_method || "enabled"
-                                  }`
-                                : "2FA setup required"}
+                                ? admin.two_factor_method === "totp"
+                                  ? "2FA: Authenticator"
+                                  : admin.two_factor_method === "email"
+                                    ? "2FA: Email"
+                                    : "2FA enabled"
+                                : admin.two_factor_required
+                                  ? "2FA setup required"
+                                  : "2FA not required"}
                             </span>
                           </div>
 

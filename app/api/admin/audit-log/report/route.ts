@@ -1,25 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const runtime = "nodejs";
-
-/**
- * File location:
- * app/api/admin/audit-log/report/route.ts
- *
- * Purpose:
- * This route writes security and admin activity events into public.admin_audit_logs.
- * It supports authenticated admin events AND unauthenticated login-page security events.
- *
- * Security rules:
- * - Never store passwords.
- * - Never store full input values except safe route/action strings.
- * - Login emails are stored as redacted labels plus a hash for investigation.
- * - Admin cookie identity is trusted only after checking admin_users.
- * - Client reports are useful for visibility, but login success/failure must still
- *   also be recorded inside the real login API because client reports can be blocked.
- */
 
 const AUDIT_LOG_TABLE = "admin_audit_logs";
 const ADMIN_USERS_TABLE = "admin_users";
@@ -53,11 +37,6 @@ const ALLOWED_AREAS = new Set([
   "unknown",
 ]);
 
-/**
- * These are the client-side event names we intentionally accept from admin pages.
- * Keeping this list explicit makes the audit log cleaner and stops random spammy
- * event names from being inserted by mistake.
- */
 const ALLOWED_ACTIONS = new Set([
   "admin_page_view",
   "admin_page_hidden",
@@ -102,6 +81,7 @@ const ALLOWED_ACTIONS = new Set([
 
 type AdminRow = {
   id: string;
+  auth_user_id?: string | null;
   email: string | null;
   role: string | null;
   is_active: boolean | null;
@@ -336,39 +316,82 @@ function getAttemptEmailFromMetadata(metadata: Record<string, unknown>) {
 }
 
 async function getCurrentAdmin(request: NextRequest) {
-  const adminId = clean(request.cookies.get("burton_admin_id")?.value);
-  const adminEmail = lower(request.cookies.get("burton_admin_email")?.value);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!adminId && !adminEmail) {
+  if (!url || !anonKey) {
     return {
       admin: null as AdminRow | null,
-      error: null as ApiError | null,
+      error: {
+        code: "SUPABASE_AUTH_CONFIG_MISSING",
+        message: "Supabase public authentication configuration is missing.",
+      } as ApiError,
+      authenticatedUserId: null as string | null,
     };
   }
 
-  let query = supabaseAdmin
-    .from(ADMIN_USERS_TABLE)
-    .select("id, email, role, is_active, permissions")
-    .limit(1);
+  /*
+   * IMPORTANT:
+   * Use the real Supabase Auth session first. The old version of this route
+   * only looked for burton_admin_id / burton_admin_email legacy cookies.
+   * /api/admin/me no longer trusts those cookies, so the two endpoints could
+   * disagree and the audit endpoint returned 401 even while the admin had a
+   * valid Supabase login.
+   */
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll() {
+        /*
+         * This audit route only needs to read/verify identity.
+         * Session refresh/cookie writes are handled by the normal auth flow
+         * and /api/admin/me.
+         */
+      },
+    },
+  });
 
-  if (adminId) {
-    query = query.eq("id", adminId);
-  } else {
-    query = query.ilike("email", adminEmail);
+  // Allow Supabase to restore/refresh internally, but never trust getSession()
+  // itself as the authorization decision.
+  await supabase.auth.getSession();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    /*
+     * No authenticated Supabase user is normal on login/security pages.
+     * Return no admin rather than treating this as a database failure.
+     */
+    return {
+      admin: null as AdminRow | null,
+      error: null as ApiError | null,
+      authenticatedUserId: null as string | null,
+    };
   }
 
-  const { data, error } = await query.maybeSingle();
+  const { data, error } = await supabaseAdmin
+    .from(ADMIN_USERS_TABLE)
+    .select("id, auth_user_id, email, role, is_active, permissions")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
 
   if (error) {
     return {
       admin: null as AdminRow | null,
       error: error as ApiError,
+      authenticatedUserId: user.id,
     };
   }
 
   return {
     admin: data as AdminRow | null,
     error: null as ApiError | null,
+    authenticatedUserId: user.id,
   };
 }
 
@@ -424,7 +447,11 @@ export async function POST(request: NextRequest) {
      * Only accept unauthenticated audit reports for auth/login/security areas.
      * Normal admin pages should have a valid admin cookie.
      */
-    const { admin, error: adminLookupError } = await getCurrentAdmin(request);
+    const {
+      admin,
+      error: adminLookupError,
+      authenticatedUserId,
+    } = await getCurrentAdmin(request);
 
     if (adminLookupError) {
       console.error("Audit report admin lookup failed:", {
@@ -433,17 +460,43 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const canWriteWithoutAdmin = isAuthArea(area) || action.startsWith("login_");
+    const canWriteWithoutAdmin =
+      isAuthArea(area) ||
+      action.startsWith("login_") ||
+      action === "unauthenticated_admin_access" ||
+      action === "admin_access_check_failed";
 
     if (!admin && !canWriteWithoutAdmin) {
+      /*
+       * Client audit reporting is best-effort telemetry.
+       * If the browser has no authenticated Supabase user yet, do not generate
+       * a noisy 401 in DevTools. Simply acknowledge the report as skipped.
+       *
+       * If there IS an authenticated Supabase user but no valid admin mapping,
+       * keep this as a real 403 because that is an authorization problem.
+       */
+      if (!authenticatedUserId) {
+        return safeJsonResponse(
+          {
+            ok: true,
+            skipped: true,
+            reason: "not_authenticated",
+            request_id: context.request_id,
+          },
+          200,
+        );
+      }
+
       return safeJsonResponse(
         {
           ok: false,
-          error: "Admin could not be confirmed for this audit report.",
-          code: "AUDIT_REPORT_ADMIN_REQUIRED",
+          error:
+            "The signed-in account is not authorised for this admin audit report.",
+          code: "AUDIT_REPORT_ADMIN_MAPPING_REQUIRED",
+          authenticated: true,
           request_id: context.request_id,
         },
-        401,
+        403,
       );
     }
 

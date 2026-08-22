@@ -6,6 +6,50 @@ import { requireAdmin } from "@/lib/adminPermissions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const MONEY_INVOICES_BUCKET =
+  process.env.MONEY_INVOICES_BUCKET?.trim() || "money-invoices";
+
+const PRIVATE_STORAGE_REFERENCE_PREFIX =
+  `storage://${MONEY_INVOICES_BUCKET}/`;
+
+/*
+ * Receipt/document types supported by the Money Management app.
+ *
+ * Supabase Storage enforces allowed MIME types at the bucket level, so the
+ * route makes sure the private money-invoices bucket includes these before
+ * uploading a receipt.
+ */
+const MONEY_INVOICE_ALLOWED_MIME_TYPES = [
+  // PDF
+  "application/pdf",
+
+  // Images
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+
+  // Microsoft Word
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+
+  // Microsoft Excel
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+  // CSV / plain text
+  "text/csv",
+  "text/plain",
+
+  // Email files accepted by the transaction form
+  "message/rfc822",
+  "application/vnd.ms-outlook",
+] as const;
+
+const MAX_RECEIPT_FILE_SIZE = 15 * 1024 * 1024;
+const MAX_RECEIPT_TOTAL_SIZE = 50 * 1024 * 1024;
+const MAX_RECEIPT_FILES = 10;
+
 type RouteContext = {
   params: Promise<{
     id: string;
@@ -105,6 +149,273 @@ async function getActorLabel() {
   }
 }
 
+function privateStorageReference(storagePath: string) {
+  return `${PRIVATE_STORAGE_REFERENCE_PREFIX}${storagePath}`;
+}
+
+async function requireMoneyInvoicesBucket() {
+  const { data: bucket, error } =
+    await supabaseAdmin.storage.getBucket(MONEY_INVOICES_BUCKET);
+
+  if (error || !bucket) {
+    console.error("Money invoice bucket check failed:", {
+      bucket: MONEY_INVOICES_BUCKET,
+      message: error?.message || "Bucket not found",
+      statusCode: (error as any)?.statusCode || null,
+      error,
+    });
+
+    throw Object.assign(
+      new Error(
+        error?.message ||
+          `Supabase Storage bucket "${MONEY_INVOICES_BUCKET}" was not found.`,
+      ),
+      {
+        code:
+          (error as any)?.statusCode ||
+          "MONEY_INVOICE_BUCKET_NOT_FOUND",
+        details: error || null,
+        hint:
+          `Confirm the Storage bucket ID is exactly "${MONEY_INVOICES_BUCKET}" and that SUPABASE_SERVICE_ROLE_KEY belongs to the same Supabase project.`,
+      },
+    );
+  }
+
+  /*
+   * Supabase may expose bucket properties using snake_case depending on the
+   * Storage client/version. Read both forms so this remains compatible.
+   */
+  const rawBucket = bucket as any;
+
+  const existingAllowedMimeTypes = Array.isArray(
+    rawBucket.allowed_mime_types,
+  )
+    ? rawBucket.allowed_mime_types
+    : Array.isArray(rawBucket.allowedMimeTypes)
+      ? rawBucket.allowedMimeTypes
+      : [];
+
+  const mergedAllowedMimeTypes = Array.from(
+    new Set([
+      ...existingAllowedMimeTypes
+        .map((value: unknown) => String(value || "").trim())
+        .filter(Boolean),
+      ...MONEY_INVOICE_ALLOWED_MIME_TYPES,
+    ]),
+  );
+
+  const existingNormalised = new Set(
+    existingAllowedMimeTypes
+      .map((value: unknown) => String(value || "").trim())
+      .filter(Boolean),
+  );
+
+  const missingRequiredMimeTypes =
+    MONEY_INVOICE_ALLOWED_MIME_TYPES.filter(
+      (mimeType) => !existingNormalised.has(mimeType),
+    );
+
+  /*
+   * Automatically repair the bucket configuration when DOCX or any other
+   * supported Money Management document type is missing.
+   *
+   * Keep the bucket private because receipts and invoices are financial
+   * documents. The app serves them using signed URLs.
+   */
+  if (
+    missingRequiredMimeTypes.length > 0 ||
+    rawBucket.public === true
+  ) {
+    const { data: updatedBucket, error: updateError } =
+      await supabaseAdmin.storage.updateBucket(
+        MONEY_INVOICES_BUCKET,
+        {
+          public: false,
+          allowedMimeTypes: mergedAllowedMimeTypes,
+          fileSizeLimit: MAX_RECEIPT_FILE_SIZE,
+        },
+      );
+
+    if (updateError) {
+      console.error(
+        "Money invoice bucket MIME configuration update failed:",
+        {
+          bucket: MONEY_INVOICES_BUCKET,
+          missingRequiredMimeTypes,
+          mergedAllowedMimeTypes,
+          message: updateError.message,
+          statusCode: (updateError as any)?.statusCode || null,
+          error: updateError,
+        },
+      );
+
+      throw Object.assign(
+        new Error(
+          updateError.message ||
+            `Could not update the "${MONEY_INVOICES_BUCKET}" bucket to allow Money Management receipt files.`,
+        ),
+        {
+          code:
+            (updateError as any)?.statusCode ||
+            "MONEY_INVOICE_BUCKET_UPDATE_FAILED",
+          details: {
+            bucket: MONEY_INVOICES_BUCKET,
+            missingRequiredMimeTypes,
+            allowedMimeTypes: mergedAllowedMimeTypes,
+            updateError,
+          },
+          hint:
+            "Make sure the Supabase service-role key can update Storage bucket settings.",
+        },
+      );
+    }
+
+    console.info("Money invoice bucket configuration updated:", {
+      bucket: MONEY_INVOICES_BUCKET,
+      addedMimeTypes: missingRequiredMimeTypes,
+      private: true,
+    });
+
+    return updatedBucket || bucket;
+  }
+
+  return bucket;
+}
+
+function validateReceiptMimeType(file: File) {
+  const mimeType = String(
+    file.type || "application/octet-stream",
+  )
+    .trim()
+    .toLowerCase();
+
+  if (
+    !MONEY_INVOICE_ALLOWED_MIME_TYPES.includes(
+      mimeType as (typeof MONEY_INVOICE_ALLOWED_MIME_TYPES)[number],
+    )
+  ) {
+    throw Object.assign(
+      new Error(
+        `"${file.name}" has an unsupported file type (${mimeType}).`,
+      ),
+      {
+        code: "UNSUPPORTED_RECEIPT_MIME_TYPE",
+        details: {
+          fileName: file.name,
+          mimeType,
+        },
+        hint:
+          "Upload a PDF, image, Word document, Excel spreadsheet, CSV, text file or supported email file.",
+      },
+    );
+  }
+
+  return mimeType;
+}
+
+function dedupeReceiptFiles(files: File[]) {
+  const seen = new Set<string>();
+
+  return files.filter((file) => {
+    if (!(file instanceof File) || file.size <= 0) {
+      return false;
+    }
+
+    const key = [
+      file.name,
+      file.size,
+      file.type,
+      file.lastModified,
+    ].join("::");
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function getReceiptFilesFromFormData(formData: FormData) {
+  const possibleFiles = [
+    ...formData.getAll("invoiceFiles"),
+    ...formData.getAll("receipt_files"),
+    ...formData.getAll("receiptFiles"),
+    ...formData.getAll("attachments"),
+  ].filter(
+    (value): value is File =>
+      value instanceof File && value.size > 0,
+  );
+
+  const legacySingleFiles = [
+    formData.get("invoiceFile"),
+    formData.get("receipt_file"),
+    formData.get("receiptFile"),
+  ].filter(
+    (value): value is File =>
+      value instanceof File && value.size > 0,
+  );
+
+  const files = dedupeReceiptFiles([
+    ...possibleFiles,
+    ...legacySingleFiles,
+  ]);
+
+  if (files.length > MAX_RECEIPT_FILES) {
+    throw new Error(
+      `Choose no more than ${MAX_RECEIPT_FILES} receipt files.`,
+    );
+  }
+
+  for (const file of files) {
+    validateReceiptMimeType(file);
+  }
+
+  const oversized = files.find(
+    (file) => file.size > MAX_RECEIPT_FILE_SIZE,
+  );
+
+  if (oversized) {
+    throw new Error(
+      `"${oversized.name}" is larger than 15 MB.`,
+    );
+  }
+
+  const totalSize = files.reduce(
+    (sum, file) => sum + file.size,
+    0,
+  );
+
+  if (totalSize > MAX_RECEIPT_TOTAL_SIZE) {
+    throw new Error(
+      "The selected receipt files are larger than 50 MB in total.",
+    );
+  }
+
+  return files;
+}
+
+async function safeCreateMoneyAuditLog(
+  input: Parameters<typeof createMoneyAuditLog>[0],
+) {
+  try {
+    await createMoneyAuditLog(input);
+  } catch (auditError) {
+    /*
+     * Audit logging must never turn a transaction that was successfully
+     * updated in money_transactions into a 500 response.
+     *
+     * The failure is still logged for the server/Vercel logs so it can be
+     * investigated independently.
+     */
+    console.error(
+      "Money transaction audit log failed after successful database action:",
+      auditError,
+    );
+  }
+}
+
 async function uploadTransactionAttachments({
   transactionId,
   files,
@@ -112,6 +423,8 @@ async function uploadTransactionAttachments({
   transactionId: string;
   files: File[];
 }) {
+  await requireMoneyInvoicesBucket();
+
   const uploadedAttachments: any[] = [];
 
   for (const file of files) {
@@ -125,29 +438,71 @@ async function uploadTransactionAttachments({
 
     const filePath = `transactions/${transactionId}/${fileName}`;
 
+    const mimeType = validateReceiptMimeType(file);
+
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     const { error: uploadError } = await supabaseAdmin.storage
-      .from("money-invoices")
+      .from(MONEY_INVOICES_BUCKET)
       .upload(filePath, buffer, {
-        contentType: file.type || "application/octet-stream",
+        contentType: mimeType,
         upsert: false,
       });
 
     if (uploadError) {
-      throw uploadError;
+      const storageError = uploadError as any;
+
+      console.error("Money transaction receipt storage upload failed:", {
+        transactionId,
+        bucket: MONEY_INVOICES_BUCKET,
+        filePath,
+        fileName: file.name,
+        fileType: mimeType,
+        fileSize: file.size,
+        storageMessage: storageError?.message || null,
+        storageStatusCode: storageError?.statusCode || null,
+        storageError: storageError?.error || null,
+        fullError: uploadError,
+      });
+
+      throw Object.assign(
+        new Error(
+          storageError?.message ||
+            `Failed to upload receipt "${file.name}".`,
+        ),
+        {
+          code:
+            storageError?.statusCode ||
+            storageError?.error ||
+            "MONEY_RECEIPT_STORAGE_UPLOAD_FAILED",
+          details: {
+            bucket: MONEY_INVOICES_BUCKET,
+            filePath,
+            fileName: file.name,
+            fileType: mimeType,
+            fileSize: file.size,
+            storageMessage: storageError?.message || null,
+            storageStatusCode: storageError?.statusCode || null,
+            storageError: storageError?.error || null,
+          },
+          hint:
+            "Check the money-invoices Storage bucket exists, the service-role key belongs to the same Supabase project, and the bucket file-size/MIME restrictions allow this receipt.",
+        },
+      );
     }
 
-    const { data: publicUrlData } = supabaseAdmin.storage
-      .from("money-invoices")
-      .getPublicUrl(filePath);
-
+    /*
+     * Store a permanent private-storage reference in the database.
+     *
+     * Do not use getPublicUrl() for finance receipts. The main transactions
+     * GET route can turn this reference into a short-lived signed URL.
+     */
     const attachmentInsert = {
       transaction_id: transactionId,
       file_name: file.name || fileName,
-      file_url: publicUrlData.publicUrl,
-      file_type: file.type || null,
+      file_url: privateStorageReference(filePath),
+      file_type: mimeType,
       file_size: file.size || null,
     };
 
@@ -158,7 +513,36 @@ async function uploadTransactionAttachments({
       .single();
 
     if (attachmentError) {
-      throw attachmentError;
+      console.error("Money transaction attachment row insert failed:", {
+        transactionId,
+        filePath,
+        attachmentInsert,
+        error: attachmentError,
+      });
+
+      /*
+       * Remove the object again if the database attachment row could not be
+       * created, otherwise Storage would contain an orphaned receipt.
+       */
+      const { error: cleanupError } = await supabaseAdmin.storage
+        .from(MONEY_INVOICES_BUCKET)
+        .remove([filePath]);
+
+      if (cleanupError) {
+        console.error(
+          "Failed to clean up orphaned money receipt after attachment insert failure:",
+          {
+            transactionId,
+            filePath,
+            cleanupError,
+          },
+        );
+      }
+
+      throw new Error(
+        attachmentError.message ||
+          "The receipt uploaded, but its attachment record could not be created.",
+      );
     }
 
     uploadedAttachments.push(attachment);
@@ -202,9 +586,30 @@ export async function PATCH(req: Request, context: RouteContext) {
       .single();
 
     if (loadError) {
+      console.error("Money transaction PATCH load failed:", {
+        transactionId: id,
+        error: loadError,
+      });
+
       return NextResponse.json(
-        { ok: false, error: loadError.message, details: loadError },
-        { status: 500 }
+        {
+          ok: false,
+          error:
+            loadError.code === "PGRST116"
+              ? "Transaction not found."
+              : loadError.message,
+          code:
+            loadError.code ||
+            "MONEY_TRANSACTION_LOAD_FAILED",
+          details: loadError.details || null,
+          hint: loadError.hint || null,
+        },
+        {
+          status:
+            loadError.code === "PGRST116"
+              ? 404
+              : 500,
+        },
       );
     }
 
@@ -260,18 +665,34 @@ export async function PATCH(req: Request, context: RouteContext) {
       clean(formData.get("financeNote")) ||
       clean(formData.get("finance_note"));
 
-    const invoiceFiles = formData
-      .getAll("invoiceFiles")
-      .filter((file): file is File => file instanceof File && file.size > 0);
+    /*
+     * Accept every receipt field name currently used by the Money Tracker.
+     *
+     * New form:
+     *   receipt_files
+     *
+     * Existing/legacy forms:
+     *   invoiceFiles
+     *   invoiceFile
+     *   receiptFiles
+     *   receiptFile
+     */
+    let invoiceFiles: File[] = [];
 
-    const oldSingleInvoiceFile = formData.get("invoiceFile");
-
-    if (
-      oldSingleInvoiceFile instanceof File &&
-      oldSingleInvoiceFile.size > 0 &&
-      invoiceFiles.length === 0
-    ) {
-      invoiceFiles.push(oldSingleInvoiceFile);
+    try {
+      invoiceFiles = getReceiptFilesFromFormData(formData);
+    } catch (fileError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            fileError instanceof Error
+              ? fileError.message
+              : "The selected receipt files are invalid.",
+          code: "INVALID_RECEIPT_FILES",
+        },
+        { status: 400 },
+      );
     }
 
     const amountPence = toPence(amount);
@@ -409,9 +830,29 @@ export async function PATCH(req: Request, context: RouteContext) {
       .single();
 
     if (error) {
+      console.error("Money transaction PATCH database update failed:", {
+        transactionId: id,
+        code: error.code || null,
+        message: error.message,
+        details: error.details || null,
+        hint: error.hint || null,
+        sent: updatePayload,
+      });
+
       return NextResponse.json(
-        { ok: false, error: error.message, details: error, sent: updatePayload },
-        { status: 500 }
+        {
+          ok: false,
+          error:
+            error.message ||
+            "The transaction could not be updated.",
+          code:
+            error.code ||
+            "MONEY_TRANSACTION_UPDATE_FAILED",
+          details: error.details || null,
+          hint: error.hint || null,
+          sent: updatePayload,
+        },
+        { status: 500 },
       );
     }
 
@@ -442,16 +883,44 @@ export async function PATCH(req: Request, context: RouteContext) {
           data.invoice_image_url = firstAttachmentUrl;
         }
       } catch (attachmentError: any) {
+        console.error(
+          "Money transaction PATCH receipt upload failed after transaction update:",
+          {
+            transactionId: id,
+            receiptCount: invoiceFiles.length,
+            receiptNames: invoiceFiles.map((file) => file.name),
+            error: attachmentError,
+          },
+        );
+
+        /*
+         * The transaction row itself has already been updated successfully.
+         * Return 502 for the attachment/storage failure instead of reporting a
+         * misleading generic transaction-update 500.
+         */
         return NextResponse.json(
           {
             ok: false,
+            partialSuccess: true,
+            transactionUpdated: true,
+            receiptUploaded: false,
             error:
               attachmentError?.message ||
-              "Transaction was updated but one or more attachments failed to upload.",
-            details: attachmentError,
+              "The transaction was updated, but one or more receipts could not be uploaded.",
+            code:
+              attachmentError?.code ||
+              "MONEY_RECEIPT_UPLOAD_FAILED",
+            details:
+              attachmentError?.details ||
+              (attachmentError instanceof Error
+                ? attachmentError.message
+                : attachmentError),
+            hint:
+              attachmentError?.hint ||
+              "Check the Supabase Storage bucket and receipt upload settings.",
             transaction: data,
           },
-          { status: 500 }
+          { status: 502 },
         );
       }
     }
@@ -463,7 +932,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       attachments: allAttachments,
     };
 
-    await createMoneyAuditLog({
+    await safeCreateMoneyAuditLog({
       action: "edit",
       transactionId: id,
       transactionTitle: data?.title || beforeData?.title || null,
@@ -508,17 +977,49 @@ export async function PATCH(req: Request, context: RouteContext) {
     return NextResponse.json({
       ok: true,
       transaction: transactionWithAttachments,
-      message: "Transaction updated successfully",
+      receiptUpload: {
+        requested: invoiceFiles.length,
+        uploaded: newAttachments.length,
+        totalAttachments: allAttachments.length,
+      },
+      message:
+        newAttachments.length > 0
+          ? `Transaction updated successfully with ${newAttachments.length} new receipt file${newAttachments.length === 1 ? "" : "s"}.`
+          : "Transaction updated successfully",
     });
-  } catch (err) {
-    console.error("Money transaction PATCH error:", err);
+  } catch (err: any) {
+    console.error("Money transaction PATCH unexpected error:", {
+      message:
+        err instanceof Error
+          ? err.message
+          : String(err || "Unknown error"),
+      code: err?.code || null,
+      details: err?.details || null,
+      hint: err?.hint || null,
+      stack:
+        err instanceof Error
+          ? err.stack
+          : null,
+    });
 
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Server error",
+        error:
+          err instanceof Error
+            ? err.message
+            : "Unexpected server error while updating transaction.",
+        code:
+          err?.code ||
+          "MONEY_TRANSACTION_PATCH_FAILED",
+        details:
+          err?.details ||
+          null,
+        hint:
+          err?.hint ||
+          null,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

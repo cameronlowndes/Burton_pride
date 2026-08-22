@@ -620,6 +620,18 @@ export default function MoneyTransactionForm({
 }: MoneyTransactionFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
   const transactionDateInputRef = useRef<HTMLInputElement | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
+
+  /*
+   * Keep the latest selected receipt files in a ref as well as React state.
+   *
+   * When editing a transaction, this form performs duplicate/funding/receipt
+   * checks before it calls the parent save handler. Those checks contain
+   * awaits, so we do not rely only on the original SyntheticEvent or a state
+   * value that may be replaced by another render before the update is sent.
+   */
+  const receiptFilesRef = useRef<File[]>(invoiceFiles);
+
   const saveAnywayRef = useRef(false);
   const saveWithoutReceiptRef = useRef(false);
   const saveOverFundingLimitRef = useRef(false);
@@ -641,6 +653,12 @@ export default function MoneyTransactionForm({
   const [budgetTextDraft, setBudgetTextDraft] = useState("");
   const [budgetSelectionMode, setBudgetSelectionMode] =
     useState<BudgetSelectionMode>("auto");
+
+  useEffect(() => {
+    receiptFilesRef.current = Array.isArray(invoiceFiles)
+      ? [...invoiceFiles]
+      : [];
+  }, [invoiceFiles]);
 
   const selectedSponsorBreakdown = form.sponsorId
     ? yearlySponsorBreakdown.find(
@@ -1082,6 +1100,23 @@ export default function MoneyTransactionForm({
   async function handleFormSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    /*
+     * Keep the actual form element before any asynchronous checks run.
+     *
+     * This is important for receipt uploads when editing an existing
+     * transaction. The parent save handler may build FormData from
+     * event.currentTarget. React's currentTarget is not something we should
+     * depend on after several awaits, so a stable event is created below.
+     */
+    event.persist?.();
+
+    const submittedFormElement =
+      event.currentTarget || formRef.current;
+
+    const receiptFilesAtSubmit = [
+      ...receiptFilesRef.current,
+    ];
+
     if (saving || checkingDuplicate || submittingRef.current) {
       return;
     }
@@ -1145,6 +1180,19 @@ export default function MoneyTransactionForm({
       return;
     }
 
+    /*
+     * Validate the exact receipt files that are about to be sent.
+     * Do this again at submit time so an edit cannot silently lose an invalid
+     * or stale file selection.
+     */
+    const submitReceiptValidation =
+      validateReceiptFiles(receiptFilesAtSubmit);
+
+    if (submitReceiptValidation) {
+      setFileError(submitReceiptValidation);
+      return;
+    }
+
     saveAnywayRef.current = false;
     saveWithoutReceiptRef.current = false;
     saveOverFundingLimitRef.current = false;
@@ -1182,7 +1230,32 @@ export default function MoneyTransactionForm({
     submittingRef.current = true;
 
     try {
-      await handleSubmit(event);
+      /*
+       * Build a stable submit event for the parent handler.
+       *
+       * The parent transaction saver can safely use:
+       *   event.currentTarget
+       *   new FormData(event.currentTarget)
+       *
+       * even though this component has already awaited duplicate/funding
+       * checks. This fixes newly selected receipts being lost specifically
+       * when an existing transaction is updated.
+       */
+      const stableSubmitEvent = {
+        ...event,
+        currentTarget: submittedFormElement,
+        target: submittedFormElement,
+        preventDefault: () => undefined,
+        persist: () => undefined,
+      } as SyntheticEvent<HTMLFormElement>;
+
+      /*
+       * Keep the latest receipt state available until the parent save has
+       * finished. Do not clear invoiceFiles before handleSubmit resolves.
+       */
+      receiptFilesRef.current = receiptFilesAtSubmit;
+
+      await handleSubmit(stableSubmitEvent);
       await createSupplierTransactionLog(supplierSnapshot);
 
       // Tell the transactions table to reload immediately after a successful
@@ -1198,6 +1271,10 @@ export default function MoneyTransactionForm({
             budgetKey: selectedBudgetKey || null,
             budgetLabel: selectedBudgetLabel || null,
             budgetMode: selectedBudgetKey || selectedBudgetLabel ? "manual" : "auto",
+            receiptFileCount: receiptFilesAtSubmit.length,
+            receiptFileNames: receiptFilesAtSubmit.map((file) => file.name),
+            receiptAddedDuringEdit:
+              Boolean(editingTransaction) && receiptFilesAtSubmit.length > 0,
           },
         }),
       );
@@ -2334,7 +2411,7 @@ export default function MoneyTransactionForm({
                         }),
                       )
                     }
-                    placeholder="Example: Cameron Lowndes"
+                    placeholder="Example: Your Name"
                     className="w-full rounded-xl bg-black/25 p-3 text-white outline-none ring-1 ring-sky-300/20 placeholder:text-white/35 focus:ring-sky-300/50"
                   />
                   <p className="mt-2 text-xs leading-5 text-sky-100/70">
@@ -3200,7 +3277,9 @@ export default function MoneyTransactionForm({
             </p>
 
             <input
+              ref={receiptInputRef}
               type="file"
+              name="receipt_files"
               multiple
               accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.eml,.msg"
               onChange={(event) => {
@@ -3209,11 +3288,18 @@ export default function MoneyTransactionForm({
 
                 if (validationError) {
                   setFileError(validationError);
+                  receiptFilesRef.current = [];
                   setInvoiceFiles([]);
                   event.currentTarget.value = "";
                   return;
                 }
 
+                /*
+                 * Update the ref immediately before React schedules the state
+                 * update. This guarantees the very latest selected receipt is
+                 * available if Save is pressed straight away.
+                 */
+                receiptFilesRef.current = files;
                 setFileError(null);
                 setInvoiceFiles(files);
                 setMissingReceiptWarningOpen(false);
@@ -3262,7 +3348,13 @@ export default function MoneyTransactionForm({
                 <button
                   type="button"
                   onClick={() => {
+                    receiptFilesRef.current = [];
                     setInvoiceFiles([]);
+
+                    if (receiptInputRef.current) {
+                      receiptInputRef.current.value = "";
+                    }
+
                     saveWithoutReceiptRef.current = false;
                     setMissingReceiptWarningOpen(false);
                   }}

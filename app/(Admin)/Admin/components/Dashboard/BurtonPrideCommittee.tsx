@@ -63,6 +63,15 @@ const emptyCreateForm = {
   image_position_y: 50,
 };
 
+const inputClass =
+  "min-h-12 w-full rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-base font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-purple-300/40 focus:bg-black/30 focus:ring-2 focus:ring-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
+
+const textareaClass =
+  "w-full resize-y rounded-2xl border border-white/15 bg-black/20 px-4 py-3 text-base font-semibold leading-6 text-white outline-none transition placeholder:text-white/35 focus:border-purple-300/40 focus:bg-black/30 focus:ring-2 focus:ring-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
+
+const fileInputClass =
+  "min-h-12 w-full rounded-2xl border border-white/15 bg-black/20 px-3 py-2 text-base text-white file:mr-3 file:min-h-10 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-black file:text-pink-600 hover:file:bg-white/90 focus:outline-none focus:ring-2 focus:ring-purple-500/20 sm:text-sm";
+
 function safeNumber(value: unknown, fallback = 50) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -88,38 +97,35 @@ function buildDetailedErrorMessage({
   fallback,
   response,
   payload,
-  rawText,
 }: {
   fallback: string;
   response?: Response;
   payload?: ApiResponse | null;
   rawText?: string;
 }) {
-  const message =
-    payload?.error ||
+  const requestId =
+    typeof payload?.code === "string" && payload.code.trim()
+      ? payload.code.trim()
+      : "";
+
+  let message =
     payload?.message ||
+    payload?.error ||
     fallback;
 
-  const parts = [
-    message,
-    response
-      ? `Status: ${response.status} ${response.statusText || ""}`.trim()
-      : "",
-    response?.url ? `Route: ${response.url}` : "",
-    payload?.code ? `Code: ${payload.code}` : "",
-    payload?.hint ? `Hint: ${payload.hint}` : "",
-    payload?.details
-      ? `Details: ${stringifyDetails(payload.details)}`
-      : "",
-    payload?.technicalDetails
-      ? `Technical details: ${stringifyDetails(payload.technicalDetails)}`
-      : "",
-    rawText && !payload
-      ? `Raw response: ${rawText}`
-      : "",
-  ].filter(Boolean);
+  if (response?.status === 401) {
+    message = "Your admin session has expired. Please sign in again.";
+  } else if (response?.status === 403) {
+    message = "Your account does not have permission to manage committee profiles.";
+  } else if (response?.status === 413) {
+    message = "The selected image is too large. Please choose a smaller image.";
+  } else if (response?.status === 429) {
+    message = "Too many requests were made. Please wait a moment and try again.";
+  } else if (response && response.status >= 500) {
+    message = "The committee profile service is temporarily unavailable.";
+  }
 
-  return parts.join("\n\n");
+  return requestId ? `${message} Reference: ${requestId}` : message;
 }
 
 async function readJsonResponse(response: Response, fallback: string) {
@@ -161,6 +167,8 @@ export default function CommitteeStoryClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [createErrorPopup, setCreateErrorPopup] =
+    useState<string | null>(null);
 
   const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
@@ -365,7 +373,12 @@ export default function CommitteeStoryClient() {
 
       setSuccess("Image uploaded successfully. You can now move the crop to center the face.");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to upload image"));
+      const message = getErrorMessage(
+        err,
+        "The image could not be uploaded.",
+      );
+
+      setCreateErrorPopup(message);
     } finally {
       setUploadingCreateImage(false);
       e.target.value = "";
@@ -444,6 +457,7 @@ export default function CommitteeStoryClient() {
       setCreating(true);
       setError(null);
       setSuccess(null);
+      setCreateErrorPopup(null);
 
       const res = await fetch("/api/admin/committee", {
         method: "POST",
@@ -475,9 +489,15 @@ export default function CommitteeStoryClient() {
       fillFormFromMember(created);
       setCreateOpen(false);
       setCreateForm(emptyCreateForm);
+      setCreateErrorPopup(null);
       setSuccess("New committee member created successfully.");
     } catch (err) {
-      setError(getErrorMessage(err, "Failed to create member"));
+      const message = getErrorMessage(
+        err,
+        "The new committee member could not be created.",
+      );
+
+      setCreateErrorPopup(message);
     } finally {
       setCreating(false);
     }
@@ -490,8 +510,8 @@ export default function CommitteeStoryClient() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-r px-6 py-8 text-white">
-        <div className="mx-auto max-w-7xl rounded-3xl border border-white/20 bg-white/10 p-6 backdrop-blur-xl">
+      <div className="min-h-screen bg-transparent px-3 py-4 text-white sm:px-6 sm:py-8">
+        <div className="mx-auto w-full max-w-none rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-xl sm:rounded-3xl sm:p-6">
           Loading committee members...
         </div>
       </div>
@@ -499,12 +519,12 @@ export default function CommitteeStoryClient() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-r px-6 py-8 text-white">
-      <div className="mx-auto max-w-7xl">
-        <div className="rounded-3xl border border-white/20 bg-white/10 p-6 shadow-2xl backdrop-blur-xl">
+    <div className="min-h-screen bg-transparent px-3 py-4 text-white sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-none">
+        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-2xl backdrop-blur-xl sm:rounded-3xl sm:p-6 lg:p-8">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="text-4xl font-bold">
+              <h1 className="text-3xl font-black leading-tight sm:text-4xl lg:text-5xl">
                 {isMainAdmin ? "Committee Member Manager" : "My Committee Story"}
               </h1>
 
@@ -518,8 +538,13 @@ export default function CommitteeStoryClient() {
             {isMainAdmin && (
               <button
                 type="button"
-                onClick={() => setCreateOpen(true)}
-                className="rounded-2xl bg-white px-6 py-3 font-bold text-pink-600 transition hover:scale-105 hover:bg-white/90"
+                onClick={() => {
+                  setError(null);
+                  setSuccess(null);
+                  setCreateErrorPopup(null);
+                  setCreateOpen(true);
+                }}
+                className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-pink-600 transition hover:bg-white/90 active:scale-[0.99] sm:w-auto"
               >
                 + Create New Member
               </button>
@@ -529,9 +554,9 @@ export default function CommitteeStoryClient() {
           {error && (
             <div className="mt-6 rounded-2xl border border-red-300/30 bg-red-500/20 px-4 py-3 text-white">
               <p className="mb-2 font-black">Something went wrong</p>
-              <pre className="whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-sm leading-6 text-white/90">
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-white/90">
                 {error}
-              </pre>
+              </p>
             </div>
           )}
 
@@ -547,7 +572,7 @@ export default function CommitteeStoryClient() {
                 {isMainAdmin ? "Committee Members" : "Your Profile"}
               </h2>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3">
                 {members.map((item) => {
                   const selectedCard = selectedId === item.id;
 
@@ -556,14 +581,14 @@ export default function CommitteeStoryClient() {
                       key={item.id}
                       type="button"
                       onClick={() => handleMemberClick(item)}
-                      className={`overflow-hidden rounded-3xl border p-5 text-left shadow-xl transition ${
+                      className={`min-w-0 overflow-hidden rounded-2xl border p-4 text-left shadow-xl transition sm:rounded-3xl sm:p-5 ${
                         selectedCard
                           ? "border-white bg-white/20 ring-2 ring-white/70"
                           : "border-white/15 bg-white/10 hover:bg-white/15"
                       }`}
                     >
                       <div className="flex items-start gap-4">
-                        <div className="relative h-20 w-20 overflow-hidden rounded-full border border-white/20 bg-white/10">
+                        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-full border border-white/20 bg-white/10 sm:h-20 sm:w-20">
                           {item.image_url ? (
                             <Image
                               src={item.image_url}
@@ -583,7 +608,7 @@ export default function CommitteeStoryClient() {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xl font-bold">{item.full_name}</p>
+                          <p className="break-words text-lg font-black sm:text-xl">{item.full_name}</p>
                           <p className="mt-1 text-sm text-white/80">{item.role}</p>
                           <p className="mt-1 text-xs text-white/60">
                             {item.email || "No email linked"}
@@ -618,7 +643,7 @@ export default function CommitteeStoryClient() {
           )}
 
           {member && (
-            <form onSubmit={saveProfile} className="mt-10 space-y-5">
+            <form onSubmit={saveProfile} className="mt-8 space-y-5 sm:mt-10">
               <div className="rounded-2xl bg-white/10 p-4">
                 <p className="text-lg font-semibold">{member.full_name}</p>
                 <p className="text-white/75">{member.role}</p>
@@ -628,15 +653,16 @@ export default function CommitteeStoryClient() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
                 <div>
                   <label className="mb-2 block text-sm font-semibold">Full Name</label>
                   <input
                     type="text"
                     name="full_name"
+                    autoComplete="name"
                     value={form.full_name}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Member name"
                   />
                 </div>
@@ -646,9 +672,10 @@ export default function CommitteeStoryClient() {
                   <input
                     type="email"
                     name="email"
+                    autoComplete="email"
                     value={form.email}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="member@email.com"
                   />
                 </div>
@@ -660,7 +687,7 @@ export default function CommitteeStoryClient() {
                     name="role"
                     value={form.role}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Board Member | He/Him"
                   />
                 </div>
@@ -672,7 +699,7 @@ export default function CommitteeStoryClient() {
                     name="pronouns"
                     value={form.pronouns}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="He/Him, She/Her, They/Them"
                   />
                 </div>
@@ -684,7 +711,7 @@ export default function CommitteeStoryClient() {
                     name="section_title"
                     value={form.section_title}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Committed Board"
                   />
                 </div>
@@ -696,7 +723,7 @@ export default function CommitteeStoryClient() {
                     name="display_order"
                     value={form.display_order}
                     onChange={updateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="1"
                     min={0}
                   />
@@ -708,7 +735,7 @@ export default function CommitteeStoryClient() {
                     type="file"
                     accept="image/*"
                     onChange={handleEditImageUpload}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-pink-600"
+                    className={fileInputClass}
                   />
                   {uploadingEditImage && (
                     <p className="mt-2 text-sm text-white/70">Uploading image...</p>
@@ -722,9 +749,9 @@ export default function CommitteeStoryClient() {
                     Image Preview
                   </p>
 
-                  <div className="flex flex-col gap-6 lg:flex-row">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:gap-6">
                     <div>
-                      <div className="relative h-48 w-48 overflow-hidden rounded-2xl border border-white/20 bg-white/10">
+                      <div className="relative aspect-square w-full max-w-64 overflow-hidden rounded-2xl border border-white/20 bg-white/10 sm:w-48">
                         <Image
                           src={form.image_url}
                           alt={form.full_name || "Committee member image"}
@@ -750,7 +777,7 @@ export default function CommitteeStoryClient() {
                           max={100}
                           value={form.image_position_x}
                           onChange={updateField}
-                          className="w-full"
+                          className="h-8 w-full cursor-pointer accent-pink-400"
                         />
                       </div>
 
@@ -765,7 +792,7 @@ export default function CommitteeStoryClient() {
                           max={100}
                           value={form.image_position_y}
                           onChange={updateField}
-                          className="w-full"
+                          className="h-8 w-full cursor-pointer accent-pink-400"
                         />
                       </div>
 
@@ -773,7 +800,7 @@ export default function CommitteeStoryClient() {
                         Move the sliders until the face sits nicely in the preview circle.
                       </p>
 
-                      <p className="break-all text-xs text-white/60">
+                      <p className="break-words text-xs leading-5 text-white/60">
                         {form.image_url}
                       </p>
                     </div>
@@ -788,7 +815,7 @@ export default function CommitteeStoryClient() {
                   name="story_title"
                   value={form.story_title}
                   onChange={updateField}
-                  className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                  className={inputClass}
                   placeholder="Why I Joined Burton Pride"
                 />
               </div>
@@ -797,32 +824,32 @@ export default function CommitteeStoryClient() {
                 <label className="mb-2 block text-sm font-semibold">Story</label>
                 <textarea
                   name="story"
-                  rows={16}
+                  rows={10}
                   value={form.story}
                   onChange={updateField}
-                  className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                  className={textareaClass}
                   placeholder="Write story here..."
                 />
               </div>
 
               <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
-                <label className="flex items-center gap-3">
+                <label className="flex min-h-12 cursor-pointer items-center gap-3">
                   <input
                     type="checkbox"
                     name="is_published"
                     checked={form.is_published}
                     onChange={updateField}
-                    className="h-5 w-5 rounded"
+                    className="h-6 w-6 shrink-0 rounded accent-pink-500"
                   />
                   <span className="text-sm font-semibold">{publishedLabel}</span>
                 </label>
               </div>
 
-              <div className="flex flex-wrap gap-3">
+              <div className="grid gap-3 sm:flex sm:flex-wrap">
                 <button
                   type="submit"
                   disabled={saving || !member || uploadingEditImage}
-                  className="rounded-2xl bg-white px-6 py-3 font-bold text-pink-600 transition hover:scale-105 hover:bg-white/90 disabled:opacity-60"
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-pink-600 transition hover:bg-white/90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {saving
                     ? "Saving..."
@@ -835,7 +862,7 @@ export default function CommitteeStoryClient() {
                   <button
                     type="button"
                     onClick={clearSelectedMember}
-                    className="rounded-2xl bg-white/15 px-6 py-3 font-bold text-white transition hover:bg-white/25"
+                    className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 text-sm font-black text-white transition hover:bg-white/25 sm:w-auto"
                   >
                     Close Details
                   </button>
@@ -845,7 +872,7 @@ export default function CommitteeStoryClient() {
           )}
 
           {isMainAdmin && !member && members.length > 0 && (
-            <div className="mt-10 rounded-3xl border border-dashed border-white/25 bg-white/5 p-10 text-center">
+            <div className="mt-8 rounded-2xl border border-dashed border-white/25 bg-white/5 p-5 text-center sm:mt-10 sm:rounded-3xl sm:p-10">
               <h3 className="text-2xl font-bold">Select a committee member</h3>
               <p className="mt-2 text-white/75">
                 Click one of the member cards above to view and edit their details.
@@ -856,36 +883,53 @@ export default function CommitteeStoryClient() {
       </div>
 
       {createOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl rounded-3xl border border-white/20 bg-gradient-to-br from-pink-500/90 via-purple-500/90 to-blue-500/90 p-6 text-white shadow-2xl backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-3xl font-bold">Create New Committee Member</h2>
+        <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-[2rem] border border-white/15 bg-gradient-to-br from-pink-500/95 via-purple-500/95 to-blue-500/95 text-white shadow-2xl backdrop-blur-xl sm:max-h-[90dvh] sm:rounded-3xl">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6">
+              <div className="flex items-start justify-between gap-3 sm:gap-4">
+              <div className="min-w-0">
+                <h2 className="text-2xl font-black leading-tight sm:text-3xl">Create New Committee Member</h2>
                 <p className="mt-1 text-white/80">
                   Add a new member, then you can edit them from the list.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => !creating && setCreateOpen(false)}
-                className="rounded-2xl bg-white/15 px-4 py-2 font-bold text-white transition hover:bg-white/25"
-              >
-                Close
-              </button>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCreateErrorPopup(
+                      "Test error: this is how a Create New Member error will appear. No member has been created and no data has been changed.",
+                    )
+                  }
+                  disabled={creating}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-500/15 px-3 py-2 text-xs font-black text-amber-50 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"
+                >
+                  Test error popup
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => !creating && setCreateOpen(false)}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl bg-white/15 px-3 py-2 text-sm font-black text-white transition hover:bg-white/25"
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
             <form onSubmit={createMember} className="mt-6 space-y-5">
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
                 <div>
                   <label className="mb-2 block text-sm font-semibold">Full Name</label>
                   <input
                     type="text"
                     name="full_name"
+                    autoComplete="name"
                     value={createForm.full_name}
                     onChange={updateCreateField}
                     required
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Member name"
                   />
                 </div>
@@ -895,9 +939,10 @@ export default function CommitteeStoryClient() {
                   <input
                     type="email"
                     name="email"
+                    autoComplete="email"
                     value={createForm.email}
                     onChange={updateCreateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="member@email.com"
                   />
                 </div>
@@ -910,7 +955,7 @@ export default function CommitteeStoryClient() {
                     value={createForm.role}
                     onChange={updateCreateField}
                     required
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Board Member | He/Him"
                   />
                 </div>
@@ -922,7 +967,7 @@ export default function CommitteeStoryClient() {
                     name="pronouns"
                     value={createForm.pronouns}
                     onChange={updateCreateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="He/Him, She/Her, They/Them"
                   />
                 </div>
@@ -934,7 +979,7 @@ export default function CommitteeStoryClient() {
                     name="section_title"
                     value={createForm.section_title}
                     onChange={updateCreateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     placeholder="Committed Board"
                   />
                 </div>
@@ -946,7 +991,7 @@ export default function CommitteeStoryClient() {
                     name="display_order"
                     value={createForm.display_order}
                     onChange={updateCreateField}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                    className={inputClass}
                     min={0}
                   />
                 </div>
@@ -957,7 +1002,7 @@ export default function CommitteeStoryClient() {
                     type="file"
                     accept="image/*"
                     onChange={handleCreateImageUpload}
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:font-semibold file:text-pink-600"
+                    className={fileInputClass}
                   />
                   {uploadingCreateImage && (
                     <p className="mt-2 text-sm text-white/70">Uploading image...</p>
@@ -973,7 +1018,7 @@ export default function CommitteeStoryClient() {
 
                   <div className="flex flex-col gap-6 lg:flex-row">
                     <div>
-                      <div className="relative h-48 w-48 overflow-hidden rounded-2xl border border-white/20 bg-white/10">
+                      <div className="relative aspect-square w-full max-w-64 overflow-hidden rounded-2xl border border-white/20 bg-white/10 sm:w-48">
                         <Image
                           src={createForm.image_url}
                           alt={createForm.full_name || "New committee member image"}
@@ -999,7 +1044,7 @@ export default function CommitteeStoryClient() {
                           max={100}
                           value={createForm.image_position_x}
                           onChange={updateCreateField}
-                          className="w-full"
+                          className="h-8 w-full cursor-pointer accent-pink-400"
                         />
                       </div>
 
@@ -1014,7 +1059,7 @@ export default function CommitteeStoryClient() {
                           max={100}
                           value={createForm.image_position_y}
                           onChange={updateCreateField}
-                          className="w-full"
+                          className="h-8 w-full cursor-pointer accent-pink-400"
                         />
                       </div>
 
@@ -1022,7 +1067,7 @@ export default function CommitteeStoryClient() {
                         Move the sliders until the face sits nicely in the preview circle.
                       </p>
 
-                      <p className="break-all text-xs text-white/60">
+                      <p className="break-words text-xs leading-5 text-white/60">
                         {createForm.image_url}
                       </p>
                     </div>
@@ -1037,7 +1082,7 @@ export default function CommitteeStoryClient() {
                   name="story_title"
                   value={createForm.story_title}
                   onChange={updateCreateField}
-                  className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                  className={inputClass}
                   placeholder="Why I Joined Burton Pride"
                 />
               </div>
@@ -1049,19 +1094,19 @@ export default function CommitteeStoryClient() {
                   rows={10}
                   value={createForm.story}
                   onChange={updateCreateField}
-                  className="w-full rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/50"
+                  className={textareaClass}
                   placeholder="Write story here..."
                 />
               </div>
 
               <div className="rounded-2xl border border-white/20 bg-white/10 p-4">
-                <label className="flex items-center gap-3">
+                <label className="flex min-h-12 cursor-pointer items-center gap-3">
                   <input
                     type="checkbox"
                     name="is_published"
                     checked={createForm.is_published}
                     onChange={updateCreateField}
-                    className="h-5 w-5 rounded"
+                    className="h-6 w-6 shrink-0 rounded accent-pink-500"
                   />
                   <span className="text-sm font-semibold">
                     {createForm.is_published
@@ -1071,11 +1116,11 @@ export default function CommitteeStoryClient() {
                 </label>
               </div>
 
-              <div className="flex justify-end gap-3">
+              <div className="grid gap-3 sm:flex sm:justify-end">
                 <button
                   type="button"
                   onClick={() => !creating && setCreateOpen(false)}
-                  className="rounded-2xl bg-white/15 px-6 py-3 font-bold text-white transition hover:bg-white/25"
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white/15 px-5 py-3 text-sm font-black text-white transition hover:bg-white/25 sm:w-auto"
                 >
                   Cancel
                 </button>
@@ -1083,12 +1128,74 @@ export default function CommitteeStoryClient() {
                 <button
                   type="submit"
                   disabled={creating || uploadingCreateImage}
-                  className="rounded-2xl bg-white px-6 py-3 font-bold text-pink-600 transition hover:scale-105 hover:bg-white/90 disabled:opacity-60"
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-pink-600 transition hover:bg-white/90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {creating ? "Creating..." : "Create Member"}
                 </button>
               </div>
             </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createErrorPopup && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-member-error-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setCreateErrorPopup(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-lg overflow-hidden rounded-t-[2rem] border border-red-300/20 bg-[#11111f] text-white shadow-2xl sm:rounded-[2rem]">
+            <div className="h-1 bg-gradient-to-r from-red-500 via-pink-500 to-purple-500" />
+
+            <div className="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-300/20 bg-red-500/15 text-xl font-black text-red-100">
+                  !
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-red-200/65">
+                    Create member problem
+                  </p>
+
+                  <h2
+                    id="create-member-error-title"
+                    className="mt-1 text-xl font-black sm:text-2xl"
+                  >
+                    Something needs fixing
+                  </h2>
+
+                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-white/75">
+                    {createErrorPopup}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs leading-5 text-white/55">
+                Check the form details and try again. If the message includes a
+                reference code, give that code to a Main Admin when reporting the
+                problem.
+              </div>
+
+              <div className="mt-6 grid gap-3 sm:flex sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateErrorPopup(null);
+                  }}
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-purple-700 transition hover:bg-white/90 active:scale-[0.99] sm:w-auto"
+                >
+                  Back to form
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

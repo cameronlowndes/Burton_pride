@@ -75,7 +75,8 @@ export default function RootLayout({
       className="
         h-full
         bg-white
-        dark:bg-[#2b2b2b]
+
+        dark:bg-[#0c1119]
       "
       suppressHydrationWarning
     >
@@ -92,6 +93,7 @@ export default function RootLayout({
         className={`
           ${geistSans.variable}
           ${geistMono.variable}
+
           m-0
           min-h-screen
           bg-white
@@ -99,8 +101,9 @@ export default function RootLayout({
           antialiased
           transition-colors
           duration-300
-          dark:bg-[#2b2b2b]
-          dark:text-[#f1f1f1]
+
+          dark:bg-[linear-gradient(180deg,#0c1119_0%,#0d111a_45%,#13182d_100%)]
+          dark:text-[#f5f5f5]
         `}
       >
         {children}

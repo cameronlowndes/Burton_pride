@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect } from "react";
 import MoneyManagementSidebar from "../components/rooting/MoneyManagement";
 import Watermark from "../components/money/watermark/Watermark";
 
@@ -10,10 +9,6 @@ export default function MoneySidebar({
 }: {
   children: ReactNode;
 }) {
-  useEffect(() => {
-    document.title = "Burton Pride Money Management APP";
-  }, []);
-
   return (
     <div className="flex min-h-dvh w-full max-w-none overflow-hidden bg-slate-950 text-white">
       <MoneyManagementSidebar>

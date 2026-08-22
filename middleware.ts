@@ -1,7 +1,14 @@
-import { type NextRequest, NextResponse } from "next/server";
+import {
+  type NextRequest,
+  NextResponse,
+} from "next/server";
+
 import { updateSession } from "@/lib/supabase/middleware";
 
-type SitePageStatus = "live" | "hidden" | "coming_soon";
+type SitePageStatus =
+  | "live"
+  | "hidden"
+  | "coming_soon";
 
 type SitePage = {
   id: string;
@@ -11,7 +18,9 @@ type SitePage = {
   password_protected: boolean;
 };
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 const SUPABASE_READ_KEY =
   process.env.SUPABASE_SITE_PAGES_READ_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
@@ -36,74 +45,152 @@ const PUBLIC_ASSET_PREFIXES = [
   "/fonts/",
 ];
 
+const PUBLIC_ADMIN_API_PATHS = new Set([
+  "/api/admin/settings/login",
+  "/api/admin/settings/login/two-factor/verify",
+  "/api/admin/settings/login/two-factor/resend",
+  "/api/admin/logout",
+]);
+
 function normalisePath(pathname: string) {
-  if (!pathname || pathname === "/") return "/";
+  if (!pathname || pathname === "/") {
+    return "/";
+  }
 
-  const cleanPath = pathname.split("?")[0].split("#")[0].trim();
+  const cleanPath = pathname
+    .split("?")[0]
+    .split("#")[0]
+    .trim();
 
-  if (!cleanPath || cleanPath === "/") return "/";
+  if (!cleanPath || cleanPath === "/") {
+    return "/";
+  }
 
-  const withSlash = cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`;
+  const withSlash =
+    cleanPath.startsWith("/")
+      ? cleanPath
+      : `/${cleanPath}`;
 
   const noTrailingSlash =
-    withSlash.endsWith("/") && withSlash !== "/"
+    withSlash.endsWith("/") &&
+    withSlash !== "/"
       ? withSlash.slice(0, -1)
       : withSlash;
 
-  return noTrailingSlash.replace(/\/{2,}/g, "/");
+  return noTrailingSlash.replace(
+    /\/{2,}/g,
+    "/",
+  );
 }
 
 function isSafeRoute(pathname: string) {
-  const route = normalisePath(pathname);
+  const route =
+    normalisePath(pathname);
 
-  if (route.length > 300) return false;
-  if (route.includes("..")) return false;
-  if (route.includes("\\")) return false;
-  if (route.includes("%00")) return false;
+  if (route.length > 300) {
+    return false;
+  }
 
-  return /^\/[a-zA-Z0-9/_-]*$/.test(route);
+  if (route.includes("..")) {
+    return false;
+  }
+
+  if (route.includes("\\")) {
+    return false;
+  }
+
+  if (
+    route.toLowerCase().includes("%00")
+  ) {
+    return false;
+  }
+
+  return /^\/[a-zA-Z0-9/_-]*$/.test(
+    route,
+  );
 }
 
 function isAdminRoute(pathname: string) {
-  const path = normalisePath(pathname).toLowerCase();
+  const path =
+    normalisePath(pathname)
+      .toLowerCase();
 
-  return path === "/admin" || path.startsWith("/admin/");
+  return (
+    path === "/admin" ||
+    path.startsWith("/admin/")
+  );
 }
 
-function isAdminApiRoute(pathname: string) {
-  return normalisePath(pathname).toLowerCase().startsWith("/api/admin");
+function isAdminApiRoute(
+  pathname: string,
+) {
+  return normalisePath(pathname)
+    .toLowerCase()
+    .startsWith("/api/admin");
 }
 
-function isPublicAdminApiPath(pathname: string) {
-  const path = normalisePath(pathname).toLowerCase();
+function isPublicAdminApiPath(
+  pathname: string,
+) {
+  const path =
+    normalisePath(pathname)
+      .toLowerCase();
 
-  return path === "/api/admin/settings/login" || path === "/api/admin/logout";
+  return PUBLIC_ADMIN_API_PATHS.has(
+    path,
+  );
 }
 
-function isAdminMutation(request: NextRequest) {
-  if (!isAdminApiRoute(request.nextUrl.pathname)) return false;
+function isAdminMutation(
+  request: NextRequest,
+) {
+  if (
+    !isAdminApiRoute(
+      request.nextUrl.pathname,
+    )
+  ) {
+    return false;
+  }
 
-  return ["POST", "PUT", "PATCH", "DELETE"].includes(
+  return [
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+  ].includes(
     request.method.toUpperCase(),
   );
 }
 
-function hasValidOrigin(request: NextRequest) {
-  const expectedOrigin = request.nextUrl.origin;
+function hasValidOrigin(
+  request: NextRequest,
+) {
+  const expectedOrigin =
+    request.nextUrl.origin;
 
-  const origin = request.headers.get("origin");
+  const origin =
+    request.headers.get("origin");
+
   if (origin) {
     try {
-      return new URL(origin).origin === expectedOrigin;
+      return (
+        new URL(origin).origin ===
+        expectedOrigin
+      );
     } catch {
       return false;
     }
   }
 
-  const referer = request.headers.get("referer");
+  const referer =
+    request.headers.get("referer");
+
   if (referer) {
     try {
-      return new URL(referer).origin === expectedOrigin;
+      return (
+        new URL(referer).origin ===
+        expectedOrigin
+      );
     } catch {
       return false;
     }
@@ -112,19 +199,47 @@ function hasValidOrigin(request: NextRequest) {
   return false;
 }
 
-function shouldSkipPageLocker(pathname: string) {
-  const path = normalisePath(pathname);
-  const lowerPath = path.toLowerCase();
+function shouldSkipPageLocker(
+  pathname: string,
+) {
+  const path =
+    normalisePath(pathname);
 
-  if (PUBLIC_ROOT_FILES.has(lowerPath)) return true;
+  const lowerPath =
+    path.toLowerCase();
 
-  if (isAdminRoute(path)) return true;
-  if (isAdminApiRoute(path)) return true;
+  if (
+    PUBLIC_ROOT_FILES.has(lowerPath)
+  ) {
+    return true;
+  }
 
-  if (lowerPath.startsWith("/api/")) return true;
-  if (lowerPath.startsWith("/page-status")) return true;
+  if (isAdminRoute(path)) {
+    return true;
+  }
 
-  return PUBLIC_ASSET_PREFIXES.some((prefix) => lowerPath.startsWith(prefix));
+  if (isAdminApiRoute(path)) {
+    return true;
+  }
+
+  if (
+    lowerPath.startsWith("/api/")
+  ) {
+    return true;
+  }
+
+  if (
+    lowerPath.startsWith(
+      "/page-status",
+    )
+  ) {
+    return true;
+  }
+
+  return PUBLIC_ASSET_PREFIXES.some(
+    (prefix) =>
+      lowerPath.startsWith(prefix),
+  );
 }
 
 function withSecurityHeaders(
@@ -135,39 +250,76 @@ function withSecurityHeaders(
     noStore?: boolean;
   },
 ) {
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+
+  response.headers.set(
+    "X-Frame-Options",
+    "DENY",
+  );
+
+  response.headers.set(
+    "Referrer-Policy",
+    options?.admin
+      ? "no-referrer"
+      : "strict-origin-when-cross-origin",
+  );
+
   response.headers.set(
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=(), payment=()",
   );
 
-  if (process.env.NODE_ENV === "production") {
+  if (
+    process.env.NODE_ENV ===
+    "production"
+  ) {
     response.headers.set(
       "Strict-Transport-Security",
-      "max-age=31536000; includeSubDomains; preload",
+      "max-age=31536000; includeSubDomains",
     );
   }
 
-  if (options?.admin || options?.lockedPage) {
-    response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  if (
+    options?.admin ||
+    options?.lockedPage
+  ) {
+    response.headers.set(
+      "X-Robots-Tag",
+      "noindex, nofollow, noarchive",
+    );
   }
 
-  if (options?.admin || options?.noStore) {
+  if (
+    options?.admin ||
+    options?.noStore
+  ) {
     response.headers.set(
       "Cache-Control",
       "no-store, no-cache, must-revalidate, proxy-revalidate",
     );
-    response.headers.set("Pragma", "no-cache");
-    response.headers.set("Expires", "0");
+
+    response.headers.set(
+      "Pragma",
+      "no-cache",
+    );
+
+    response.headers.set(
+      "Expires",
+      "0",
+    );
   }
 
   return response;
 }
 
-function buildPageStatusPath(pathname: string) {
-  const path = normalisePath(pathname);
+function buildPageStatusPath(
+  pathname: string,
+) {
+  const path =
+    normalisePath(pathname);
 
   if (path === "/") {
     return "/page-status/home";
@@ -179,32 +331,57 @@ function buildPageStatusPath(pathname: string) {
 function makeLockedPageRewrite(
   request: NextRequest,
   pathname: string,
-  reason: "unavailable" | "access_required",
+  reason:
+    | "unavailable"
+    | "access_required",
 ) {
-  const statusUrl = request.nextUrl.clone();
+  const statusUrl =
+    request.nextUrl.clone();
 
-  statusUrl.pathname = buildPageStatusPath(pathname);
-  statusUrl.searchParams.set("reason", reason);
-  statusUrl.searchParams.set("route", normalisePath(pathname));
+  statusUrl.pathname =
+    buildPageStatusPath(pathname);
 
-  return withSecurityHeaders(NextResponse.rewrite(statusUrl), {
-    lockedPage: true,
-    noStore: true,
-  });
+  statusUrl.searchParams.set(
+    "reason",
+    reason,
+  );
+
+  statusUrl.searchParams.set(
+    "route",
+    normalisePath(pathname),
+  );
+
+  return withSecurityHeaders(
+    NextResponse.rewrite(statusUrl),
+    {
+      lockedPage: true,
+      noStore: true,
+    },
+  );
 }
 
-async function getSitePage(route: string) {
-  if (!SUPABASE_URL || !SUPABASE_READ_KEY) {
+async function getSitePage(
+  route: string,
+) {
+  if (
+    !SUPABASE_URL ||
+    !SUPABASE_READ_KEY
+  ) {
     return {
       page: null as SitePage | null,
       failed: false,
     };
   }
 
-  const normalisedRoute = normalisePath(route);
-  const lowerRoute = normalisedRoute.toLowerCase();
+  const normalisedRoute =
+    normalisePath(route);
 
-  if (!isSafeRoute(normalisedRoute)) {
+  const lowerRoute =
+    normalisedRoute.toLowerCase();
+
+  if (
+    !isSafeRoute(normalisedRoute)
+  ) {
     return {
       page: null as SitePage | null,
       failed: false,
@@ -212,15 +389,22 @@ async function getSitePage(route: string) {
   }
 
   try {
-    const url = new URL(`${SUPABASE_URL}/rest/v1/site_pages`);
+    const url = new URL(
+      `${SUPABASE_URL}/rest/v1/site_pages`,
+    );
 
     url.searchParams.set(
       "select",
       "id,route,status,is_enabled,password_protected",
     );
 
-    if (normalisedRoute === lowerRoute) {
-      url.searchParams.set("route", `eq.${lowerRoute}`);
+    if (
+      normalisedRoute === lowerRoute
+    ) {
+      url.searchParams.set(
+        "route",
+        `eq.${lowerRoute}`,
+      );
     } else {
       url.searchParams.set(
         "or",
@@ -228,117 +412,222 @@ async function getSitePage(route: string) {
       );
     }
 
-    url.searchParams.set("limit", "1");
+    url.searchParams.set(
+      "limit",
+      "1",
+    );
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        apikey: SUPABASE_READ_KEY,
-        Authorization: `Bearer ${SUPABASE_READ_KEY}`,
-      },
-      cache: "no-store",
-    });
+    const response =
+      await fetch(
+        url.toString(),
+        {
+          headers: {
+            apikey:
+              SUPABASE_READ_KEY,
+
+            Authorization:
+              `Bearer ${SUPABASE_READ_KEY}`,
+          },
+
+          cache: "no-store",
+        },
+      );
 
     if (!response.ok) {
-      console.error("Website page locker failed", {
-        status: response.status,
-        route: normalisedRoute,
-      });
+      console.error(
+        "Website page locker failed",
+        {
+          status:
+            response.status,
+          route:
+            normalisedRoute,
+        },
+      );
 
       return {
-        page: null as SitePage | null,
+        page:
+          null as SitePage | null,
         failed: true,
       };
     }
 
-    const data = (await response.json()) as SitePage[];
+    const data =
+      (await response.json()) as SitePage[];
 
     return {
-      page: data[0] ?? null,
+      page:
+        data[0] ?? null,
       failed: false,
     };
   } catch (error) {
-    console.error("Website page locker failed", {
-      route: normalisedRoute,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+    console.error(
+      "Website page locker failed",
+      {
+        route:
+          normalisedRoute,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown error",
+      },
+    );
 
     return {
-      page: null as SitePage | null,
+      page:
+        null as SitePage | null,
       failed: true,
     };
   }
 }
 
-async function runPageLocker(request: NextRequest) {
-  const pathname = normalisePath(request.nextUrl.pathname);
+async function runPageLocker(
+  request: NextRequest,
+) {
+  const pathname =
+    normalisePath(
+      request.nextUrl.pathname,
+    );
 
-  if (shouldSkipPageLocker(pathname)) {
+  if (
+    shouldSkipPageLocker(pathname)
+  ) {
     return null;
   }
 
-  if (!isSafeRoute(pathname)) {
+  if (
+    !isSafeRoute(pathname)
+  ) {
     return null;
   }
 
-  const result = await getSitePage(pathname);
+  const result =
+    await getSitePage(pathname);
 
-  if (result.failed && PAGE_LOCKER_FAIL_CLOSED) {
-    return makeLockedPageRewrite(request, pathname, "unavailable");
+  if (
+    result.failed &&
+    PAGE_LOCKER_FAIL_CLOSED
+  ) {
+    return makeLockedPageRewrite(
+      request,
+      pathname,
+      "unavailable",
+    );
   }
 
-  const page = result.page;
+  const page =
+    result.page;
 
   if (!page) {
     return null;
   }
 
   if (!page.is_enabled) {
-    return makeLockedPageRewrite(request, pathname, "unavailable");
+    return makeLockedPageRewrite(
+      request,
+      pathname,
+      "unavailable",
+    );
   }
 
-  if (page.status === "hidden") {
-    return makeLockedPageRewrite(request, pathname, "unavailable");
+  if (
+    page.status === "hidden"
+  ) {
+    return makeLockedPageRewrite(
+      request,
+      pathname,
+      "unavailable",
+    );
   }
 
-  if (page.status === "coming_soon") {
-    return makeLockedPageRewrite(request, pathname, "unavailable");
+  if (
+    page.status ===
+    "coming_soon"
+  ) {
+    return makeLockedPageRewrite(
+      request,
+      pathname,
+      "unavailable",
+    );
   }
 
-  if (page.status !== "live") {
-    return makeLockedPageRewrite(request, pathname, "unavailable");
+  if (
+    page.status !== "live"
+  ) {
+    return makeLockedPageRewrite(
+      request,
+      pathname,
+      "unavailable",
+    );
   }
 
-  if (page.password_protected) {
+  if (
+    page.password_protected
+  ) {
     /**
-     * Temporary compatibility with your old page password cookie.
-     * Once your password unlock API is upgraded to signed cookies,
-     * this should be replaced with signed-cookie verification.
+     * Temporary compatibility with the
+     * existing page-password cookie.
+     *
+     * This is NOT a security boundary.
+     * Replace this with a signed or
+     * server-validated unlock token.
      */
-    const oldCookieName = `site_page_access_${page.id}`;
-    const hasOldAccessCookie = request.cookies.get(oldCookieName)?.value === "true";
+    const oldCookieName =
+      `site_page_access_${page.id}`;
+
+    const hasOldAccessCookie =
+      request.cookies.get(
+        oldCookieName,
+      )?.value === "true";
 
     if (!hasOldAccessCookie) {
-      return makeLockedPageRewrite(request, pathname, "access_required");
+      return makeLockedPageRewrite(
+        request,
+        pathname,
+        "access_required",
+      );
     }
   }
 
   return null;
 }
 
-export async function middleware(request: NextRequest) {
-  const pathname = normalisePath(request.nextUrl.pathname);
+export async function middleware(
+  request: NextRequest,
+) {
+  const pathname =
+    normalisePath(
+      request.nextUrl.pathname,
+    );
 
-  if (isAdminRoute(pathname) || isAdminApiRoute(pathname)) {
+  /**
+   * ADMIN SECURITY
+   */
+  if (
+    isAdminRoute(pathname) ||
+    isAdminApiRoute(pathname)
+  ) {
+    /**
+     * CSRF / cross-origin mutation
+     * protection.
+     *
+     * Login/logout/MFA routes are
+     * excluded here because they have
+     * their own authentication lifecycle.
+     */
     if (
       isAdminMutation(request) &&
-      !isPublicAdminApiPath(pathname) &&
+      !isPublicAdminApiPath(
+        pathname,
+      ) &&
       !hasValidOrigin(request)
     ) {
       return withSecurityHeaders(
         NextResponse.json(
           {
             ok: false,
-            message: "Request blocked.",
+            message:
+              "Request blocked.",
           },
           {
             status: 403,
@@ -351,28 +640,68 @@ export async function middleware(request: NextRequest) {
       );
     }
 
-    const adminResponse = await updateSession(request);
+    /**
+     * updateSession performs:
+     *
+     * - Supabase user validation
+     * - AAL2 / MFA validation
+     * - active admin validation
+     * - trusted-device validation
+     * - Burton security-session validation
+     */
+    const adminResponse =
+      await updateSession(
+        request,
+      );
 
-    return withSecurityHeaders(adminResponse, {
-      admin: true,
-      noStore: true,
-    });
+    return withSecurityHeaders(
+      adminResponse,
+      {
+        admin: true,
+        noStore: true,
+      },
+    );
   }
 
-  const lockedResponse = await runPageLocker(request);
+  /**
+   * PUBLIC WEBSITE PAGE LOCKER
+   */
+  const lockedResponse =
+    await runPageLocker(
+      request,
+    );
 
   if (lockedResponse) {
     return lockedResponse;
   }
 
-  return withSecurityHeaders(NextResponse.next());
+  return withSecurityHeaders(
+    NextResponse.next(),
+  );
 }
 
 export const config = {
+  /**
+   * Required because
+   * lib/supabase/middleware.ts uses
+   * node:crypto.
+   *
+   * Next.js 15.5 supports the stable
+   * Node.js middleware runtime.
+   */
+  runtime: "nodejs",
+
   matcher: [
     "/Admin/:path*",
     "/admin/:path*",
     "/api/admin/:path*",
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+
+    /**
+     * Public website routes.
+     *
+     * Skip Next.js internal static/image
+     * requests and common root metadata.
+     */
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
