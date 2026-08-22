@@ -114,25 +114,160 @@ function repeatLabel(rr?: string | null) {
   return rr;
 }
 
-/**
- * ✅ Admin status:
- * - expired: end_at < now OR (no end_at and start_at < now)
- * - ongoing: start_at <= now <= end_at (only when end_at exists)
- * - upcoming: everything else
- */
-function getStatus(ev: EventRow): "upcoming" | "ongoing" | "expired" {
-  const now = Date.now();
-  const start = new Date(ev.start_at).getTime();
-  const end = ev.end_at ? new Date(ev.end_at).getTime() : NaN;
+function addRepeatInterval(date: Date, repeatRule: RepeatRule): Date {
+  const next = new Date(date);
 
-  if (Number.isFinite(end)) {
-    if (end < now) return "expired";
-    if (Number.isFinite(start) && start <= now && now <= end) return "ongoing";
-    return "upcoming";
+  switch (repeatRule) {
+    case "daily":
+      next.setDate(next.getDate() + 1);
+      break;
+    case "weekly":
+      next.setDate(next.getDate() + 7);
+      break;
+    case "biweekly":
+      next.setDate(next.getDate() + 14);
+      break;
+    case "triweekly":
+      next.setDate(next.getDate() + 21);
+      break;
+    case "monthly":
+      next.setMonth(next.getMonth() + 1);
+      break;
+    default:
+      break;
   }
 
-  if (Number.isFinite(start) && start < now) return "expired";
-  return "upcoming";
+  return next;
+}
+
+type OccurrenceInfo = {
+  start: Date;
+  end: Date | null;
+  status: "upcoming" | "ongoing" | "expired";
+  isNextOccurrence: boolean;
+};
+
+/**
+ * Work out the occurrence that should be shown in the admin UI.
+ *
+ * One-off events can expire normally.
+ * Repeating events never become expired just because the first occurrence
+ * has passed: the UI moves forward to the current or next occurrence.
+ */
+function getOccurrenceInfo(ev: EventRow, now = new Date()): OccurrenceInfo {
+  const originalStart = new Date(ev.start_at);
+  const originalEnd = ev.end_at ? new Date(ev.end_at) : null;
+  const repeatRule = ev.repeat_rule || "none";
+
+  if (Number.isNaN(originalStart.getTime())) {
+    return {
+      start: originalStart,
+      end: originalEnd,
+      status: "expired",
+      isNextOccurrence: false,
+    };
+  }
+
+  const validOriginalEnd =
+    originalEnd && !Number.isNaN(originalEnd.getTime()) ? originalEnd : null;
+
+  // Normal one-off event.
+  if (repeatRule === "none") {
+    if (validOriginalEnd) {
+      if (validOriginalEnd.getTime() < now.getTime()) {
+        return {
+          start: originalStart,
+          end: validOriginalEnd,
+          status: "expired",
+          isNextOccurrence: false,
+        };
+      }
+
+      if (
+        originalStart.getTime() <= now.getTime() &&
+        now.getTime() <= validOriginalEnd.getTime()
+      ) {
+        return {
+          start: originalStart,
+          end: validOriginalEnd,
+          status: "ongoing",
+          isNextOccurrence: false,
+        };
+      }
+
+      return {
+        start: originalStart,
+        end: validOriginalEnd,
+        status: "upcoming",
+        isNextOccurrence: false,
+      };
+    }
+
+    return {
+      start: originalStart,
+      end: null,
+      status: originalStart.getTime() < now.getTime() ? "expired" : "upcoming",
+      isNextOccurrence: false,
+    };
+  }
+
+  const durationMs = validOriginalEnd
+    ? Math.max(0, validOriginalEnd.getTime() - originalStart.getTime())
+    : null;
+
+  // The recurring series has not started yet.
+  if (originalStart.getTime() > now.getTime()) {
+    return {
+      start: originalStart,
+      end:
+        durationMs !== null
+          ? new Date(originalStart.getTime() + durationMs)
+          : null,
+      status: "upcoming",
+      isNextOccurrence: true,
+    };
+  }
+
+  // Find the latest occurrence whose start is <= now.
+  let currentStart = new Date(originalStart);
+  let nextStart = addRepeatInterval(currentStart, repeatRule);
+
+  // Safety limit prevents a malformed repeat rule from creating an infinite loop.
+  let guard = 0;
+  while (nextStart.getTime() <= now.getTime() && guard < 10000) {
+    currentStart = nextStart;
+    nextStart = addRepeatInterval(currentStart, repeatRule);
+    guard += 1;
+  }
+
+  const currentEnd =
+    durationMs !== null ? new Date(currentStart.getTime() + durationMs) : null;
+
+  // If the latest occurrence is currently running, show it as ongoing.
+  if (
+    currentEnd &&
+    currentStart.getTime() <= now.getTime() &&
+    now.getTime() <= currentEnd.getTime()
+  ) {
+    return {
+      start: currentStart,
+      end: currentEnd,
+      status: "ongoing",
+      isNextOccurrence: false,
+    };
+  }
+
+  // The latest occurrence has finished (or has no end time), so show the next one.
+  return {
+    start: nextStart,
+    end: durationMs !== null ? new Date(nextStart.getTime() + durationMs) : null,
+    status: "upcoming",
+    isNextOccurrence: true,
+  };
+}
+
+function getStatus(ev: EventRow): "upcoming" | "ongoing" | "expired" {
+  return getOccurrenceInfo(ev).status;
 }
 
 export default function AdminEventsClient() {
@@ -873,9 +1008,10 @@ function EventCard({
   onDelete: () => void;
   deleting: boolean;
 }) {
-  const start = new Date(ev.start_at);
-  const end = ev.end_at ? new Date(ev.end_at) : null;
-  const status = getStatus(ev);
+  const occurrence = getOccurrenceInfo(ev);
+  const start = occurrence.start;
+  const end = occurrence.end;
+  const status = occurrence.status;
 
   const statusCls =
     status === "expired"
@@ -909,6 +1045,11 @@ function EventCard({
           </div>
 
           <div className="mt-1 text-sm text-white/70">
+            {ev.repeat_rule && ev.repeat_rule !== "none" ? (
+              <span className="font-semibold text-white/85">
+                {status === "ongoing" ? "Current: " : "Next: "}
+              </span>
+            ) : null}
             {start.toLocaleString()}
             {end ? ` → ${end.toLocaleString()}` : ""}
             {ev.location ? ` • ${ev.location}` : ""}

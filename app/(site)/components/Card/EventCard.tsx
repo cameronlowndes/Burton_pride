@@ -8,6 +8,7 @@ import {
   Clock3,
   ExternalLink,
   MapPin,
+  Repeat2,
   Sparkles,
   Ticket,
   X,
@@ -28,6 +29,19 @@ type EventRow = {
   is_free?: boolean | null;
   price_type?: "free" | "paid" | null;
   price_gbp?: number | null;
+  repeat_rule?:
+    | "none"
+    | "daily"
+    | "weekly"
+    | "biweekly"
+    | "triweekly"
+    | "monthly"
+    | null;
+  is_repeating?: boolean;
+  occurrence_start_at?: string | null;
+  occurrence_end_at?: string | null;
+  original_start_at?: string | null;
+  original_end_at?: string | null;
 };
 
 function formatDate(dateStr: string) {
@@ -42,6 +56,7 @@ function formatDate(dateStr: string) {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/London",
   });
 }
 
@@ -58,6 +73,8 @@ function formatTimeRange(
   const startTime = start.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
   });
 
   if (!endIso) {
@@ -73,6 +90,8 @@ function formatTimeRange(
   const endTime = end.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
   });
 
   return `${startTime} – ${endTime}`;
@@ -80,9 +99,21 @@ function formatTimeRange(
 
 function isEventToday(eventIso: string) {
   const eventDate = new Date(eventIso);
+
+  if (Number.isNaN(eventDate.getTime())) {
+    return false;
+  }
+
   const now = new Date();
 
-  return eventDate.toDateString() === now.toDateString();
+  const londonDate = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Europe/London",
+  });
+
+  return londonDate.format(eventDate) === londonDate.format(now);
 }
 
 function mapsLink(location?: string | null) {
@@ -123,6 +154,58 @@ function getPriceLabel(event: EventRow) {
   }
 
   return null;
+}
+
+function isRepeatingEvent(event: EventRow) {
+  return (
+    event.is_repeating === true ||
+    event.repeat_rule === "daily" ||
+    event.repeat_rule === "weekly" ||
+    event.repeat_rule === "biweekly" ||
+    event.repeat_rule === "triweekly" ||
+    event.repeat_rule === "monthly"
+  );
+}
+
+function getRepeatText(event: EventRow) {
+  switch (event.repeat_rule) {
+    case "daily":
+      return "Repeats every day";
+    case "weekly":
+      return "Repeats every week";
+    case "biweekly":
+      return "Repeats every 2 weeks";
+    case "triweekly":
+      return "Repeats every 3 weeks";
+    case "monthly":
+      return "Repeats every month";
+    default:
+      return "Repeating event";
+  }
+}
+
+function getRepeatDayText(event: EventRow) {
+  if (event.repeat_rule !== "weekly") {
+    return null;
+  }
+
+  const source =
+    event.original_start_at ||
+    event.occurrence_start_at ||
+    event.start_at;
+
+  const d = new Date(source);
+
+  if (Number.isNaN(d.getTime())) {
+    return null;
+  }
+
+  const weekday = d.toLocaleDateString("en-GB", {
+    weekday: "long",
+    timeZone: "Europe/London",
+  });
+
+  return `Every ${weekday}`;
 }
 
 export default function EventPage() {
@@ -411,6 +494,15 @@ export default function EventPage() {
               const priceLabel =
                 getPriceLabel(event);
 
+              const repeating =
+                isRepeatingEvent(event);
+
+              const repeatText =
+                getRepeatText(event);
+
+              const repeatDayText =
+                getRepeatDayText(event);
+
               return (
                 <article
                   key={event.id}
@@ -437,11 +529,37 @@ export default function EventPage() {
 
                     ${
                       today
-                        ? "border-yellow-300 ring-2 ring-yellow-300/30"
+                        ? "border-2 border-yellow-300 ring-4 ring-yellow-300/20 shadow-[0_0_45px_rgba(253,224,71,0.40)]"
                         : "border-white/15 dark:border-white/10"
                     }
                   `}
                 >
+                  {today && (
+                    <div
+                      role="status"
+                      className="
+                        flex
+                        items-center
+                        justify-center
+                        gap-2
+                        bg-yellow-300
+                        px-4
+                        py-3
+                        text-center
+                        text-sm
+                        font-black
+                        uppercase
+                        tracking-[0.16em]
+                        text-purple-950
+                        shadow-lg
+                      "
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      Happening Today
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                  )}
+
                   {/* Pride stripe */}
                   <div
                     aria-hidden="true"
@@ -532,7 +650,31 @@ export default function EventPage() {
                               shadow-lg
                             "
                           >
-                            Happening Today
+                            Live Today
+                          </span>
+                        )}
+
+                        {repeating && (
+                          <span
+                            className="
+                              inline-flex
+                              items-center
+                              gap-1.5
+                              rounded-full
+                              bg-purple-700/95
+                              px-3
+                              py-1.5
+                              text-xs
+                              font-black
+                              uppercase
+                              tracking-wide
+                              text-white
+                              shadow-lg
+                              backdrop-blur-md
+                            "
+                          >
+                            <Repeat2 className="h-3.5 w-3.5" />
+                            Recurring
                           </span>
                         )}
 
@@ -644,6 +786,30 @@ export default function EventPage() {
                           </span>
                         )}
 
+                        {repeating && (
+                          <span
+                            className="
+                              inline-flex
+                              items-center
+                              gap-1.5
+                              rounded-full
+                              border
+                              border-purple-300/30
+                              bg-purple-500/20
+                              px-3
+                              py-1.5
+                              text-xs
+                              font-black
+                              uppercase
+                              tracking-wide
+                              text-purple-100
+                            "
+                          >
+                            <Repeat2 className="h-3.5 w-3.5" />
+                            Recurring
+                          </span>
+                        )}
+
                         {priceLabel && (
                           <span
                             className="
@@ -676,6 +842,37 @@ export default function EventPage() {
                       {event.title}
                     </h3>
 
+                    {today && (
+                      <div
+                        className="
+                          mt-4
+                          rounded-2xl
+                          border
+                          border-yellow-300/50
+                          bg-yellow-300/15
+                          p-4
+                          shadow-[0_10px_35px_rgba(253,224,71,0.12)]
+                        "
+                      >
+                        <div className="flex items-start gap-3">
+                          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-yellow-300" />
+
+                          <div>
+                            <p className="text-base font-black text-yellow-200">
+                              {event.title} is happening today!
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold leading-6 text-white/90">
+                              Come along today from {formatTimeRange(
+                                event.start_at,
+                                event.end_at,
+                              )}. Everyone is welcome.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {event.description && (
                       <p
                         className="
@@ -692,21 +889,49 @@ export default function EventPage() {
                       </p>
                     )}
 
+                    {repeating && (
+                      <div
+                        className="
+                          mt-5
+                          rounded-2xl
+                          border
+                          border-purple-300/30
+                          bg-purple-500/15
+                          p-4
+                        "
+                      >
+                        <div className="flex items-start gap-3">
+                          <Repeat2 className="mt-0.5 h-5 w-5 shrink-0 text-purple-200" />
+
+                          <div>
+                            <p className="font-black text-purple-100">
+                              Recurring event
+                            </p>
+
+                            {repeatDayText && (
+                              <p className="mt-1 text-sm font-bold text-white">
+                                {repeatDayText}
+                              </p>
+                            )}
+
+                            <p className="mt-1 text-sm text-white/70">
+                              {repeatText}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* =====================================================
                         EVENT DETAILS
                         ===================================================== */}
                     <div className="mt-6 grid gap-3">
                       <div
-                        className="
-                          flex
-                          items-start
-                          gap-3
-                          rounded-2xl
-                          border
-                          border-white/10
-                          bg-white/[0.06]
-                          p-4
-                        "
+                        className={
+                          today
+                            ? "flex items-start gap-3 rounded-2xl border border-yellow-300/40 bg-yellow-300/10 p-4"
+                            : "flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4"
+                        }
                       >
                         <CalendarDays
                           className="
@@ -728,15 +953,19 @@ export default function EventPage() {
                               text-white/45
                             "
                           >
-                            Date
+                            {today
+                              ? "Today"
+                              : repeating
+                                ? "Next event date"
+                                : "Date"}
                           </p>
 
                           <p
-                            className="
-                              mt-1
-                              font-bold
-                              text-white
-                            "
+                            className={
+                              today
+                                ? "mt-1 font-black text-yellow-100"
+                                : "mt-1 font-bold text-white"
+                            }
                           >
                             {formatDate(
                               event.start_at,
@@ -865,6 +1094,28 @@ export default function EventPage() {
                         </a>
                       )}
                     </div>
+
+                    {today && (
+                      <div
+                        className="
+                          mt-5
+                          rounded-2xl
+                          bg-gradient-to-r
+                          from-yellow-300
+                          via-amber-300
+                          to-yellow-300
+                          px-4
+                          py-3
+                          text-center
+                          text-sm
+                          font-black
+                          text-purple-950
+                          shadow-lg
+                        "
+                      >
+                        ✨ It&apos;s today — come and join us!
+                      </div>
+                    )}
 
                     {/* =====================================================
                         FREE BANNER
