@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   FaBluesky,
@@ -63,6 +64,16 @@ type FooterApiResponse = {
     explore?: FooterLink[];
     getInvolved?: FooterLink[];
   };
+  resolvedProfile?: {
+    id?: string;
+    name?: string;
+    slug?: string;
+    isDefault?: boolean;
+  } | null;
+  matchedAssignment?: {
+    pathPattern?: string;
+    matchType?: "exact" | "prefix";
+  } | null;
 };
 
 function isExternalUrl(url: string) {
@@ -118,6 +129,8 @@ function FooterNavLink({
 }
 
 export default function Footer() {
+  const pathname = usePathname();
+
   const [data, setData] = useState<FooterApiResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -126,14 +139,20 @@ export default function Footer() {
     let active = true;
 
     async function loadFooter() {
+      setLoaded(false);
+
       try {
-        const response = await fetch("/api/footer", {
+        const currentPath = pathname || "/";
+        const response = await fetch(
+          `/api/footer?path=${encodeURIComponent(currentPath)}`,
+          {
           method: "GET",
           headers: {
             Accept: "application/json",
           },
-          cache: "no-store",
-        });
+            cache: "no-store",
+          },
+        );
 
         const responseBody = await response.json().catch(() => null);
 
@@ -175,7 +194,7 @@ export default function Footer() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [pathname]);
 
   const settings = data?.settings;
   const exploreLinks = useMemo(
@@ -262,8 +281,24 @@ export default function Footer() {
     Boolean(developerCredit?.text?.trim()) &&
     Boolean(developerCredit?.url?.trim());
 
+  const resolvedProfile = data?.resolvedProfile;
+  const matchedAssignment = data?.matchedAssignment;
+
   return (
-    <footer
+    <>
+      {IS_DEV && resolvedProfile && (
+        <div className="border-b border-purple-500/20 bg-purple-950/70 px-4 py-2 text-xs text-purple-100">
+          <span className="font-black">Footer resolver:</span>{" "}
+          {resolvedProfile.name || resolvedProfile.slug || resolvedProfile.id}
+          {resolvedProfile.isDefault ? " (default)" : ""}
+          {matchedAssignment?.pathPattern
+            ? ` • ${matchedAssignment.matchType}: ${matchedAssignment.pathPattern}`
+            : ""}
+          {pathname ? ` • page: ${pathname}` : ""}
+        </div>
+      )}
+
+      <footer
       className="
         relative
         w-full
@@ -828,6 +863,7 @@ export default function Footer() {
           </div>
         </div>
       )}
-    </footer>
+      </footer>
+    </>
   );
 }
