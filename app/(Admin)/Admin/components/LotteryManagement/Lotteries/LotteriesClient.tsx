@@ -1,0 +1,1424 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  Archive,
+  CalendarDays,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  Eye,
+  Filter,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Ticket,
+  XCircle,
+  X,
+  Check,
+  ArrowLeft,
+  ArrowRight,
+  ShieldCheck,
+  Settings2,
+  PoundSterling,
+} from "lucide-react";
+
+type LotteryStatus =
+  | "draft"
+  | "compliance_review"
+  | "scheduled"
+  | "live"
+  | "sales_closed"
+  | "draw_ready"
+  | "completed"
+  | "archived"
+  | "paused"
+  | "cancelled"
+  | "under_review";
+
+type Lottery = {
+  id: string;
+  title: string;
+  slug: string;
+  internal_reference: string | null;
+  lottery_type: string;
+  status: LotteryStatus;
+  short_summary: string | null;
+  ticket_price: number;
+  currency: string;
+  max_tickets: number | null;
+  sales_open_at: string | null;
+  sales_close_at: string | null;
+  draw_at: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  is_active: boolean;
+  order_count?: number;
+  paid_order_count?: number;
+  ticket_count?: number;
+  revenue?: number;
+};
+
+type ApiResponse = {
+  ok: boolean;
+  items?: Lottery[];
+  item?: Lottery;
+  error?: string;
+  message?: string;
+  details?: unknown;
+};
+
+const API_ROUTE = "/api/admin/lotterymanagement/lottery";
+const ROOT = "/Admin/LotteryManagement";
+
+const STATUS_OPTIONS: Array<{ value: LotteryStatus | "all"; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "draft", label: "Draft" },
+  { value: "compliance_review", label: "Compliance Review" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "live", label: "Live" },
+  { value: "sales_closed", label: "Sales Closed" },
+  { value: "draw_ready", label: "Draw Ready" },
+  { value: "completed", label: "Completed" },
+  { value: "archived", label: "Archived" },
+  { value: "paused", label: "Paused" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "under_review", label: "Under Review" },
+];
+
+function statusLabel(status: LotteryStatus) {
+  return STATUS_OPTIONS.find((x) => x.value === status)?.label ?? status;
+}
+
+function statusClass(status: LotteryStatus) {
+  const map: Record<LotteryStatus, string> = {
+    draft: "border-white/15 bg-white/10 text-white/75",
+    compliance_review: "border-amber-400/30 bg-amber-500/10 text-amber-200",
+    scheduled: "border-blue-400/30 bg-blue-500/10 text-blue-200",
+    live: "border-emerald-400/30 bg-emerald-500/10 text-emerald-200",
+    sales_closed: "border-orange-400/30 bg-orange-500/10 text-orange-200",
+    draw_ready: "border-purple-400/30 bg-purple-500/10 text-purple-200",
+    completed: "border-cyan-400/30 bg-cyan-500/10 text-cyan-200",
+    archived: "border-white/10 bg-black/20 text-white/50",
+    paused: "border-yellow-400/30 bg-yellow-500/10 text-yellow-100",
+    cancelled: "border-red-400/30 bg-red-500/10 text-red-200",
+    under_review: "border-rose-400/30 bg-rose-500/10 text-rose-200",
+  };
+  return map[status];
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "Not set";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/London",
+  }).format(new Date(value));
+}
+
+function formatMoney(value: number, currency = "GBP") {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+  }).format(Number(value || 0));
+}
+
+async function readJson(res: Response): Promise<ApiResponse> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : { ok: false };
+  } catch {
+    return { ok: false, error: "The API returned invalid JSON." };
+  }
+}
+
+export default function LotteriesClient() {
+  const [items, setItems] = useState<Lottery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<LotteryStatus | "all">("all");
+  const [type, setType] = useState("all");
+  const [year, setYear] = useState("all");
+  const [sort, setSort] = useState("created_desc");
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createStep, setCreateStep] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createForm, setCreateForm] = useState({
+    title: "",
+    slug: "",
+    internal_reference: "",
+    lottery_type: "small_society",
+    short_summary: "",
+    description: "",
+    fundraising_purpose: "",
+    publication_at: "",
+    sales_open_at: "",
+    sales_close_at: "",
+    draw_at: "",
+    results_publish_at: "",
+    timezone: "Europe/London",
+    ticket_price: "1.00",
+    currency: "GBP",
+    max_tickets: "",
+    minimum_age: "16",
+    promoting_society_legal_name: "Burton Pride C.I.C.",
+    registration_licence_type: "",
+    registration_licence_number: "",
+    licensing_authority: "",
+    responsible_promoter_name: "",
+    responsible_promoter_address: "",
+    geographic_eligibility: "Great Britain",
+    terms_version: "",
+    privacy_notice_version: "",
+    responsible_gambling_info: "",
+    required_ticket_wording: "",
+    maximum_proceeds: "",
+    maximum_prize_value: "",
+    show_in_directory: true,
+    allow_page_before_sales: false,
+    show_ticket_count: false,
+    show_amount_raised: false,
+    show_remaining_tickets: false,
+    show_prize_values: true,
+    winner_display_mode: "first_name",
+    countdown_enabled: true,
+  });
+
+
+  useEffect(() => {
+    loadItems();
+  }, []);
+
+  async function loadItems() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(API_ROUTE, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || data.message || "Failed to load lotteries.");
+      }
+
+      setItems(data.items || []);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load lotteries.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const types = useMemo(
+    () =>
+      Array.from(new Set(items.map((x) => x.lottery_type).filter(Boolean))).sort(),
+    [items],
+  );
+
+  const years = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          items.map((x) => new Date(x.created_at).getFullYear().toString()),
+        ),
+      ).sort((a, b) => Number(b) - Number(a)),
+    [items],
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    const result = items.filter((item) => {
+      const matchesSearch =
+        !q ||
+        item.title.toLowerCase().includes(q) ||
+        item.slug.toLowerCase().includes(q) ||
+        item.id.toLowerCase().includes(q) ||
+        (item.internal_reference || "").toLowerCase().includes(q);
+
+      const matchesStatus = status === "all" || item.status === status;
+      const matchesType = type === "all" || item.lottery_type === type;
+      const matchesYear =
+        year === "all" ||
+        new Date(item.created_at).getFullYear().toString() === year;
+
+      return matchesSearch && matchesStatus && matchesType && matchesYear;
+    });
+
+    return result.sort((a, b) => {
+      switch (sort) {
+        case "created_asc":
+          return +new Date(a.created_at) - +new Date(b.created_at);
+        case "closing_asc":
+          return +(a.sales_close_at ? new Date(a.sales_close_at) : new Date(8640000000000000))
+            - +(b.sales_close_at ? new Date(b.sales_close_at) : new Date(8640000000000000));
+        case "draw_asc":
+          return +(a.draw_at ? new Date(a.draw_at) : new Date(8640000000000000))
+            - +(b.draw_at ? new Date(b.draw_at) : new Date(8640000000000000));
+        case "revenue_desc":
+          return Number(b.revenue || 0) - Number(a.revenue || 0);
+        case "tickets_desc":
+          return Number(b.ticket_count || 0) - Number(a.ticket_count || 0);
+        default:
+          return +new Date(b.created_at) - +new Date(a.created_at);
+      }
+    });
+  }, [items, search, status, type, year, sort]);
+
+  async function duplicateLottery(item: Lottery) {
+    setActionId(item.id);
+    setError(null);
+
+    try {
+      const res = await fetch(`${API_ROUTE}/${item.id}/duplicate`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to duplicate lottery.");
+      }
+
+      await loadItems();
+    } catch (err: any) {
+      setError(err?.message || "Failed to duplicate lottery.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  async function archiveLottery(item: Lottery) {
+    if (!window.confirm(`Archive "${item.title}"? This will not delete its records.`)) {
+      return;
+    }
+
+    setActionId(item.id);
+    setError(null);
+
+    try {
+      const res = await fetch(`${API_ROUTE}/${item.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "archived" }),
+      });
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to archive lottery.");
+      }
+
+      await loadItems();
+    } catch (err: any) {
+      setError(err?.message || "Failed to archive lottery.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  async function closeSales(item: Lottery) {
+    if (!window.confirm(`Close ticket sales for "${item.title}"?`)) return;
+
+    setActionId(item.id);
+    setError(null);
+
+    try {
+      const res = await fetch(`${API_ROUTE}/${item.id}/close-sales`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to close sales.");
+      }
+
+      await loadItems();
+    } catch (err: any) {
+      setError(err?.message || "Failed to close sales.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+
+  function slugify(value: string) {
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function updateCreateField(name: string, value: string | boolean) {
+    setCreateForm((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === "title" && !prev.slug) {
+        next.slug = slugify(String(value));
+      }
+      return next;
+    });
+  }
+
+  function closeCreateModal() {
+    if (creating) return;
+    setCreateOpen(false);
+    setCreateStep(1);
+    setCreateError(null);
+  }
+
+  function validateCreateStep(step: number) {
+    if (step === 1) {
+      if (!createForm.title.trim()) return "Enter a lottery title.";
+      if (!createForm.slug.trim()) return "Enter a slug.";
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(createForm.slug)) {
+        return "Slug must use lowercase letters, numbers and hyphens only.";
+      }
+      if (!createForm.lottery_type) return "Select a lottery type.";
+    }
+
+    if (step === 2) {
+      if (!createForm.sales_open_at) return "Set the sales opening date and time.";
+      if (!createForm.sales_close_at) return "Set the sales closing date and time.";
+      if (!createForm.draw_at) return "Set the draw date and time.";
+
+      const open = new Date(createForm.sales_open_at).getTime();
+      const close = new Date(createForm.sales_close_at).getTime();
+      const draw = new Date(createForm.draw_at).getTime();
+
+      if (close <= open) return "Sales closing time must be after sales opening time.";
+      if (draw < close) return "Draw time must be on or after the sales closing time.";
+    }
+
+    if (step === 3) {
+      if (Number(createForm.ticket_price) <= 0) return "Ticket price must be more than £0.";
+      if (Number(createForm.minimum_age) < 0) return "Minimum age is invalid.";
+      if (createForm.max_tickets && Number(createForm.max_tickets) <= 0) {
+        return "Maximum tickets must be more than 0.";
+      }
+    }
+
+    if (step === 4) {
+      if (!createForm.promoting_society_legal_name.trim()) {
+        return "Enter the promoting society legal name.";
+      }
+      if (!createForm.registration_licence_type.trim()) {
+        return "Enter the registration or licence type.";
+      }
+      if (!createForm.licensing_authority.trim()) {
+        return "Enter the licensing authority.";
+      }
+      if (!createForm.responsible_promoter_name.trim()) {
+        return "Enter the responsible promoter name.";
+      }
+      if (!createForm.responsible_promoter_address.trim()) {
+        return "Enter the responsible promoter address.";
+      }
+      if (!createForm.geographic_eligibility.trim()) {
+        return "Enter geographic eligibility.";
+      }
+    }
+
+    return null;
+  }
+
+  function nextCreateStep() {
+    const validation = validateCreateStep(createStep);
+    if (validation) {
+      setCreateError(validation);
+      return;
+    }
+    setCreateError(null);
+    setCreateStep((step) => Math.min(5, step + 1));
+  }
+
+  async function submitCreateLottery() {
+    const validation = validateCreateStep(4);
+    if (validation) {
+      setCreateError(validation);
+      setCreateStep(4);
+      return;
+    }
+
+    setCreating(true);
+    setCreateError(null);
+
+    try {
+      const payload = {
+        ...createForm,
+        ticket_price: Number(createForm.ticket_price),
+        minimum_age: Number(createForm.minimum_age),
+        max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
+        maximum_proceeds: createForm.maximum_proceeds
+          ? Number(createForm.maximum_proceeds)
+          : null,
+        maximum_prize_value: createForm.maximum_prize_value
+          ? Number(createForm.maximum_prize_value)
+          : null,
+        publication_at: createForm.publication_at || null,
+        sales_open_at: createForm.sales_open_at || null,
+        sales_close_at: createForm.sales_close_at || null,
+        draw_at: createForm.draw_at || null,
+        results_publish_at: createForm.results_publish_at || null,
+      };
+
+      const res = await fetch(API_ROUTE, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await readJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || data.message || "Failed to create lottery.");
+      }
+
+      setCreateOpen(false);
+      setCreateStep(1);
+      setCreateForm((prev) => ({
+        ...prev,
+        title: "",
+        slug: "",
+        internal_reference: "",
+        short_summary: "",
+        description: "",
+        fundraising_purpose: "",
+        publication_at: "",
+        sales_open_at: "",
+        sales_close_at: "",
+        draw_at: "",
+        results_publish_at: "",
+      }));
+
+      await loadItems();
+    } catch (err: any) {
+      setCreateError(err?.message || "Failed to create lottery.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const liveCount = items.filter((x) => x.status === "live").length;
+  const draftCount = items.filter((x) => x.status === "draft").length;
+  const reviewCount = items.filter((x) =>
+    ["compliance_review", "under_review"].includes(x.status),
+  ).length;
+  const archivedCount = items.filter((x) => x.status === "archived").length;
+
+  return (
+    <div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
+      <section className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="mb-2 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/10">
+                <Ticket className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-extrabold text-white">Lotteries</h1>
+                <p className="text-sm text-white/60">
+                  Create and manage reusable lottery campaigns, sales dates, public pages and lifecycle status.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={loadItems}
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" />
+              Create lottery
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Live lotteries" value={liveCount} />
+        <StatCard label="Drafts" value={draftCount} />
+        <StatCard label="Needs review" value={reviewCount} />
+        <StatCard label="Archived" value={archivedCount} />
+      </section>
+
+      {error ? (
+        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+          {error}
+        </div>
+      ) : null}
+
+      <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+        <div className="mb-5 flex items-center gap-2">
+          <Filter className="h-4 w-4 text-white/70" />
+          <h2 className="text-lg font-bold text-white">Search & filters</h2>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="relative xl:col-span-2">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title, slug, ID or reference..."
+              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"
+            />
+          </div>
+
+          <Select value={status} onChange={(v) => setStatus(v as LotteryStatus | "all")}>
+            {STATUS_OPTIONS.map((x) => (
+              <option key={x.value} value={x.value}>{x.label}</option>
+            ))}
+          </Select>
+
+          <Select value={type} onChange={setType}>
+            <option value="all">All types</option>
+            {types.map((x) => <option key={x} value={x}>{x.replaceAll("_", " ")}</option>)}
+          </Select>
+
+          <Select value={year} onChange={setYear}>
+            <option value="all">All years</option>
+            {years.map((x) => <option key={x} value={x}>{x}</option>)}
+          </Select>
+        </div>
+
+        <div className="mt-3 max-w-sm">
+          <Select value={sort} onChange={setSort}>
+            <option value="created_desc">Newest created</option>
+            <option value="created_asc">Oldest created</option>
+            <option value="closing_asc">Closing date</option>
+            <option value="draw_asc">Draw date</option>
+            <option value="revenue_desc">Revenue</option>
+            <option value="tickets_desc">Ticket count</option>
+          </Select>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-white">Lottery list</h2>
+            <p className="mt-1 text-sm text-white/50">
+              Showing {filtered.length} of {items.length} lotteries
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex min-h-48 items-center justify-center text-white/70">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            Loading lotteries...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
+            <Ticket className="mx-auto h-8 w-8 text-white/35" />
+            <h3 className="mt-3 font-bold text-white">No lotteries found</h3>
+            <p className="mt-1 text-sm text-white/50">
+              Create a new lottery or change your filters.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filtered.map((item) => (
+              <LotteryRow
+                key={item.id}
+                item={item}
+                busy={actionId === item.id}
+                onDuplicate={() => duplicateLottery(item)}
+                onArchive={() => archiveLottery(item)}
+                onCloseSales={() => closeSales(item)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {createOpen ? (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-lottery-title"
+        >
+          <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/10">
+                    <Plus className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 id="create-lottery-title" className="text-xl font-extrabold text-white">
+                      Create new lottery
+                    </h2>
+                    <p className="mt-1 text-sm text-white/55">
+                      Create the campaign as a draft. It will not go live until the compliance checks are completed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCreateModal}
+                disabled={creating}
+                className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10 disabled:opacity-50"
+                aria-label="Close create lottery"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="border-b border-white/10 px-5 py-4 md:px-6">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                {[
+                  ["1", "Basic"],
+                  ["2", "Dates"],
+                  ["3", "Tickets"],
+                  ["4", "Compliance"],
+                  ["5", "Public settings"],
+                ].map(([number, label]) => {
+                  const active = Number(number) === createStep;
+                  const complete = Number(number) < createStep;
+
+                  return (
+                    <button
+                      key={number}
+                      type="button"
+                      onClick={() => Number(number) < createStep && setCreateStep(Number(number))}
+                      className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs font-bold ${
+                        active
+                          ? "border-white/30 bg-white text-black"
+                          : complete
+                            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
+                            : "border-white/10 bg-white/5 text-white/45"
+                      }`}
+                    >
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-current/20">
+                        {complete ? <Check className="h-3.5 w-3.5" /> : number}
+                      </span>
+                      <span className="hidden sm:inline">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="overflow-y-auto p-5 md:p-6">
+              {createError ? (
+                <div className="mb-5 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+                  {createError}
+                </div>
+              ) : null}
+
+              {createStep === 1 ? (
+                <CreateSection
+                  icon={<Ticket className="h-5 w-5" />}
+                  title="Basic information"
+                  description="Set the identity of this reusable lottery campaign."
+                >
+                  <Field label="Lottery title" required>
+                    <input
+                      value={createForm.title}
+                      onChange={(e) => updateCreateField("title", e.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. Christmas Raffle 2026"
+                    />
+                  </Field>
+
+                  <Field label="Unique slug" required hint="Used for the public /lottery/[slug] page.">
+                    <input
+                      value={createForm.slug}
+                      onChange={(e) => updateCreateField("slug", slugify(e.target.value))}
+                      className={inputClass}
+                      placeholder="christmas-raffle-2026"
+                    />
+                  </Field>
+
+                  <Field label="Internal reference / code">
+                    <input
+                      value={createForm.internal_reference}
+                      onChange={(e) => updateCreateField("internal_reference", e.target.value)}
+                      className={inputClass}
+                      placeholder="BP-LOT-2026-001"
+                    />
+                  </Field>
+
+                  <Field label="Lottery type / compliance profile" required>
+                    <select
+                      value={createForm.lottery_type}
+                      onChange={(e) => updateCreateField("lottery_type", e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="small_society">Small society lottery</option>
+                      <option value="incidental_event">Incidental event lottery</option>
+                      <option value="large_society">Large society lottery</option>
+                      <option value="free_draw">Free draw / prize competition</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Short summary" full>
+                    <textarea
+                      value={createForm.short_summary}
+                      onChange={(e) => updateCreateField("short_summary", e.target.value)}
+                      className={`${inputClass} min-h-24`}
+                      placeholder="Short summary shown in admin and public previews."
+                    />
+                  </Field>
+
+                  <Field label="Full description" full>
+                    <textarea
+                      value={createForm.description}
+                      onChange={(e) => updateCreateField("description", e.target.value)}
+                      className={`${inputClass} min-h-32`}
+                      placeholder="Full lottery description."
+                    />
+                  </Field>
+
+                  <Field label="Fundraising purpose / good cause" full>
+                    <textarea
+                      value={createForm.fundraising_purpose}
+                      onChange={(e) => updateCreateField("fundraising_purpose", e.target.value)}
+                      className={`${inputClass} min-h-24`}
+                      placeholder="Explain what the money raised will support."
+                    />
+                  </Field>
+                </CreateSection>
+              ) : null}
+
+              {createStep === 2 ? (
+                <CreateSection
+                  icon={<CalendarDays className="h-5 w-5" />}
+                  title="Dates and times"
+                  description="Configure publication, sales, draw and result timing."
+                >
+                  <Field label="Publication date/time">
+                    <input
+                      type="datetime-local"
+                      value={createForm.publication_at}
+                      onChange={(e) => updateCreateField("publication_at", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Sales opening date/time" required>
+                    <input
+                      type="datetime-local"
+                      value={createForm.sales_open_at}
+                      onChange={(e) => updateCreateField("sales_open_at", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Sales closing date/time" required>
+                    <input
+                      type="datetime-local"
+                      value={createForm.sales_close_at}
+                      onChange={(e) => updateCreateField("sales_close_at", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Draw date/time" required>
+                    <input
+                      type="datetime-local"
+                      value={createForm.draw_at}
+                      onChange={(e) => updateCreateField("draw_at", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Results publication date/time">
+                    <input
+                      type="datetime-local"
+                      value={createForm.results_publish_at}
+                      onChange={(e) => updateCreateField("results_publish_at", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Timezone">
+                    <select
+                      value={createForm.timezone}
+                      onChange={(e) => updateCreateField("timezone", e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="Europe/London">Europe/London (UK)</option>
+                    </select>
+                  </Field>
+                </CreateSection>
+              ) : null}
+
+              {createStep === 3 ? (
+                <CreateSection
+                  icon={<PoundSterling className="h-5 w-5" />}
+                  title="Ticket setup"
+                  description="Set fixed ticket pricing and entry limits."
+                >
+                  <Field label="Ticket price" required>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={createForm.ticket_price}
+                      onChange={(e) => updateCreateField("ticket_price", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Currency">
+                    <select
+                      value={createForm.currency}
+                      onChange={(e) => updateCreateField("currency", e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="GBP">GBP (£)</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Maximum tickets">
+                    <input
+                      type="number"
+                      min="1"
+                      value={createForm.max_tickets}
+                      onChange={(e) => updateCreateField("max_tickets", e.target.value)}
+                      className={inputClass}
+                      placeholder="Optional"
+                    />
+                  </Field>
+
+                  <Field label="Minimum participant age">
+                    <input
+                      type="number"
+                      min="0"
+                      value={createForm.minimum_age}
+                      onChange={(e) => updateCreateField("minimum_age", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <div className="md:col-span-2 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+                    For profiles that require equal ticket pricing, quantity options must use the same individual ticket price. The system should not create discounted per-ticket bundles.
+                  </div>
+                </CreateSection>
+              ) : null}
+
+              {createStep === 4 ? (
+                <CreateSection
+                  icon={<ShieldCheck className="h-5 w-5" />}
+                  title="Compliance"
+                  description="Record the legal and operational details required before publication."
+                >
+                  <Field label="Promoting society legal name" required>
+                    <input
+                      value={createForm.promoting_society_legal_name}
+                      onChange={(e) => updateCreateField("promoting_society_legal_name", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Registration / licence type" required>
+                    <input
+                      value={createForm.registration_licence_type}
+                      onChange={(e) => updateCreateField("registration_licence_type", e.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. Local authority registration"
+                    />
+                  </Field>
+
+                  <Field label="Registration / licence number">
+                    <input
+                      value={createForm.registration_licence_number}
+                      onChange={(e) => updateCreateField("registration_licence_number", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Licensing authority" required>
+                    <input
+                      value={createForm.licensing_authority}
+                      onChange={(e) => updateCreateField("licensing_authority", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Responsible promoter name" required>
+                    <input
+                      value={createForm.responsible_promoter_name}
+                      onChange={(e) => updateCreateField("responsible_promoter_name", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Geographic eligibility" required>
+                    <input
+                      value={createForm.geographic_eligibility}
+                      onChange={(e) => updateCreateField("geographic_eligibility", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Responsible promoter address" full required>
+                    <textarea
+                      value={createForm.responsible_promoter_address}
+                      onChange={(e) => updateCreateField("responsible_promoter_address", e.target.value)}
+                      className={`${inputClass} min-h-24`}
+                    />
+                  </Field>
+
+                  <Field label="Terms version">
+                    <input
+                      value={createForm.terms_version}
+                      onChange={(e) => updateCreateField("terms_version", e.target.value)}
+                      className={inputClass}
+                      placeholder="e.g. 2026-08-v1"
+                    />
+                  </Field>
+
+                  <Field label="Privacy notice version">
+                    <input
+                      value={createForm.privacy_notice_version}
+                      onChange={(e) => updateCreateField("privacy_notice_version", e.target.value)}
+                      className={inputClass}
+                    />
+                  </Field>
+
+                  <Field label="Maximum proceeds">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={createForm.maximum_proceeds}
+                      onChange={(e) => updateCreateField("maximum_proceeds", e.target.value)}
+                      className={inputClass}
+                      placeholder="Profile limit"
+                    />
+                  </Field>
+
+                  <Field label="Maximum prize value">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={createForm.maximum_prize_value}
+                      onChange={(e) => updateCreateField("maximum_prize_value", e.target.value)}
+                      className={inputClass}
+                      placeholder="Profile limit"
+                    />
+                  </Field>
+
+                  <Field label="Required ticket wording" full>
+                    <textarea
+                      value={createForm.required_ticket_wording}
+                      onChange={(e) => updateCreateField("required_ticket_wording", e.target.value)}
+                      className={`${inputClass} min-h-24`}
+                    />
+                  </Field>
+
+                  <Field label="Responsible gambling information" full>
+                    <textarea
+                      value={createForm.responsible_gambling_info}
+                      onChange={(e) => updateCreateField("responsible_gambling_info", e.target.value)}
+                      className={`${inputClass} min-h-24`}
+                    />
+                  </Field>
+
+                  <div className="md:col-span-2 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
+                    Creating the lottery does not approve compliance. The campaign will be saved as a Draft and must pass the publication compliance gate before it can be made Live.
+                  </div>
+                </CreateSection>
+              ) : null}
+
+              {createStep === 5 ? (
+                <CreateSection
+                  icon={<Settings2 className="h-5 w-5" />}
+                  title="Public settings"
+                  description="Choose what the public lottery page may display."
+                >
+                  <ToggleField
+                    label="Show in public lottery directory"
+                    checked={createForm.show_in_directory}
+                    onChange={(v) => updateCreateField("show_in_directory", v)}
+                  />
+                  <ToggleField
+                    label="Allow page before sales open"
+                    checked={createForm.allow_page_before_sales}
+                    onChange={(v) => updateCreateField("allow_page_before_sales", v)}
+                  />
+                  <ToggleField
+                    label="Show tickets sold"
+                    checked={createForm.show_ticket_count}
+                    onChange={(v) => updateCreateField("show_ticket_count", v)}
+                  />
+                  <ToggleField
+                    label="Show amount raised"
+                    checked={createForm.show_amount_raised}
+                    onChange={(v) => updateCreateField("show_amount_raised", v)}
+                  />
+                  <ToggleField
+                    label="Show remaining tickets"
+                    checked={createForm.show_remaining_tickets}
+                    onChange={(v) => updateCreateField("show_remaining_tickets", v)}
+                  />
+                  <ToggleField
+                    label="Show prize values"
+                    checked={createForm.show_prize_values}
+                    onChange={(v) => updateCreateField("show_prize_values", v)}
+                  />
+                  <ToggleField
+                    label="Enable sales-close countdown"
+                    checked={createForm.countdown_enabled}
+                    onChange={(v) => updateCreateField("countdown_enabled", v)}
+                  />
+
+                  <Field label="Public winner display">
+                    <select
+                      value={createForm.winner_display_mode}
+                      onChange={(e) => updateCreateField("winner_display_mode", e.target.value)}
+                      className={inputClass}
+                    >
+                      <option value="full_name">Full name</option>
+                      <option value="first_name">First name only</option>
+                      <option value="ticket_number">Ticket number only</option>
+                      <option value="none">Do not show winner identity</option>
+                    </select>
+                  </Field>
+
+                  <div className="md:col-span-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-5">
+                    <div className="flex items-start gap-3">
+                      <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-200" />
+                      <div>
+                        <h3 className="font-bold text-emerald-100">Ready to create the draft</h3>
+                        <p className="mt-1 text-sm leading-6 text-emerald-100/75">
+                          This will create the lottery record and reserve the slug. It will remain Draft until the separate compliance approval and publishing process is completed.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CreateSection>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between md:px-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateError(null);
+                  setCreateStep((step) => Math.max(1, step - 1));
+                }}
+                disabled={createStep === 1 || creating}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </button>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={closeCreateModal}
+                  disabled={creating}
+                  className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white/80 hover:bg-white/10 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                {createStep < 5 ? (
+                  <button
+                    type="button"
+                    onClick={nextCreateStep}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
+                  >
+                    Continue
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={submitCreateLottery}
+                    disabled={creating}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    {creating ? "Creating draft..." : "Create draft lottery"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+      <div className="text-3xl font-black text-white">{value}</div>
+      <div className="mt-1 text-sm text-white/55">{label}</div>
+    </div>
+  );
+}
+
+function Select({
+  value,
+  onChange,
+  children,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
+      >
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/45" />
+    </div>
+  );
+}
+
+function LotteryRow({
+  item,
+  busy,
+  onDuplicate,
+  onArchive,
+  onCloseSales,
+}: {
+  item: Lottery;
+  busy: boolean;
+  onDuplicate: () => void;
+  onArchive: () => void;
+  onCloseSales: () => void;
+}) {
+  const publicUrl = `/lottery/${item.slug}`;
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-black/20 p-5">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-extrabold text-white">{item.title}</h3>
+            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClass(item.status)}`}>
+              {statusLabel(item.status)}
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/60">
+              {item.lottery_type.replaceAll("_", " ")}
+            </span>
+          </div>
+
+          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-white/45">
+            <span>Slug: {item.slug}</span>
+            <span>Reference: {item.internal_reference || "Not set"}</span>
+            <span>ID: {item.id}</span>
+          </div>
+
+          {item.short_summary ? (
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-white/65">
+              {item.short_summary}
+            </p>
+          ) : null}
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MiniInfo label="Ticket price" value={formatMoney(item.ticket_price, item.currency)} />
+            <MiniInfo label="Sales close" value={formatDate(item.sales_close_at)} icon={<CalendarDays className="h-3.5 w-3.5" />} />
+            <MiniInfo label="Draw" value={formatDate(item.draw_at)} icon={<CalendarDays className="h-3.5 w-3.5" />} />
+            <MiniInfo label="Tickets issued" value={String(item.ticket_count || 0)} />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2 xl:max-w-md xl:justify-end">
+          <Link
+            href={`${ROOT}/Lotteries/${item.id}`}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white/85 hover:bg-white/10"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View
+          </Link>
+
+          <Link
+            href={`${ROOT}/Lotteries/${item.id}/Edit`}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white/85 hover:bg-white/10"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </Link>
+
+          <button
+            type="button"
+            onClick={onDuplicate}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white/85 hover:bg-white/10 disabled:opacity-50"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            Duplicate
+          </button>
+
+          <Link
+            href={publicUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white/85 hover:bg-white/10"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Public page
+          </Link>
+
+          {item.status === "live" ? (
+            <button
+              type="button"
+              onClick={onCloseSales}
+              disabled={busy}
+              className="inline-flex items-center gap-2 rounded-xl border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-xs font-bold text-orange-200 hover:bg-orange-500/20 disabled:opacity-50"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Close sales
+            </button>
+          ) : null}
+
+          {item.status !== "archived" ? (
+            <button
+              type="button"
+              onClick={onArchive}
+              disabled={busy}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white/70 hover:bg-white/10 disabled:opacity-50"
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Archive
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MiniInfo({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <div className="text-[11px] uppercase tracking-wide text-white/35">{label}</div>
+      <div className="mt-1 flex items-center gap-1.5 text-xs font-bold text-white/75">
+        {icon}
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const inputClass =
+  "w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-white/25";
+
+function CreateSection({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-5 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
+          {icon}
+        </div>
+        <div>
+          <h3 className="text-lg font-extrabold text-white">{title}</h3>
+          <p className="mt-1 text-sm text-white/50">{description}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">{children}</div>
+    </section>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  required,
+  full,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  full?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={full ? "md:col-span-2" : ""}>
+      <span className="mb-2 block text-sm font-semibold text-white/80">
+        {label}
+        {required ? <span className="ml-1 text-red-300">*</span> : null}
+      </span>
+      {children}
+      {hint ? <span className="mt-2 block text-xs text-white/40">{hint}</span> : null}
+    </label>
+  );
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+      <span className="text-sm font-semibold text-white/80">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-5 w-5"
+      />
+    </label>
+  );
+}

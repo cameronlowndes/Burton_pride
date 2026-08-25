@@ -231,7 +231,7 @@ export default function LotteryManagementDashboardPage() {
 
     try {
       const response = await fetch(
-        "/api/admin/lottery/dashboard",
+        "/api/admin/lotterymanagement/dashboard",
         {
           method: "GET",
           headers: {

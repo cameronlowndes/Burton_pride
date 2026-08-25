@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import AdminDashboardClient from "../components/LotteryManagement/Dashboard/DashboardPage";
 
 export const metadata: Metadata = {
-  title: "Admin Dashboard",
-  description: "Restricted Burton Pride administration dashboard.",
+  title: "Lottery Dashboard",
+  description: "Restricted Burton Pride administration dashboard For running the Lottery.",
 
   robots: {
     index: false,
