@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   Settings2,
   PoundSterling,
+  Beaker,
 } from "lucide-react";
 
 type LotteryStatus =
@@ -141,6 +142,7 @@ export default function LotteriesClient() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<LotteryStatus | "all">("all");
@@ -198,7 +200,116 @@ export default function LotteriesClient() {
     loadItems();
   }, []);
 
+  function startFullFeatureTest() {
+    const now = Date.now();
+
+    const demoItems: Lottery[] = [
+      {
+        id: "test-lottery-live",
+        title: "Test Summer Raffle 2026",
+        slug: "test-summer-raffle-2026",
+        internal_reference: "TEST-LOT-001",
+        lottery_type: "small_society",
+        status: "live",
+        short_summary: "Test live lottery used to preview the full Lottery Management interface.",
+        ticket_price: 1,
+        currency: "GBP",
+        max_tickets: 5000,
+        sales_open_at: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        sales_close_at: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        draw_at: new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+        archived_at: null,
+        is_active: true,
+        order_count: 42,
+        paid_order_count: 39,
+        ticket_count: 184,
+        revenue: 184,
+      },
+      {
+        id: "test-lottery-draft",
+        title: "Test Christmas Raffle 2026",
+        slug: "test-christmas-raffle-2026",
+        internal_reference: "TEST-LOT-002",
+        lottery_type: "small_society",
+        status: "draft",
+        short_summary: "Draft test campaign for checking editing and filtering.",
+        ticket_price: 2,
+        currency: "GBP",
+        max_tickets: 3000,
+        sales_open_at: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        sales_close_at: new Date(now + 45 * 24 * 60 * 60 * 1000).toISOString(),
+        draw_at: new Date(now + 46 * 24 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+        archived_at: null,
+        is_active: true,
+        order_count: 0,
+        paid_order_count: 0,
+        ticket_count: 0,
+        revenue: 0,
+      },
+      {
+        id: "test-lottery-review",
+        title: "Test Community Fundraiser",
+        slug: "test-community-fundraiser",
+        internal_reference: "TEST-LOT-003",
+        lottery_type: "small_society",
+        status: "compliance_review",
+        short_summary: "Test campaign waiting for compliance approval.",
+        ticket_price: 1,
+        currency: "GBP",
+        max_tickets: 1000,
+        sales_open_at: null,
+        sales_close_at: null,
+        draw_at: null,
+        created_at: new Date(now - 4 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+        archived_at: null,
+        is_active: true,
+        order_count: 0,
+        paid_order_count: 0,
+        ticket_count: 0,
+        revenue: 0,
+      },
+      {
+        id: "test-lottery-archived",
+        title: "Test Archived Pride Draw",
+        slug: "test-archived-pride-draw",
+        internal_reference: "TEST-LOT-004",
+        lottery_type: "small_society",
+        status: "archived",
+        short_summary: "Archived test record for checking historical lottery display.",
+        ticket_price: 1,
+        currency: "GBP",
+        max_tickets: 2000,
+        sales_open_at: new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString(),
+        sales_close_at: new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString(),
+        draw_at: new Date(now - 44 * 24 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date(now - 70 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 44 * 24 * 60 * 60 * 1000).toISOString(),
+        archived_at: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString(),
+        is_active: false,
+        order_count: 57,
+        paid_order_count: 55,
+        ticket_count: 250,
+        revenue: 250,
+      },
+    ];
+
+    setTestMode(true);
+    setItems(demoItems);
+    setError(null);
+    setSearch("");
+    setStatus("all");
+    setType("all");
+    setYear("all");
+    setSort("created_desc");
+  }
+
   async function loadItems() {
+    setTestMode(false);
     setLoading(true);
     setError(null);
 
@@ -281,6 +392,30 @@ export default function LotteriesClient() {
     setActionId(item.id);
     setError(null);
 
+    if (testMode) {
+      const copy: Lottery = {
+        ...item,
+        id: `test-copy-${Date.now()}`,
+        title: `${item.title} Copy`,
+        slug: `${item.slug}-copy-${Date.now()}`,
+        internal_reference: item.internal_reference
+          ? `${item.internal_reference}-COPY`
+          : "TEST-COPY",
+        status: "draft",
+        order_count: 0,
+        paid_order_count: 0,
+        ticket_count: 0,
+        revenue: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        archived_at: null,
+      };
+
+      setItems((current) => [copy, ...current]);
+      setActionId(null);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_ROUTE}/${item.id}/duplicate`, {
         method: "POST",
@@ -301,6 +436,23 @@ export default function LotteriesClient() {
   }
 
   async function archiveLottery(item: Lottery) {
+    if (testMode) {
+      setItems((current) =>
+        current.map((lottery) =>
+          lottery.id === item.id
+            ? {
+                ...lottery,
+                status: "archived",
+                is_active: false,
+                archived_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+            : lottery,
+        ),
+      );
+      return;
+    }
+
     if (!window.confirm(`Archive "${item.title}"? This will not delete its records.`)) {
       return;
     }
@@ -330,6 +482,22 @@ export default function LotteriesClient() {
   }
 
   async function closeSales(item: Lottery) {
+    if (testMode) {
+      setItems((current) =>
+        current.map((lottery) =>
+          lottery.id === item.id
+            ? {
+                ...lottery,
+                status: "sales_closed",
+                sales_close_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+            : lottery,
+        ),
+      );
+      return;
+    }
+
     if (!window.confirm(`Close ticket sales for "${item.title}"?`)) return;
 
     setActionId(item.id);
@@ -456,6 +624,54 @@ export default function LotteriesClient() {
     setCreating(true);
     setCreateError(null);
 
+    if (testMode) {
+      const now = new Date().toISOString();
+
+      const demoLottery: Lottery = {
+        id: `test-created-${Date.now()}`,
+        title: createForm.title.trim(),
+        slug: createForm.slug.trim(),
+        internal_reference: createForm.internal_reference.trim() || null,
+        lottery_type: createForm.lottery_type,
+        status: "draft",
+        short_summary: createForm.short_summary.trim() || null,
+        ticket_price: Number(createForm.ticket_price),
+        currency: createForm.currency,
+        max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
+        sales_open_at: createForm.sales_open_at || null,
+        sales_close_at: createForm.sales_close_at || null,
+        draw_at: createForm.draw_at || null,
+        created_at: now,
+        updated_at: now,
+        archived_at: null,
+        is_active: true,
+        order_count: 0,
+        paid_order_count: 0,
+        ticket_count: 0,
+        revenue: 0,
+      };
+
+      setItems((current) => [demoLottery, ...current]);
+      setCreateOpen(false);
+      setCreateStep(1);
+      setCreateForm((prev) => ({
+        ...prev,
+        title: "",
+        slug: "",
+        internal_reference: "",
+        short_summary: "",
+        description: "",
+        fundraising_purpose: "",
+        publication_at: "",
+        sales_open_at: "",
+        sales_close_at: "",
+        draw_at: "",
+        results_publish_at: "",
+      }));
+      setCreating(false);
+      return;
+    }
+
     try {
       const payload = {
         ...createForm,
@@ -541,6 +757,15 @@ export default function LotteriesClient() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
+              onClick={startFullFeatureTest}
+              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black transition hover:opacity-90"
+            >
+              <Beaker className="h-4 w-4" />
+              Test full feature
+            </button>
+
+            <button
+              type="button"
               onClick={loadItems}
               disabled={loading}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:opacity-50"
@@ -560,6 +785,20 @@ export default function LotteriesClient() {
           </div>
         </div>
       </section>
+
+      {testMode ? (
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          <div className="flex items-start gap-3">
+            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-bold">Test mode is active</div>
+              <div className="mt-1 text-yellow-100/70">
+                You are using fake lottery records. Create, duplicate, close sales and archive actions only change this page and do not write to the real API or Supabase.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Live lotteries" value={liveCount} />

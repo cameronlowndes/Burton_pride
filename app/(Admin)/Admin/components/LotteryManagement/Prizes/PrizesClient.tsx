@@ -16,6 +16,7 @@ import {
   Search,
   Trophy,
   X,
+  Beaker,
 } from "lucide-react";
 
 type PrizeStatus =
@@ -136,6 +137,7 @@ export default function PrizesClient() {
   const [selected, setSelected] = useState<PrizeRecord | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<PrizeRecord | null>(null);
+  const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PrizeStatus | "all">("all");
@@ -164,7 +166,238 @@ export default function PrizesClient() {
     loadPrizes();
   }, []);
 
+  function startFullFeatureTest() {
+    const now = Date.now();
+
+    const demoPrizes: PrizeRecord[] = [
+      {
+        id: "test-prize-1",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        name: "Test Main Prize",
+        description: "Main test prize for checking the full prize-management interface.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 250,
+        is_donated: true,
+        donor_name: "Test Local Business",
+        sponsor_name: null,
+        display_order: 1,
+        eligibility_restrictions: "Test winner must meet the demo eligibility rules.",
+        fulfilment_requirements: "Collection from the Burton Pride store in this test example.",
+        fulfilment_notes: null,
+        status: "available_for_draw",
+        allocated_winner_id: null,
+        allocated_at: null,
+        claimed_at: null,
+        fulfilled_at: null,
+        unclaimed_at: null,
+        withdrawn_at: null,
+        created_at: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        winner_name: null,
+        winner_email: null,
+        winner_claimed: null,
+      },
+      {
+        id: "test-prize-2",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        name: "Test Second Prize",
+        description: "Purchased test prize used to check allocated and winner information.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 100,
+        is_donated: false,
+        donor_name: null,
+        sponsor_name: "Test Sponsor",
+        display_order: 2,
+        eligibility_restrictions: null,
+        fulfilment_requirements: "Post to winner address.",
+        fulfilment_notes: "Test fulfilment note.",
+        status: "allocated",
+        allocated_winner_id: "test-winner-1",
+        allocated_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        claimed_at: null,
+        fulfilled_at: null,
+        unclaimed_at: null,
+        withdrawn_at: null,
+        created_at: new Date(now - 6 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        winner_name: "Test Winner",
+        winner_email: "winner@example.test",
+        winner_claimed: false,
+      },
+      {
+        id: "test-prize-3",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        name: "Test Claimed Prize",
+        description: "Prize showing a successful claim state.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 75,
+        is_donated: true,
+        donor_name: "Test Donor",
+        sponsor_name: null,
+        display_order: 1,
+        eligibility_restrictions: null,
+        fulfilment_requirements: "Collection only.",
+        fulfilment_notes: "Winner has arranged collection.",
+        status: "claimed",
+        allocated_winner_id: "test-winner-2",
+        allocated_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        claimed_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        fulfilled_at: null,
+        unclaimed_at: null,
+        withdrawn_at: null,
+        created_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        winner_name: "Test Claimed Winner",
+        winner_email: "claimed@example.test",
+        winner_claimed: true,
+      },
+      {
+        id: "test-prize-4",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        name: "Test Fulfilled Prize",
+        description: "Prize showing the final fulfilled state.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 50,
+        is_donated: false,
+        donor_name: null,
+        sponsor_name: null,
+        display_order: 2,
+        eligibility_restrictions: null,
+        fulfilment_requirements: null,
+        fulfilment_notes: "Test prize collected successfully.",
+        status: "fulfilled",
+        allocated_winner_id: "test-winner-3",
+        allocated_at: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        claimed_at: new Date(now - 6 * 24 * 60 * 60 * 1000).toISOString(),
+        fulfilled_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        unclaimed_at: null,
+        withdrawn_at: null,
+        created_at: new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        winner_name: "Test Fulfilled Winner",
+        winner_email: "fulfilled@example.test",
+        winner_claimed: true,
+      },
+      {
+        id: "test-prize-5",
+        lottery_id: "test-lottery-3",
+        lottery_title: "Test Community Fundraiser",
+        lottery_slug: "test-community-fundraiser",
+        name: "Test Unclaimed Prize",
+        description: "Prize showing the unclaimed workflow.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 40,
+        is_donated: true,
+        donor_name: "Test Community Donor",
+        sponsor_name: null,
+        display_order: 1,
+        eligibility_restrictions: null,
+        fulfilment_requirements: null,
+        fulfilment_notes: "Claim deadline passed in this test scenario.",
+        status: "unclaimed",
+        allocated_winner_id: "test-winner-4",
+        allocated_at: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString(),
+        claimed_at: null,
+        fulfilled_at: null,
+        unclaimed_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        withdrawn_at: null,
+        created_at: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        winner_name: "Test Unclaimed Winner",
+        winner_email: "unclaimed@example.test",
+        winner_claimed: false,
+      },
+      {
+        id: "test-prize-6",
+        lottery_id: "test-lottery-3",
+        lottery_title: "Test Community Fundraiser",
+        lottery_slug: "test-community-fundraiser",
+        name: "Test Withdrawn Prize",
+        description: "Withdrawn test prize for checking the withdrawn state.",
+        image_url: null,
+        quantity: 1,
+        declared_value: 30,
+        is_donated: false,
+        donor_name: null,
+        sponsor_name: null,
+        display_order: 2,
+        eligibility_restrictions: null,
+        fulfilment_requirements: null,
+        fulfilment_notes: "Withdrawn from the test campaign.",
+        status: "withdrawn",
+        allocated_winner_id: null,
+        allocated_at: null,
+        claimed_at: null,
+        fulfilled_at: null,
+        unclaimed_at: null,
+        withdrawn_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        winner_name: null,
+        winner_email: null,
+        winner_claimed: null,
+      },
+      {
+        id: "test-prize-7",
+        lottery_id: "test-lottery-3",
+        lottery_title: "Test Community Fundraiser",
+        lottery_slug: "test-community-fundraiser",
+        name: "Test Draft Prize",
+        description: "Draft prize for testing create/edit behaviour.",
+        image_url: null,
+        quantity: 2,
+        declared_value: 20,
+        is_donated: true,
+        donor_name: "Test Draft Donor",
+        sponsor_name: null,
+        display_order: 3,
+        eligibility_restrictions: null,
+        fulfilment_requirements: null,
+        fulfilment_notes: null,
+        status: "draft",
+        allocated_winner_id: null,
+        allocated_at: null,
+        claimed_at: null,
+        fulfilled_at: null,
+        unclaimed_at: null,
+        withdrawn_at: null,
+        created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        winner_name: null,
+        winner_email: null,
+        winner_claimed: null,
+      },
+    ];
+
+    setTestMode(true);
+    setItems(demoPrizes);
+    setSelected(null);
+    setEditorOpen(false);
+    setEditing(null);
+    setError(null);
+    setSearch("");
+    setStatus("all");
+    setLotteryId("all");
+    setSource("all");
+    setSort("display_order");
+    setLoading(false);
+  }
+
   async function loadPrizes() {
+    setTestMode(false);
     setLoading(true);
     setError(null);
 
@@ -303,6 +536,86 @@ export default function PrizesClient() {
     setSaving(true);
     setError(null);
 
+    if (testMode) {
+      const now = new Date().toISOString();
+
+      if (editing) {
+        setItems((current) =>
+          current.map((item) =>
+            item.id === editing.id
+              ? {
+                  ...item,
+                  name: form.name.trim(),
+                  description: form.description.trim() || null,
+                  image_url: form.image_url.trim() || null,
+                  quantity: Number(form.quantity),
+                  declared_value: form.declared_value
+                    ? Number(form.declared_value)
+                    : null,
+                  is_donated: form.is_donated,
+                  donor_name: form.donor_name.trim() || null,
+                  sponsor_name: form.sponsor_name.trim() || null,
+                  display_order: Number(form.display_order) || 0,
+                  eligibility_restrictions:
+                    form.eligibility_restrictions.trim() || null,
+                  fulfilment_requirements:
+                    form.fulfilment_requirements.trim() || null,
+                  fulfilment_notes: form.fulfilment_notes.trim() || null,
+                  status: form.status,
+                  updated_at: now,
+                }
+              : item,
+          ),
+        );
+      } else {
+        const lotteryTitle =
+          lotteries.find(([id]) => id === form.lottery_id)?.[1] ||
+          "Test Lottery";
+
+        const newPrize: PrizeRecord = {
+          id: `test-prize-created-${Date.now()}`,
+          lottery_id: form.lottery_id,
+          lottery_title: lotteryTitle,
+          lottery_slug: "test-created-prize",
+          name: form.name.trim(),
+          description: form.description.trim() || null,
+          image_url: form.image_url.trim() || null,
+          quantity: Number(form.quantity),
+          declared_value: form.declared_value
+            ? Number(form.declared_value)
+            : null,
+          is_donated: form.is_donated,
+          donor_name: form.donor_name.trim() || null,
+          sponsor_name: form.sponsor_name.trim() || null,
+          display_order: Number(form.display_order) || 0,
+          eligibility_restrictions:
+            form.eligibility_restrictions.trim() || null,
+          fulfilment_requirements:
+            form.fulfilment_requirements.trim() || null,
+          fulfilment_notes: form.fulfilment_notes.trim() || null,
+          status: form.status,
+          allocated_winner_id: null,
+          allocated_at: null,
+          claimed_at: null,
+          fulfilled_at: null,
+          unclaimed_at: null,
+          withdrawn_at: null,
+          created_at: now,
+          updated_at: now,
+          winner_name: null,
+          winner_email: null,
+          winner_claimed: null,
+        };
+
+        setItems((current) => [newPrize, ...current]);
+      }
+
+      setEditorOpen(false);
+      setEditing(null);
+      setSaving(false);
+      return;
+    }
+
     try {
       const payload = {
         id: editing?.id,
@@ -365,6 +678,15 @@ export default function PrizesClient() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
+              onClick={startFullFeatureTest}
+              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
+            >
+              <Beaker className="h-4 w-4" />
+              Test full feature
+            </button>
+
+            <button
+              type="button"
               onClick={loadPrizes}
               disabled={loading}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
@@ -384,6 +706,22 @@ export default function PrizesClient() {
           </div>
         </div>
       </section>
+
+      {testMode ? (
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          <div className="flex items-start gap-3">
+            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-bold">Test mode is active</div>
+              <div className="mt-1 text-yellow-100/70">
+                These are fake prize records. You can test filters, details, edit/create,
+                donor and sponsor fields, winner allocation and fulfilment states without
+                changing the real API or Supabase.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total prize value" value={formatMoney(totalValue)} />

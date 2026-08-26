@@ -16,6 +16,7 @@ import {
   UserRound,
   X,
   XCircle,
+  Beaker,
 } from "lucide-react";
 
 type TicketStatus = "reserved" | "issued" | "void" | "refunded" | "winner";
@@ -111,6 +112,7 @@ export default function TicketsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TicketRecord | null>(null);
+  const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<TicketStatus | "all">("all");
@@ -122,7 +124,262 @@ export default function TicketsClient() {
     loadTickets();
   }, []);
 
+  function startFullFeatureTest() {
+    const now = Date.now();
+
+    const demoTickets: TicketRecord[] = [
+      {
+        id: "test-ticket-issued",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        order_id: "test-order-1",
+        order_reference: "TEST-ORD-0001",
+        purchaser_name: "Test Supporter One",
+        purchaser_email: "test.one@example.test",
+        payment_status: "paid",
+        payment_reference: "TEST-PAY-001",
+        ticket_number: "BP-TEST-000001",
+        status: "issued",
+        issued_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        voided_at: null,
+        refunded_at: null,
+        winner_at: null,
+        void_reason: null,
+        status_reason: null,
+        created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        is_payment_valid: true,
+        is_draw_eligible: true,
+        events: [
+          {
+            id: "evt-issued-1",
+            event_type: "reserved",
+            previous_status: null,
+            new_status: "reserved",
+            reason: "Ticket reserved during test checkout.",
+            created_at: new Date(now - 130 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "evt-issued-2",
+            event_type: "issued",
+            previous_status: "reserved",
+            new_status: "issued",
+            reason: "Test payment confirmed.",
+            created_at: new Date(now - 120 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-ticket-reserved",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        order_id: "test-order-2",
+        order_reference: "TEST-ORD-0002",
+        purchaser_name: "Test Reserved User",
+        purchaser_email: "reserved@example.test",
+        payment_status: "pending",
+        payment_reference: "TEST-PAY-002",
+        ticket_number: "BP-TEST-000002",
+        status: "reserved",
+        issued_at: null,
+        voided_at: null,
+        refunded_at: null,
+        winner_at: null,
+        void_reason: null,
+        status_reason: "Waiting for payment confirmation.",
+        created_at: new Date(now - 90 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 90 * 60 * 1000).toISOString(),
+        is_payment_valid: false,
+        is_draw_eligible: false,
+        events: [
+          {
+            id: "evt-reserved-1",
+            event_type: "reserved",
+            previous_status: null,
+            new_status: "reserved",
+            reason: "Reserved pending payment.",
+            created_at: new Date(now - 90 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-ticket-winner",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        order_id: "test-order-3",
+        order_reference: "TEST-ORD-0003",
+        purchaser_name: "Test Winner",
+        purchaser_email: "winner@example.test",
+        payment_status: "paid",
+        payment_reference: "TEST-PAY-003",
+        ticket_number: "BP-TEST-000104",
+        status: "winner",
+        issued_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        voided_at: null,
+        refunded_at: null,
+        winner_at: new Date(now - 30 * 60 * 1000).toISOString(),
+        void_reason: null,
+        status_reason: "Selected in test draw.",
+        created_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 30 * 60 * 1000).toISOString(),
+        is_payment_valid: true,
+        is_draw_eligible: true,
+        events: [
+          {
+            id: "evt-winner-1",
+            event_type: "issued",
+            previous_status: "reserved",
+            new_status: "issued",
+            reason: "Test payment confirmed.",
+            created_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "evt-winner-2",
+            event_type: "winner_selected",
+            previous_status: "issued",
+            new_status: "winner",
+            reason: "Selected by test secure draw.",
+            created_at: new Date(now - 30 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-ticket-refunded",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        order_id: "test-order-4",
+        order_reference: "TEST-ORD-0004",
+        purchaser_name: "Test Refund",
+        purchaser_email: "refund@example.test",
+        payment_status: "partially_refunded",
+        payment_reference: "TEST-PAY-004",
+        ticket_number: "BP-TEST-000203",
+        status: "refunded",
+        issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        voided_at: null,
+        refunded_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        winner_at: null,
+        void_reason: null,
+        status_reason: "Ticket refunded in test order.",
+        created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        is_payment_valid: false,
+        is_draw_eligible: false,
+        events: [
+          {
+            id: "evt-refund-1",
+            event_type: "issued",
+            previous_status: "reserved",
+            new_status: "issued",
+            reason: "Test ticket issued.",
+            created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "evt-refund-2",
+            event_type: "refunded",
+            previous_status: "issued",
+            new_status: "refunded",
+            reason: "Test refund completed.",
+            created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-ticket-void",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        order_id: "test-order-5",
+        order_reference: "TEST-ORD-0005",
+        purchaser_name: "Test Void",
+        purchaser_email: "void@example.test",
+        payment_status: "cancelled",
+        payment_reference: "TEST-PAY-005",
+        ticket_number: "BP-TEST-000250",
+        status: "void",
+        issued_at: null,
+        voided_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        refunded_at: null,
+        winner_at: null,
+        void_reason: "Test payment was cancelled.",
+        status_reason: "Voided after cancelled payment.",
+        created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        is_payment_valid: false,
+        is_draw_eligible: false,
+        events: [
+          {
+            id: "evt-void-1",
+            event_type: "reserved",
+            previous_status: null,
+            new_status: "reserved",
+            reason: "Test ticket reserved.",
+            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000 - 20 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "evt-void-2",
+            event_type: "voided",
+            previous_status: "reserved",
+            new_status: "void",
+            reason: "Payment cancelled during test.",
+            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-ticket-warning",
+        lottery_id: "test-lottery-3",
+        lottery_title: "Test Community Fundraiser",
+        lottery_slug: "test-community-fundraiser",
+        order_id: "test-order-6",
+        order_reference: "TEST-ORD-0006",
+        purchaser_name: "Test Integrity Warning",
+        purchaser_email: "warning@example.test",
+        payment_status: "failed",
+        payment_reference: "TEST-PAY-006",
+        ticket_number: "BP-TEST-000301",
+        status: "issued",
+        issued_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
+        voided_at: null,
+        refunded_at: null,
+        winner_at: null,
+        void_reason: null,
+        status_reason: "Test integrity mismatch: issued ticket linked to failed payment.",
+        created_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        is_payment_valid: false,
+        is_draw_eligible: false,
+        events: [
+          {
+            id: "evt-warning-1",
+            event_type: "issued",
+            previous_status: "reserved",
+            new_status: "issued",
+            reason: "Intentional test integrity warning.",
+            created_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+    ];
+
+    setTestMode(true);
+    setItems(demoTickets);
+    setSelected(null);
+    setError(null);
+    setSearch("");
+    setStatus("all");
+    setLotteryId("all");
+    setEligibility("all");
+    setSort("newest");
+    setLoading(false);
+  }
+
   async function loadTickets() {
+    setTestMode(false);
     setLoading(true);
     setError(null);
 
@@ -216,17 +473,44 @@ export default function TicketsClient() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={loadTickets}
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={startFullFeatureTest}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
+            >
+              <Beaker className="h-4 w-4" />
+              Test full feature
+            </button>
+
+            <button
+              type="button"
+              onClick={loadTickets}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
       </section>
+
+      {testMode ? (
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          <div className="flex items-start gap-3">
+            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-bold">Test mode is active</div>
+              <div className="mt-1 text-yellow-100/70">
+                These are fake ticket records. You can test issued, reserved, winner,
+                refunded, void and payment-warning states, plus filters and ticket history,
+                without changing the real API or Supabase.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Issued" value={issued} icon={<CheckCircle2 className="h-5 w-5" />} />

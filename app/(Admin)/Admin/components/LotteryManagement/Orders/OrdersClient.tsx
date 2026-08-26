@@ -19,6 +19,7 @@ import {
   UserRound,
   X,
   XCircle,
+  Beaker,
 } from "lucide-react";
 
 type PaymentStatus =
@@ -149,6 +150,7 @@ export default function OrdersClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OrderRecord | null>(null);
+  const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "all">("all");
@@ -160,7 +162,332 @@ export default function OrdersClient() {
     loadOrders();
   }, []);
 
+  function startFullFeatureTest() {
+    const now = Date.now();
+
+    const demoOrders: OrderRecord[] = [
+      {
+        id: "test-order-paid",
+        order_reference: "TEST-ORD-0001",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        purchaser_name: "Test Supporter One",
+        purchaser_email: "test.one@example.test",
+        purchaser_phone: "07123 000001",
+        quantity: 5,
+        total_amount: 5,
+        currency: "GBP",
+        payment_status: "paid",
+        payment_reference: "TEST-PAY-PAID-001",
+        eligibility_accepted: true,
+        terms_version: "TEST-2026-v1",
+        privacy_notice_version: "TEST-PRIVACY-v1",
+        marketing_opt_in: false,
+        created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 90 * 60 * 1000).toISOString(),
+        paid_at: new Date(now - 110 * 60 * 1000).toISOString(),
+        ticket_count: 5,
+        active_ticket_count: 5,
+        winner_count: 0,
+        refunded_amount: 0,
+        tickets: Array.from({ length: 5 }, (_, index) => ({
+          id: `test-ticket-paid-${index + 1}`,
+          ticket_number: `BP-TEST-${String(index + 1).padStart(6, "0")}`,
+          status: "issued",
+          issued_at: new Date(now - 100 * 60 * 1000).toISOString(),
+        })),
+        acceptances: [
+          {
+            id: "test-accept-1",
+            label: "Eligibility declaration accepted",
+            status: "accepted",
+            detail: "Test declaration accepted during checkout.",
+            created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-accept-2",
+            label: "Terms accepted",
+            status: "accepted",
+            detail: "Terms version TEST-2026-v1.",
+            created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        refunds: [],
+        notifications: [
+          {
+            id: "test-notify-1",
+            label: "Purchase confirmation",
+            status: "sent",
+            detail: "Test confirmation email sent.",
+            created_at: new Date(now - 95 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-order-winner",
+        order_reference: "TEST-ORD-0002",
+        lottery_id: "test-lottery-1",
+        lottery_title: "Test Summer Raffle 2026",
+        lottery_slug: "test-summer-raffle-2026",
+        purchaser_name: "Test Winner",
+        purchaser_email: "winner@example.test",
+        purchaser_phone: null,
+        quantity: 2,
+        total_amount: 2,
+        currency: "GBP",
+        payment_status: "paid",
+        payment_reference: "TEST-PAY-WINNER-002",
+        eligibility_accepted: true,
+        terms_version: "TEST-2026-v1",
+        privacy_notice_version: "TEST-PRIVACY-v1",
+        marketing_opt_in: true,
+        created_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 30 * 60 * 1000).toISOString(),
+        paid_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
+        ticket_count: 2,
+        active_ticket_count: 2,
+        winner_count: 1,
+        refunded_amount: 0,
+        tickets: [
+          {
+            id: "test-ticket-winner-1",
+            ticket_number: "BP-TEST-000104",
+            status: "winner",
+            issued_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-winner-2",
+            ticket_number: "BP-TEST-000105",
+            status: "issued",
+            issued_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        acceptances: [
+          {
+            id: "test-accept-winner",
+            label: "Eligibility declaration accepted",
+            status: "accepted",
+            detail: "Test winner order declaration.",
+            created_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        refunds: [],
+        notifications: [
+          {
+            id: "test-notify-winner-1",
+            label: "Purchase confirmation",
+            status: "sent",
+            detail: "Test purchase confirmation sent.",
+            created_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-notify-winner-2",
+            label: "Winner notification",
+            status: "sent",
+            detail: "Test winner email sent.",
+            created_at: new Date(now - 20 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-order-failed",
+        order_reference: "TEST-ORD-0003",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        purchaser_name: "Test Failed Payment",
+        purchaser_email: "failed@example.test",
+        purchaser_phone: null,
+        quantity: 10,
+        total_amount: 20,
+        currency: "GBP",
+        payment_status: "failed",
+        payment_reference: "TEST-PAY-FAILED-003",
+        eligibility_accepted: true,
+        terms_version: "TEST-2026-v1",
+        privacy_notice_version: "TEST-PRIVACY-v1",
+        marketing_opt_in: false,
+        created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        paid_at: null,
+        ticket_count: 0,
+        active_ticket_count: 0,
+        winner_count: 0,
+        refunded_amount: 0,
+        tickets: [],
+        acceptances: [
+          {
+            id: "test-accept-failed",
+            label: "Eligibility declaration accepted",
+            status: "accepted",
+            detail: "Declaration accepted before payment failure.",
+            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        refunds: [],
+        notifications: [
+          {
+            id: "test-notify-failed",
+            label: "Payment failed",
+            status: "sent",
+            detail: "Test failed-payment notification.",
+            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-order-refund",
+        order_reference: "TEST-ORD-0004",
+        lottery_id: "test-lottery-2",
+        lottery_title: "Test Christmas Raffle 2026",
+        lottery_slug: "test-christmas-raffle-2026",
+        purchaser_name: "Test Refund",
+        purchaser_email: "refund@example.test",
+        purchaser_phone: "07123 000004",
+        quantity: 4,
+        total_amount: 8,
+        currency: "GBP",
+        payment_status: "partially_refunded",
+        payment_reference: "TEST-PAY-REFUND-004",
+        eligibility_accepted: true,
+        terms_version: "TEST-2026-v1",
+        privacy_notice_version: "TEST-PRIVACY-v1",
+        marketing_opt_in: false,
+        created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        paid_at: new Date(now - 5 * 24 * 60 * 60 * 1000 + 10 * 60 * 1000).toISOString(),
+        ticket_count: 4,
+        active_ticket_count: 2,
+        winner_count: 0,
+        refunded_amount: 4,
+        tickets: [
+          {
+            id: "test-ticket-refund-1",
+            ticket_number: "BP-TEST-000201",
+            status: "issued",
+            issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-refund-2",
+            ticket_number: "BP-TEST-000202",
+            status: "issued",
+            issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-refund-3",
+            ticket_number: "BP-TEST-000203",
+            status: "refunded",
+            issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-refund-4",
+            ticket_number: "BP-TEST-000204",
+            status: "refunded",
+            issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        acceptances: [
+          {
+            id: "test-accept-refund",
+            label: "Terms accepted",
+            status: "accepted",
+            detail: "Test terms acceptance.",
+            created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        refunds: [
+          {
+            id: "test-refund-1",
+            label: "Partial refund",
+            status: "completed",
+            detail: "£4.00 test refund completed; two tickets refunded.",
+            created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        notifications: [
+          {
+            id: "test-notify-refund",
+            label: "Refund confirmation",
+            status: "sent",
+            detail: "Test refund confirmation sent.",
+            created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+      {
+        id: "test-order-disputed",
+        order_reference: "TEST-ORD-0005",
+        lottery_id: "test-lottery-3",
+        lottery_title: "Test Community Fundraiser",
+        lottery_slug: "test-community-fundraiser",
+        purchaser_name: "Test Dispute",
+        purchaser_email: "dispute@example.test",
+        purchaser_phone: null,
+        quantity: 3,
+        total_amount: 3,
+        currency: "GBP",
+        payment_status: "disputed",
+        payment_reference: "TEST-PAY-DISPUTE-005",
+        eligibility_accepted: true,
+        terms_version: "TEST-2026-v1",
+        privacy_notice_version: "TEST-PRIVACY-v1",
+        marketing_opt_in: false,
+        created_at: new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        paid_at: new Date(now - 8 * 24 * 60 * 60 * 1000 + 5 * 60 * 1000).toISOString(),
+        ticket_count: 3,
+        active_ticket_count: 3,
+        winner_count: 0,
+        refunded_amount: 0,
+        tickets: [
+          {
+            id: "test-ticket-dispute-1",
+            ticket_number: "BP-TEST-000301",
+            status: "issued",
+            issued_at: new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-dispute-2",
+            ticket_number: "BP-TEST-000302",
+            status: "issued",
+            issued_at: new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+          {
+            id: "test-ticket-dispute-3",
+            ticket_number: "BP-TEST-000303",
+            status: "issued",
+            issued_at: new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        acceptances: [],
+        refunds: [],
+        notifications: [
+          {
+            id: "test-notify-dispute",
+            label: "Admin dispute alert",
+            status: "sent",
+            detail: "Test dispute alert created for review.",
+            created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+          },
+        ],
+      },
+    ];
+
+    setTestMode(true);
+    setItems(demoOrders);
+    setSelected(null);
+    setError(null);
+    setSearch("");
+    setPaymentStatus("all");
+    setLotteryId("all");
+    setTicketState("all");
+    setSort("newest");
+    setLoading(false);
+  }
+
   async function loadOrders() {
+    setTestMode(false);
     setLoading(true);
     setError(null);
 
@@ -273,17 +600,44 @@ export default function OrdersClient() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={loadOrders}
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={startFullFeatureTest}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
+            >
+              <Beaker className="h-4 w-4" />
+              Test full feature
+            </button>
+
+            <button
+              type="button"
+              onClick={loadOrders}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
       </section>
+
+      {testMode ? (
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+          <div className="flex items-start gap-3">
+            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-bold">Test mode is active</div>
+              <div className="mt-1 text-yellow-100/70">
+                These are fake order and ticket records. You can test filters, winner orders,
+                refunds, payment problems and the full order details modal without changing
+                the real API or Supabase.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
