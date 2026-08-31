@@ -26,6 +26,7 @@ type EventRow = {
   website_url?: string | null;
 
   is_published: boolean;
+  is_planning?: boolean | null;
 
   repeat_rule?: RepeatRule | null;
   price_type?: PriceType | null;
@@ -49,6 +50,7 @@ type DraftEvent = {
   website_url: string;
 
   is_published: boolean;
+  is_planning: boolean;
 
   repeat_rule: RepeatRule;
   price_type: PriceType;
@@ -67,6 +69,7 @@ const emptyDraft = (): DraftEvent => ({
   ticket_url: "",
   website_url: "",
   is_published: false,
+  is_planning: false,
   repeat_rule: "none",
   price_type: "free",
   price_gbp: "",
@@ -369,6 +372,7 @@ export default function AdminEventsClient() {
       ticket_url: ev.ticket_url || "",
       website_url: (ev as any).website_url || "",
       is_published: !!ev.is_published,
+      is_planning: !!ev.is_planning,
 
       repeat_rule: (ev.repeat_rule as RepeatRule) || "none",
       price_type: isFree ? "free" : "paid",
@@ -505,6 +509,7 @@ export default function AdminEventsClient() {
         website_url: draft.website_url.trim() || null,
 
         is_published: !!draft.is_published,
+        is_planning: !!draft.is_planning,
 
         repeat_rule: draft.repeat_rule,
         price_type: draft.price_type,
@@ -904,6 +909,29 @@ export default function AdminEventsClient() {
             </div>
           </label>
 
+          <label
+            className={[
+              "flex items-start gap-3 rounded-2xl border px-4 py-4 transition",
+              draft.is_planning
+                ? "border-amber-400/30 bg-amber-500/10"
+                : "border-white/10 bg-white/5",
+            ].join(" ")}
+          >
+            <input
+              type="checkbox"
+              checked={draft.is_planning}
+              onChange={(e) => setDraft((d) => ({ ...d, is_planning: e.target.checked }))}
+              className="mt-0.5 h-4 w-4"
+            />
+            <div>
+              <div className="text-sm font-semibold">Still in planning</div>
+              <div className="mt-1 text-xs text-white/65">
+                Keep the event visible to the public, but show a warning that details are not yet final.
+                The date, time, location and other event information may change while planning continues.
+              </div>
+            </div>
+          </label>
+
           <div className="flex items-center justify-end gap-2 pt-2">
             <button
               type="button"
@@ -1031,6 +1059,12 @@ function EventCard({
             <div className="font-extrabold truncate">{ev.title}</div>
             <Badge published={ev.is_published} />
 
+            {ev.is_planning ? (
+              <span className="text-[11px] px-2 py-1 rounded-full border border-amber-400/30 text-amber-200 bg-amber-500/10">
+                Still in planning
+              </span>
+            ) : null}
+
             <span className={["text-[11px] px-2 py-1 rounded-full border", statusCls].join(" ")}>
               {statusLabel}
             </span>
@@ -1082,6 +1116,12 @@ function EventCard({
               >
                 {(ev as any).website_url}
               </a>
+            </div>
+          ) : null}
+
+          {ev.is_planning ? (
+            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              Public planning notice enabled: date, time, location and other details may still change.
             </div>
           ) : null}
 

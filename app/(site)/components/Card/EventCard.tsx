@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createPortal } from "react-dom";
 import {
+  AlertTriangle,
   CalendarDays,
   Clock3,
   ExternalLink,
@@ -26,6 +27,10 @@ type EventRow = {
   ticket_url: string | null;
   website_url: string | null;
   is_published: boolean;
+
+  // True when the event is public but details are still provisional.
+  is_planning?: boolean | null;
+
   is_free?: boolean | null;
   price_type?: "free" | "paid" | null;
   price_gbp?: number | null;
@@ -345,9 +350,6 @@ export default function EventPage() {
         lg:px-8
       "
     >
-      {/* =====================================================
-          SECTION HEADING
-          ===================================================== */}
       <div className="mb-8 w-full text-center sm:mb-10">
         <p
           className="
@@ -392,9 +394,6 @@ export default function EventPage() {
         </p>
       </div>
 
-      {/* =====================================================
-          LOADING
-          ===================================================== */}
       {loading && (
         <div
           className="
@@ -436,9 +435,7 @@ export default function EventPage() {
         </div>
       )}
 
-      {/* =====================================================
-          ERROR
-          ===================================================== */}
+   
       {error && (
         <div
           role="alert"
@@ -465,10 +462,6 @@ export default function EventPage() {
           </p>
         </div>
       )}
-
-      {/* =====================================================
-          EVENT CARDS
-          ===================================================== */}
       {!loading &&
         !error &&
         upcoming.length > 0 && (
@@ -487,6 +480,9 @@ export default function EventPage() {
               const today = isEventToday(
                 event.start_at,
               );
+
+              const planning =
+                event.is_planning === true;
 
               const freeEvent =
                 isFreeEvent(event);
@@ -528,13 +524,15 @@ export default function EventPage() {
                     dark:shadow-black/30
 
                     ${
-                      today
-                        ? "border-2 border-yellow-300 ring-4 ring-yellow-300/20 shadow-[0_0_45px_rgba(253,224,71,0.40)]"
-                        : "border-white/15 dark:border-white/10"
+                      planning
+                        ? "border-2 border-amber-300 ring-4 ring-amber-300/15 shadow-[0_0_45px_rgba(251,191,36,0.18)]"
+                        : today
+                          ? "border-2 border-yellow-300 ring-4 ring-yellow-300/20 shadow-[0_0_45px_rgba(253,224,71,0.40)]"
+                          : "border-white/15 dark:border-white/10"
                     }
                   `}
                 >
-                  {today && (
+                  {today && !planning && (
                     <div
                       role="status"
                       className="
@@ -560,6 +558,78 @@ export default function EventPage() {
                     </div>
                   )}
 
+                  {today && planning && (
+                    <div
+                      role="status"
+                      className="
+                        flex
+                        items-center
+                        justify-center
+                        gap-2
+                        bg-amber-300
+                        px-4
+                        py-3
+                        text-center
+                        text-sm
+                        font-black
+                        uppercase
+                        tracking-[0.14em]
+                        text-amber-950
+                        shadow-lg
+                      "
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      Planned for Today
+                    </div>
+                  )}
+
+                  {planning && (
+                    <div
+                      role="alert"
+                      className="
+                        border-b
+                        border-amber-300/40
+                        bg-amber-300
+                        px-5
+                        py-4
+                        text-amber-950
+                      "
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className="
+                            flex
+                            h-10
+                            w-10
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-full
+                            bg-amber-950
+                            text-amber-200
+                          "
+                        >
+                          <AlertTriangle className="h-5 w-5" />
+                        </div>
+
+                        <div>
+                          <p className="font-black">
+                            This event is still in planning
+                          </p>
+
+                          <p className="mt-1 text-sm font-semibold leading-6">
+                            The date, time, location and other event details
+                            are provisional and may change.
+                          </p>
+
+                          <p className="mt-2 text-xs font-bold">
+                            Please check this page again before travelling.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Pride stripe */}
                   <div
                     aria-hidden="true"
@@ -572,10 +642,6 @@ export default function EventPage() {
                       to-blue-500
                     "
                   />
-
-                  {/* =====================================================
-                      IMAGE
-                      ===================================================== */}
                   {event.image_url ? (
                     <button
                       type="button"
@@ -635,7 +701,30 @@ export default function EventPage() {
                           gap-2
                         "
                       >
-                        {today && (
+                        {planning && (
+                          <span
+                            className="
+                              inline-flex
+                              items-center
+                              gap-1.5
+                              rounded-full
+                              bg-amber-300
+                              px-3
+                              py-1.5
+                              text-xs
+                              font-black
+                              uppercase
+                              tracking-wide
+                              text-amber-950
+                              shadow-lg
+                            "
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Still in planning
+                          </span>
+                        )}
+
+                        {today && !planning && (
                           <span
                             className="
                               rounded-full
@@ -751,10 +840,6 @@ export default function EventPage() {
                       </div>
                     </div>
                   )}
-
-                  {/* =====================================================
-                      CONTENT
-                      ===================================================== */}
                   <div
                     className="
                       flex
@@ -765,10 +850,33 @@ export default function EventPage() {
                       sm:p-6
                     "
                   >
-                    {/* Tags */}
                     {!event.image_url && (
                       <div className="mb-4 flex flex-wrap gap-2">
-                        {today && (
+                        {planning && (
+                          <span
+                            className="
+                              inline-flex
+                              items-center
+                              gap-1.5
+                              rounded-full
+                              border
+                              border-amber-300/40
+                              bg-amber-300/15
+                              px-3
+                              py-1.5
+                              text-xs
+                              font-black
+                              uppercase
+                              tracking-wide
+                              text-amber-200
+                            "
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Still in planning
+                          </span>
+                        )}
+
+                        {today && !planning && (
                           <span
                             className="
                               rounded-full
@@ -842,7 +950,36 @@ export default function EventPage() {
                       {event.title}
                     </h3>
 
-                    {today && (
+                    {planning && (
+                      <div
+                        className="
+                          mt-4
+                          rounded-2xl
+                          border
+                          border-amber-300/40
+                          bg-amber-300/10
+                          p-4
+                        "
+                      >
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+
+                          <div>
+                            <p className="font-black text-amber-200">
+                              Event details are not final yet
+                            </p>
+
+                            <p className="mt-1 text-sm leading-6 text-white/80">
+                              This event is still being planned. The date,
+                              time, location and other information shown below
+                              may change as planning continues.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {today && !planning && (
                       <div
                         className="
                           mt-4
@@ -922,15 +1059,14 @@ export default function EventPage() {
                       </div>
                     )}
 
-                    {/* =====================================================
-                        EVENT DETAILS
-                        ===================================================== */}
                     <div className="mt-6 grid gap-3">
                       <div
                         className={
-                          today
-                            ? "flex items-start gap-3 rounded-2xl border border-yellow-300/40 bg-yellow-300/10 p-4"
-                            : "flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4"
+                          planning
+                            ? "flex items-start gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4"
+                            : today
+                              ? "flex items-start gap-3 rounded-2xl border border-yellow-300/40 bg-yellow-300/10 p-4"
+                              : "flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4"
                         }
                       >
                         <CalendarDays
@@ -953,38 +1089,45 @@ export default function EventPage() {
                               text-white/45
                             "
                           >
-                            {today
-                              ? "Today"
-                              : repeating
-                                ? "Next event date"
-                                : "Date"}
+                            {planning
+                              ? repeating
+                                ? "Provisional next date"
+                                : "Provisional date"
+                              : today
+                                ? "Today"
+                                : repeating
+                                  ? "Next event date"
+                                  : "Date"}
                           </p>
 
                           <p
                             className={
-                              today
-                                ? "mt-1 font-black text-yellow-100"
-                                : "mt-1 font-bold text-white"
+                              planning
+                                ? "mt-1 font-black text-amber-100"
+                                : today
+                                  ? "mt-1 font-black text-yellow-100"
+                                  : "mt-1 font-bold text-white"
                             }
                           >
                             {formatDate(
                               event.start_at,
                             )}
                           </p>
+
+                          {planning && (
+                            <p className="mt-1 text-xs font-semibold text-amber-200">
+                              This date may change.
+                            </p>
+                          )}
                         </div>
                       </div>
 
                       <div
-                        className="
-                          flex
-                          items-start
-                          gap-3
-                          rounded-2xl
-                          border
-                          border-white/10
-                          bg-white/[0.06]
-                          p-4
-                        "
+                        className={
+                          planning
+                            ? "flex items-start gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4"
+                            : "flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4"
+                        }
                       >
                         <Clock3
                           className="
@@ -1006,21 +1149,27 @@ export default function EventPage() {
                               text-white/45
                             "
                           >
-                            Time
+                            {planning ? "Provisional time" : "Time"}
                           </p>
 
                           <p
-                            className="
-                              mt-1
-                              font-bold
-                              text-white
-                            "
+                            className={
+                              planning
+                                ? "mt-1 font-black text-amber-100"
+                                : "mt-1 font-bold text-white"
+                            }
                           >
                             {formatTimeRange(
                               event.start_at,
                               event.end_at,
                             )}
                           </p>
+
+                          {planning && (
+                            <p className="mt-1 text-xs font-semibold text-amber-200">
+                              This time may change.
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -1031,20 +1180,11 @@ export default function EventPage() {
                           )}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="
-                            flex
-                            items-start
-                            gap-3
-                            rounded-2xl
-                            border
-                            border-white/10
-                            bg-white/[0.06]
-                            p-4
-                            transition
-
-                            hover:border-green-300/30
-                            hover:bg-white/10
-                          "
+                          className={
+                            planning
+                              ? "flex items-start gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 transition hover:bg-amber-300/15"
+                              : "flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-4 transition hover:border-green-300/30 hover:bg-white/10"
+                          }
                         >
                           <MapPin
                             className="
@@ -1095,7 +1235,7 @@ export default function EventPage() {
                       )}
                     </div>
 
-                    {today && (
+                    {today && !planning && (
                       <div
                         className="
                           mt-5

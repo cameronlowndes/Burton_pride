@@ -15,7 +15,14 @@ type RepeatRule =
 type PriceType = "free" | "paid";
 
 function jsonError(message: string, status = 400) {
-  return NextResponse.json({ error: message }, { status });
+  return NextResponse.json(
+    {
+      error: message,
+    },
+    {
+      status,
+    },
+  );
 }
 
 function requireAdmin(req: Request) {
@@ -34,7 +41,9 @@ function requireAdmin(req: Request) {
   return null;
 }
 
-function isValidRepeatRule(value: unknown): value is RepeatRule {
+function isValidRepeatRule(
+  value: unknown,
+): value is RepeatRule {
   return (
     value === "none" ||
     value === "daily" ||
@@ -45,10 +54,21 @@ function isValidRepeatRule(value: unknown): value is RepeatRule {
   );
 }
 
-function isValidPriceType(value: unknown): value is PriceType {
-  return value === "free" || value === "paid";
+function isValidPriceType(
+  value: unknown,
+): value is PriceType {
+  return (
+    value === "free" ||
+    value === "paid"
+  );
 }
 
+/*
+ * =========================================================
+ * GET
+ * Load all events for the admin Event Management page.
+ * =========================================================
+ */
 export async function GET(req: Request) {
   const denied = requireAdmin(req);
 
@@ -71,17 +91,27 @@ export async function GET(req: Request) {
       ticket_url,
       website_url,
       is_published,
+      is_planning,
       repeat_rule,
       price_type,
       price_gbp,
       is_free
-      `
+      `,
     )
-    .order("start_at", { ascending: true });
+    .order("start_at", {
+      ascending: true,
+    });
 
   if (error) {
-    console.error("Failed to load events:", error);
-    return jsonError("Failed to load events", 500);
+    console.error(
+      "Failed to load events:",
+      error,
+    );
+
+    return jsonError(
+      "Failed to load events",
+      500,
+    );
   }
 
   return NextResponse.json({
@@ -89,6 +119,12 @@ export async function GET(req: Request) {
   });
 }
 
+/*
+ * =========================================================
+ * POST
+ * Create a new event.
+ * =========================================================
+ */
 export async function POST(req: Request) {
   const denied = requireAdmin(req);
 
@@ -101,53 +137,89 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return jsonError("Invalid JSON body", 400);
+    return jsonError(
+      "Invalid JSON body",
+      400,
+    );
   }
 
   /*
-   * Title
+   * =========================================================
+   * TITLE
+   * =========================================================
    */
-  const title = String(body?.title ?? "").trim();
+  const title = String(
+    body?.title ?? "",
+  ).trim();
 
   if (!title) {
-    return jsonError("Title is required", 400);
+    return jsonError(
+      "Title is required",
+      400,
+    );
   }
 
   /*
-   * Description
+   * =========================================================
+   * DESCRIPTION
+   * =========================================================
    */
-  const description = String(body?.description ?? "").trim();
+  const description = String(
+    body?.description ?? "",
+  ).trim();
 
   if (!description) {
-    return jsonError("Description is required", 400);
+    return jsonError(
+      "Description is required",
+      400,
+    );
   }
 
   /*
-   * Location
+   * =========================================================
+   * LOCATION
+   * =========================================================
    */
-  const location = String(body?.location ?? "").trim();
+  const location = String(
+    body?.location ?? "",
+  ).trim();
 
   if (!location) {
-    return jsonError("Location is required", 400);
+    return jsonError(
+      "Location is required",
+      400,
+    );
   }
 
   /*
-   * Start date
+   * =========================================================
+   * START DATE / TIME
+   * =========================================================
    */
-  const startAt = String(body?.start_at ?? "").trim();
+  const startAt = String(
+    body?.start_at ?? "",
+  ).trim();
 
   if (!startAt) {
-    return jsonError("start_at is required", 400);
+    return jsonError(
+      "start_at is required",
+      400,
+    );
   }
 
   const start = new Date(startAt);
 
   if (Number.isNaN(start.getTime())) {
-    return jsonError("start_at is not a valid date", 400);
+    return jsonError(
+      "start_at is not a valid date",
+      400,
+    );
   }
 
   /*
-   * End date
+   * =========================================================
+   * END DATE / TIME
+   * =========================================================
    */
   const endAt = body?.end_at
     ? String(body.end_at).trim()
@@ -162,118 +234,193 @@ export async function POST(req: Request) {
     end &&
     Number.isNaN(end.getTime())
   ) {
-    return jsonError("end_at is not a valid date", 400);
+    return jsonError(
+      "end_at is not a valid date",
+      400,
+    );
   }
 
   if (
     end &&
-    end.getTime() < start.getTime()
+    end.getTime() <
+      start.getTime()
   ) {
     return jsonError(
       "end_at must be after start_at",
-      400
+      400,
     );
   }
 
   /*
-   * Repeat rule
+   * =========================================================
+   * REPEAT RULE
+   * =========================================================
    */
   const repeatRuleRaw =
-    body?.repeat_rule ?? "none";
+    body?.repeat_rule ??
+    "none";
 
   const repeatRule: RepeatRule =
-    isValidRepeatRule(repeatRuleRaw)
+    isValidRepeatRule(
+      repeatRuleRaw,
+    )
       ? repeatRuleRaw
       : "none";
 
   /*
-   * Price
+   * =========================================================
+   * PRICE
+   * =========================================================
    */
   const priceTypeRaw =
-    body?.price_type ?? "free";
+    body?.price_type ??
+    "free";
 
   const priceType: PriceType =
-    isValidPriceType(priceTypeRaw)
+    isValidPriceType(
+      priceTypeRaw,
+    )
       ? priceTypeRaw
       : "free";
 
   let priceGbp = 0;
 
   if (priceType === "paid") {
-    priceGbp = Number(body?.price_gbp);
+    priceGbp = Number(
+      body?.price_gbp,
+    );
 
     if (
-      !Number.isFinite(priceGbp) ||
+      !Number.isFinite(
+        priceGbp,
+      ) ||
       priceGbp <= 0
     ) {
       return jsonError(
         "A valid price is required for paid events",
-        400
+        400,
       );
     }
   }
 
-  const isFree = priceType === "free";
+  const isFree =
+    priceType === "free";
 
   /*
-   * URLs
+   * =========================================================
+   * PUBLISHING STATUS
+   * =========================================================
    */
-  const imageUrl = body?.image_url
-    ? String(body.image_url).trim()
-    : null;
-
-  const ticketUrl = body?.ticket_url
-    ? String(body.ticket_url).trim()
-    : null;
-
-  const websiteUrl = body?.website_url
-    ? String(body.website_url).trim()
-    : null;
+  const isPublished =
+    Boolean(
+      body?.is_published,
+    );
 
   /*
-   * Create slug
+   * =========================================================
+   * PLANNING STATUS
+   *
+   * Allows the event to stay publicly visible while clearly
+   * warning users that the date, time, location or other
+   * details may still change.
+   * =========================================================
    */
-  const baseSlug = slugify(title);
+  const isPlanning =
+    Boolean(
+      body?.is_planning,
+    );
+
+  /*
+   * =========================================================
+   * URLS
+   * =========================================================
+   */
+  const imageUrl =
+    body?.image_url
+      ? String(
+          body.image_url,
+        ).trim()
+      : null;
+
+  const ticketUrl =
+    body?.ticket_url
+      ? String(
+          body.ticket_url,
+        ).trim()
+      : null;
+
+  const websiteUrl =
+    body?.website_url
+      ? String(
+          body.website_url,
+        ).trim()
+      : null;
+
+  /*
+   * =========================================================
+   * CREATE SLUG
+   * =========================================================
+   */
+  const baseSlug =
+    slugify(title);
 
   if (!baseSlug) {
     return jsonError(
       "Title produces an invalid slug",
-      400
+      400,
     );
   }
 
   /*
-   * Ensure slug is unique.
+   * =========================================================
+   * ENSURE SLUG IS UNIQUE
+   *
+   * Examples:
    *
    * coffee-morning
    * coffee-morning-2
    * coffee-morning-3
+   * =========================================================
    */
   let slug = baseSlug;
-  let slugFound = false;
 
-  for (let i = 0; i < 100; i++) {
-    const { data: existing, error: slugError } =
+  let slugFound =
+    false;
+
+  for (
+    let i = 0;
+    i < 100;
+    i++
+  ) {
+    const {
+      data: existing,
+      error: slugError,
+    } =
       await supabaseAdmin
         .from("events")
         .select("id")
-        .eq("slug", slug)
+        .eq(
+          "slug",
+          slug,
+        )
         .maybeSingle();
 
     if (slugError) {
       console.error(
         "Failed checking event slug:",
-        slugError
+        slugError,
       );
 
       return jsonError(
         "Failed to create event",
-        500
+        500,
       );
     }
 
     if (!existing) {
-      slugFound = true;
+      slugFound =
+        true;
+
       break;
     }
 
@@ -283,12 +430,14 @@ export async function POST(req: Request) {
   if (!slugFound) {
     return jsonError(
       "Could not generate a unique event slug",
-      500
+      500,
     );
   }
 
   /*
-   * Database payload
+   * =========================================================
+   * DATABASE PAYLOAD
+   * =========================================================
    */
   const payload = {
     title,
@@ -297,63 +446,103 @@ export async function POST(req: Request) {
     description,
     location,
 
-    start_at: start.toISOString(),
+    start_at:
+      start.toISOString(),
+
     end_at: end
       ? end.toISOString()
       : null,
 
-    image_url: imageUrl,
-    ticket_url: ticketUrl,
-    website_url: websiteUrl,
+    image_url:
+      imageUrl,
 
-    is_published: !!body?.is_published,
+    ticket_url:
+      ticketUrl,
 
-    repeat_rule: repeatRule,
+    website_url:
+      websiteUrl,
 
-    price_type: priceType,
-    price_gbp: isFree
-      ? 0
-      : priceGbp,
+    /*
+     * Published determines whether the event is shown
+     * publicly.
+     */
+    is_published:
+      isPublished,
 
-    is_free: isFree,
+    /*
+     * Planning status can be enabled at the same time
+     * as published.
+     *
+     * Example:
+     *
+     * is_published = true
+     * is_planning  = true
+     *
+     * This means:
+     * "show the event publicly, but warn people details
+     * are still being confirmed."
+     */
+    is_planning:
+      isPlanning,
+
+    repeat_rule:
+      repeatRule,
+
+    price_type:
+      priceType,
+
+    price_gbp:
+      isFree
+        ? 0
+        : priceGbp,
+
+    is_free:
+      isFree,
   };
 
   /*
-   * Insert event
+   * =========================================================
+   * INSERT EVENT
+   * =========================================================
    */
-  const { data, error } = await supabaseAdmin
-    .from("events")
-    .insert(payload)
-    .select(
-      `
-      id,
-      title,
-      slug,
-      description,
-      location,
-      start_at,
-      end_at,
-      image_url,
-      ticket_url,
-      website_url,
-      is_published,
-      repeat_rule,
-      price_type,
-      price_gbp,
-      is_free
-      `
-    )
-    .single();
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin
+      .from("events")
+      .insert(payload)
+      .select(
+        `
+        id,
+        title,
+        slug,
+        description,
+        location,
+        start_at,
+        end_at,
+        image_url,
+        ticket_url,
+        website_url,
+        is_published,
+        is_planning,
+        repeat_rule,
+        price_type,
+        price_gbp,
+        is_free
+        `,
+      )
+      .single();
 
   if (error) {
     console.error(
       "Failed to create event:",
-      error
+      error,
     );
 
     return jsonError(
       "Failed to create event",
-      500
+      500,
     );
   }
 
@@ -363,6 +552,6 @@ export async function POST(req: Request) {
     },
     {
       status: 201,
-    }
+    },
   );
 }
