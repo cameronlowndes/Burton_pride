@@ -294,11 +294,6 @@ export async function buildStyledXlsx(
   const workbook = new ExcelJS.Workbook();
 
   workbook.creator = "Burton Pride Lottery Management";
-  workbook.company = "Burton Pride C.I.C.";
-  workbook.subject = options.title;
-  workbook.title = options.title;
-  workbook.description =
-    options.subtitle || "Burton Pride Lottery Management report";
   workbook.created = new Date();
   workbook.modified = new Date();
 
