@@ -177,9 +177,6 @@ export default function HomeClient() {
           xl:px-14
         "
       >
-        {/* =====================================================
-            HERO
-            ===================================================== */}
         <motion.section
           className="
             relative
@@ -435,547 +432,7 @@ export default function HomeClient() {
           "
         >
           {/* =====================================================
-              EVENT
-              ===================================================== */}
-          <motion.section
-            id="next-event"
-            variants={fadeUp}
-            transition={sectionTransition}
-            aria-label="Burton Pride event information"
-            className="scroll-mt-28"
-          >
-            <div className={`${glassCardClass} p-3 sm:p-5 lg:p-6`}>
-              <EventCard />
-            </div>
-          </motion.section>
-
-          {/* =====================================================
-              SOCIAL LINKS
-              ===================================================== */}
-          <motion.section
-            variants={fadeUp}
-            transition={sectionTransition}
-            aria-labelledby="social-heading"
-          >
-            <div className={`${glassCardClass} p-6 text-center sm:p-9`}>
-              <h2
-                id="social-heading"
-                className="text-balance text-3xl font-black sm:text-4xl"
-              >
-                Follow Burton Pride
-              </h2>
-
-              <p
-                className="
-                  mx-auto
-                  mt-3
-                  max-w-2xl
-                  text-base
-                  leading-7
-                  text-white/90
-                  sm:text-lg
-                "
-              >
-                Follow us for the latest Burton Pride announcements, community updates,
-                events and ways to get involved.
-              </p>
-
-              <div
-                className="
-                  mx-auto
-                  mt-6
-                  grid
-                  max-w-5xl
-                  gap-4
-                  md:grid-cols-3
-                "
-              >
-                <a
-                  href="https://www.facebook.com/profile.php?id=61556621159422"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="
-                    group
-                    relative
-                    overflow-hidden
-                    rounded-2xl
-                    border
-                    border-white/20
-                    bg-[#1877F2]
-                    p-5
-                    text-left
-                    text-white
-                    shadow-2xl
-                    transition
-                    duration-200
-                    focus-visible:outline
-                    focus-visible:outline-4
-                    focus-visible:outline-offset-4
-                    focus-visible:outline-yellow-300
-                    active:scale-[0.98]
-                    sm:rounded-3xl
-                    sm:p-6
-                    motion-safe:hover:-translate-y-1
-                    motion-safe:hover:shadow-blue-500/30
-                  "
-                  aria-label="Visit Burton Pride on Facebook in a new tab"
-                >
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/12 via-transparent to-black/15" />
-
-                  <div className="relative flex items-center gap-4">
-                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#1877F2] shadow-xl">
-                      <FacebookIcon />
-                    </span>
-
-                    <div>
-                      <h3 className="text-2xl font-black leading-tight">Facebook</h3>
-                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
-                        News, updates and community posts
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="relative mt-5 flex items-center justify-between gap-3">
-                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
-                      Follow our page
-                    </span>
-                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
-                      Open app
-                    </span>
-                  </div>
-
-                  <span className="sr-only">, opens in a new tab</span>
-                </a>
-
-                <a
-                  href="https://www.instagram.com/prideburton/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="
-                    group
-                    relative
-                    overflow-hidden
-                    rounded-2xl
-                    border
-                    border-white/20
-                    bg-gradient-to-br
-                    from-[#F58529]
-                    via-[#DD2A7B]
-                    to-[#515BD4]
-                    p-5
-                    text-left
-                    text-white
-                    shadow-2xl
-                    transition
-                    duration-200
-                    focus-visible:outline
-                    focus-visible:outline-4
-                    focus-visible:outline-offset-4
-                    focus-visible:outline-yellow-300
-                    active:scale-[0.98]
-                    sm:rounded-3xl
-                    sm:p-6
-                    motion-safe:hover:-translate-y-1
-                    motion-safe:hover:shadow-pink-500/30
-                  "
-                  aria-label="Visit Burton Pride on Instagram in a new tab"
-                >
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/12 via-transparent to-black/15" />
-
-                  <div className="relative flex items-center gap-4">
-                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#DD2A7B] shadow-xl">
-                      <InstagramIcon />
-                    </span>
-
-                    <div>
-                      <h3 className="text-2xl font-black leading-tight">Instagram</h3>
-                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
-                        @prideburton • photos, reels and updates
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="relative mt-5 flex items-center justify-between gap-3">
-                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
-                      Follow on Instagram
-                    </span>
-                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
-                      Open app
-                    </span>
-                  </div>
-
-                  <span className="sr-only">, opens in a new tab</span>
-                </a>
-
-                <a
-                  href="https://bsky.app/profile/prideinburton.bsky.social"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="
-                    group
-                    relative
-                    overflow-hidden
-                    rounded-2xl
-                    border
-                    border-white/20
-                    bg-gradient-to-br
-                    from-[#1185FE]
-                    via-[#0A7AFF]
-                    to-[#0057D9]
-                    p-5
-                    text-left
-                    text-white
-                    shadow-2xl
-                    transition
-                    duration-200
-                    focus-visible:outline
-                    focus-visible:outline-4
-                    focus-visible:outline-offset-4
-                    focus-visible:outline-yellow-300
-                    active:scale-[0.98]
-                    sm:rounded-3xl
-                    sm:p-6
-                    motion-safe:hover:-translate-y-1
-                    motion-safe:hover:shadow-blue-400/30
-                  "
-                  aria-label="Visit Burton Pride on Bluesky in a new tab"
-                >
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 via-transparent to-black/15" />
-
-                  <div className="relative flex items-center gap-4">
-                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#1185FE] shadow-xl">
-                      <BlueskyIcon />
-                    </span>
-
-                    <div>
-                      <h3 className="text-2xl font-black leading-tight">Bluesky</h3>
-                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
-                        @prideinburton • updates and community posts
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="relative mt-5 flex items-center justify-between gap-3">
-                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
-                      Follow on Bluesky
-                    </span>
-                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
-                      Open app
-                    </span>
-                  </div>
-
-                  <span className="sr-only">, opens in a new tab</span>
-                </a>
-              </div>
-            </div>
-          </motion.section>
-
-          {/* =====================================================
-              MAIN QUICK ACTIONS
-              ===================================================== */}
-          <motion.section
-            id="get-involved"
-            variants={fadeUp}
-            transition={sectionTransition}
-            aria-labelledby="quick-actions-heading"
-            className="scroll-mt-28"
-          >
-            <div className="mb-5 text-center sm:mb-7">
-              <p className="text-sm font-black uppercase tracking-[0.18em] text-yellow-300">
-                Be part of Burton Pride
-              </p>
-              <h2
-                id="quick-actions-heading"
-                className="mt-2 text-balance text-3xl font-black sm:text-4xl"
-              >
-                Get involved with your local Pride
-              </h2>
-              <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
-                Donate, volunteer or support Burton Pride as a sponsor. Every bit of
-                support helps keep Pride community-led, welcoming and free to attend.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 sm:gap-5">
-              <Link
-                href="/DonateToUs"
-                className={`
-                  ${glassCardClass}
-                  group
-                  flex
-                  min-h-40
-                  flex-col
-                  items-center
-                  justify-center
-                  p-5
-                  text-center
-                  transition-transform
-                  duration-200
-                  focus-visible:outline
-                  focus-visible:outline-4
-                  focus-visible:outline-offset-4
-                  focus-visible:outline-yellow-300
-                  active:scale-[0.98]
-                  motion-safe:hover:-translate-y-1
-                  motion-safe:hover:bg-white/20
-                  dark:hover:bg-[#3d3d3d]
-                `}
-              >
-                <span className="text-4xl sm:text-5xl" aria-hidden="true">
-                  💖
-                </span>
-
-                <h3 className="mt-3 text-xl font-black sm:text-2xl">
-                  Donate
-                </h3>
-
-                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
-                  Help keep Burton Pride free, safe and community-led.
-                </p>
-              </Link>
-
-              <Link
-                href="/JoinUS/Volunteer"
-                className={`
-                  ${glassCardClass}
-                  group
-                  flex
-                  min-h-40
-                  flex-col
-                  items-center
-                  justify-center
-                  p-5
-                  text-center
-                  transition-transform
-                  duration-200
-                  focus-visible:outline
-                  focus-visible:outline-4
-                  focus-visible:outline-offset-4
-                  focus-visible:outline-yellow-300
-                  active:scale-[0.98]
-                  motion-safe:hover:-translate-y-1
-                  motion-safe:hover:bg-white/20
-                  dark:hover:bg-[#3d3d3d]
-                `}
-              >
-                <span className="text-4xl sm:text-5xl" aria-hidden="true">
-                  💚
-                </span>
-
-                <h3 className="mt-3 text-xl font-black sm:text-2xl">
-                  Volunteer
-                </h3>
-
-                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
-                  Join the team and help make Pride happen.
-                </p>
-              </Link>
-
-              <Link
-                href="/Sponsor"
-                className={`
-                  ${glassCardClass}
-                  group
-                  flex
-                  min-h-40
-                  flex-col
-                  items-center
-                  justify-center
-                  p-5
-                  text-center
-                  transition-transform
-                  duration-200
-                  focus-visible:outline
-                  focus-visible:outline-4
-                  focus-visible:outline-offset-4
-                  focus-visible:outline-yellow-300
-                  active:scale-[0.98]
-                  motion-safe:hover:-translate-y-1
-                  motion-safe:hover:bg-white/20
-                  dark:hover:bg-[#3d3d3d]
-                `}
-              >
-                <span className="text-4xl sm:text-5xl" aria-hidden="true">
-                  ⭐
-                </span>
-
-                <h3 className="mt-3 text-xl font-black sm:text-2xl">
-                  Sponsors
-                </h3>
-
-                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
-                  See who supports your local grassroots Pride.
-                </p>
-              </Link>
-            </div>
-          </motion.section>
-
-          {/* =====================================================
-              ABOUT AND VALUES
-              ===================================================== */}
-          <motion.section
-            variants={fadeUp}
-            transition={sectionTransition}
-            aria-labelledby="about-heading"
-          >
-            <div className={`${glassCardClass} p-5 sm:p-8 lg:p-10`}>
-              <div className="grid gap-8 lg:grid-cols-2 lg:items-center lg:gap-12">
-                <div>
-                  <p
-                    className="
-                      mb-3
-                      inline-flex
-                      rounded-full
-                      bg-white/20
-                      px-4
-                      py-2
-                      text-xs
-                      font-black
-                      uppercase
-                      tracking-wide
-                      text-white
-                      sm:px-5
-                      sm:text-sm
-                    "
-                  >
-                    About Burton Pride
-                  </p>
-
-                  <h2
-                    id="about-heading"
-                    className="
-                      text-balance
-                      text-3xl
-                      font-black
-                      leading-tight
-                      sm:text-5xl
-                    "
-                  >
-                    Built by the community, for the community.
-                  </h2>
-
-                  <p
-                    className="
-                      mt-5
-                      text-base
-                      leading-7
-                      text-white/90
-                      sm:text-lg
-                      sm:leading-8
-                    "
-                  >
-                    Burton Pride exists to celebrate, support and uplift
-                    LGBTQIA+ people across Burton upon Trent and surrounding
-                    areas. We believe Pride should be welcoming, visible,
-                    inclusive and accessible.
-                  </p>
-
-                  <div
-                    className="
-                      mt-7
-                      grid
-                      gap-3
-                      sm:flex
-                      sm:flex-wrap
-                      sm:gap-4
-                    "
-                  >
-                    <Link
-                      href="/about"
-                      className={`
-                        ${secondaryButtonClass}
-                        bg-white
-                        text-purple-700
-                        hover:bg-purple-100
-                        dark:bg-zinc-100
-                        dark:text-purple-800
-                        dark:hover:bg-white
-                      `}
-                    >
-                      Learn More
-                    </Link>
-
-                    <Link
-                      href="/about/OurCoreValues"
-                      className={`
-                        ${secondaryButtonClass}
-                        bg-purple-700
-                        text-white
-                        hover:bg-purple-600
-                      `}
-                    >
-                      Our Core Values
-                    </Link>
-                  </div>
-                </div>
-
-                <div className="grid gap-3">
-                  <div
-                    className="
-                      rounded-xl
-                      border
-                      border-white/10
-                      bg-white/10
-                      p-5
-                      sm:rounded-2xl
-                      dark:bg-white/[0.06]
-                    "
-                  >
-                    <h3 className="text-xl font-black">
-                      <span aria-hidden="true">🌈</span> Inclusion
-                    </h3>
-
-                    <p className="mt-2 leading-7 text-white/90">
-                      Everyone deserves to feel welcome, safe and respected.
-                    </p>
-                  </div>
-
-                  <div
-                    className="
-                      rounded-xl
-                      border
-                      border-white/10
-                      bg-white/10
-                      p-5
-                      sm:rounded-2xl
-                      dark:bg-white/[0.06]
-                    "
-                  >
-                    <h3 className="text-xl font-black">
-                      <span aria-hidden="true">💬</span> Community
-                    </h3>
-
-                    <p className="mt-2 leading-7 text-white/90">
-                      We work with local people, groups and organisations.
-                    </p>
-                  </div>
-
-                  <div
-                    className="
-                      rounded-xl
-                      border
-                      border-white/10
-                      bg-white/10
-                      p-5
-                      sm:rounded-2xl
-                      dark:bg-white/[0.06]
-                    "
-                  >
-                    <h3 className="text-xl font-black">
-                      <span aria-hidden="true">❤️</span> Equality
-                    </h3>
-
-                    <p className="mt-2 leading-7 text-white/90">
-                      We stand for LGBTQIA+ rights, safety and visibility.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </motion.section>
-
-          {/* =====================================================
-              DONATION
+              DONATION - MOVED NEAR TOP OF HOME PAGE
               ===================================================== */}
           <motion.section
             variants={fadeUp}
@@ -1283,6 +740,535 @@ export default function HomeClient() {
               </div>
             </div>
           </motion.section>
+
+          <motion.section
+            id="next-event"
+            variants={fadeUp}
+            transition={sectionTransition}
+            aria-label="Burton Pride event information"
+            className="scroll-mt-28"
+          >
+            <div className={`${glassCardClass} p-3 sm:p-5 lg:p-6`}>
+              <EventCard />
+            </div>
+          </motion.section>
+
+          <motion.section
+            variants={fadeUp}
+            transition={sectionTransition}
+            aria-labelledby="social-heading"
+          >
+            <div className={`${glassCardClass} p-6 text-center sm:p-9`}>
+              <h2
+                id="social-heading"
+                className="text-balance text-3xl font-black sm:text-4xl"
+              >
+                Follow Burton Pride
+              </h2>
+
+              <p
+                className="
+                  mx-auto
+                  mt-3
+                  max-w-2xl
+                  text-base
+                  leading-7
+                  text-white/90
+                  sm:text-lg
+                "
+              >
+                Follow us for the latest Burton Pride announcements, community updates,
+                events and ways to get involved.
+              </p>
+
+              <div
+                className="
+                  mx-auto
+                  mt-6
+                  grid
+                  max-w-5xl
+                  gap-4
+                  md:grid-cols-3
+                "
+              >
+                <a
+                  href="https://www.facebook.com/profile.php?id=61556621159422"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="
+                    group
+                    relative
+                    overflow-hidden
+                    rounded-2xl
+                    border
+                    border-white/20
+                    bg-[#1877F2]
+                    p-5
+                    text-left
+                    text-white
+                    shadow-2xl
+                    transition
+                    duration-200
+                    focus-visible:outline
+                    focus-visible:outline-4
+                    focus-visible:outline-offset-4
+                    focus-visible:outline-yellow-300
+                    active:scale-[0.98]
+                    sm:rounded-3xl
+                    sm:p-6
+                    motion-safe:hover:-translate-y-1
+                    motion-safe:hover:shadow-blue-500/30
+                  "
+                  aria-label="Visit Burton Pride on Facebook in a new tab"
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/12 via-transparent to-black/15" />
+
+                  <div className="relative flex items-center gap-4">
+                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#1877F2] shadow-xl">
+                      <FacebookIcon />
+                    </span>
+
+                    <div>
+                      <h3 className="text-2xl font-black leading-tight">Facebook</h3>
+                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
+                        News, updates and community posts
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="relative mt-5 flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
+                      Follow our page
+                    </span>
+                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
+                      Open app
+                    </span>
+                  </div>
+
+                  <span className="sr-only">, opens in a new tab</span>
+                </a>
+
+                <a
+                  href="https://www.instagram.com/prideburton/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="
+                    group
+                    relative
+                    overflow-hidden
+                    rounded-2xl
+                    border
+                    border-white/20
+                    bg-gradient-to-br
+                    from-[#F58529]
+                    via-[#DD2A7B]
+                    to-[#515BD4]
+                    p-5
+                    text-left
+                    text-white
+                    shadow-2xl
+                    transition
+                    duration-200
+                    focus-visible:outline
+                    focus-visible:outline-4
+                    focus-visible:outline-offset-4
+                    focus-visible:outline-yellow-300
+                    active:scale-[0.98]
+                    sm:rounded-3xl
+                    sm:p-6
+                    motion-safe:hover:-translate-y-1
+                    motion-safe:hover:shadow-pink-500/30
+                  "
+                  aria-label="Visit Burton Pride on Instagram in a new tab"
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/12 via-transparent to-black/15" />
+
+                  <div className="relative flex items-center gap-4">
+                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#DD2A7B] shadow-xl">
+                      <InstagramIcon />
+                    </span>
+
+                    <div>
+                      <h3 className="text-2xl font-black leading-tight">Instagram</h3>
+                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
+                        @prideburton • photos, reels and updates
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="relative mt-5 flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
+                      Follow on Instagram
+                    </span>
+                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
+                      Open app
+                    </span>
+                  </div>
+
+                  <span className="sr-only">, opens in a new tab</span>
+                </a>
+
+                <a
+                  href="https://bsky.app/profile/prideinburton.bsky.social"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="
+                    group
+                    relative
+                    overflow-hidden
+                    rounded-2xl
+                    border
+                    border-white/20
+                    bg-gradient-to-br
+                    from-[#1185FE]
+                    via-[#0A7AFF]
+                    to-[#0057D9]
+                    p-5
+                    text-left
+                    text-white
+                    shadow-2xl
+                    transition
+                    duration-200
+                    focus-visible:outline
+                    focus-visible:outline-4
+                    focus-visible:outline-offset-4
+                    focus-visible:outline-yellow-300
+                    active:scale-[0.98]
+                    sm:rounded-3xl
+                    sm:p-6
+                    motion-safe:hover:-translate-y-1
+                    motion-safe:hover:shadow-blue-400/30
+                  "
+                  aria-label="Visit Burton Pride on Bluesky in a new tab"
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 via-transparent to-black/15" />
+
+                  <div className="relative flex items-center gap-4">
+                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white text-[#1185FE] shadow-xl">
+                      <BlueskyIcon />
+                    </span>
+
+                    <div>
+                      <h3 className="text-2xl font-black leading-tight">Bluesky</h3>
+                      <p className="mt-1 text-sm font-medium text-white/90 sm:text-base">
+                        @prideinburton • updates and community posts
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="relative mt-5 flex items-center justify-between gap-3">
+                    <span className="text-sm font-bold uppercase tracking-[0.16em] text-white/85">
+                      Follow on Bluesky
+                    </span>
+                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-white backdrop-blur-md">
+                      Open app
+                    </span>
+                  </div>
+
+                  <span className="sr-only">, opens in a new tab</span>
+                </a>
+              </div>
+            </div>
+          </motion.section>
+
+       
+          <motion.section
+            id="get-involved"
+            variants={fadeUp}
+            transition={sectionTransition}
+            aria-labelledby="quick-actions-heading"
+            className="scroll-mt-28"
+          >
+            <div className="mb-5 text-center sm:mb-7">
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-yellow-300">
+                Be part of Burton Pride
+              </p>
+              <h2
+                id="quick-actions-heading"
+                className="mt-2 text-balance text-3xl font-black sm:text-4xl"
+              >
+                Get involved with your local Pride
+              </h2>
+              <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
+                Donate, volunteer or support Burton Pride as a sponsor. Every bit of
+                support helps keep Pride community-led, welcoming and free to attend.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 sm:gap-5">
+              <Link
+                href="/DonateToUs"
+                className={`
+                  ${glassCardClass}
+                  group
+                  flex
+                  min-h-40
+                  flex-col
+                  items-center
+                  justify-center
+                  p-5
+                  text-center
+                  transition-transform
+                  duration-200
+                  focus-visible:outline
+                  focus-visible:outline-4
+                  focus-visible:outline-offset-4
+                  focus-visible:outline-yellow-300
+                  active:scale-[0.98]
+                  motion-safe:hover:-translate-y-1
+                  motion-safe:hover:bg-white/20
+                  dark:hover:bg-[#3d3d3d]
+                `}
+              >
+                <span className="text-4xl sm:text-5xl" aria-hidden="true">
+                  💖
+                </span>
+
+                <h3 className="mt-3 text-xl font-black sm:text-2xl">
+                  Donate
+                </h3>
+
+                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
+                  Help keep Burton Pride free, safe and community-led.
+                </p>
+              </Link>
+
+              <Link
+                href="/JoinUS/Volunteer"
+                className={`
+                  ${glassCardClass}
+                  group
+                  flex
+                  min-h-40
+                  flex-col
+                  items-center
+                  justify-center
+                  p-5
+                  text-center
+                  transition-transform
+                  duration-200
+                  focus-visible:outline
+                  focus-visible:outline-4
+                  focus-visible:outline-offset-4
+                  focus-visible:outline-yellow-300
+                  active:scale-[0.98]
+                  motion-safe:hover:-translate-y-1
+                  motion-safe:hover:bg-white/20
+                  dark:hover:bg-[#3d3d3d]
+                `}
+              >
+                <span className="text-4xl sm:text-5xl" aria-hidden="true">
+                  💚
+                </span>
+
+                <h3 className="mt-3 text-xl font-black sm:text-2xl">
+                  Volunteer
+                </h3>
+
+                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
+                  Join the team and help make Pride happen.
+                </p>
+              </Link>
+
+              <Link
+                href="/Sponsor"
+                className={`
+                  ${glassCardClass}
+                  group
+                  flex
+                  min-h-40
+                  flex-col
+                  items-center
+                  justify-center
+                  p-5
+                  text-center
+                  transition-transform
+                  duration-200
+                  focus-visible:outline
+                  focus-visible:outline-4
+                  focus-visible:outline-offset-4
+                  focus-visible:outline-yellow-300
+                  active:scale-[0.98]
+                  motion-safe:hover:-translate-y-1
+                  motion-safe:hover:bg-white/20
+                  dark:hover:bg-[#3d3d3d]
+                `}
+              >
+                <span className="text-4xl sm:text-5xl" aria-hidden="true">
+                  ⭐
+                </span>
+
+                <h3 className="mt-3 text-xl font-black sm:text-2xl">
+                  Sponsors
+                </h3>
+
+                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
+                  See who supports your local grassroots Pride.
+                </p>
+              </Link>
+            </div>
+          </motion.section>
+          <motion.section
+            variants={fadeUp}
+            transition={sectionTransition}
+            aria-labelledby="about-heading"
+          >
+            <div className={`${glassCardClass} p-5 sm:p-8 lg:p-10`}>
+              <div className="grid gap-8 lg:grid-cols-2 lg:items-center lg:gap-12">
+                <div>
+                  <p
+                    className="
+                      mb-3
+                      inline-flex
+                      rounded-full
+                      bg-white/20
+                      px-4
+                      py-2
+                      text-xs
+                      font-black
+                      uppercase
+                      tracking-wide
+                      text-white
+                      sm:px-5
+                      sm:text-sm
+                    "
+                  >
+                    About Burton Pride
+                  </p>
+
+                  <h2
+                    id="about-heading"
+                    className="
+                      text-balance
+                      text-3xl
+                      font-black
+                      leading-tight
+                      sm:text-5xl
+                    "
+                  >
+                    Built by the community, for the community.
+                  </h2>
+
+                  <p
+                    className="
+                      mt-5
+                      text-base
+                      leading-7
+                      text-white/90
+                      sm:text-lg
+                      sm:leading-8
+                    "
+                  >
+                    Burton Pride exists to celebrate, support and uplift
+                    LGBTQIA+ people across Burton upon Trent and surrounding
+                    areas. We believe Pride should be welcoming, visible,
+                    inclusive and accessible.
+                  </p>
+
+                  <div
+                    className="
+                      mt-7
+                      grid
+                      gap-3
+                      sm:flex
+                      sm:flex-wrap
+                      sm:gap-4
+                    "
+                  >
+                    <Link
+                      href="/about"
+                      className={`
+                        ${secondaryButtonClass}
+                        bg-white
+                        text-purple-700
+                        hover:bg-purple-100
+                        dark:bg-zinc-100
+                        dark:text-purple-800
+                        dark:hover:bg-white
+                      `}
+                    >
+                      Learn More
+                    </Link>
+
+                    <Link
+                      href="/about/OurCoreValues"
+                      className={`
+                        ${secondaryButtonClass}
+                        bg-purple-700
+                        text-white
+                        hover:bg-purple-600
+                      `}
+                    >
+                      Our Core Values
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <div
+                    className="
+                      rounded-xl
+                      border
+                      border-white/10
+                      bg-white/10
+                      p-5
+                      sm:rounded-2xl
+                      dark:bg-white/[0.06]
+                    "
+                  >
+                    <h3 className="text-xl font-black">
+                      <span aria-hidden="true">🌈</span> Inclusion
+                    </h3>
+
+                    <p className="mt-2 leading-7 text-white/90">
+                      Everyone deserves to feel welcome, safe and respected.
+                    </p>
+                  </div>
+
+                  <div
+                    className="
+                      rounded-xl
+                      border
+                      border-white/10
+                      bg-white/10
+                      p-5
+                      sm:rounded-2xl
+                      dark:bg-white/[0.06]
+                    "
+                  >
+                    <h3 className="text-xl font-black">
+                      <span aria-hidden="true">💬</span> Community
+                    </h3>
+
+                    <p className="mt-2 leading-7 text-white/90">
+                      We work with local people, groups and organisations.
+                    </p>
+                  </div>
+
+                  <div
+                    className="
+                      rounded-xl
+                      border
+                      border-white/10
+                      bg-white/10
+                      p-5
+                      sm:rounded-2xl
+                      dark:bg-white/[0.06]
+                    "
+                  >
+                    <h3 className="text-xl font-black">
+                      <span aria-hidden="true">❤️</span> Equality
+                    </h3>
+
+                    <p className="mt-2 leading-7 text-white/90">
+                      We stand for LGBTQIA+ rights, safety and visibility.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.section>
+
 
           {/* =====================================================
               COMMUNITY ART

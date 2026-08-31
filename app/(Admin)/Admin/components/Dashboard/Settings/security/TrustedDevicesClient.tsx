@@ -235,7 +235,7 @@ export default function TrustedDevicesClient() {
                 </h1>
 
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-white/65">
-                  Each Burton Pride administrator can have a maximum of three
+                  Each Burton Pride administrator can have a maximum of five
                   active trusted devices. New devices must pass two-step
                   verification before they are trusted.
                 </p>
@@ -348,7 +348,7 @@ export default function TrustedDevicesClient() {
               <p className="text-xs font-black uppercase tracking-[0.16em] text-white/45">
                 Device limit
               </p>
-              <p className="mt-3 text-4xl font-black">3</p>
+              <p className="mt-3 text-4xl font-black">{data.maxDevices}</p>
               <p className="mt-2 text-sm text-white/55">
                 The database also enforces this maximum.
               </p>
@@ -360,9 +360,9 @@ export default function TrustedDevicesClient() {
               <div className="flex gap-3">
                 <ShieldX className="mt-0.5 h-6 w-6 shrink-0" />
                 <div>
-                  <p className="font-black">Three-device limit reached</p>
+                  <p className="font-black">Five-device limit reached</p>
                   <p className="mt-1 text-sm leading-6 text-amber-50/85">
-                    A fourth device cannot be trusted. Revoke one of the devices
+                    A sixth device cannot be trusted. Revoke one of the devices
                     below before signing in from another new device.
                   </p>
                 </div>

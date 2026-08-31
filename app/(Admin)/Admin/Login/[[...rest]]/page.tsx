@@ -461,7 +461,7 @@ function normaliseSecurityContext(
   const maxTrustedDevices =
     typeof value.maxTrustedDevices === "number" && value.maxTrustedDevices > 0
       ? Math.floor(value.maxTrustedDevices)
-      : 3;
+      : 5;
 
   const trustedDeviceCount =
     typeof value.trustedDeviceCount === "number" && value.trustedDeviceCount >= 0
@@ -501,7 +501,7 @@ function shouldCreateTrustedDevice(
   const maxTrustedDevices =
     typeof security.maxTrustedDevices === "number" && security.maxTrustedDevices > 0
       ? Math.floor(security.maxTrustedDevices)
-      : 3;
+      : 5;
 
   const trustedDeviceCount =
     typeof security.trustedDeviceCount === "number" &&
@@ -1275,7 +1275,7 @@ export default function LoginPage() {
             trusted_device_count:
               returnedSecurityContext.trustedDeviceCount ?? null,
             max_trusted_devices:
-              returnedSecurityContext.maxTrustedDevices ?? 3,
+              returnedSecurityContext.maxTrustedDevices ?? 5,
           },
         });
 
@@ -3131,7 +3131,7 @@ function DeviceSecurityPanel({
                 icon={Users}
                 label="Trusted devices"
                 value={`${securityContext.trustedDeviceCount} / ${
-                  securityContext.maxTrustedDevices || 3
+                  securityContext.maxTrustedDevices || 5
                 }`}
               />
             ) : null}

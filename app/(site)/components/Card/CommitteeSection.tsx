@@ -93,7 +93,7 @@ function MemberModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md sm:p-6"
+          className="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/75 p-6 backdrop-blur-md md:flex"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -105,7 +105,7 @@ function MemberModal({
             exit={{ opacity: 0, scale: 0.96, y: 20 }}
             transition={{ duration: 0.22, ease: "easeOut" as const }}
             onClick={(e) => e.stopPropagation()}
-            className="relative max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/20 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-700 p-6 text-white shadow-2xl sm:p-8"
+            className="relative max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-white/20 bg-gradient-to-br from-violet-700 via-purple-700 to-fuchsia-700 p-7 text-white shadow-2xl lg:p-9"
           >
             <button
               type="button"
@@ -193,6 +193,22 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeMember, setActiveMember] = useState<Member | null>(null);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+
+  useEffect(() => {
+    const updateDeviceMode = () => {
+      setIsMobileDevice(window.matchMedia("(max-width: 767px)").matches);
+    };
+
+    updateDeviceMode();
+
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    mediaQuery.addEventListener("change", updateDeviceMode);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateDeviceMode);
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -244,17 +260,23 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
     };
   }, [onlySection]);
 
+  useEffect(() => {
+    if (isMobileDevice && activeMember) {
+      setActiveMember(null);
+    }
+  }, [isMobileDevice, activeMember]);
+
   const sections = useMemo(() => groupMembers(members), [members]);
 
   if (loading) {
     return (
       <section className="w-full">
         <div className="mx-auto max-w-7xl">
-          <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-5 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div
                 key={i}
-                className="h-[420px] animate-pulse rounded-[28px] border border-white/15 bg-white/10"
+                className="h-[360px] animate-pulse rounded-[24px] border border-white/15 bg-white/10 sm:h-[420px] sm:rounded-[28px]"
               />
             ))}
           </div>
@@ -266,7 +288,7 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
   if (error) {
     return (
       <section className="w-full">
-        <div className="mx-auto max-w-4xl rounded-3xl border border-rose-300/30 bg-rose-500/10 px-6 py-5 text-center text-white">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-rose-300/30 bg-rose-500/10 px-4 py-4 text-center text-sm text-white sm:rounded-3xl sm:px-6 sm:py-5 sm:text-base">
           {error}
         </div>
       </section>
@@ -280,14 +302,14 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
   return (
     <>
       <section className="w-full">
-        <div className="mx-auto max-w-7xl space-y-14">
+        <div className="mx-auto max-w-7xl space-y-10 px-1 sm:space-y-14 sm:px-0">
           {sections.map((section) => (
             <div key={section.title}>
-              <h2 className="mb-8 text-center text-3xl font-bold text-black sm:text-5xl">
+              <h2 className="mb-5 px-2 text-center text-2xl font-black leading-tight text-black sm:mb-8 sm:text-4xl lg:text-5xl">
                 {section.title}
               </h2>
 
-              <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
                 {section.members.map((member, index) => (
                   <motion.article
                     key={member.id}
@@ -296,9 +318,9 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
                     whileInView="visible"
                     viewport={{ once: true, amount: 0.2 }}
                     variants={fadeUp}
-                    className="overflow-hidden rounded-[30px] border border-white/20 bg-white/10 shadow-[0_18px_45px_rgba(0,0,0,0.18)] backdrop-blur-md"
+                    className="mx-auto w-full max-w-[520px] overflow-hidden rounded-[24px] border border-white/20 bg-white/10 shadow-[0_16px_36px_rgba(0,0,0,0.16)] backdrop-blur-md sm:rounded-[30px] sm:shadow-[0_18px_45px_rgba(0,0,0,0.18)] md:max-w-none"
                   >
-                    <div className="relative h-[300px] w-full overflow-hidden">
+                    <div className="relative aspect-[4/3] w-full overflow-hidden sm:aspect-auto sm:h-[300px]">
                       <Image
                         src={member.image_url || "/image/Logo.png"}
                         alt={member.full_name}
@@ -311,50 +333,65 @@ export default function CommitteeSection({ onlySection }: CommitteeSectionProps)
                       />
                     </div>
 
-                    <div className="space-y-4 p-5 text-white">
+                    <div className="space-y-3 p-4 text-white sm:space-y-4 sm:p-5">
                       <div>
-                        <h3 className="text-2xl font-bold">
+                        <h3 className="text-xl font-black leading-tight sm:text-2xl">
                           {member.full_name}
                         </h3>
 
-                        <p className="mt-1 text-base font-semibold text-white/90">
+                        <p className="mt-1 text-sm font-semibold text-white/90 sm:text-base">
                           {member.role}
                         </p>
                       </div>
 
                       {member.pronouns && (
-                        <p className="text-sm font-medium text-white/85">
+                        <p className="text-xs font-medium text-white/85 sm:text-sm">
                           {member.pronouns}
                         </p>
                       )}
 
                       {member.email && (
-                        <div className="inline-flex max-w-full rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white/95">
+                        <div className="inline-flex max-w-full rounded-xl bg-white/10 px-3 py-2 text-xs font-medium text-white/95 sm:rounded-full sm:px-4 sm:text-sm">
                           <span className="truncate">{member.email}</span>
                         </div>
                       )}
 
-                      <div className="flex flex-col gap-3 pt-2">
+                      <div className="flex flex-col gap-2.5 pt-2 sm:gap-3">
                         <Link
                           href={`/team/${slugifyName(member.full_name)}`}
-                          className="inline-flex items-center justify-center rounded-full border border-white/25 bg-white/10 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/20"
+                          className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/25 bg-white/10 px-5 py-3 text-sm font-black text-white transition active:scale-[0.99] hover:bg-white/20 sm:rounded-full sm:px-6"
                         >
                           View Profile
                         </Link>
 
                         {member.story ? (
-                          <button
-                            type="button"
-                            onClick={() => setActiveMember(member)}
-                            className="inline-flex items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-pink-700"
-                          >
-                            Read Story
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!isMobileDevice) {
+                                  setActiveMember(member);
+                                }
+                              }}
+                              className="hidden min-h-12 items-center justify-center rounded-full bg-pink-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-pink-700 md:inline-flex"
+                            >
+                              Read Story
+                            </button>
+
+                            <div className="rounded-2xl border border-white/15 bg-black/15 px-4 py-3 text-center md:hidden">
+                              <p className="text-sm font-bold text-white/85">
+                                Story available on larger screens
+                              </p>
+                              <p className="mt-1 text-xs leading-5 text-white/60">
+                                Use View Profile on mobile to see this committee member.
+                              </p>
+                            </div>
+                          </>
                         ) : (
                           <button
                             type="button"
                             disabled
-                            className="inline-flex cursor-not-allowed items-center justify-center rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white/60"
+                            className="inline-flex min-h-12 cursor-not-allowed items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white/60 sm:rounded-full"
                           >
                             Story Coming Soon
                           </button>

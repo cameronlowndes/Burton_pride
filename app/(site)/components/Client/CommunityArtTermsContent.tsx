@@ -240,13 +240,13 @@ const TERMS_DOWNLOAD_URL =
 
 export default function CommunityArtTermsContent() {
   return (
-    <main className="min-h-screen bg-transparent px-4 pb-16 pt-24 text-white sm:px-7 sm:pt-28 lg:px-10">
+    <main className="min-h-screen bg-transparent px-3 pb-14 pt-20 text-white sm:px-7 sm:pb-16 sm:pt-28 lg:px-10">
       <div className="mx-auto w-full max-w-5xl">
         <motion.header
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55 }}
-          className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-black/20 p-6 shadow-2xl backdrop-blur-md sm:p-10"
+          className="relative overflow-hidden rounded-[1.5rem] border border-white/20 bg-black/20 p-4 shadow-2xl backdrop-blur-md sm:rounded-[2rem] sm:p-10"
         >
           <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-pink-500/30 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 -right-20 h-72 w-72 rounded-full bg-blue-500/30 blur-3xl" />
@@ -254,36 +254,36 @@ export default function CommunityArtTermsContent() {
           <div className="relative">
             <Link
               href="/CommunityArt"
-              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white hover:text-purple-800"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-black text-white transition active:scale-[0.99] hover:bg-white hover:text-purple-800 sm:w-auto sm:rounded-full"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Back to Community Art
             </Link>
 
-            <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-yellow-300 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-purple-950">
+            <div className="mt-5 inline-flex max-w-full items-center gap-2 rounded-xl bg-yellow-300 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-purple-950 sm:mt-6 sm:rounded-full sm:px-4 sm:text-xs sm:tracking-[0.14em]">
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
               Artist protection
             </div>
 
-            <h1 className="mt-5 text-4xl font-black tracking-tight sm:text-6xl">
+            <h1 className="mt-4 text-[2rem] font-black leading-[1.05] tracking-tight sm:mt-5 sm:text-6xl">
               Burton Pride Community Art
             </h1>
-            <h2 className="mt-2 text-2xl font-black text-yellow-300 sm:text-4xl">
+            <h2 className="mt-2 text-xl font-black leading-tight text-yellow-300 sm:text-4xl">
               Artist Protection Terms and Conditions
             </h2>
 
-            <p className="mt-5 max-w-3xl text-lg font-semibold leading-8 text-white/90">
+            <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-white/90 sm:mt-5 sm:text-lg sm:leading-8">
               An LGBTQIA+ creative space created by the community, for the community.
             </p>
           </div>
         </motion.header>
 
-        <section className="mt-7 rounded-3xl border border-emerald-300/40 bg-emerald-500/15 p-6 shadow-lg backdrop-blur-md sm:p-8">
-          <div className="flex items-start gap-4">
-            <ShieldCheck className="mt-1 h-9 w-9 shrink-0 text-emerald-300" aria-hidden="true" />
+        <section className="mt-6 rounded-2xl border border-emerald-300/40 bg-emerald-500/15 p-4 shadow-lg backdrop-blur-md sm:mt-7 sm:rounded-3xl sm:p-8">
+          <div className="flex items-start gap-3 sm:gap-4">
+            <ShieldCheck className="mt-0.5 h-7 w-7 shrink-0 text-emerald-300 sm:mt-1 sm:h-9 sm:w-9" aria-hidden="true" />
             <div>
-              <h2 className="text-2xl font-black sm:text-3xl">Our commitment to artists</h2>
-              <p className="mt-3 leading-7 text-white/90">
+              <h2 className="text-xl font-black leading-tight sm:text-3xl">Our commitment to artists</h2>
+              <p className="mt-3 text-sm leading-6 text-white/90 sm:text-base sm:leading-7">
                 Artists keep ownership and copyright of their work. Burton Pride only receives the limited permission needed to display and promote approved submissions. Artists may request removal, choose how they are credited and challenge decisions fairly.
               </p>
             </div>
@@ -291,19 +291,19 @@ export default function CommunityArtTermsContent() {
         </section>
 
         <section
-          className="mt-7 overflow-hidden rounded-3xl border border-yellow-300/50 bg-yellow-300/10 shadow-lg backdrop-blur-md"
+          className="mt-6 overflow-hidden rounded-2xl border border-yellow-300/50 bg-yellow-300/10 shadow-lg backdrop-blur-md sm:mt-7 sm:rounded-3xl"
           aria-labelledby="download-terms-heading"
         >
-          <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div className="grid gap-5 p-4 sm:gap-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-4 py-2 text-xs font-black uppercase tracking-[0.12em] text-purple-950">
+              <div className="inline-flex max-w-full items-center gap-2 rounded-xl bg-yellow-300 px-3 py-2 text-[11px] font-black uppercase tracking-[0.1em] text-purple-950 sm:rounded-full sm:px-4 sm:text-xs sm:tracking-[0.12em]">
                 <FileCheck2 className="h-4 w-4" aria-hidden="true" />
                 Official document
               </div>
 
               <h2
                 id="download-terms-heading"
-                className="mt-4 text-3xl font-black sm:text-4xl"
+                className="mt-4 text-2xl font-black leading-tight sm:text-4xl"
               >
                 Download these terms
               </h2>
@@ -314,7 +314,7 @@ export default function CommunityArtTermsContent() {
                 provided for reading, reference and record keeping.
               </p>
 
-              <div className="mt-4 rounded-2xl border border-amber-300/45 bg-amber-300/10 p-4">
+              <div className="mt-4 rounded-xl border border-amber-300/45 bg-amber-300/10 p-3 sm:rounded-2xl sm:p-4">
                 <div className="flex items-start gap-3">
                   <AlertTriangle
                     className="mt-0.5 h-6 w-6 shrink-0 text-amber-300"
@@ -333,7 +333,7 @@ export default function CommunityArtTermsContent() {
             <a
               href={TERMS_DOWNLOAD_URL}
               download="Burton_Pride_Community_Art_Terms_and_Conditions.pdf"
-              className="inline-flex w-full items-center justify-center gap-3 rounded-full bg-yellow-300 px-7 py-4 text-lg font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white lg:w-auto"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-yellow-300 px-5 py-3 text-base font-black text-purple-950 shadow-lg transition active:scale-[0.99] hover:-translate-y-0.5 hover:bg-white sm:gap-3 sm:rounded-full sm:px-7 sm:py-4 sm:text-lg lg:w-auto"
               aria-label="Download the official Burton Pride Community Art Artist Protection Terms and Conditions PDF"
             >
               <Download className="h-6 w-6" aria-hidden="true" />
@@ -342,13 +342,13 @@ export default function CommunityArtTermsContent() {
           </div>
         </section>
 
-        <section className="mt-7 rounded-3xl border border-white/20 bg-black/20 p-6 shadow-lg backdrop-blur-md sm:p-8">
-          <p className="leading-8 text-white/90">
+        <section className="mt-6 rounded-2xl border border-white/20 bg-black/20 p-4 shadow-lg backdrop-blur-md sm:mt-7 sm:rounded-3xl sm:p-8">
+          <p className="text-sm leading-6 text-white/90 sm:text-base sm:leading-8">
             Welcome to the Burton Pride Community Art page. This page celebrates original artwork made by real people and provides a respectful, inclusive and safer place for LGBTQIA+ artists, community members and allies to share creativity, experiences and stories. Burton Pride is committed to protecting artists, respecting their ownership and using artwork only within the permissions clearly given by the artist.
           </p>
         </section>
 
-        <div className="mt-7 space-y-5">
+        <div className="mt-6 space-y-4 sm:mt-7 sm:space-y-5">
           {sections.map(({ title, icon: Icon, content }, index) => (
             <motion.section
               key={title}
@@ -356,18 +356,18 @@ export default function CommunityArtTermsContent() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-70px" }}
               transition={{ duration: 0.4, delay: Math.min(index * 0.015, 0.15) }}
-              className="rounded-3xl border border-white/20 bg-black/20 p-5 shadow-lg backdrop-blur-md sm:p-7"
+              className="rounded-2xl border border-white/20 bg-black/20 p-4 shadow-lg backdrop-blur-md sm:rounded-3xl sm:p-7"
             >
-              <div className="flex items-start gap-4">
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-yellow-300 text-purple-950 shadow-md">
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-yellow-300 text-purple-950 shadow-md sm:h-12 sm:w-12 sm:rounded-2xl">
                   <Icon className="h-6 w-6" aria-hidden="true" />
                 </div>
 
                 <div className="min-w-0">
-                  <h2 className="text-2xl font-black">{title}</h2>
-                  <div className="mt-4 space-y-3">
+                  <h2 className="text-xl font-black leading-tight sm:text-2xl">{title}</h2>
+                  <div className="mt-3 space-y-2.5 sm:mt-4 sm:space-y-3">
                     {content.map((paragraph) => (
-                      <p key={paragraph} className="leading-7 text-white/85">
+                      <p key={paragraph} className="text-sm leading-6 text-white/85 sm:text-base sm:leading-7">
                         {paragraph}
                       </p>
                     ))}
@@ -378,13 +378,13 @@ export default function CommunityArtTermsContent() {
           ))}
         </div>
 
-        <section className="mt-8 overflow-hidden rounded-3xl border border-white/20 bg-black/20 shadow-lg backdrop-blur-md">
-          <div className="border-b border-white/15 bg-white/10 p-6 sm:p-8">
-            <div className="flex items-start gap-4">
-              <ClipboardCheck className="mt-1 h-9 w-9 shrink-0 text-yellow-300" aria-hidden="true" />
+        <section className="mt-7 overflow-hidden rounded-2xl border border-white/20 bg-black/20 shadow-lg backdrop-blur-md sm:mt-8 sm:rounded-3xl">
+          <div className="border-b border-white/15 bg-white/10 p-4 sm:p-8">
+            <div className="flex items-start gap-3 sm:gap-4">
+              <ClipboardCheck className="mt-0.5 h-7 w-7 shrink-0 text-yellow-300 sm:mt-1 sm:h-9 sm:w-9" aria-hidden="true" />
               <div>
-                <h2 className="text-3xl font-black">Artist Submission Checklist</h2>
-                <p className="mt-2 text-white/80">
+                <h2 className="text-2xl font-black leading-tight sm:text-3xl">Artist Submission Checklist</h2>
+                <p className="mt-2 text-sm leading-6 text-white/80 sm:text-base">
                   Before submitting artwork, the artist should confirm each of the following points.
                 </p>
               </div>
@@ -393,28 +393,28 @@ export default function CommunityArtTermsContent() {
 
           <div className="divide-y divide-white/10">
             {checklist.map((item) => (
-              <div key={item.area} className="grid gap-3 p-5 sm:grid-cols-[42px_150px_1fr] sm:items-start sm:p-6">
+              <div key={item.area} className="grid gap-2.5 p-4 sm:grid-cols-[42px_150px_1fr] sm:items-start sm:gap-3 sm:p-6">
                 <div className="grid h-8 w-8 place-items-center rounded-lg border-2 border-white/50 text-sm font-black" aria-hidden="true">
                   ✓
                 </div>
                 <p className="font-black text-yellow-300">{item.area}</p>
-                <p className="leading-7 text-white/85">{item.confirmation}</p>
+                <p className="text-sm leading-6 text-white/85 sm:text-base sm:leading-7">{item.confirmation}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="mt-8 rounded-3xl border border-blue-300/35 bg-blue-500/10 p-6 shadow-lg backdrop-blur-md sm:p-8">
-          <div className="flex items-start gap-4">
-            <Mail className="mt-1 h-9 w-9 shrink-0 text-blue-200" aria-hidden="true" />
+        <section className="mt-7 rounded-2xl border border-blue-300/35 bg-blue-500/10 p-4 shadow-lg backdrop-blur-md sm:mt-8 sm:rounded-3xl sm:p-8">
+          <div className="flex items-start gap-3 sm:gap-4">
+            <Mail className="mt-0.5 h-7 w-7 shrink-0 text-blue-200 sm:mt-1 sm:h-9 sm:w-9" aria-hidden="true" />
             <div>
-              <h2 className="text-3xl font-black">Contact and Removal Requests</h2>
-              <p className="mt-3 leading-7 text-white/90">
+              <h2 className="text-2xl font-black leading-tight sm:text-3xl">Contact and Removal Requests</h2>
+              <p className="mt-3 text-sm leading-6 text-white/90 sm:text-base sm:leading-7">
                 Artists may contact Burton Pride to ask a question, challenge a decision, update their details or request removal of their artwork. Contact details should be published alongside this document on the Burton Pride website or submission form.
               </p>
               <a
                 href="mailto:Info@burtonpride.co.uk?subject=Community%20Art%20Enquiry"
-                className="mt-5 inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 font-black text-blue-800 transition hover:bg-blue-50"
+                className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-blue-800 transition active:scale-[0.99] hover:bg-blue-50 sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
               >
                 <Mail className="h-5 w-5" aria-hidden="true" />
                 Email Burton Pride
@@ -423,24 +423,24 @@ export default function CommunityArtTermsContent() {
           </div>
         </section>
 
-        <section className="mt-8 rounded-3xl border border-white/20 bg-black/20 p-6 shadow-lg backdrop-blur-md sm:p-8">
+        <section className="mt-7 rounded-2xl border border-white/20 bg-black/20 p-4 shadow-lg backdrop-blur-md sm:mt-8 sm:rounded-3xl sm:p-8">
           <dl className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Document owner</dt>
+            <div className="rounded-xl bg-white/10 p-3.5 sm:rounded-2xl sm:p-4">
+              <dt className="text-[11px] font-black uppercase tracking-wider text-white/60 sm:text-xs">Document owner</dt>
               <dd className="mt-2 font-black">Burton Pride C.I.C.</dd>
             </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Version</dt>
+            <div className="rounded-xl bg-white/10 p-3.5 sm:rounded-2xl sm:p-4">
+              <dt className="text-[11px] font-black uppercase tracking-wider text-white/60 sm:text-xs">Version</dt>
               <dd className="mt-2 font-black">1.0</dd>
             </div>
-            <div className="rounded-2xl bg-white/10 p-4">
-              <dt className="text-xs font-black uppercase tracking-wider text-white/60">Last reviewed</dt>
+            <div className="rounded-xl bg-white/10 p-3.5 sm:rounded-2xl sm:p-4">
+              <dt className="text-[11px] font-black uppercase tracking-wider text-white/60 sm:text-xs">Last reviewed</dt>
               <dd className="mt-2 font-black">July 2026</dd>
             </div>
           </dl>
         </section>
 
-        <section className="mt-7 rounded-3xl border border-amber-300/40 bg-amber-300/10 p-5 shadow-lg backdrop-blur-md sm:p-6">
+        <section className="mt-6 rounded-2xl border border-amber-300/40 bg-amber-300/10 p-4 shadow-lg backdrop-blur-md sm:mt-7 sm:rounded-3xl sm:p-6">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-1 h-6 w-6 shrink-0 text-amber-300" aria-hidden="true" />
             <p className="leading-7 text-white/90">
@@ -449,17 +449,17 @@ export default function CommunityArtTermsContent() {
           </div>
         </section>
 
-        <section className="mt-7 rounded-3xl border border-emerald-300/40 bg-emerald-500/15 p-6 text-center shadow-lg backdrop-blur-md sm:p-8">
-          <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-300" aria-hidden="true" />
-          <h2 className="mt-4 text-3xl font-black">Agreement</h2>
+        <section className="mt-6 rounded-2xl border border-emerald-300/40 bg-emerald-500/15 p-4 text-center shadow-lg backdrop-blur-md sm:mt-7 sm:rounded-3xl sm:p-8">
+          <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-300 sm:h-12 sm:w-12" aria-hidden="true" />
+          <h2 className="mt-4 text-2xl font-black sm:text-3xl">Agreement</h2>
           <p className="mx-auto mt-3 max-w-3xl leading-7 text-white/90">
             By submitting artwork, the artist confirms that they have read and understood these terms and that they have the right to submit the work. The artist keeps full ownership of their artwork and gives Burton Pride only the limited permissions clearly described in this document.
           </p>
 
-          <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center">
             <Link
               href="/CommunityArt?submit=1"
-              className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-6 py-3 font-black text-purple-950 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-yellow-300 px-5 py-3 text-sm font-black text-purple-950 shadow-lg transition active:scale-[0.99] hover:-translate-y-0.5 hover:bg-white sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
             >
               <ImageIcon className="h-5 w-5" aria-hidden="true" />
               Submit artwork
@@ -467,7 +467,7 @@ export default function CommunityArtTermsContent() {
 
             <Link
               href="/CommunityArt"
-              className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-6 py-3 font-black text-white transition hover:bg-white hover:text-purple-800"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-5 py-3 text-sm font-black text-white transition active:scale-[0.99] hover:bg-white hover:text-purple-800 sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
             >
               <Heart className="h-5 w-5" aria-hidden="true" />
               View the gallery
@@ -476,7 +476,7 @@ export default function CommunityArtTermsContent() {
             <a
               href={TERMS_DOWNLOAD_URL}
               download="Burton_Pride_Community_Art_Terms_and_Conditions.pdf"
-              className="inline-flex items-center gap-2 rounded-full border border-yellow-300/60 bg-yellow-300/10 px-6 py-3 font-black text-yellow-200 transition hover:bg-yellow-300 hover:text-purple-950"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-yellow-300/60 bg-yellow-300/10 px-5 py-3 text-sm font-black text-yellow-200 transition active:scale-[0.99] hover:bg-yellow-300 hover:text-purple-950 sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
             >
               <Download className="h-5 w-5" aria-hidden="true" />
               Download terms
