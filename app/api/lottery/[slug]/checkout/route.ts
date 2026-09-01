@@ -4,6 +4,7 @@ import {
 } from "next/server";
 
 import Stripe from "stripe";
+import { Resend } from "resend";
 
 import {
   supabaseAdmin,
@@ -24,6 +25,11 @@ type RouteContext = {
 const stripe =
   new Stripe(
     process.env.STRIPE_SECRET_KEY!,
+  );
+
+const resend =
+  new Resend(
+    process.env.RESEND_API_KEY,
   );
 
 function response(
@@ -60,6 +66,1462 @@ function createOrderReference() {
     )
     .toUpperCase()}`;
 }
+
+
+const LOTTERY_FROM_EMAIL =
+  "Burton Pride Lotteries <Lotteries@burtonpride.co.uk>";
+
+const LOTTERY_INFO_EMAIL =
+  "info@burtonpride.co.uk";
+
+type PaidOrder = {
+  id: string;
+  lottery_id: string;
+  order_reference: string;
+  purchaser_name: string;
+  purchaser_email: string;
+  purchaser_phone: string | null;
+  quantity: number;
+  total_amount: number;
+  currency: string;
+  payment_status: string;
+  payment_reference: string | null;
+};
+
+type LotteryForEmail = {
+  id: string;
+  title: string;
+  slug: string;
+  draw_at: string | null;
+  max_tickets: number | null;
+};
+
+type TicketForEmail = {
+  id: string;
+  ticket_number: string;
+  status: string;
+  issued_at: string | null;
+};
+
+function escapeHtml(
+  value: unknown,
+) {
+  return String(
+    value ?? "",
+  )
+    .replaceAll(
+      "&",
+      "&amp;",
+    )
+    .replaceAll(
+      "<",
+      "&lt;",
+    )
+    .replaceAll(
+      ">",
+      "&gt;",
+    )
+    .replaceAll(
+      '"',
+      "&quot;",
+    )
+    .replaceAll(
+      "'",
+      "&#039;",
+    );
+}
+
+function formatMoney(
+  value: number,
+  currency = "GBP",
+) {
+  return new Intl.NumberFormat(
+    "en-GB",
+    {
+      style: "currency",
+      currency:
+        currency || "GBP",
+    },
+  ).format(
+    Number(
+      value || 0,
+    ),
+  );
+}
+
+function formatDateTime(
+  value:
+    | string
+    | null,
+) {
+  if (!value) {
+    return "To be confirmed";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleString(
+    "en-GB",
+    {
+      weekday:
+        "long",
+      day:
+        "numeric",
+      month:
+        "long",
+      year:
+        "numeric",
+      hour:
+        "2-digit",
+      minute:
+        "2-digit",
+      timeZone:
+        "Europe/London",
+    },
+  );
+}
+
+
+function parseNumericTicketNumber(
+  value: unknown,
+) {
+  const text =
+    String(
+      value ?? "",
+    ).trim();
+
+  if (
+    !/^[1-9][0-9]*$/.test(
+      text,
+    )
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(
+      text,
+    );
+
+  return Number.isSafeInteger(
+    number,
+  )
+    ? number
+    : null;
+}
+
+async function getUsedNumericTicketNumbers(
+  lotteryId: string,
+) {
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_tickets",
+      )
+      .select(
+        "ticket_number",
+      )
+      .eq(
+        "lottery_id",
+        lotteryId,
+      );
+
+  if (
+    error
+  ) {
+    throw new Error(
+      `Unable to load used lottery numbers: ${error.message}`,
+    );
+  }
+
+  const used =
+    new Set<number>();
+
+  for (
+    const row of
+    data || []
+  ) {
+    const number =
+      parseNumericTicketNumber(
+        row.ticket_number,
+      );
+
+    if (
+      number !==
+      null
+    ) {
+      used.add(
+        number,
+      );
+    }
+  }
+
+  return used;
+}
+
+function getNextNumericTicketNumber(
+  used: Set<number>,
+  maxTickets: number,
+) {
+  for (
+    let number = 1;
+    number <= maxTickets;
+    number += 1
+  ) {
+    if (
+      !used.has(
+        number,
+      )
+    ) {
+      return number;
+    }
+  }
+
+  return null;
+}
+
+
+async function sendLotteryEmail({
+  to,
+  subject,
+  html,
+  text,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}) {
+  const apiKey =
+    process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "RESEND_API_KEY is not configured.",
+    );
+  }
+
+  const {
+    data,
+    error,
+  } =
+    await resend.emails.send({
+      from:
+        LOTTERY_FROM_EMAIL,
+
+      to: [
+        to,
+      ],
+
+      subject,
+
+      html,
+
+      text,
+
+      replyTo:
+        LOTTERY_INFO_EMAIL,
+    });
+
+  if (error) {
+    throw new Error(
+      error.message ||
+        "Resend rejected the lottery email.",
+    );
+  }
+
+  return data;
+}
+
+async function notificationAlreadySent(
+  orderId: string,
+  notificationType: string,
+  recipient: string,
+) {
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_notifications",
+      )
+      .select(
+        "id,status",
+      )
+      .eq(
+        "order_id",
+        orderId,
+      )
+      .eq(
+        "notification_type",
+        notificationType,
+      )
+      .eq(
+        "recipient",
+        recipient,
+      )
+      .eq(
+        "status",
+        "sent",
+      )
+      .limit(1);
+
+  if (error) {
+    console.error(
+      "Lottery notification history lookup failed:",
+      error,
+    );
+
+    return false;
+  }
+
+  return Boolean(
+    data?.length,
+  );
+}
+
+async function recordLotteryNotification({
+  orderId,
+  notificationType,
+  recipient,
+  status,
+  errorMessage = null,
+}: {
+  orderId: string;
+  notificationType: string;
+  recipient: string;
+  status:
+    | "sent"
+    | "failed";
+  errorMessage?:
+    | string
+    | null;
+}) {
+  const now =
+    new Date()
+      .toISOString();
+
+  const {
+    error,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_notifications",
+      )
+      .insert({
+        order_id:
+          orderId,
+
+        notification_type:
+          notificationType,
+
+        recipient,
+
+        status,
+
+        sent_at:
+          status === "sent"
+            ? now
+            : null,
+
+        failed_at:
+          status === "failed"
+            ? now
+            : null,
+
+        error_message:
+          errorMessage,
+      });
+
+  if (error) {
+    console.error(
+      "Lottery notification history insert failed:",
+      error,
+    );
+  }
+}
+
+async function issueLotteryTickets(
+  order: PaidOrder,
+  lottery: LotteryForEmail,
+) {
+  const {
+    data:
+      existingTickets,
+    error:
+      existingTicketsError,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_tickets",
+      )
+      .select(
+        "id,ticket_number,status,issued_at",
+      )
+      .eq(
+        "order_id",
+        order.id,
+      )
+      .order(
+        "issued_at",
+        {
+          ascending:
+            true,
+        },
+      );
+
+  if (
+    existingTicketsError
+  ) {
+    throw new Error(
+      `Unable to load existing tickets: ${existingTicketsError.message}`,
+    );
+  }
+
+  const tickets: TicketForEmail[] =
+    [
+      ...(
+        existingTickets ??
+        []
+      ),
+    ];
+
+  const maxTickets =
+    Math.floor(
+      Number(
+        lottery.max_tickets ||
+        0,
+      ),
+    );
+
+  if (
+    !Number.isFinite(
+      maxTickets,
+    ) ||
+    maxTickets < 1
+  ) {
+    throw new Error(
+      "This lottery does not have a valid maximum ticket number.",
+    );
+  }
+
+  const missing =
+    Math.max(
+      0,
+      Number(
+        order.quantity ||
+        0,
+      ) -
+        tickets.length,
+    );
+
+  if (
+    missing ===
+    0
+  ) {
+    return tickets;
+  }
+
+  const used =
+    await getUsedNumericTicketNumbers(
+      order.lottery_id,
+    );
+
+  for (
+    let index = 0;
+    index < missing;
+    index += 1
+  ) {
+    let created:
+      | TicketForEmail
+      | null =
+      null;
+
+    /*
+     * A composite unique index on:
+     *
+     *   (lottery_id, ticket_number)
+     *
+     * protects against two checkout requests selecting the
+     * same number at the same time.
+     */
+    for (
+      let attempt = 0;
+      attempt < maxTickets;
+      attempt += 1
+    ) {
+      const nextNumber =
+        getNextNumericTicketNumber(
+          used,
+          maxTickets,
+        );
+
+      if (
+        nextNumber ===
+        null
+      ) {
+        throw new Error(
+          "No lottery numbers are available. This lottery is sold out.",
+        );
+      }
+
+      const ticketNumber =
+        String(
+          nextNumber,
+        );
+
+      const {
+        data:
+          insertedTicket,
+        error:
+          insertError,
+      } =
+        await supabaseAdmin
+          .from(
+            "lottery_tickets",
+          )
+          .insert({
+            lottery_id:
+              order.lottery_id,
+
+            order_id:
+              order.id,
+
+            ticket_number:
+              ticketNumber,
+
+            status:
+              "issued",
+
+            issued_at:
+              new Date()
+                .toISOString(),
+          })
+          .select(
+            "id,ticket_number,status,issued_at",
+          )
+          .single();
+
+      if (
+        !insertError &&
+        insertedTicket
+      ) {
+        created =
+          insertedTicket as TicketForEmail;
+
+        used.add(
+          nextNumber,
+        );
+
+        break;
+      }
+
+      if (
+        insertError?.code ===
+        "23505"
+      ) {
+        /*
+         * Another request used this number first.
+         * Mark it as unavailable locally and try the next number.
+         */
+        used.add(
+          nextNumber,
+        );
+
+        continue;
+      }
+
+      throw new Error(
+        `Unable to issue lottery ticket: ${
+          insertError?.message ||
+          "Unknown database error"
+        }`,
+      );
+    }
+
+    if (
+      !created
+    ) {
+      throw new Error(
+        "Unable to allocate an available numeric lottery number.",
+      );
+    }
+
+    tickets.push(
+      created,
+    );
+  }
+
+  return tickets;
+}
+
+function ticketNumbersHtml(
+  tickets: TicketForEmail[],
+) {
+  return tickets
+    .map(
+      (
+        ticket,
+      ) =>
+        `<div style="margin:8px 0;padding:12px 14px;border-radius:10px;background:#f3e8ff;color:#581c87;font-size:18px;font-weight:800;letter-spacing:.04em;">${escapeHtml(
+          ticket.ticket_number,
+        )}</div>`,
+    )
+    .join("");
+}
+
+function ticketNumbersText(
+  tickets: TicketForEmail[],
+) {
+  return tickets
+    .map(
+      (
+        ticket,
+      ) =>
+        `- ${ticket.ticket_number}`,
+    )
+    .join("\n");
+}
+
+function customerEmailHtml({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: PaidOrder;
+  lottery: LotteryForEmail;
+  tickets: TicketForEmail[];
+}) {
+  return `
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#172033;">
+    <div style="max-width:640px;margin:0 auto;padding:30px 18px;">
+      <div style="overflow:hidden;border-radius:22px;background:#ffffff;border:1px solid #e2e8f0;">
+        <div style="padding:30px;background:linear-gradient(135deg,#ec4899,#7c3aed,#2563eb);color:#ffffff;text-align:center;">
+          <div style="font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#fde68a;">Burton Pride Lottery</div>
+          <h1 style="margin:10px 0 0;font-size:30px;line-height:1.2;">You have been entered into the lottery</h1>
+        </div>
+
+        <div style="padding:30px;">
+          <p style="margin-top:0;font-size:17px;line-height:1.7;">
+            Hello <strong>${escapeHtml(
+              order.purchaser_name,
+            )}</strong>,
+          </p>
+
+          <p style="font-size:16px;line-height:1.7;">
+            Thank you for supporting Burton Pride. Your payment has been confirmed and your entry into
+            <strong>${escapeHtml(
+              lottery.title,
+            )}</strong> is complete.
+          </p>
+
+          <h2 style="margin:28px 0 10px;font-size:20px;">Your lottery number${tickets.length === 1 ? "" : "s"}</h2>
+
+          ${ticketNumbersHtml(
+            tickets,
+          )}
+
+          <div style="margin-top:28px;padding:18px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0;">
+            <p style="margin:0 0 8px;"><strong>Order reference:</strong> ${escapeHtml(
+              order.order_reference,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Lottery:</strong> ${escapeHtml(
+              lottery.title,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Tickets:</strong> ${escapeHtml(
+              order.quantity,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Amount paid:</strong> ${escapeHtml(
+              formatMoney(
+                order.total_amount,
+                order.currency,
+              ),
+            )}</p>
+            <p style="margin:0;"><strong>Draw:</strong> ${escapeHtml(
+              formatDateTime(
+                lottery.draw_at,
+              ),
+            )}</p>
+          </div>
+
+          <p style="margin:26px 0 0;font-size:15px;line-height:1.7;color:#475569;">
+            Please keep this email safe until the draw has taken place. If you purchased more than one
+            ticket, every number shown above is one separate entry.
+          </p>
+
+          <p style="margin:22px 0 0;font-size:15px;line-height:1.7;color:#475569;">
+            Good luck, and thank you for supporting Burton Pride.
+          </p>
+        </div>
+      </div>
+
+      <p style="margin:18px 0 0;text-align:center;font-size:12px;line-height:1.6;color:#64748b;">
+        This is an automated lottery confirmation from Burton Pride.
+      </p>
+    </div>
+  </body>
+</html>`;
+}
+
+function customerEmailText({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: PaidOrder;
+  lottery: LotteryForEmail;
+  tickets: TicketForEmail[];
+}) {
+  return `BURTON PRIDE LOTTERY
+
+Hello ${order.purchaser_name},
+
+You have been entered into the lottery.
+
+Thank you for supporting Burton Pride. Your payment has been confirmed and your entry into ${lottery.title} is complete.
+
+Your lottery number${tickets.length === 1 ? "" : "s"}:
+${ticketNumbersText(
+  tickets,
+)}
+
+Order reference: ${order.order_reference}
+Lottery: ${lottery.title}
+Tickets: ${order.quantity}
+Amount paid: ${formatMoney(
+    order.total_amount,
+    order.currency,
+  )}
+Draw: ${formatDateTime(
+    lottery.draw_at,
+  )}
+
+Please keep this email safe until the draw has taken place.
+
+Good luck,
+Burton Pride`;
+}
+
+function internalEmailHtml({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: PaidOrder;
+  lottery: LotteryForEmail;
+  tickets: TicketForEmail[];
+}) {
+  return `
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#172033;">
+    <div style="max-width:680px;margin:0 auto;padding:30px 18px;">
+      <div style="overflow:hidden;border-radius:22px;background:#ffffff;border:1px solid #e2e8f0;">
+        <div style="padding:26px 30px;background:#1e1b4b;color:#ffffff;">
+          <div style="font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#fde68a;">Lottery Entry Notification</div>
+          <h1 style="margin:9px 0 0;font-size:28px;">A paid lottery entry has been received</h1>
+        </div>
+
+        <div style="padding:30px;">
+          <p style="margin-top:0;font-size:16px;line-height:1.7;">
+            A customer has successfully paid and has been issued their lottery number${tickets.length === 1 ? "" : "s"}.
+          </p>
+
+          <div style="margin-top:22px;padding:18px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0;">
+            <p style="margin:0 0 8px;"><strong>Name:</strong> ${escapeHtml(
+              order.purchaser_name,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(
+              order.purchaser_email,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Phone:</strong> ${escapeHtml(
+              order.purchaser_phone ||
+                "Not provided",
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Lottery:</strong> ${escapeHtml(
+              lottery.title,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Order reference:</strong> ${escapeHtml(
+              order.order_reference,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Tickets purchased:</strong> ${escapeHtml(
+              order.quantity,
+            )}</p>
+            <p style="margin:0 0 8px;"><strong>Amount paid:</strong> ${escapeHtml(
+              formatMoney(
+                order.total_amount,
+                order.currency,
+              ),
+            )}</p>
+            <p style="margin:0;"><strong>Draw:</strong> ${escapeHtml(
+              formatDateTime(
+                lottery.draw_at,
+              ),
+            )}</p>
+          </div>
+
+          <h2 style="margin:28px 0 10px;font-size:20px;">Issued lottery number${tickets.length === 1 ? "" : "s"}</h2>
+
+          ${ticketNumbersHtml(
+            tickets,
+          )}
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+}
+
+function internalEmailText({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: PaidOrder;
+  lottery: LotteryForEmail;
+  tickets: TicketForEmail[];
+}) {
+  return `BURTON PRIDE LOTTERY ENTRY NOTIFICATION
+
+A paid lottery entry has been received.
+
+Name: ${order.purchaser_name}
+Email: ${order.purchaser_email}
+Phone: ${order.purchaser_phone || "Not provided"}
+Lottery: ${lottery.title}
+Order reference: ${order.order_reference}
+Tickets purchased: ${order.quantity}
+Amount paid: ${formatMoney(
+    order.total_amount,
+    order.currency,
+  )}
+Draw: ${formatDateTime(
+    lottery.draw_at,
+  )}
+
+Issued lottery number${tickets.length === 1 ? "" : "s"}:
+${ticketNumbersText(
+    tickets,
+  )}`;
+}
+
+async function sendPaidEntryEmails({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: PaidOrder;
+  lottery: LotteryForEmail;
+  tickets: TicketForEmail[];
+}) {
+  const results = {
+    customer:
+      "skipped",
+    internal:
+      "skipped",
+  } as {
+    customer:
+      | "sent"
+      | "failed"
+      | "skipped";
+    internal:
+      | "sent"
+      | "failed"
+      | "skipped";
+  };
+
+  const customerType =
+    "paid_entry_customer_confirmation";
+
+  const customerSent =
+    await notificationAlreadySent(
+      order.id,
+      customerType,
+      order.purchaser_email,
+    );
+
+  if (!customerSent) {
+    try {
+      await sendLotteryEmail({
+        to:
+          order.purchaser_email,
+
+        subject:
+          `Your ${lottery.title} lottery number${tickets.length === 1 ? "" : "s"}`,
+
+        html:
+          customerEmailHtml({
+            order,
+            lottery,
+            tickets,
+          }),
+
+        text:
+          customerEmailText({
+            order,
+            lottery,
+            tickets,
+          }),
+      });
+
+      await recordLotteryNotification({
+        orderId:
+          order.id,
+
+        notificationType:
+          customerType,
+
+        recipient:
+          order.purchaser_email,
+
+        status:
+          "sent",
+      });
+
+      results.customer =
+        "sent";
+    } catch (
+      error
+    ) {
+      const message =
+        error instanceof
+        Error
+          ? error.message
+          : "Unknown email error";
+
+      console.error(
+        "Lottery customer confirmation email failed:",
+        error,
+      );
+
+      await recordLotteryNotification({
+        orderId:
+          order.id,
+
+        notificationType:
+          customerType,
+
+        recipient:
+          order.purchaser_email,
+
+        status:
+          "failed",
+
+        errorMessage:
+          message,
+      });
+
+      results.customer =
+        "failed";
+    }
+  }
+
+  const internalType =
+    "paid_entry_internal_notification";
+
+  const internalSent =
+    await notificationAlreadySent(
+      order.id,
+      internalType,
+      LOTTERY_INFO_EMAIL,
+    );
+
+  if (!internalSent) {
+    try {
+      await sendLotteryEmail({
+        to:
+          LOTTERY_INFO_EMAIL,
+
+        subject:
+          `New lottery entry: ${order.purchaser_name} - ${lottery.title}`,
+
+        html:
+          internalEmailHtml({
+            order,
+            lottery,
+            tickets,
+          }),
+
+        text:
+          internalEmailText({
+            order,
+            lottery,
+            tickets,
+          }),
+      });
+
+      await recordLotteryNotification({
+        orderId:
+          order.id,
+
+        notificationType:
+          internalType,
+
+        recipient:
+          LOTTERY_INFO_EMAIL,
+
+        status:
+          "sent",
+      });
+
+      results.internal =
+        "sent";
+    } catch (
+      error
+    ) {
+      const message =
+        error instanceof
+        Error
+          ? error.message
+          : "Unknown email error";
+
+      console.error(
+        "Lottery internal entry notification failed:",
+        error,
+      );
+
+      await recordLotteryNotification({
+        orderId:
+          order.id,
+
+        notificationType:
+          internalType,
+
+        recipient:
+          LOTTERY_INFO_EMAIL,
+
+        status:
+          "failed",
+
+        errorMessage:
+          message,
+      });
+
+      results.internal =
+        "failed";
+    }
+  }
+
+  return results;
+}
+
+async function completePaidLotteryCheckout(
+  session: Stripe.Checkout.Session,
+  expectedSlug: string,
+) {
+  if (
+    session.payment_status !==
+    "paid"
+  ) {
+    throw new Error(
+      "Stripe has not marked this checkout session as paid.",
+    );
+  }
+
+  if (
+    session.metadata?.type !==
+    "burton_pride_lottery"
+  ) {
+    throw new Error(
+      "This Stripe session is not a Burton Pride lottery checkout.",
+    );
+  }
+
+  if (
+    session.metadata?.lottery_slug !==
+    expectedSlug
+  ) {
+    throw new Error(
+      "The Stripe session does not belong to this lottery.",
+    );
+  }
+
+  const orderId =
+    String(
+      session.metadata
+        ?.order_id ||
+        "",
+    ).trim();
+
+  if (!orderId) {
+    throw new Error(
+      "The Stripe session does not contain a lottery order ID.",
+    );
+  }
+
+  const {
+    data:
+      orderData,
+    error:
+      orderError,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_orders",
+      )
+      .select(
+        `
+        id,
+        lottery_id,
+        order_reference,
+        purchaser_name,
+        purchaser_email,
+        purchaser_phone,
+        quantity,
+        total_amount,
+        currency,
+        payment_status,
+        payment_reference
+        `,
+      )
+      .eq(
+        "id",
+        orderId,
+      )
+      .single();
+
+  if (
+    orderError ||
+    !orderData
+  ) {
+    throw new Error(
+      `Unable to load lottery order: ${orderError?.message || "Order not found"}`,
+    );
+  }
+
+  const order =
+    orderData as PaidOrder;
+
+  if (
+    String(
+      order.payment_reference ||
+        "",
+    ) &&
+    order.payment_reference !==
+      session.id
+  ) {
+    throw new Error(
+      "The Stripe session does not match the saved lottery payment reference.",
+    );
+  }
+
+  const {
+    data:
+      lotteryData,
+    error:
+      lotteryError,
+  } =
+    await supabaseAdmin
+      .from(
+        "lotteries",
+      )
+      .select(
+        "id,title,slug,draw_at,max_tickets",
+      )
+      .eq(
+        "id",
+        order.lottery_id,
+      )
+      .single();
+
+  if (
+    lotteryError ||
+    !lotteryData
+  ) {
+    throw new Error(
+      `Unable to load lottery details: ${lotteryError?.message || "Lottery not found"}`,
+    );
+  }
+
+  const lottery =
+    lotteryData as LotteryForEmail;
+
+  if (
+    lottery.slug !==
+    expectedSlug
+  ) {
+    throw new Error(
+      "The order belongs to a different lottery.",
+    );
+  }
+
+  const expectedAmount =
+    Math.round(
+      Number(
+        order.total_amount ||
+          0,
+      ) *
+        100,
+    );
+
+  if (
+    typeof session.amount_total ===
+      "number" &&
+    expectedAmount !==
+      session.amount_total
+  ) {
+    throw new Error(
+      "The Stripe payment amount does not match the lottery order total.",
+    );
+  }
+
+  const paidAt =
+    new Date()
+      .toISOString();
+
+  const {
+    error:
+      paymentUpdateError,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_orders",
+      )
+      .update({
+        payment_status:
+          "paid",
+
+        payment_reference:
+          session.id,
+
+        paid_at:
+          paidAt,
+      })
+      .eq(
+        "id",
+        order.id,
+      );
+
+  if (
+    paymentUpdateError
+  ) {
+    throw new Error(
+      `Unable to mark the lottery order as paid: ${paymentUpdateError.message}`,
+    );
+  }
+
+  order.payment_status =
+    "paid";
+
+  order.payment_reference =
+    session.id;
+
+  const tickets =
+    await issueLotteryTickets(
+        order,
+        lottery,
+      );
+
+  const emailResults =
+    await sendPaidEntryEmails({
+      order,
+      lottery,
+      tickets,
+    });
+
+  return {
+    order,
+    lottery,
+    tickets,
+    emailResults,
+  };
+}
+
+export async function GET(
+  request: NextRequest,
+  context: RouteContext,
+) {
+  const {
+    slug: rawSlug,
+  } =
+    await context.params;
+
+  const slug =
+    decodeURIComponent(
+      rawSlug,
+    )
+      .trim()
+      .toLowerCase();
+
+  const origin =
+    new URL(
+      request.url,
+    ).origin;
+
+  const successPage =
+    new URL(
+      `/Lottery/${encodeURIComponent(
+        slug,
+      )}/checkout`,
+      origin,
+    );
+
+  const responseMode =
+    request.nextUrl
+      .searchParams
+      .get(
+        "response",
+      );
+
+  const wantsJson =
+    responseMode ===
+    "json";
+
+  try {
+    const payment =
+      request.nextUrl
+        .searchParams
+        .get(
+          "payment",
+        );
+
+    const sessionId =
+      request.nextUrl
+        .searchParams
+        .get(
+          "session_id",
+        )
+        ?.trim();
+
+    if (
+      payment !==
+        "success" ||
+      !sessionId
+    ) {
+      if (wantsJson) {
+        return response(
+          {
+            ok: false,
+            code:
+              "LOTTERY_CHECKOUT_CONFIRMATION_INVALID",
+            error:
+              "A valid paid checkout session is required.",
+          },
+          400,
+        );
+      }
+
+      successPage.searchParams.set(
+        "payment",
+        "invalid",
+      );
+
+      return NextResponse.redirect(
+        successPage,
+      );
+    }
+
+    const session =
+      await stripe
+        .checkout
+        .sessions
+        .retrieve(
+          sessionId,
+        );
+
+    const completion =
+      await completePaidLotteryCheckout(
+        session,
+        slug,
+      );
+
+    const customerEmailStatus =
+      completion
+        .emailResults
+        .customer ===
+        "failed"
+        ? "failed"
+        : "sent";
+
+    if (wantsJson) {
+      return response({
+        ok: true,
+        payment_status:
+          "paid",
+        order_reference:
+          completion
+            .order
+            .order_reference,
+        ticket_count:
+          completion
+            .tickets
+            .length,
+        email_status:
+          customerEmailStatus,
+      });
+    }
+
+    /*
+     * Backwards compatibility:
+     * if an older Stripe Checkout Session still points at the API URL,
+     * finish the paid order and immediately move the browser to the
+     * correct public confirmation page.
+     */
+    successPage.searchParams.set(
+      "payment",
+      "success",
+    );
+
+    successPage.searchParams.set(
+      "session_id",
+      session.id,
+    );
+
+    successPage.searchParams.set(
+      "email",
+      customerEmailStatus,
+    );
+
+    return NextResponse.redirect(
+      successPage,
+    );
+  } catch (
+    error
+  ) {
+    console.error(
+      "Lottery paid checkout completion failed:",
+      error,
+    );
+
+    if (wantsJson) {
+      return response(
+        {
+          ok: false,
+          code:
+            "LOTTERY_CHECKOUT_CONFIRMATION_FAILED",
+          error:
+            "We could not complete the lottery entry confirmation.",
+        },
+        409,
+      );
+    }
+
+    successPage.searchParams.set(
+      "payment",
+      "confirmation_error",
+    );
+
+    return NextResponse.redirect(
+      successPage,
+    );
+  }
+}
+
 
 export async function POST(
   request: NextRequest,
@@ -283,7 +1745,7 @@ export async function POST(
      *
      * This is the critical part.
      *
-     * /api/lottery/test/checkout
+     * /api/Lottery/test/checkout
      *
      * resolves:
      *
@@ -854,12 +2316,12 @@ export async function POST(
             email,
 
           success_url:
-            `${origin}/lottery/${encodeURIComponent(
+            `${origin}/Lottery/${encodeURIComponent(
               lottery.slug,
-            )}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+            )}/checkout?payment=success&session_id={CHECKOUT_SESSION_ID}`,
 
           cancel_url:
-            `${origin}/lottery/${encodeURIComponent(
+            `${origin}/Lottery/${encodeURIComponent(
               lottery.slug,
             )}?payment=cancelled`,
 

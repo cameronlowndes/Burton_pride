@@ -179,72 +179,6 @@ type FormState = {
     boolean;
 };
 
-function formatMoney(
-  pence: number,
-  currency = "GBP",
-) {
-  return new Intl.NumberFormat(
-    "en-GB",
-    {
-      style: "currency",
-
-      currency:
-        currency ||
-        "GBP",
-    },
-  ).format(
-    pence /
-      100,
-  );
-}
-
-function formatDateTime(
-  value:
-    | string
-    | null,
-) {
-  if (!value) {
-    return "To be confirmed";
-  }
-
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime(),
-    )
-  ) {
-    return value;
-  }
-
-  return date.toLocaleString(
-    "en-GB",
-    {
-      weekday:
-        "long",
-
-      day:
-        "numeric",
-
-      month:
-        "long",
-
-      year:
-        "numeric",
-
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit",
-
-      timeZone:
-        "Europe/London",
-    },
-  );
-}
-
 export default function LotterySlugClient({
   slug,
 }: {
@@ -326,9 +260,7 @@ export default function LotterySlugClient({
 
         const response =
           await fetch(
-            `/api/lottery/${encodeURIComponent(
-              slug,
-            )}`,
+            `/api/lottery/${encodeURIComponent(slug)}`,
             {
               cache:
                 "no-store",
@@ -511,9 +443,7 @@ export default function LotterySlugClient({
 
       const response =
         await fetch(
-          `/api/lottery/${encodeURIComponent(
-            slug,
-          )}/checkout`,
+          `/api/lottery/${encodeURIComponent(slug)}/checkout`,
           {
             method:
               "POST",
@@ -826,9 +756,7 @@ export default function LotterySlugClient({
         </Link>
 
         <Link
-          href={`/Lottery/${encodeURIComponent(
-            lottery.slug,
-          )}/Terms`}
+          href={`/Lottery/${encodeURIComponent(lottery.slug)}/Terms`}
           target="_blank"
           rel="noopener noreferrer"
           className="
@@ -946,9 +874,7 @@ export default function LotterySlugClient({
                 </Link>
 
                 <Link
-                  href={`/Lottery/${encodeURIComponent(
-                    lottery.slug,
-                  )}/Terms`}
+                  href={`/Lottery/${encodeURIComponent(lottery.slug)}/Terms`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="
@@ -1034,9 +960,7 @@ export default function LotterySlugClient({
               </Link>
 
               <Link
-                href={`/Lottery/${encodeURIComponent(
-                  lottery.slug,
-                )}/Terms`}
+                href={`/Lottery/${encodeURIComponent(lottery.slug)}/Terms`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="
@@ -1436,9 +1360,7 @@ export default function LotterySlugClient({
                   </Link>
 
                   <Link
-                    href={`/Lottery/${encodeURIComponent(
-                      lottery.slug,
-                    )}/Terms`}
+                    href={`/Lottery/${encodeURIComponent(lottery.slug)}/Terms`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="
@@ -1982,9 +1904,7 @@ export default function LotterySlugClient({
                 </Link>{" "}
                 and the{" "}
                 <Link
-                  href={`/Lottery/${encodeURIComponent(
-                    lottery.slug,
-                  )}/Terms`}
+                  href={`/Lottery/${encodeURIComponent(lottery.slug)}/Terms`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="
@@ -2116,6 +2036,48 @@ export default function LotterySlugClient({
       </div>
     </main>
   );
+}
+
+function formatMoney(
+  amountPence: number,
+  currency: string,
+) {
+  const amount =
+    amountPence / 100;
+
+  return new Intl.NumberFormat(
+    "en-GB",
+    {
+      style: "currency",
+      currency,
+      minimumFractionDigits:
+        2,
+    },
+  ).format(amount);
+}
+
+function formatDateTime(
+  value: string | null,
+) {
+  if (!value) {
+    return "TBC";
+  }
+
+  const date = new Date(value);
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return "TBC";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-GB",
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+    },
+  ).format(date);
 }
 
 function LotteryHeading({

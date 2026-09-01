@@ -179,6 +179,7 @@ const MAX_PASSWORD_LENGTH = 128;
 const TWO_FACTOR_CODE_LENGTH = 6;
 const LOCAL_MAX_ATTEMPTS = 5;
 const LOCAL_LOCKOUT_MS = 5 * 60 * 1000;
+const MAX_TRUSTED_DEVICES = 5;
 
 const DEBUG_LOGIN_ERRORS =
   process.env.NODE_ENV === "development";
@@ -459,9 +460,7 @@ function normaliseSecurityContext(
   if (!value || typeof value !== "object") return null;
 
   const maxTrustedDevices =
-    typeof value.maxTrustedDevices === "number" && value.maxTrustedDevices > 0
-      ? Math.floor(value.maxTrustedDevices)
-      : 5;
+    MAX_TRUSTED_DEVICES;
 
   const trustedDeviceCount =
     typeof value.trustedDeviceCount === "number" && value.trustedDeviceCount >= 0
@@ -499,9 +498,7 @@ function shouldCreateTrustedDevice(
   if (security.requiresDeviceApproval === true) return false;
 
   const maxTrustedDevices =
-    typeof security.maxTrustedDevices === "number" && security.maxTrustedDevices > 0
-      ? Math.floor(security.maxTrustedDevices)
-      : 5;
+    MAX_TRUSTED_DEVICES;
 
   const trustedDeviceCount =
     typeof security.trustedDeviceCount === "number" &&
@@ -1275,7 +1272,7 @@ export default function LoginPage() {
             trusted_device_count:
               returnedSecurityContext.trustedDeviceCount ?? null,
             max_trusted_devices:
-              returnedSecurityContext.maxTrustedDevices ?? 5,
+              returnedSecurityContext.maxTrustedDevices ?? MAX_TRUSTED_DEVICES,
           },
         });
 
@@ -3130,9 +3127,7 @@ function DeviceSecurityPanel({
               <SecurityDataLine
                 icon={Users}
                 label="Trusted devices"
-                value={`${securityContext.trustedDeviceCount} / ${
-                  securityContext.maxTrustedDevices || 5
-                }`}
+                value={`${securityContext.trustedDeviceCount} / ${MAX_TRUSTED_DEVICES}`}
               />
             ) : null}
           </div>

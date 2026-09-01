@@ -7,12 +7,16 @@ import {
   ChevronDown,
   CreditCard,
   Eye,
+  EyeOff,
   Filter,
   Loader2,
+  LockKeyhole,
   Mail,
   PoundSterling,
+  Pencil,
   ReceiptText,
   RefreshCw,
+  Save,
   Search,
   Ticket,
   Trophy,
@@ -78,18 +82,35 @@ type OrderRecord = {
   notifications: HistoryRecord[];
 };
 
+type EditOrderDraft = {
+  purchaser_name: string;
+  purchaser_email: string;
+  purchaser_phone: string;
+  marketing_opt_in: boolean;
+};
+
 type ApiResponse = {
   ok: boolean;
   items?: OrderRecord[];
   error?: string;
   message?: string;
+  payment_status?: PaymentStatus;
+  paid_at?: string;
+  tickets?: TicketRecord[];
+  email?: {
+    sent?: boolean;
+    recipient?: string | null;
+    error?: string | null;
+  };
 };
 
 const API_ROUTE = "/api/admin/lotterymanagement/orders";
+const MAIN_ADMIN_PASSWORD_API =
+  "/api/admin/settings/delete-password/";
 
 const PAYMENT_OPTIONS: Array<{ value: PaymentStatus | "all"; label: string }> = [
   { value: "all", label: "All payment statuses" },
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: "Waiting payment" },
   { value: "processing", label: "Processing" },
   { value: "paid", label: "Paid" },
   { value: "failed", label: "Failed" },
@@ -151,6 +172,23 @@ export default function OrdersClient() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<OrderRecord | null>(null);
   const [testMode, setTestMode] = useState(false);
+
+  const [markPaidOrder, setMarkPaidOrder] =
+    useState<OrderRecord | null>(null);
+  const [markPaidPassword, setMarkPaidPassword] = useState("");
+  const [showMarkPaidPassword, setShowMarkPaidPassword] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [markPaidError, setMarkPaidError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [editOrder, setEditOrder] =
+    useState<OrderRecord | null>(null);
+  const [editDraft, setEditDraft] =
+    useState<EditOrderDraft | null>(null);
+  const [editPassword, setEditPassword] = useState("");
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | "all">("all");
@@ -511,6 +549,612 @@ export default function OrdersClient() {
     }
   }
 
+  function requestEditOrder(
+    order: OrderRecord,
+  ) {
+    if (
+      testMode
+    ) {
+      setError(
+        "Order editing is disabled while test-mode demo records are active.",
+      );
+      return;
+    }
+
+    setEditOrder(
+      order,
+    );
+
+    setEditDraft({
+      purchaser_name:
+        order.purchaser_name ||
+        "",
+
+      purchaser_email:
+        order.purchaser_email ||
+        "",
+
+      purchaser_phone:
+        order.purchaser_phone ||
+        "",
+
+      marketing_opt_in:
+        Boolean(
+          order.marketing_opt_in,
+        ),
+    });
+
+    setEditPassword(
+      "",
+    );
+
+    setShowEditPassword(
+      false,
+    );
+
+    setEditError(
+      null,
+    );
+
+    setNotice(
+      null,
+    );
+  }
+
+  function closeEditOrder() {
+    if (
+      savingEdit
+    ) {
+      return;
+    }
+
+    setEditOrder(
+      null,
+    );
+
+    setEditDraft(
+      null,
+    );
+
+    setEditPassword(
+      "",
+    );
+
+    setShowEditPassword(
+      false,
+    );
+
+    setEditError(
+      null,
+    );
+  }
+
+  function updateEditDraft(
+    patch: Partial<EditOrderDraft>,
+  ) {
+    setEditDraft(
+      (
+        current,
+      ) =>
+        current
+          ? {
+              ...current,
+              ...patch,
+            }
+          : current,
+    );
+  }
+
+  async function confirmEditOrder(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (
+      !editOrder ||
+      !editDraft ||
+      savingEdit
+    ) {
+      return;
+    }
+
+    const cleanName =
+      editDraft
+        .purchaser_name
+        .trim();
+
+    const cleanEmail =
+      editDraft
+        .purchaser_email
+        .trim();
+
+    const cleanPhone =
+      editDraft
+        .purchaser_phone
+        .trim();
+
+    if (
+      !cleanName
+    ) {
+      setEditError(
+        "Purchaser name is required.",
+      );
+      return;
+    }
+
+    if (
+      !cleanEmail ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        cleanEmail,
+      )
+    ) {
+      setEditError(
+        "Enter a valid purchaser email address.",
+      );
+      return;
+    }
+
+    if (
+      !editPassword
+        .trim()
+    ) {
+      setEditError(
+        "Enter the main admin settings password before saving changes.",
+      );
+      return;
+    }
+
+    const changesMade =
+      cleanName !==
+        (
+          editOrder.purchaser_name ||
+          ""
+        ).trim() ||
+      cleanEmail.toLowerCase() !==
+        (
+          editOrder.purchaser_email ||
+          ""
+        )
+          .trim()
+          .toLowerCase() ||
+      cleanPhone !==
+        (
+          editOrder.purchaser_phone ||
+          ""
+        ).trim() ||
+      editDraft.marketing_opt_in !==
+        Boolean(
+          editOrder.marketing_opt_in,
+        );
+
+    if (
+      !changesMade
+    ) {
+      setEditError(
+        "No order details have been changed.",
+      );
+      return;
+    }
+
+    setSavingEdit(
+      true,
+    );
+
+    setEditError(
+      null,
+    );
+
+    setNotice(
+      null,
+    );
+
+    try {
+      /*
+       * Step 1:
+       * Verify the password through the existing Main Admin
+       * Settings password endpoint.
+       */
+      const passwordResponse =
+        await fetch(
+          MAIN_ADMIN_PASSWORD_API,
+          {
+            method:
+              "POST",
+
+            cache:
+              "no-store",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                password:
+                  editPassword,
+              }),
+          },
+        );
+
+      const passwordData =
+        await readJson(
+          passwordResponse,
+        );
+
+      if (
+        !passwordResponse.ok ||
+        !passwordData.ok
+      ) {
+        throw new Error(
+          passwordData.error ||
+            passwordData.message ||
+            "The main admin settings password is incorrect or could not be verified.",
+        );
+      }
+
+      /*
+       * Step 2:
+       * Save the order edit.
+       *
+       * The Orders API verifies the same password again server-side,
+       * so this browser check cannot be bypassed.
+       */
+      const response =
+        await fetch(
+          API_ROUTE,
+          {
+            method:
+              "PATCH",
+
+            cache:
+              "no-store",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                action:
+                  "edit_order",
+
+                order_id:
+                  editOrder.id,
+
+                main_admin_password:
+                  editPassword,
+
+                changes: {
+                  purchaser_name:
+                    cleanName,
+
+                  purchaser_email:
+                    cleanEmail,
+
+                  purchaser_phone:
+                    cleanPhone ||
+                    null,
+
+                  marketing_opt_in:
+                    editDraft
+                      .marketing_opt_in,
+                },
+              }),
+          },
+        );
+
+      const data =
+        await readJson(
+          response,
+        );
+
+      if (
+        !response.ok ||
+        !data.ok
+      ) {
+        throw new Error(
+          data.error ||
+            data.message ||
+            "The order changes could not be saved.",
+        );
+      }
+
+      setEditOrder(
+        null,
+      );
+
+      setEditDraft(
+        null,
+      );
+
+      setEditPassword(
+        "",
+      );
+
+      setShowEditPassword(
+        false,
+      );
+
+      setSelected(
+        null,
+      );
+
+      setNotice(
+        data.message ||
+          "The order details have been updated.",
+      );
+
+      await loadOrders();
+    } catch (
+      caught: any
+    ) {
+      setEditError(
+        caught?.message ||
+          "The order changes could not be saved.",
+      );
+    } finally {
+      setSavingEdit(
+        false,
+      );
+    }
+  }
+
+  function requestMarkPaid(
+    order: OrderRecord,
+  ) {
+    if (
+      testMode
+    ) {
+      setError(
+        "Manual payment changes are disabled while test-mode demo records are active.",
+      );
+      return;
+    }
+
+    if (
+      order.payment_status !==
+      "pending"
+    ) {
+      setError(
+        "Only an order waiting for payment can be manually marked as paid.",
+      );
+      return;
+    }
+
+    setMarkPaidOrder(
+      order,
+    );
+    setMarkPaidPassword(
+      "",
+    );
+    setShowMarkPaidPassword(
+      false,
+    );
+    setMarkPaidError(
+      null,
+    );
+    setNotice(
+      null,
+    );
+  }
+
+  function closeMarkPaid() {
+    if (
+      markingPaid
+    ) {
+      return;
+    }
+
+    setMarkPaidOrder(
+      null,
+    );
+    setMarkPaidPassword(
+      "",
+    );
+    setShowMarkPaidPassword(
+      false,
+    );
+    setMarkPaidError(
+      null,
+    );
+  }
+
+  async function confirmMarkPaid(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (
+      !markPaidOrder ||
+      markingPaid
+    ) {
+      return;
+    }
+
+    if (
+      !markPaidPassword
+        .trim()
+    ) {
+      setMarkPaidError(
+        "Enter the main admin password.",
+      );
+      return;
+    }
+
+    setMarkingPaid(
+      true,
+    );
+    setMarkPaidError(
+      null,
+    );
+    setNotice(
+      null,
+    );
+
+    const orderToUpdate =
+      markPaidOrder;
+
+    try {
+      /*
+       * Step 1:
+       * Verify the password using the existing Admin Settings API.
+       * This API checks the bcrypt hash stored in admin_delete_settings.
+       */
+      const passwordResponse =
+        await fetch(
+          MAIN_ADMIN_PASSWORD_API,
+          {
+            method:
+              "POST",
+
+            cache:
+              "no-store",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                password:
+                  markPaidPassword,
+              }),
+          },
+        );
+
+      const passwordData =
+        await readJson(
+          passwordResponse,
+        );
+
+      if (
+        !passwordResponse.ok ||
+        !passwordData.ok
+      ) {
+        throw new Error(
+          passwordData.error ||
+            passwordData.message ||
+            "The main admin password is incorrect or could not be verified.",
+        );
+      }
+
+      /*
+       * Step 2:
+       * Send the protected order update.
+       *
+       * The Orders API checks admin_delete_settings again server-side,
+       * so bypassing this browser check cannot bypass the password.
+       */
+      const res =
+        await fetch(
+          API_ROUTE,
+          {
+            method:
+              "PATCH",
+
+            cache:
+              "no-store",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                action:
+                  "mark_paid",
+
+                order_id:
+                  orderToUpdate.id,
+
+                main_admin_password:
+                  markPaidPassword,
+              }),
+          },
+        );
+
+      const data =
+        await readJson(
+          res,
+        );
+
+      if (
+        !res.ok ||
+        !data.ok
+      ) {
+        throw new Error(
+          data.error ||
+            data.message ||
+            "The order could not be marked as paid.",
+        );
+      }
+
+      setMarkPaidOrder(
+        null,
+      );
+      setMarkPaidPassword(
+        "",
+      );
+      setShowMarkPaidPassword(
+        false,
+      );
+      setSelected(
+        null,
+      );
+
+      setNotice(
+        data.message ||
+          (
+            data.email?.sent ===
+            false
+              ? "The order is paid and ticket numbers were issued, but the confirmation email needs attention."
+              : "The order is now paid. Ticket numbers were issued and the confirmation email was sent."
+          ),
+      );
+
+      await loadOrders();
+    } catch (
+      err: any
+    ) {
+      setMarkPaidError(
+        err?.message ||
+          "The order could not be marked as paid.",
+      );
+    } finally {
+      setMarkingPaid(
+        false,
+      );
+    }
+  }
+
   const lotteries = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -667,6 +1311,23 @@ export default function OrdersClient() {
         />
       </section>
 
+      {notice ? (
+        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="flex-1">{notice}</div>
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="rounded-lg p-1 text-emerald-100/70 hover:bg-white/10 hover:text-white"
+              aria-label="Dismiss message"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
@@ -761,7 +1422,46 @@ export default function OrdersClient() {
       </section>
 
       {selected ? (
-        <OrderDetailsModal order={selected} onClose={() => setSelected(null)} />
+        <OrderDetailsModal
+          order={selected}
+          onClose={() => setSelected(null)}
+          onMarkPaid={requestMarkPaid}
+          onEdit={requestEditOrder}
+        />
+      ) : null}
+
+      {editOrder && editDraft ? (
+        <EditOrderModal
+          order={editOrder}
+          draft={editDraft}
+          password={editPassword}
+          showPassword={showEditPassword}
+          loading={savingEdit}
+          error={editError}
+          onDraftChange={updateEditDraft}
+          onPasswordChange={setEditPassword}
+          onTogglePassword={() =>
+            setShowEditPassword((current) => !current)
+          }
+          onClose={closeEditOrder}
+          onSubmit={confirmEditOrder}
+        />
+      ) : null}
+
+      {markPaidOrder ? (
+        <MarkPaidModal
+          order={markPaidOrder}
+          password={markPaidPassword}
+          showPassword={showMarkPaidPassword}
+          loading={markingPaid}
+          error={markPaidError}
+          onPasswordChange={setMarkPaidPassword}
+          onTogglePassword={() =>
+            setShowMarkPaidPassword((current) => !current)
+          }
+          onClose={closeMarkPaid}
+          onSubmit={confirmMarkPaid}
+        />
       ) : null}
     </div>
   );
@@ -889,9 +1589,13 @@ function Info({ label, value }: { label: string; value: string }) {
 function OrderDetailsModal({
   order,
   onClose,
+  onMarkPaid,
+  onEdit,
 }: {
   order: OrderRecord;
   onClose: () => void;
+  onMarkPaid: (order: OrderRecord) => void;
+  onEdit: (order: OrderRecord) => void;
 }) {
   return (
     <div
@@ -909,17 +1613,57 @@ function OrderDetailsModal({
             <p className="mt-1 text-sm text-white/55">{order.lottery_title}</p>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
-            aria-label="Close order details"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onEdit(order)}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-2 text-sm font-extrabold text-purple-100 transition hover:bg-purple-500/20"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit order
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
+              aria-label="Close order details"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto p-5 md:p-6">
+          {order.payment_status === "pending" ? (
+            <div className="mb-6 rounded-2xl border border-amber-400/25 bg-amber-500/10 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 font-extrabold text-amber-100">
+                    <AlertTriangle className="h-5 w-5" />
+                    Waiting for payment
+                  </div>
+
+                  <p className="mt-2 text-sm leading-6 text-amber-100/70">
+                    Only use the manual paid action when Burton Pride has confirmed
+                    that this payment should be treated as received. A main admin
+                    password is required. The action will issue the lottery number
+                    and send the entrant a confirmation email.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onMarkPaid(order)}
+                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 transition hover:bg-emerald-300"
+                >
+                  <CheckCircle2 className="h-5 w-5" />
+                  Mark as paid
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <DetailCard
               icon={<UserRound className="h-4 w-4" />}
@@ -1041,6 +1785,490 @@ function OrderDetailsModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+
+function EditOrderModal({
+  order,
+  draft,
+  password,
+  showPassword,
+  loading,
+  error,
+  onDraftChange,
+  onPasswordChange,
+  onTogglePassword,
+  onClose,
+  onSubmit,
+}: {
+  order: OrderRecord;
+  draft: EditOrderDraft;
+  password: string;
+  showPassword: boolean;
+  loading: boolean;
+  error: string | null;
+  onDraftChange: (patch: Partial<EditOrderDraft>) => void;
+  onPasswordChange: (value: string) => void;
+  onTogglePassword: () => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="edit-order-title"
+    >
+      <form
+        onSubmit={onSubmit}
+        className="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-purple-300/20 bg-[#15172a] shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-6">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-200">
+              <Pencil className="h-5 w-5" />
+            </div>
+
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-purple-300">
+                Protected order edit
+              </p>
+
+              <h2
+                id="edit-order-title"
+                className="mt-1 text-xl font-extrabold text-white"
+              >
+                Edit {order.order_reference}
+              </h2>
+
+              <p className="mt-1 text-sm text-white/50">
+                Every save requires the Main Admin Settings password.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 disabled:opacity-40"
+            aria-label="Close order editor"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label
+                htmlFor="edit-order-name"
+                className="text-sm font-extrabold text-white"
+              >
+                Purchaser name
+              </label>
+
+              <input
+                id="edit-order-name"
+                type="text"
+                value={draft.purchaser_name}
+                onChange={(event) =>
+                  onDraftChange({
+                    purchaser_name:
+                      event.target.value,
+                  })
+                }
+                disabled={loading}
+                maxLength={200}
+                className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus:ring-4 focus:ring-purple-400/10 disabled:opacity-50"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="edit-order-email"
+                className="text-sm font-extrabold text-white"
+              >
+                Purchaser email
+              </label>
+
+              <input
+                id="edit-order-email"
+                type="email"
+                value={draft.purchaser_email}
+                onChange={(event) =>
+                  onDraftChange({
+                    purchaser_email:
+                      event.target.value,
+                  })
+                }
+                disabled={loading}
+                maxLength={320}
+                className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus:ring-4 focus:ring-purple-400/10 disabled:opacity-50"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="edit-order-phone"
+                className="text-sm font-extrabold text-white"
+              >
+                Phone
+              </label>
+
+              <input
+                id="edit-order-phone"
+                type="tel"
+                value={draft.purchaser_phone}
+                onChange={(event) =>
+                  onDraftChange({
+                    purchaser_phone:
+                      event.target.value,
+                  })
+                }
+                disabled={loading}
+                maxLength={50}
+                placeholder="Optional"
+                className="mt-2 h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus:ring-4 focus:ring-purple-400/10 disabled:opacity-50"
+              />
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="text-sm font-extrabold text-white">
+                Marketing preference
+              </div>
+
+              <label className="mt-3 flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={draft.marketing_opt_in}
+                  onChange={(event) =>
+                    onDraftChange({
+                      marketing_opt_in:
+                        event.target.checked,
+                    })
+                  }
+                  disabled={loading}
+                  className="h-5 w-5 rounded border-white/20 bg-black/30 accent-purple-500"
+                />
+
+                <span className="text-sm text-white/70">
+                  Marketing opt-in recorded
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100/75">
+            <div className="flex items-start gap-3">
+              <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-blue-200" />
+              <div>
+                <div className="font-extrabold text-blue-100">
+                  Protected fields
+                </div>
+
+                <p className="mt-1">
+                  Order reference, lottery, payment status, payment reference,
+                  amount, quantity, paid date, declarations and ticket numbers
+                  are not changed through this general editor. Use their
+                  dedicated payment, refund or ticket actions instead.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Info
+                label="Payment status"
+                value={statusLabel(order.payment_status)}
+              />
+              <Info
+                label="Order total"
+                value={formatMoney(order.total_amount, order.currency)}
+              />
+              <Info
+                label="Quantity"
+                value={String(order.quantity)}
+              />
+              <Info
+                label="Tickets issued"
+                value={String(order.ticket_count)}
+              />
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label
+              htmlFor="edit-order-main-admin-password"
+              className="text-sm font-extrabold text-white"
+            >
+              Main admin settings password
+            </label>
+
+            <div className="relative mt-2">
+              <input
+                id="edit-order-main-admin-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) =>
+                  onPasswordChange(
+                    event.target.value,
+                  )
+                }
+                autoComplete="current-password"
+                disabled={loading}
+                placeholder="Enter the password set in Admin Settings"
+                className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 pr-12 text-base text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus:ring-4 focus:ring-purple-400/10 disabled:opacity-50"
+              />
+
+              <button
+                type="button"
+                onClick={onTogglePassword}
+                disabled={loading}
+                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+
+            <p className="mt-2 text-xs leading-5 text-white/40">
+              The password is checked by /api/admin/settings/delete-password/
+              and is checked again by the Orders API before Supabase is updated.
+            </p>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              className="mt-5 rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm font-semibold text-red-100"
+            >
+              {error}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/15 px-5 py-3 text-sm font-extrabold text-white hover:bg-white/10 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading || !password.trim()}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-purple-400 px-5 py-3 text-sm font-extrabold text-purple-950 transition hover:bg-purple-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="h-5 w-5" />
+                Save changes
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+function MarkPaidModal({
+  order,
+  password,
+  showPassword,
+  loading,
+  error,
+  onPasswordChange,
+  onTogglePassword,
+  onClose,
+  onSubmit,
+}: {
+  order: OrderRecord;
+  password: string;
+  showPassword: boolean;
+  loading: boolean;
+  error: string | null;
+  onPasswordChange: (value: string) => void;
+  onTogglePassword: () => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mark-paid-title"
+    >
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-xl overflow-hidden rounded-3xl border border-emerald-400/20 bg-[#15172a] shadow-2xl"
+      >
+        <div className="border-b border-white/10 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
+                <LockKeyhole className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-emerald-300">
+                  Main admin confirmation
+                </p>
+
+                <h2
+                  id="mark-paid-title"
+                  className="mt-1 text-xl font-extrabold text-white"
+                >
+                  Mark order as paid
+                </h2>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 disabled:opacity-40"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-6">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Info
+                label="Order"
+                value={order.order_reference}
+              />
+              <Info
+                label="Entrant"
+                value={order.purchaser_name || "Not provided"}
+              />
+              <Info
+                label="Amount"
+                value={formatMoney(order.total_amount, order.currency)}
+              />
+              <Info
+                label="Tickets to issue"
+                value={String(Math.max(1, order.quantity || 1))}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100/80">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+              <p>
+                This overrides the waiting-payment status. After confirmation,
+                the order becomes paid, lottery number(s) are issued and a
+                confirmation email is sent to{" "}
+                <strong className="text-amber-100">
+                  {order.purchaser_email || "the entrant"}
+                </strong>.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="main-admin-payment-password"
+              className="text-sm font-extrabold text-white"
+            >
+              Main admin settings password
+            </label>
+
+            <div className="relative mt-2">
+              <input
+                id="main-admin-payment-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) =>
+                  onPasswordChange(event.target.value)
+                }
+                autoComplete="current-password"
+                disabled={loading}
+                placeholder="Enter the password set in Admin Settings"
+                className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 pr-12 text-base text-white outline-none placeholder:text-white/30 focus:border-emerald-400/60 focus:ring-4 focus:ring-emerald-400/10 disabled:opacity-50"
+              />
+
+              <button
+                type="button"
+                onClick={onTogglePassword}
+                disabled={loading}
+                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm font-semibold text-red-100"
+            >
+              {error}
+            </div>
+          ) : null}
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/15 px-5 py-3 text-sm font-extrabold text-white hover:bg-white/10 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading || !password.trim()}
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Confirming...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-5 w-5" />
+                  Confirm paid & send email
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }
