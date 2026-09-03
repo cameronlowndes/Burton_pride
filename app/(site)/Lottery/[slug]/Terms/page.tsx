@@ -929,6 +929,14 @@ export default async function IndividualLotteryTermsPage({
               "See General Lottery Terms"
             }
           />
+
+          <TermsDetail
+            icon={
+              <ShieldCheck />
+            }
+            label="Lottery registration"
+            value="Burton Pride lottery number: SL0507 — issued by East Staffordshire Borough Council."
+          />
         </div>
       </section>
 

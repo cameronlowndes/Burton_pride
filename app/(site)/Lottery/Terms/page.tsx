@@ -875,6 +875,59 @@ export default function LotteryTermsPage() {
 
         
 
+            {/* LOTTERY REGISTRATION */}
+            <section
+              className="
+                mt-6
+                rounded-2xl
+                border
+                border-amber-300
+                bg-amber-50
+                p-5
+                dark:border-yellow-300/25
+                dark:bg-yellow-300/10
+              "
+            >
+              <div className="flex items-start gap-3">
+                <ShieldCheck
+                  className="
+                    mt-0.5
+                    h-5
+                    w-5
+                    shrink-0
+                    text-amber-700
+                    dark:text-yellow-300
+                  "
+                />
+
+                <div>
+                  <h2
+                    className="
+                      text-lg
+                      font-black
+                      text-slate-950
+                      dark:text-white
+                    "
+                  >
+                    Lottery registration
+                  </h2>
+
+                  <p
+                    className="
+                      mt-2
+                      leading-7
+                      text-slate-700
+                      dark:text-white/75
+                    "
+                  >
+                    Burton Pride lottery number:{" "}
+                    <strong>SL0507</strong>. This lottery number was
+                    issued by East Staffordshire Borough Council.
+                  </p>
+                </div>
+              </div>
+            </section>
+
             <div className="mt-10 space-y-10">
               {termsSections.map((section) => (
                 <TermsSectionBlock

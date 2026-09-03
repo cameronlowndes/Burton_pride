@@ -13,12 +13,14 @@ import {
   Filter,
   Loader2,
   PoundSterling,
+  Printer,
   RefreshCw,
   Search,
   Ticket,
   Trophy,
   UsersRound,
   WalletCards,
+  X,
 } from "lucide-react";
 
 type LotteryReport = {
@@ -56,6 +58,31 @@ type ApiResponse = {
   message?: string;
 };
 
+type PaperDrawLottery = {
+  id: string;
+  title: string;
+  slug: string;
+  status: string;
+  draw_at: string | null;
+  sales_close_at: string | null;
+};
+
+type PaperDrawTicket = {
+  id: string;
+  ticket_number: string;
+  order_reference: string;
+  issued_at: string | null;
+};
+
+type PaperDrawResponse = {
+  ok: boolean;
+  lotteries?: PaperDrawLottery[];
+  lottery?: PaperDrawLottery | null;
+  tickets?: PaperDrawTicket[];
+  generated_at?: string;
+  error?: string;
+};
+
 type ExportType =
   | "entrants"
   | "tickets"
@@ -64,7 +91,8 @@ type ExportType =
   | "winners"
   | "audit"
   | "regulatory"
-  | "archive";
+  | "archive"
+  | "paper_draw";
 
 const API_ROUTE = "/api/admin/lotterymanagement/reports";
 
@@ -85,6 +113,13 @@ const EXPORT_OPTIONS: Array<{
     title: "Issued ticket register",
     description: "Ticket numbers, status and linked order information.",
     icon: <Ticket className="h-5 w-5" />,
+  },
+  {
+    type: "paper_draw",
+    title: "Paper draw ticket sheets",
+    description:
+      "Open a low-ink A4 print page containing every eligible issued ticket.",
+    icon: <Printer className="h-5 w-5" />,
   },
   {
     type: "orders",
@@ -157,6 +192,7 @@ export default function ReportsClient() {
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testMode, setTestMode] = useState(false);
+  const [paperDrawOpen, setPaperDrawOpen] = useState(false);
 
   const [search, setSearch] = useState("");
   const [lotteryId, setLotteryId] = useState("all");
@@ -415,6 +451,11 @@ export default function ReportsClient() {
 
   async function exportReport(type: ExportType) {
     if (exporting) return;
+
+    if (type === "paper_draw") {
+      setPaperDrawOpen(true);
+      return;
+    }
 
     setExporting(type);
     setError(null);
@@ -686,6 +727,8 @@ export default function ReportsClient() {
                 </div>
                 {exporting === option.type ? (
                   <Loader2 className="h-4 w-4 animate-spin text-white/55" />
+                ) : option.type === "paper_draw" ? (
+                  <Printer className="h-4 w-4 text-white/35 transition group-hover:text-white/65" />
                 ) : (
                   <Download className="h-4 w-4 text-white/35 transition group-hover:text-white/65" />
                 )}
@@ -718,6 +761,319 @@ export default function ReportsClient() {
           </div>
         </div>
       </section>
+
+      <PaperDrawModal
+        open={paperDrawOpen}
+        initialLotteryId={lotteryId === "all" || testMode ? "" : lotteryId}
+        onClose={() => setPaperDrawOpen(false)}
+      />
+    </div>
+  );
+}
+
+function PaperDrawModal({
+  open,
+  initialLotteryId,
+  onClose,
+}: {
+  open: boolean;
+  initialLotteryId: string;
+  onClose: () => void;
+}) {
+  const [selectedLotteryId, setSelectedLotteryId] = useState("");
+  const [lotteries, setLotteries] = useState<PaperDrawLottery[]>([]);
+  const [lottery, setLottery] = useState<PaperDrawLottery | null>(null);
+  const [tickets, setTickets] = useState<PaperDrawTicket[]>([]);
+  const [generatedAt, setGeneratedAt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedLotteryId(initialLotteryId);
+  }, [open, initialLotteryId]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const controller = new AbortController();
+
+    async function loadPaperDraw() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const params = new URLSearchParams();
+        if (selectedLotteryId) {
+          params.set("lottery_id", selectedLotteryId);
+        }
+
+        const response = await fetch(
+          `/api/admin/lotterymanagement/reports/paper-draw?${params.toString()}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+        const data = (await response.json()) as PaperDrawResponse;
+
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || "Unable to prepare paper draw tickets.");
+        }
+
+        setLotteries(data.lotteries || []);
+        setLottery(data.lottery || null);
+        setTickets(data.tickets || []);
+        setGeneratedAt(data.generated_at || new Date().toISOString());
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+        setLottery(null);
+        setTickets([]);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Unable to prepare paper draw tickets.",
+        );
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+
+    void loadPaperDraw();
+    return () => controller.abort();
+  }, [open, selectedLotteryId, reloadKey]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="paper-draw-overlay fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/80 p-3 backdrop-blur-sm sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="paper-draw-title"
+    >
+      <div className="paper-draw-modal my-auto w-full max-w-6xl overflow-hidden rounded-3xl border border-white/15 bg-[#15172a] shadow-2xl">
+        <header className="paper-draw-controls sticky top-0 z-10 border-b border-white/10 bg-[#15172a] p-5 text-white sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 id="paper-draw-title" className="text-xl font-black sm:text-2xl">
+                Paper draw ticket sheets
+              </h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-white/55">
+                Preview and print low-ink slips for issued tickets belonging to paid orders.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 text-white/65 hover:bg-white/10 hover:text-white"
+              aria-label="Close paper draw popup"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <label className="text-sm font-bold">
+              Lottery
+              <select
+                value={selectedLotteryId}
+                onChange={(event) => setSelectedLotteryId(event.target.value)}
+                className="mt-2 min-h-11 w-full rounded-xl border border-white/15 bg-slate-950 px-3 text-white"
+              >
+                <option value="">Choose a lottery</option>
+                {lotteries.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setReloadKey((value) => value + 1)}
+              disabled={loading}
+              className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 font-bold disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.print()}
+              disabled={loading || tickets.length === 0}
+              className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-yellow-300 px-5 font-black text-purple-950 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Printer className="h-4 w-4" />
+              Print {tickets.length || ""} tickets
+            </button>
+          </div>
+        </header>
+
+        <div className="max-h-[72vh] overflow-y-auto p-4 sm:p-6">
+          {error ? (
+            <div className="paper-draw-controls rounded-2xl border border-red-300 bg-red-50 p-5 font-bold text-red-800">
+              {error}
+            </div>
+          ) : loading ? (
+            <div className="paper-draw-controls flex min-h-56 items-center justify-center text-white/60">
+              <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+              Preparing tickets…
+            </div>
+          ) : !selectedLotteryId ? (
+            <div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
+              Choose a lottery to preview its paper draw tickets.
+            </div>
+          ) : lottery && tickets.length === 0 ? (
+            <div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
+              No eligible issued tickets were found for paid orders in this lottery.
+            </div>
+          ) : lottery ? (
+            <main className="paper-draw-print bg-white p-5 text-black sm:p-7">
+              <header className="paper-draw-print-header mb-5 border-b-2 border-black pb-4">
+                <div className="flex items-start justify-between gap-5">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.16em]">
+                      Burton Pride Lottery
+                    </p>
+                    <h3 className="mt-1 text-2xl font-black">{lottery.title}</h3>
+                  </div>
+                  <Ticket className="h-8 w-8" aria-hidden="true" />
+                </div>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <p><strong>Tickets:</strong> {tickets.length}</p>
+                  <p><strong>Draw:</strong> {formatDate(lottery.draw_at)}</p>
+                  <p><strong>Prepared:</strong> {formatDate(generatedAt || null)}</p>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-600">
+                  Cut along the dashed lines and fold each slip before drawing.
+                </p>
+              </header>
+
+              <div className="paper-ticket-grid grid gap-4 sm:grid-cols-2">
+                {tickets.map((item) => (
+                  <article
+                    key={item.id}
+                    className="paper-ticket flex min-h-36 break-inside-avoid flex-col justify-between border border-dashed border-slate-500 p-4 text-black"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.14em]">
+                          Burton Pride Lottery
+                        </p>
+                        <p className="mt-1 text-sm font-bold">{lottery.title}</p>
+                      </div>
+                      <p className="text-[10px] uppercase">Paper draw slip</p>
+                    </div>
+                    <p className="my-3 text-center text-3xl font-black tracking-wide">
+                      Ticket {item.ticket_number}
+                    </p>
+                    <p className="border-t border-slate-300 pt-2 text-[10px]">
+                      Order reference: <strong>{item.order_reference}</strong>
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </main>
+          ) : null}
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @page {
+          size: A4 portrait;
+          margin: 8mm;
+        }
+
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+
+          html,
+          body {
+            background: #fff !important;
+          }
+
+          .paper-draw-overlay,
+          .paper-draw-modal,
+          .paper-draw-print,
+          .paper-draw-print * {
+            visibility: visible !important;
+          }
+
+          .paper-draw-controls {
+            display: none !important;
+          }
+
+          .paper-draw-overlay,
+          .paper-draw-modal {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            background: #fff !important;
+            box-shadow: none !important;
+          }
+
+          .paper-draw-modal > div {
+            max-height: none !important;
+            overflow: visible !important;
+            padding: 0 !important;
+          }
+
+          .paper-draw-print {
+            padding: 0 !important;
+          }
+
+          .paper-draw-print-header {
+            margin-bottom: 4mm !important;
+          }
+
+          .paper-ticket-grid {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 4mm !important;
+          }
+
+          .paper-ticket {
+            min-height: 34mm !important;
+            padding: 3mm !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            border: 1px dashed #555 !important;
+            background: #fff !important;
+            color: #000 !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

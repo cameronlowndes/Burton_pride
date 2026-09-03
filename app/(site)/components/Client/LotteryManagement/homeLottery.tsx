@@ -497,6 +497,58 @@ export default function LotteryHomePage() {
         </div>
       </section>
 
+      {/* LOTTERY REGISTRATION */}
+      <section className="mx-auto w-full max-w-7xl px-4 pb-6 sm:px-6 lg:px-8">
+        <div
+          className="
+            rounded-[2rem]
+            border
+            border-purple-200
+            bg-purple-50
+            p-6
+            shadow-[0_16px_40px_rgba(15,23,42,0.10)]
+            sm:p-8
+            dark:border-purple-300/20
+            dark:bg-purple-500/10
+            dark:shadow-xl
+          "
+        >
+          <div className="flex items-start gap-4">
+            <div
+              className="
+                flex
+                h-12
+                w-12
+                shrink-0
+                items-center
+                justify-center
+                rounded-2xl
+                bg-purple-700
+                text-white
+                dark:bg-purple-400/20
+                dark:text-purple-200
+              "
+            >
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+
+            <div>
+              <p className="text-sm font-black uppercase tracking-[0.18em] text-purple-700 dark:text-purple-300">
+                Lottery registration
+              </p>
+
+              <h2 className="mt-2 text-2xl font-black text-slate-950 sm:text-3xl dark:text-white">
+                Burton Pride lottery number: SL0507
+              </h2>
+
+              <p className="mt-3 max-w-3xl font-semibold leading-7 text-slate-700 dark:text-white/70">
+                This lottery number was issued by East Staffordshire Borough Council.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* LIVE LOTTERY DIRECTORY */}
       <section
         id="lotteries"

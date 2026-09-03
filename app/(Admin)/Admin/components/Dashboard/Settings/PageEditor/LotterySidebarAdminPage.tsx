@@ -70,6 +70,8 @@ type LotterySidebarResponse = {
   items?: LotterySidebarItem[];
   item?: LotterySidebarItem;
   deletedId?: string;
+  deleted?: LotterySidebarItem | null;
+  already_deleted?: boolean;
 };
 
 type EditorMode = "create" | "edit";
@@ -601,6 +603,8 @@ export default function LotterySidebarAdminClient() {
   async function confirmDelete() {
     if (!deleteId) return;
 
+    const deletingId = deleteId;
+
     setDeleting(true);
     setNotice(null);
 
@@ -624,15 +628,44 @@ export default function LotterySidebarAdminClient() {
 
       setNotice({
         type: "success",
-        message: "Lottery sidebar item deleted successfully.",
+        message: data.already_deleted
+          ? "The sidebar item had already been deleted and has now been removed from this screen."
+          : "Lottery sidebar item deleted successfully.",
       });
 
-      if (editingId === deleteId) resetEditor();
+      if (editingId === deletingId) resetEditor();
+
+      /*
+       * Remove the card immediately, including when Supabase reports that
+       * the row had already been deleted by an earlier request.
+       */
+      setItems((current) =>
+        current.filter((item) => item.id !== deletingId),
+      );
+
+      /*
+       * DELETE returns the current database list. Prefer that response over
+       * a second GET so stale client data cannot put the deleted card back.
+       */
+      if (Array.isArray(data.items)) {
+        const refreshedItems = [...data.items]
+          .sort(
+            (a, b) =>
+              Number(a.sort_order || 0) - Number(b.sort_order || 0),
+          )
+          .map((item) => ({
+            ...item,
+            icon:
+              item.icon && iconMap[item.icon]
+                ? item.icon
+                : inferLotteryIconName(item.label, item.href),
+          }));
+
+        setItems(refreshedItems);
+      }
 
       setDeleteDialogOpen(false);
       setDeleteId(null);
-
-      await loadItems();
     } catch (error: any) {
       setNotice({
         type: "error",

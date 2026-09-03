@@ -181,6 +181,13 @@ export default function OrdersClient() {
   const [markPaidError, setMarkPaidError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const [issueTicketOrder, setIssueTicketOrder] =
+    useState<OrderRecord | null>(null);
+  const [issueTicketPassword, setIssueTicketPassword] = useState("");
+  const [showIssueTicketPassword, setShowIssueTicketPassword] = useState(false);
+  const [issuingTickets, setIssuingTickets] = useState(false);
+  const [issueTicketError, setIssueTicketError] = useState<string | null>(null);
+
   const [editOrder, setEditOrder] =
     useState<OrderRecord | null>(null);
   const [editDraft, setEditDraft] =
@@ -1155,6 +1162,124 @@ export default function OrdersClient() {
     }
   }
 
+  function requestIssueMissingTickets(order: OrderRecord) {
+    if (testMode) {
+      setError(
+        "Manual ticket issuing is disabled while test-mode demo records are active.",
+      );
+      return;
+    }
+
+    if (order.payment_status !== "paid") {
+      setError(
+        "Missing tickets can only be issued for an order that is already paid.",
+      );
+      return;
+    }
+
+    if (order.ticket_count >= Math.max(1, order.quantity || 1)) {
+      setError("This order already has all of its ticket numbers.");
+      return;
+    }
+
+    setIssueTicketOrder(order);
+    setIssueTicketPassword("");
+    setShowIssueTicketPassword(false);
+    setIssueTicketError(null);
+    setNotice(null);
+  }
+
+  function closeIssueMissingTickets() {
+    if (issuingTickets) return;
+
+    setIssueTicketOrder(null);
+    setIssueTicketPassword("");
+    setShowIssueTicketPassword(false);
+    setIssueTicketError(null);
+  }
+
+  async function confirmIssueMissingTickets(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (!issueTicketOrder || issuingTickets) return;
+
+    if (!issueTicketPassword.trim()) {
+      setIssueTicketError("Enter the main admin settings password.");
+      return;
+    }
+
+    setIssuingTickets(true);
+    setIssueTicketError(null);
+    setNotice(null);
+
+    try {
+      const passwordResponse = await fetch(MAIN_ADMIN_PASSWORD_API, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ password: issueTicketPassword }),
+      });
+
+      const passwordData = await readJson(passwordResponse);
+
+      if (!passwordResponse.ok || !passwordData.ok) {
+        throw new Error(
+          passwordData.error ||
+            passwordData.message ||
+            "The main admin settings password is incorrect or could not be verified.",
+        );
+      }
+
+      const response = await fetch(API_ROUTE, {
+        method: "PATCH",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "issue_missing_tickets",
+          order_id: issueTicketOrder.id,
+          main_admin_password: issueTicketPassword,
+        }),
+      });
+
+      const data = await readJson(response);
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+            data.message ||
+            "The missing ticket could not be issued.",
+        );
+      }
+
+      setIssueTicketOrder(null);
+      setIssueTicketPassword("");
+      setShowIssueTicketPassword(false);
+      setSelected(null);
+      setNotice(
+        data.message ||
+          "The missing ticket was issued and the order was updated.",
+      );
+
+      await loadOrders();
+    } catch (caught: any) {
+      setIssueTicketError(
+        caught?.message || "The missing ticket could not be issued.",
+      );
+    } finally {
+      setIssuingTickets(false);
+    }
+  }
+
   const lotteries = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -1426,6 +1551,7 @@ export default function OrdersClient() {
           order={selected}
           onClose={() => setSelected(null)}
           onMarkPaid={requestMarkPaid}
+          onIssueMissingTickets={requestIssueMissingTickets}
           onEdit={requestEditOrder}
         />
       ) : null}
@@ -1461,6 +1587,22 @@ export default function OrdersClient() {
           }
           onClose={closeMarkPaid}
           onSubmit={confirmMarkPaid}
+        />
+      ) : null}
+
+      {issueTicketOrder ? (
+        <IssueMissingTicketsModal
+          order={issueTicketOrder}
+          password={issueTicketPassword}
+          showPassword={showIssueTicketPassword}
+          loading={issuingTickets}
+          error={issueTicketError}
+          onPasswordChange={setIssueTicketPassword}
+          onTogglePassword={() =>
+            setShowIssueTicketPassword((current) => !current)
+          }
+          onClose={closeIssueMissingTickets}
+          onSubmit={confirmIssueMissingTickets}
         />
       ) : null}
     </div>
@@ -1590,11 +1732,13 @@ function OrderDetailsModal({
   order,
   onClose,
   onMarkPaid,
+  onIssueMissingTickets,
   onEdit,
 }: {
   order: OrderRecord;
   onClose: () => void;
   onMarkPaid: (order: OrderRecord) => void;
+  onIssueMissingTickets: (order: OrderRecord) => void;
   onEdit: (order: OrderRecord) => void;
 }) {
   return (
@@ -1659,6 +1803,42 @@ function OrderDetailsModal({
                 >
                   <CheckCircle2 className="h-5 w-5" />
                   Mark as paid
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {order.payment_status === "paid" &&
+          order.ticket_count < Math.max(1, order.quantity || 1) ? (
+            <div className="mb-6 rounded-2xl border border-red-400/25 bg-red-500/10 p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 font-extrabold text-red-100">
+                    <AlertTriangle className="h-5 w-5" />
+                    Paid order has missing tickets
+                  </div>
+
+                  <p className="mt-2 text-sm leading-6 text-red-100/70">
+                    This order is paid for {Math.max(1, order.quantity || 1)} ticket
+                    {Math.max(1, order.quantity || 1) === 1 ? "" : "s"}, but only{" "}
+                    {order.ticket_count} {order.ticket_count === 1 ? "has" : "have"} been
+                    issued. A main admin can safely issue only the missing ticket
+                    {Math.max(1, order.quantity || 1) - order.ticket_count === 1
+                      ? ""
+                      : "s"}.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onIssueMissingTickets(order)}
+                  className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl bg-red-400 px-5 py-3 text-sm font-extrabold text-red-950 transition hover:bg-red-300"
+                >
+                  <Ticket className="h-5 w-5" />
+                  Issue missing ticket
+                  {Math.max(1, order.quantity || 1) - order.ticket_count === 1
+                    ? ""
+                    : "s"}
                 </button>
               </div>
             </div>
@@ -2007,7 +2187,7 @@ function EditOrderModal({
               htmlFor="edit-order-main-admin-password"
               className="text-sm font-extrabold text-white"
             >
-              Main admin settings password
+              Main admin password
             </label>
 
             <div className="relative mt-2">
@@ -2022,7 +2202,7 @@ function EditOrderModal({
                 }
                 autoComplete="current-password"
                 disabled={loading}
-                placeholder="Enter the password set in Admin Settings"
+                placeholder="Enter the main admin password"
                 className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 pr-12 text-base text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus:ring-4 focus:ring-purple-400/10 disabled:opacity-50"
               />
 
@@ -2040,11 +2220,6 @@ function EditOrderModal({
                 )}
               </button>
             </div>
-
-            <p className="mt-2 text-xs leading-5 text-white/40">
-              The password is checked by /api/admin/settings/delete-password/
-              and is checked again by the Orders API before Supabase is updated.
-            </p>
           </div>
 
           {error ? (
@@ -2090,6 +2265,176 @@ function EditOrderModal({
   );
 }
 
+
+function IssueMissingTicketsModal({
+  order,
+  password,
+  showPassword,
+  loading,
+  error,
+  onPasswordChange,
+  onTogglePassword,
+  onClose,
+  onSubmit,
+}: {
+  order: OrderRecord;
+  password: string;
+  showPassword: boolean;
+  loading: boolean;
+  error: string | null;
+  onPasswordChange: (value: string) => void;
+  onTogglePassword: () => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const required = Math.max(1, order.quantity || 1);
+  const missing = Math.max(0, required - order.ticket_count);
+
+  return (
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="issue-missing-tickets-title"
+    >
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-xl overflow-hidden rounded-3xl border border-red-400/20 bg-[#15172a] shadow-2xl"
+      >
+        <div className="border-b border-white/10 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-400/15 text-red-300">
+                <Ticket className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-red-300">
+                  Protected ticket recovery
+                </p>
+                <h2
+                  id="issue-missing-tickets-title"
+                  className="mt-1 text-xl font-extrabold text-white"
+                >
+                  Issue missing ticket{missing === 1 ? "" : "s"}
+                </h2>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 disabled:opacity-40"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-6">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Info label="Order" value={order.order_reference} />
+              <Info label="Payment" value={statusLabel(order.payment_status)} />
+              <Info label="Quantity paid for" value={String(required)} />
+              <Info label="Missing tickets" value={String(missing)} />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100/80">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+              <p>
+                This action keeps the order marked as paid and issues only the
+                missing ticket number{missing === 1 ? "" : "s"}. Existing ticket
+                numbers are preserved. A confirmation email will be sent to{" "}
+                <strong className="text-amber-100">
+                  {order.purchaser_email || "the entrant"}
+                </strong>.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="issue-ticket-main-admin-password"
+              className="text-sm font-extrabold text-white"
+            >
+              Main admin settings password
+            </label>
+
+            <div className="relative mt-2">
+              <input
+                id="issue-ticket-main-admin-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => onPasswordChange(event.target.value)}
+                autoComplete="current-password"
+                disabled={loading}
+                placeholder="Enter the password set in Admin Settings"
+                className="h-12 w-full rounded-2xl border border-white/15 bg-black/25 px-4 pr-12 text-base text-white outline-none placeholder:text-white/30 focus:border-red-400/60 focus:ring-4 focus:ring-red-400/10 disabled:opacity-50"
+              />
+
+              <button
+                type="button"
+                onClick={onTogglePassword}
+                disabled={loading}
+                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm font-semibold text-red-100"
+            >
+              {error}
+            </div>
+          ) : null}
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/15 px-5 py-3 text-sm font-extrabold text-white hover:bg-white/10 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading || !password.trim() || missing < 1}
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-red-400 px-5 py-3 text-sm font-extrabold text-red-950 transition hover:bg-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Issuing...
+                </>
+              ) : (
+                <>
+                  <Ticket className="h-5 w-5" />
+                  Issue {missing} missing ticket{missing === 1 ? "" : "s"}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
 
 function MarkPaidModal({
   order,

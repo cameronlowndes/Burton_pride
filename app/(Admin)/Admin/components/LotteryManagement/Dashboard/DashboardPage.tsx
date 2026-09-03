@@ -70,11 +70,23 @@ type RecentActivity = {
 };
 
 type DashboardResponse = {
-  success: boolean;
-  summary?: Partial<DashboardSummary>;
-  upcoming?: UpcomingItem[];
-  complianceWarnings?: ComplianceWarning[];
-  recentActivity?: RecentActivity[];
+  ok?: boolean;
+  success?: boolean;
+  dashboard?: unknown;
+  data?: unknown;
+  stats?: unknown;
+  summary?: unknown;
+  upcoming?: unknown;
+  upcomingSalesClosingDates?: unknown;
+  upcomingSalesClosings?: unknown;
+  upcoming_sales_closing_dates?: unknown;
+  upcomingDraws?: unknown;
+  upcoming_draws?: unknown;
+  complianceWarnings?: unknown;
+  warningItems?: unknown;
+  warnings?: unknown;
+  recentActivity?: unknown;
+  recent_activity?: unknown;
   error?: string;
   details?: string;
 };
@@ -91,7 +103,259 @@ const EMPTY_SUMMARY: DashboardSummary = {
 };
 
 const LOTTERY_API_ROUTE = "/api/admin/lotterymanagement/lottery";
+const DASHBOARD_API_ROUTE = "/api/admin/lotterymanagement/dashboard";
 
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function firstArray(...values: unknown[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+  }
+
+  return [];
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+
+  return undefined;
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return "";
+}
+
+function poundsToPence(value: unknown) {
+  const amount = firstNumber(value) ?? 0;
+  return Math.round(amount * 100);
+}
+
+function normaliseSummary(body: DashboardResponse): DashboardSummary {
+  const dashboard = asRecord(body.dashboard || body.data);
+  const stats = asRecord(body.stats || dashboard.stats);
+  const summary = asRecord(body.summary || dashboard.summary);
+
+  return {
+    totalActiveLotteries:
+      firstNumber(
+        summary.totalActiveLotteries,
+        summary.active_lotteries,
+        stats.activeLotteries,
+        dashboard.activeLotteries,
+      ) ?? 0,
+    liveLotterySalesPence:
+      firstNumber(
+        summary.liveLotterySalesPence,
+        summary.live_lottery_sales_pence,
+      ) ??
+      poundsToPence(
+        firstNumber(
+          summary.current_live_sales,
+          stats.currentLiveSales,
+          dashboard.currentLiveSales,
+        ),
+      ),
+    grossTicketProceedsPence:
+      firstNumber(
+        summary.grossTicketProceedsPence,
+        summary.gross_ticket_proceeds_pence,
+      ) ??
+      poundsToPence(
+        firstNumber(
+          summary.gross_ticket_proceeds,
+          stats.grossTicketProceeds,
+          dashboard.grossTicketProceeds,
+          dashboard.totalRevenue,
+        ),
+      ),
+    paidEntries:
+      firstNumber(
+        summary.paidEntries,
+        summary.paid_entries,
+        stats.paidEntries,
+        dashboard.paidEntries,
+        dashboard.paidOrders,
+      ) ?? 0,
+    ticketsIssued:
+      firstNumber(
+        summary.ticketsIssued,
+        summary.tickets_issued,
+        stats.ticketsIssued,
+        dashboard.ticketsIssued,
+      ) ?? 0,
+    pendingOrFailedPayments:
+      firstNumber(
+        summary.pendingOrFailedPayments,
+        summary.pending_or_failed_payments,
+        summary.payment_attention,
+        stats.paymentAttention,
+        dashboard.paymentAttention,
+      ) ?? 0,
+    unclaimedPrizes:
+      firstNumber(
+        summary.unclaimedPrizes,
+        summary.unclaimed_prizes,
+        stats.unclaimedPrizes,
+        dashboard.unclaimedPrizes,
+      ) ?? 0,
+    complianceWarnings:
+      firstNumber(
+        summary.complianceWarnings,
+        summary.compliance_warnings,
+        stats.complianceWarnings,
+        dashboard.complianceWarnings,
+      ) ?? 0,
+  };
+}
+
+function normaliseUpcomingItem(
+  value: unknown,
+  kind: "sales_close" | "draw",
+): UpcomingItem | null {
+  const item = asRecord(value);
+  const lotteryId = firstText(item.lotteryId, item.lottery_id, item.id);
+  const dateTime =
+    kind === "sales_close"
+      ? firstText(item.dateTime, item.sales_close_at, item.ends_at)
+      : firstText(item.dateTime, item.draw_at, item.scheduled_at);
+
+  if (!lotteryId || !dateTime) return null;
+
+  return {
+    id: firstText(item.id, item.draw_id) || `${kind}-${lotteryId}-${dateTime}`,
+    lotteryId,
+    title:
+      firstText(item.title, item.lotteryTitle, item.lottery_title) ||
+      "Untitled lottery",
+    slug: firstText(item.slug, item.lottery_slug),
+    kind,
+    dateTime,
+    status: firstText(item.status) || undefined,
+  };
+}
+
+function normaliseUpcoming(body: DashboardResponse) {
+  const dashboard = asRecord(body.dashboard || body.data);
+  const legacyUpcoming = asArray(body.upcoming || dashboard.upcoming);
+
+  if (legacyUpcoming.length > 0) {
+    return legacyUpcoming
+      .map((value) => {
+        const item = asRecord(value);
+        const kind = item.kind === "draw" ? "draw" : "sales_close";
+        return normaliseUpcomingItem(value, kind);
+      })
+      .filter((item): item is UpcomingItem => Boolean(item));
+  }
+
+  const closingRows = firstArray(
+    body.upcomingSalesClosingDates,
+    body.upcomingSalesClosings,
+    body.upcoming_sales_closing_dates,
+    dashboard.upcomingSalesClosingDates,
+    dashboard.upcomingSalesClosings,
+  );
+  const drawRows = firstArray(
+    body.upcomingDraws,
+    body.upcoming_draws,
+    dashboard.upcomingDraws,
+  );
+
+  return [
+    ...closingRows.map((item) => normaliseUpcomingItem(item, "sales_close")),
+    ...drawRows.map((item) => normaliseUpcomingItem(item, "draw")),
+  ].filter((item): item is UpcomingItem => Boolean(item));
+}
+
+function normaliseSeverity(value: unknown): ComplianceWarning["severity"] {
+  const severity = firstText(value).toLowerCase();
+
+  if (["critical", "high", "error", "blocker"].includes(severity)) {
+    return "critical";
+  }
+
+  if (["warning", "warn", "medium"].includes(severity)) {
+    return "warning";
+  }
+
+  return "info";
+}
+
+function normaliseWarnings(body: DashboardResponse) {
+  const dashboard = asRecord(body.dashboard || body.data);
+  const rows = firstArray(
+    body.complianceWarnings,
+    body.warningItems,
+    body.warnings,
+    dashboard.warningItems,
+    dashboard.warnings,
+  );
+
+  return rows.map((value, index): ComplianceWarning => {
+    const item = asRecord(value);
+
+    return {
+      id: firstText(item.id) || `warning-${index}`,
+      lotteryId: firstText(item.lotteryId, item.lottery_id) || null,
+      lotteryTitle:
+        firstText(item.lotteryTitle, item.lottery_title) || null,
+      severity: normaliseSeverity(item.severity),
+      message:
+        firstText(item.message, item.title, item.warning_code) ||
+        "Lottery compliance warning",
+      createdAt: firstText(item.createdAt, item.created_at) || null,
+    };
+  });
+}
+
+function normaliseRecentActivity(body: DashboardResponse) {
+  const dashboard = asRecord(body.dashboard || body.data);
+  const rows = firstArray(
+    body.recentActivity,
+    body.recent_activity,
+    dashboard.recentActivity,
+  );
+
+  return rows.map((value, index): RecentActivity => {
+    const item = asRecord(value);
+
+    return {
+      id: firstText(item.id) || `activity-${index}`,
+      actionLabel:
+        firstText(
+          item.actionLabel,
+          item.action_label,
+          item.title,
+          item.action_code,
+        ) || "Lottery activity",
+      adminName:
+        firstText(item.adminName, item.admin_name, item.admin) || null,
+      adminEmail: firstText(item.adminEmail, item.admin_email) || null,
+      lotteryTitle:
+        firstText(item.lotteryTitle, item.lottery_title) || null,
+      createdAt:
+        firstText(item.createdAt, item.created_at) || new Date().toISOString(),
+    };
+  });
+}
 
 
 function formatMoney(pence: number) {
@@ -304,22 +568,20 @@ export default function LotteryManagementDashboardPage() {
     setDetails(null);
 
     try {
-      const response = await fetch(
-        "/api/admin/lotterymanagement/dashboard",
-        {
+      const response = await fetch(DASHBOARD_API_ROUTE, {
           method: "GET",
           headers: {
             Accept: "application/json",
           },
+          credentials: "include",
           cache: "no-store",
-        },
-      );
+        });
 
       const body = (await response.json().catch(() => null)) as
         | DashboardResponse
         | null;
 
-      if (!response.ok || !body?.success) {
+      if (!response.ok || (!body?.success && !body?.ok)) {
         throw new Error(
           body?.details ||
             body?.error ||
@@ -327,13 +589,10 @@ export default function LotteryManagementDashboardPage() {
         );
       }
 
-      setSummary({
-        ...EMPTY_SUMMARY,
-        ...(body.summary ?? {}),
-      });
-      setUpcoming(body.upcoming ?? []);
-      setWarnings(body.complianceWarnings ?? []);
-      setRecentActivity(body.recentActivity ?? []);
+      setSummary(normaliseSummary(body));
+      setUpcoming(normaliseUpcoming(body));
+      setWarnings(normaliseWarnings(body));
+      setRecentActivity(normaliseRecentActivity(body));
     } catch (caughtError) {
       const message =
         caughtError instanceof Error
@@ -749,7 +1008,7 @@ export default function LotteryManagementDashboardPage() {
                         {item.title}
                       </p>
                       <p className="mt-1 text-xs text-white/40">
-                        /lottery/{item.slug}
+                        /Lottery/{item.slug}
                       </p>
                     </div>
 
@@ -797,7 +1056,7 @@ export default function LotteryManagementDashboardPage() {
                         {item.title}
                       </p>
                       <p className="mt-1 text-xs text-white/40">
-                        /lottery/{item.slug}
+                        /Lottery/{item.slug}
                       </p>
                     </div>
 
@@ -1080,7 +1339,7 @@ export default function LotteryManagementDashboardPage() {
                     />
                   </Field>
 
-                  <Field label="Unique slug" required hint="Used for the public /lottery/[slug] page.">
+                  <Field label="Unique slug" required hint="Used for the public /Lottery/[slug] page.">
                     <input
                       value={createForm.slug}
                       onChange={(e) => updateCreateField("slug", slugify(e.target.value))}

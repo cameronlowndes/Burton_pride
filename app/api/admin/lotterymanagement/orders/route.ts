@@ -1633,6 +1633,7 @@ type ManualPaidOrder = {
   payment_status: string | null;
   payment_reference: string | null;
   paid_at: string | null;
+  updated_at?: string | null;
 };
 
 type ManualPaidLottery = {
@@ -2437,12 +2438,14 @@ function manualTicketText(
 }
 
 async function recordManualPaymentNotification({
+  lotteryId,
   orderId,
   notificationType,
   recipient,
   status,
   errorMessage = null,
 }: {
+  lotteryId: string;
   orderId: string;
   notificationType: string;
   recipient: string;
@@ -2461,6 +2464,9 @@ async function recordManualPaymentNotification({
         "lottery_notifications",
       )
       .insert({
+        lottery_id:
+          lotteryId,
+
         order_id:
           orderId,
 
@@ -2506,7 +2512,7 @@ async function sendPaidOrderEmails({
   order: ManualPaidOrder;
   lottery: ManualPaidLottery;
   tickets: ManualPaidTicket[];
-  source: "stripe" | "manual";
+  source: "stripe" | "manual" | "ticket_recovery";
 }) {
   if (
     !process.env.RESEND_API_KEY
@@ -2527,27 +2533,37 @@ async function sendPaidOrderEmails({
   const customerNotificationType =
     source === "stripe"
       ? "paid_entry_customer_confirmation"
-      : "paid_entry_manual_confirmation";
+      : source === "ticket_recovery"
+        ? "missing_ticket_customer_confirmation"
+        : "paid_entry_manual_confirmation";
 
   const internalNotificationType =
     source === "stripe"
       ? "paid_entry_internal_notification"
-      : "paid_entry_manual_internal_notification";
+      : source === "ticket_recovery"
+        ? "missing_ticket_internal_notification"
+        : "paid_entry_manual_internal_notification";
 
   const internalSubject =
     source === "stripe"
       ? `New paid lottery entry: ${order.order_reference}`
-      : `Manual paid lottery entry: ${order.order_reference}`;
+      : source === "ticket_recovery"
+        ? `Missing lottery ticket issued: ${order.order_reference}`
+        : `Manual paid lottery entry: ${order.order_reference}`;
 
   const internalHeading =
     source === "stripe"
       ? "A paid lottery entry has been received"
-      : "A manual paid lottery entry has been received";
+      : source === "ticket_recovery"
+        ? "A missing lottery ticket has been issued"
+        : "A manual paid lottery entry has been received";
 
   const internalIntro =
     source === "stripe"
       ? "Stripe has confirmed this lottery payment as paid."
-      : "A main admin manually confirmed this lottery order as paid.";
+      : source === "ticket_recovery"
+        ? "A main admin issued the missing ticket number for this paid order."
+        : "A main admin manually confirmed this lottery order as paid.";
 
   const customerSubject =
     `Your ${lottery.title} lottery number${
@@ -2686,6 +2702,9 @@ Burton Pride Lotteries`;
     customerResult.error
   ) {
     await recordManualPaymentNotification({
+      lotteryId:
+        lottery.id,
+
       orderId:
         order.id,
 
@@ -2709,6 +2728,9 @@ Burton Pride Lotteries`;
   }
 
   await recordManualPaymentNotification({
+    lotteryId:
+      lottery.id,
+
     orderId:
       order.id,
 
@@ -2816,6 +2838,9 @@ ${manualTicketText(
     }
 
     await recordManualPaymentNotification({
+      lotteryId:
+        lottery.id,
+
       orderId:
         order.id,
 
@@ -2843,6 +2868,9 @@ ${manualTicketText(
     );
 
     await recordManualPaymentNotification({
+      lotteryId:
+        lottery.id,
+
       orderId:
         order.id,
 
@@ -2960,6 +2988,60 @@ async function writeManualPaidAudit({
   ) {
     console.warn(
       "Lottery manual-paid audit could not be written:",
+      error,
+    );
+  }
+}
+
+async function writeMissingTicketAudit({
+  admin,
+  order,
+  lottery,
+  tickets,
+  issuedTickets,
+}: {
+  admin: ManualPaidAdmin;
+  order: ManualPaidOrder;
+  lottery: ManualPaidLottery;
+  tickets: ManualPaidTicket[];
+  issuedTickets: ManualPaidTicket[];
+}) {
+  const { error } = await supabaseAdmin
+    .from("admin_audit_logs")
+    .insert({
+      admin_id: admin.id,
+      admin_email: admin.email,
+      action: "lottery_order_missing_tickets_issued",
+      area: "lottery_management",
+      route: "/api/admin/lotterymanagement/orders",
+      method: "PATCH",
+      status: "completed",
+      target_type: "lottery_order",
+      target_id: order.id,
+      target_label: order.order_reference,
+      metadata: {
+        payment_status: order.payment_status,
+        lottery_id: lottery.id,
+        lottery_title: lottery.title,
+        ordered_quantity: order.quantity,
+        issued_count: issuedTickets.length,
+        issued_ticket_numbers: issuedTickets.map(
+          (ticket) => ticket.ticket_number,
+        ),
+        all_ticket_numbers: tickets.map(
+          (ticket) => ticket.ticket_number,
+        ),
+        main_admin_verified: true,
+        password_verified: true,
+        password_source: "admin_delete_settings",
+        password_action_key: MAIN_ADMIN_PASSWORD_ACTION_KEY,
+      },
+      created_at: new Date().toISOString(),
+    });
+
+  if (error) {
+    console.warn(
+      "Lottery missing-ticket audit could not be written:",
       error,
     );
   }
@@ -3411,7 +3493,9 @@ export async function PATCH(
       action !==
         "mark_paid" &&
       action !==
-        "edit_order"
+        "edit_order" &&
+      action !==
+        "issue_missing_tickets"
     ) {
       return jsonResponse(
         {
@@ -3561,7 +3645,8 @@ export async function PATCH(
           currency,
           payment_status,
           payment_reference,
-          paid_at
+          paid_at,
+          updated_at
           `,
         )
         .eq(
@@ -3588,6 +3673,256 @@ export async function PATCH(
 
     const order =
       orderData as ManualPaidOrder;
+
+    if (
+      action ===
+      "issue_missing_tickets"
+    ) {
+      if (
+        order.payment_status !==
+        "paid"
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "Missing tickets can only be issued for an order that is already marked as paid.",
+          },
+          409,
+        );
+      }
+
+      if (
+        !order.purchaser_email
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "This order has no purchaser email address. Add an email address before issuing the missing ticket.",
+          },
+          409,
+        );
+      }
+
+      const existingTickets =
+        await loadManualPaidTickets(
+          order.id,
+        );
+
+      const requiredTickets =
+        Math.max(
+          1,
+          Number(
+            order.quantity ||
+            1,
+          ),
+        );
+
+      if (
+        existingTickets.length >=
+        requiredTickets
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "This order already has all of its ticket numbers. Refresh the page to see them.",
+          },
+          409,
+        );
+      }
+
+      const {
+        data: lotteryData,
+        error: lotteryError,
+      } = await supabaseAdmin
+        .from("lotteries")
+        .select("id,title,slug,draw_at,max_tickets")
+        .eq("id", order.lottery_id)
+        .single();
+
+      if (
+        lotteryError ||
+        !lotteryData
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "The lottery attached to this order could not be loaded.",
+          },
+          409,
+        );
+      }
+
+      /*
+       * Claim this order using its last update time. If two admins click
+       * the recovery action together, only one request may allocate tickets.
+       */
+      const issueStartedAt =
+        new Date()
+          .toISOString();
+
+      let claimQuery =
+        supabaseAdmin
+          .from("lottery_orders")
+          .update({
+            updated_at:
+              issueStartedAt,
+          })
+          .eq("id", order.id)
+          .eq("payment_status", "paid");
+
+      if (
+        order.updated_at
+      ) {
+        claimQuery =
+          claimQuery.eq(
+            "updated_at",
+            order.updated_at,
+          );
+      }
+
+      const {
+        data: claimedOrder,
+        error: claimError,
+      } = await claimQuery
+        .select("id")
+        .maybeSingle();
+
+      if (
+        claimError ||
+        !claimedOrder
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "This order changed while the tickets were being checked. Refresh the page and try again.",
+          },
+          409,
+        );
+      }
+
+      const lottery =
+        lotteryData as ManualPaidLottery;
+
+      const {
+        tickets,
+        createdIds,
+      } = await createMissingManualPaidTickets(
+        order,
+        lottery,
+      );
+
+      if (
+        createdIds.length ===
+        0
+      ) {
+        return jsonResponse(
+          {
+            ok: false,
+            error:
+              "No tickets were issued because this order already has the required number.",
+          },
+          409,
+        );
+      }
+
+      const createdIdSet =
+        new Set(
+          createdIds,
+        );
+
+      const issuedTickets =
+        tickets.filter(
+          (ticket) =>
+            createdIdSet.has(
+              ticket.id,
+            ),
+        );
+
+      let emailSent =
+        false;
+
+      let emailError:
+        string |
+        null =
+        null;
+
+      try {
+        await sendPaidOrderEmails({
+          order,
+          lottery,
+          tickets,
+          source:
+            "ticket_recovery",
+        });
+
+        emailSent =
+          true;
+      } catch (
+        error
+      ) {
+        emailError =
+          error instanceof Error
+            ? error.message
+            : "The confirmation email could not be sent.";
+
+        console.error(
+          "Lottery missing-ticket confirmation email failed:",
+          error,
+        );
+      }
+
+      await writeMissingTicketAudit({
+        admin:
+          auth.admin,
+        order,
+        lottery,
+        tickets,
+        issuedTickets,
+      });
+
+      return jsonResponse({
+        ok: true,
+        message:
+          emailSent
+            ? `${issuedTickets.length} missing ticket${issuedTickets.length === 1 ? "" : "s"} issued and the confirmation email was sent.`
+            : `${issuedTickets.length} missing ticket${issuedTickets.length === 1 ? "" : "s"} issued, but the confirmation email could not be sent.`,
+        payment_status:
+          "paid",
+        paid_at:
+          order.paid_at,
+        order_id:
+          order.id,
+        order_reference:
+          order.order_reference,
+        tickets:
+          tickets.map(
+            (ticket) => ({
+              id: ticket.id,
+              ticket_number:
+                ticket.ticket_number,
+              status:
+                ticket.status,
+              issued_at:
+                ticket.issued_at,
+            }),
+          ),
+        issued_count:
+          issuedTickets.length,
+        email: {
+          sent:
+            emailSent,
+          recipient:
+            order.purchaser_email,
+          error:
+            emailError,
+        },
+      });
+    }
 
     if (
       order.payment_status !==
@@ -3856,7 +4191,7 @@ export async function PATCH(
     error
   ) {
     console.error(
-      "Lottery manual mark-paid error:",
+      "Lottery protected order action error:",
       error,
     );
 
@@ -3866,7 +4201,7 @@ export async function PATCH(
           false,
 
         error:
-          "The order could not be manually marked as paid.",
+          "The protected lottery order action could not be completed.",
       },
       500,
     );

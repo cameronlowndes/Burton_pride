@@ -989,6 +989,25 @@ export default function LotterySlugClient({
         )}
       </section>
 
+      <section
+        aria-label="Burton Pride lottery registration"
+        className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 shadow-sm dark:border-blue-300/20 dark:bg-blue-500/10"
+      >
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-700 dark:text-blue-300" />
+
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700 dark:text-blue-300">
+              Lottery registration
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-white/75">
+              Burton Pride lottery number: <strong>SL0507</strong>. This lottery
+              number was issued by East Staffordshire Borough Council.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <div
         className="
           mt-8
