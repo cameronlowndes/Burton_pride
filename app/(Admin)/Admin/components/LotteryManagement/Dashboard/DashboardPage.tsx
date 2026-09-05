@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  Bug,
   CalendarDays,
   Check,
   ChevronRight,
@@ -104,6 +105,7 @@ const EMPTY_SUMMARY: DashboardSummary = {
 
 const LOTTERY_API_ROUTE = "/api/admin/lotterymanagement/lottery";
 const DASHBOARD_API_ROUTE = "/api/admin/lotterymanagement/dashboard";
+const REQUIRED_MINIMUM_AGE = 18;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -509,7 +511,7 @@ export default function LotteryManagementDashboardPage() {
     ticket_price: "1.00",
     currency: "GBP",
     max_tickets: "",
-    minimum_age: "16",
+    minimum_age: "18",
     promoting_society_legal_name: "Burton Pride C.I.C.",
     registration_licence_type: "",
     registration_licence_number: "",
@@ -533,9 +535,51 @@ export default function LotteryManagementDashboardPage() {
     countdown_enabled: true,
   });
 
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [bugSubmitting, setBugSubmitting] = useState(false);
+  const [bugError, setBugError] = useState<string | null>(null);
+  const [bugSuccess, setBugSuccess] = useState<{
+    reference: string;
+    message: string;
+    emailSent: boolean;
+  } | null>(null);
+  const [bugForm, setBugForm] = useState({
+    priority: "normal",
+    title: "",
+    description: "",
+    affected_feature: "Lottery Management Dashboard",
+    page_url: "",
+    steps_to_reproduce: "",
+    expected_result: "",
+    actual_result: "",
+  });
+
+
   useEffect(() => {
     void loadDashboard(false);
   }, []);
+
+  useEffect(() => {
+    if (!bugReportOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleBugKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !bugSubmitting) {
+        setBugReportOpen(false);
+        setBugError(null);
+        setBugSuccess(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleBugKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleBugKeyDown);
+    };
+  }, [bugReportOpen, bugSubmitting]);
 
   useEffect(() => {
     if (!createOpen) return;
@@ -607,6 +651,155 @@ export default function LotteryManagementDashboardPage() {
     }
   }
 
+  function openBugReport() {
+    setBugError(null);
+    setBugSuccess(null);
+    setBugForm({
+      priority: "normal",
+      title: "",
+      description: "",
+      affected_feature: "Lottery Management Dashboard",
+      page_url:
+        typeof window !== "undefined"
+          ? window.location.href
+          : "",
+      steps_to_reproduce: "",
+      expected_result: "",
+      actual_result: "",
+    });
+    setBugReportOpen(true);
+  }
+
+  function closeBugReport() {
+    if (bugSubmitting) return;
+
+    setBugReportOpen(false);
+    setBugError(null);
+    setBugSuccess(null);
+  }
+
+  function updateBugField(
+    name: keyof typeof bugForm,
+    value: string,
+  ) {
+    setBugForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  async function submitBugReport() {
+    const title = bugForm.title.trim();
+    const description = bugForm.description.trim();
+    const actualResult = bugForm.actual_result.trim();
+
+    if (!title) {
+      setBugError("Enter a short title for the bug.");
+      return;
+    }
+
+    if (!description) {
+      setBugError("Explain what the bug is and how it affects Lottery Management.");
+      return;
+    }
+
+    if (!actualResult) {
+      setBugError("Explain what actually happened.");
+      return;
+    }
+
+    setBugSubmitting(true);
+    setBugError(null);
+    setBugSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/bug-tracker", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          // Lottery Management currently sits inside the Admin Portal
+          // application group in the central Bug Tracker.
+          application: "admin_portal",
+          priority: bugForm.priority,
+          title,
+          description,
+          affected_feature:
+            bugForm.affected_feature.trim() ||
+            "Lottery Management",
+          page_url:
+            bugForm.page_url.trim() ||
+            null,
+          steps_to_reproduce:
+            bugForm.steps_to_reproduce.trim() ||
+            null,
+          expected_result:
+            bugForm.expected_result.trim() ||
+            null,
+          actual_result: actualResult,
+          browser_name:
+            typeof navigator !== "undefined"
+              ? navigator.userAgent
+              : null,
+          device_type:
+            typeof window !== "undefined" &&
+            window.matchMedia("(pointer: coarse)").matches
+              ? "Touch device"
+              : "Desktop or laptop",
+          operating_system:
+            typeof navigator !== "undefined"
+              ? navigator.platform
+              : null,
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (
+        !response.ok ||
+        !result?.ok ||
+        !result?.report
+      ) {
+        throw new Error(
+          [
+            result?.error ||
+              result?.message ||
+              "The bug report could not be submitted.",
+            result?.code
+              ? `Error code: ${result.code}.`
+              : null,
+            result?.hint || null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
+
+      setBugSuccess({
+        reference:
+          result.report.reference_number ||
+          result.report.id ||
+          "Saved",
+        message:
+          result.message ||
+          "Your bug report has been saved successfully.",
+        emailSent: Boolean(result.emailSent),
+      });
+    } catch (submitError) {
+      setBugError(
+        submitError instanceof Error
+          ? submitError.message
+          : "The bug report could not be submitted.",
+      );
+    } finally {
+      setBugSubmitting(false);
+    }
+  }
+
   function slugify(value: string) {
     return value
       .toLowerCase()
@@ -661,7 +854,7 @@ export default function LotteryManagementDashboardPage() {
 
     if (step === 3) {
       if (Number(createForm.ticket_price) <= 0) return "Ticket price must be more than £0.";
-      if (Number(createForm.minimum_age) < 0) return "Minimum age is invalid.";
+      if (Number(createForm.minimum_age) !== REQUIRED_MINIMUM_AGE) return "All Burton Pride lotteries must be 18+.";
 
       if (createForm.max_tickets && Number(createForm.max_tickets) <= 0) {
         return "Maximum tickets must be more than 0.";
@@ -742,7 +935,7 @@ export default function LotteryManagementDashboardPage() {
       const payload = {
         ...createForm,
         ticket_price: Number(createForm.ticket_price),
-        minimum_age: Number(createForm.minimum_age),
+        minimum_age: REQUIRED_MINIMUM_AGE,
         max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
         maximum_proceeds: createForm.maximum_proceeds
           ? Number(createForm.maximum_proceeds)
@@ -861,6 +1054,31 @@ export default function LotteryManagementDashboardPage() {
                 <RefreshCw size={17} />
               )}
               Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={openBugReport}
+              className="
+                inline-flex
+                h-12
+                items-center
+                gap-2
+                rounded-2xl
+                border
+                border-white/10
+                bg-white/5
+                px-5
+                text-sm
+                font-black
+                text-white
+                transition
+                hover:border-pink-400/25
+                hover:bg-pink-500/10
+              "
+            >
+              <Bug size={18} />
+              Report a bug
             </button>
 
             <button
@@ -1246,6 +1464,305 @@ export default function LotteryManagementDashboardPage() {
           </div>
         </SectionCard>
 
+      {bugReportOpen ? (
+        <div
+          className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/70 p-3 backdrop-blur-xl sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lottery-bug-report-title"
+        >
+          <button
+            type="button"
+            aria-label="Close bug report"
+            className="absolute inset-0 cursor-default"
+            disabled={bugSubmitting}
+            onClick={closeBugReport}
+          />
+
+          <div className="relative max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-[1.5rem] border border-white/10 bg-[#11111f] shadow-2xl sm:rounded-[2rem]">
+            <div className="bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 p-1" />
+
+            <div className="p-4 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-red-100/70">
+                    <Bug className="h-4 w-4" />
+                    Burton Pride Bug Tracker
+                  </div>
+
+                  <h2
+                    id="lottery-bug-report-title"
+                    className="mt-2 text-2xl font-black text-white"
+                  >
+                    Report a bug
+                  </h2>
+
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-white/60">
+                    This report is sent directly to the Admin Portal Bug Tracker.
+                    It will be recorded as a Lottery Management issue so you can
+                    report problems without leaving this application.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeBugReport}
+                  disabled={bugSubmitting}
+                  className="shrink-0 rounded-full bg-white/10 px-3 py-2 text-xs font-black text-white/65 transition hover:bg-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Close
+                </button>
+              </div>
+
+              {bugError ? (
+                <div className="mt-5 rounded-2xl border border-red-300/25 bg-red-500/10 p-4 text-red-50">
+                  <div className="flex gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+
+                    <div className="min-w-0">
+                      <p className="font-black">
+                        Bug report could not be submitted
+                      </p>
+
+                      <p className="mt-1 break-words text-sm leading-6 text-red-50/80">
+                        {bugError}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {bugSuccess ? (
+                <div className="mt-5 rounded-2xl border border-emerald-300/25 bg-emerald-500/10 p-5 text-emerald-50">
+                  <div className="flex gap-3">
+                    <Check className="mt-0.5 h-5 w-5 shrink-0" />
+
+                    <div className="min-w-0">
+                      <p className="font-black">
+                        Bug report submitted
+                      </p>
+
+                      <p className="mt-1 text-sm leading-6 text-emerald-50/80">
+                        {bugSuccess.message}
+                      </p>
+
+                      <div className="mt-3 rounded-xl border border-emerald-200/15 bg-black/15 px-4 py-3">
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-emerald-100/55">
+                          Reference
+                        </p>
+                        <p className="mt-1 font-black text-emerald-50">
+                          {bugSuccess.reference}
+                        </p>
+                      </div>
+
+                      <p className="mt-3 text-xs leading-5 text-emerald-50/55">
+                        {bugSuccess.emailSent
+                          ? "The Bug Tracker notification email was sent."
+                          : "The report was saved. Email delivery was not confirmed by the API."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 space-y-5">
+                  <div className="rounded-2xl border border-purple-300/15 bg-purple-500/[0.07] p-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-purple-300" />
+
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-purple-200/60">
+                          Application
+                        </p>
+
+                        <p className="mt-1 font-black text-white">
+                          Lottery Management
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-white/45">
+                          The central Bug Tracker currently stores this under
+                          Admin Portal, with Lottery Management recorded as the
+                          affected feature.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Priority" required>
+                      <select
+                        value={bugForm.priority}
+                        onChange={(event) =>
+                          updateBugField(
+                            "priority",
+                            event.target.value,
+                          )
+                        }
+                        className={inputClass}
+                      >
+                        <option value="minor">
+                          Minor Bug
+                        </option>
+                        <option value="normal">
+                          Normal Issue
+                        </option>
+                        <option value="senior">
+                          Senior / Critical
+                        </option>
+                      </select>
+                    </Field>
+
+                    <Field label="Affected feature">
+                      <input
+                        value={bugForm.affected_feature}
+                        onChange={(event) =>
+                          updateBugField(
+                            "affected_feature",
+                            event.target.value,
+                          )
+                        }
+                        className={inputClass}
+                        placeholder="e.g. Dashboard, Tickets, Draws"
+                      />
+                    </Field>
+
+                    <Field label="Bug title" full required>
+                      <input
+                        value={bugForm.title}
+                        onChange={(event) =>
+                          updateBugField(
+                            "title",
+                            event.target.value,
+                          )
+                        }
+                        className={inputClass}
+                        placeholder="Give the problem a short clear title"
+                      />
+                    </Field>
+
+                    <Field label="Bug description" full required>
+                      <textarea
+                        value={bugForm.description}
+                        onChange={(event) =>
+                          updateBugField(
+                            "description",
+                            event.target.value,
+                          )
+                        }
+                        className={`${inputClass} min-h-28 resize-y`}
+                        placeholder="Explain what happened and how it affects Lottery Management."
+                      />
+                    </Field>
+
+                    <Field label="Steps to reproduce" full>
+                      <textarea
+                        value={bugForm.steps_to_reproduce}
+                        onChange={(event) =>
+                          updateBugField(
+                            "steps_to_reproduce",
+                            event.target.value,
+                          )
+                        }
+                        className={`${inputClass} min-h-24 resize-y`}
+                        placeholder="1. Open... 2. Click... 3. The problem appears..."
+                      />
+                    </Field>
+
+                    <Field label="Expected result">
+                      <textarea
+                        value={bugForm.expected_result}
+                        onChange={(event) =>
+                          updateBugField(
+                            "expected_result",
+                            event.target.value,
+                          )
+                        }
+                        className={`${inputClass} min-h-24 resize-y`}
+                        placeholder="What should have happened?"
+                      />
+                    </Field>
+
+                    <Field label="Actual result" required>
+                      <textarea
+                        value={bugForm.actual_result}
+                        onChange={(event) =>
+                          updateBugField(
+                            "actual_result",
+                            event.target.value,
+                          )
+                        }
+                        className={`${inputClass} min-h-24 resize-y`}
+                        placeholder="What happened instead?"
+                      />
+                    </Field>
+
+                    <Field
+                      label="Page URL"
+                      full
+                      hint="This is filled in automatically from the Lottery Management page you are using."
+                    >
+                      <input
+                        value={bugForm.page_url}
+                        onChange={(event) =>
+                          updateBugField(
+                            "page_url",
+                            event.target.value,
+                          )
+                        }
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs leading-5 text-white/45">
+                    Browser, device type and operating system are added
+                    automatically to help reproduce the problem.
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <Link
+                  href="/Admin/BugTracker"
+                  className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  Open full Bug Tracker
+                </Link>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={closeBugReport}
+                    disabled={bugSubmitting}
+                    className="min-h-11 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  >
+                    {bugSuccess ? "Close" : "Cancel"}
+                  </button>
+
+                  {!bugSuccess ? (
+                    <button
+                      type="button"
+                      onClick={submitBugReport}
+                      disabled={bugSubmitting}
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-500 via-pink-500 to-purple-500 px-5 py-3 text-sm font-black text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {bugSubmitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bug className="h-4 w-4" />
+                      )}
+
+                      {bugSubmitting
+                        ? "Submitting..."
+                        : "Submit bug report"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {createOpen ? (
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
@@ -1501,13 +2018,17 @@ export default function LotteryManagementDashboardPage() {
                   </Field>
 
                   <Field label="Minimum participant age">
-                    <input
-                      type="number"
-                      min="0"
-                      value={createForm.minimum_age}
-                      onChange={(e) => updateCreateField("minimum_age", e.target.value)}
-                      className={inputClass}
-                    />
+                    <div className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3">
+                      <div>
+                        <div className="text-base font-extrabold text-emerald-100">
+                          18+ only
+                        </div>
+                        <div className="mt-1 text-xs font-medium text-emerald-100/65">
+                          Fixed for every Burton Pride lottery and cannot be changed.
+                        </div>
+                      </div>
+                      <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-200" />
+                    </div>
                   </Field>
 
                   <div className="md:col-span-2 rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">

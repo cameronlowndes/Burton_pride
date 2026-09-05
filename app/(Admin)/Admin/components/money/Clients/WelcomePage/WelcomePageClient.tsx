@@ -1,8 +1,14 @@
 import Link from "next/link";
-import { Lock, User, WalletCards } from "lucide-react";
+import {
+  Lock,
+  Sparkles,
+  User,
+  WalletCards,
+} from "lucide-react";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
 import MoneyManagementBugReporter from "./MoneyManagementBugReporter";
+import MoneyManagementFeatureRequestReporter from "./MoneyManagementFeatureRequestReporter";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,7 +16,8 @@ export const revalidate = 0;
 export default async function MoneyManagementHomePage() {
   const admin = await getCurrentAdmin();
 
-  const userName = admin?.email || "Money tracker user";
+  const userName =
+    admin?.email || "Money tracker user";
 
   return (
     <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.14),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
@@ -102,11 +109,29 @@ export default async function MoneyManagementHomePage() {
                 </Link>
               </div>
 
-              <div className="mt-3">
-                <MoneyManagementBugReporter
-                  reporterName={admin.email || ""}
-                  reporterEmail={admin.email || ""}
-                />
+              <div className="mt-5 rounded-3xl border border-white/10 bg-black/15 p-4">
+                <div className="flex items-center justify-center gap-2 text-sm font-black text-white/85">
+                  <Sparkles className="h-4 w-4 text-purple-300" />
+                  Help improve Money Management
+                </div>
+
+                <p className="mx-auto mt-2 max-w-2xl text-xs leading-5 text-white/45">
+                  Found a problem or have an idea for a new feature? You can send
+                  it directly from Money Management without going back to the main
+                  Admin Portal.
+                </p>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <MoneyManagementBugReporter
+                    reporterName={admin.email || ""}
+                    reporterEmail={admin.email || ""}
+                  />
+
+                  <MoneyManagementFeatureRequestReporter
+                    reporterName={admin.email || ""}
+                    reporterEmail={admin.email || ""}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -120,12 +145,21 @@ export default async function MoneyManagementHomePage() {
             </Link>
 
             {admin && (
-              <Link
-                href="/Admin/BugTracker"
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-white/80 transition hover:bg-white/10 hover:text-white"
-              >
-                View Admin Bug Tracker
-              </Link>
+              <>
+                <Link
+                  href="/Admin/BugTracker"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-white/80 transition hover:bg-white/10 hover:text-white"
+                >
+                  View Admin Bug Tracker
+                </Link>
+
+                <Link
+                  href="/Admin/DevelopmentRequests"
+                  className="rounded-2xl border border-purple-300/15 bg-purple-500/10 px-4 py-2 text-sm font-bold text-purple-100 transition hover:bg-purple-500/20"
+                >
+                  View Development Requests
+                </Link>
+              </>
             )}
           </div>
         </div>

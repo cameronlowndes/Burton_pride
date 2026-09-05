@@ -13,6 +13,8 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const REQUIRED_MINIMUM_AGE = 18;
+
 type LotteryStatus =
   | "draft"
   | "compliance_review"
@@ -718,6 +720,24 @@ export async function PATCH(
 
     /*
      * =====================================================
+     * FIXED 18+ AGE REQUIREMENT
+     * =====================================================
+     *
+     * Every Burton Pride lottery is strictly 18+.
+     *
+     * minimum_age is deliberately NOT read from the request
+     * body. Even if a client manually sends minimum_age: 16
+     * or another value, this route will always save 18.
+     *
+     * This also repairs any older lottery record that may
+     * currently contain an age below 18 whenever it is
+     * updated through this route.
+     */
+    update.minimum_age =
+      REQUIRED_MINIMUM_AGE;
+
+    /*
+     * =====================================================
      * STATUS
      * =====================================================
      */
@@ -860,6 +880,16 @@ export async function PATCH(
             422,
           );
         }
+
+        /*
+         * Enforce Burton Pride's fixed 18+ rule.
+         *
+         * Any historic or incorrectly stored value is
+         * corrected to 18 as part of this update before
+         * the lottery is made live.
+         */
+        update.minimum_age =
+          REQUIRED_MINIMUM_AGE;
 
         /*
          * Require public slug.

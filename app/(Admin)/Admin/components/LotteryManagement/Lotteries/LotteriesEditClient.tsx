@@ -275,6 +275,8 @@ type ApiResponse = {
   details?: unknown;
 };
 
+const REQUIRED_MINIMUM_AGE = 18;
+
 type PageProps = {
   params: Promise<{
     id: string;
@@ -598,8 +600,7 @@ export default function EditLotteryPage({
 
           minimumAge:
             String(
-              item.minimum_age ??
-                18,
+              REQUIRED_MINIMUM_AGE,
             ),
 
           maxTickets:
@@ -868,12 +869,10 @@ export default function EditLotteryPage({
       );
 
     if (
-      !Number.isInteger(
-        age,
-      ) ||
-      age < 0
+      age !==
+      REQUIRED_MINIMUM_AGE
     ) {
-      return "Minimum age must be a valid whole number.";
+      return "All Burton Pride lotteries must be 18+.";
     }
 
     if (
@@ -1018,9 +1017,7 @@ export default function EditLotteryPage({
             .toUpperCase(),
 
         minimum_age:
-          Number(
-            form.minimumAge,
-          ),
+          REQUIRED_MINIMUM_AGE,
 
         max_tickets:
           form.maxTickets
@@ -1256,8 +1253,7 @@ export default function EditLotteryPage({
 
           minimumAge:
             String(
-              item.minimum_age ??
-                18,
+              REQUIRED_MINIMUM_AGE,
             ),
 
           maxTickets:
@@ -2073,7 +2069,7 @@ export default function EditLotteryPage({
               <ShieldCheck />
             }
             title="Eligibility & compliance information"
-            description="Information shown to entrants before they purchase tickets."
+            description="Entry is strictly 18+ for every Burton Pride lottery. Other eligibility information is shown to entrants before purchase."
           >
             <div
               className="
@@ -2083,22 +2079,40 @@ export default function EditLotteryPage({
                 md:grid-cols-2
               "
             >
-              <TextField
-                label="Minimum age"
-                type="number"
-                min="0"
-                value={
-                  form.minimumAge
-                }
-                onChange={(
-                  value,
-                ) =>
-                  updateField(
-                    "minimumAge",
-                    value,
-                  )
-                }
-              />
+              <div>
+                <div className="mb-2 text-sm font-bold text-white/80">
+                  Minimum age
+                </div>
+
+                <div
+                  className="
+                    flex
+                    min-h-12
+                    items-center
+                    justify-between
+                    gap-3
+                    rounded-2xl
+                    border
+                    border-emerald-400/25
+                    bg-emerald-500/10
+                    px-4
+                    py-3
+                    text-emerald-100
+                  "
+                >
+                  <div>
+                    <div className="text-base font-extrabold">
+                      18+ only
+                    </div>
+
+                    <div className="mt-1 text-xs font-medium text-emerald-100/65">
+                      Fixed for every Burton Pride lottery and cannot be changed.
+                    </div>
+                  </div>
+
+                  <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-200" />
+                </div>
+              </div>
 
               <TextField
                 label="Geographical eligibility"

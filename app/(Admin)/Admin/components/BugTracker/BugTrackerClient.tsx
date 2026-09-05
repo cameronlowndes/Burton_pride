@@ -31,9 +31,12 @@ import {
 
 type BugApplication =
   | "admin_portal"
+  | "email_hub"
   | "money_management"
   | "stock_control"
   | "event_hub"
+  | "lottery_management"
+  | "competition_management"
   | "public_website";
 
 type BugPriority = "minor" | "normal" | "senior";
@@ -150,9 +153,12 @@ type StatusFilter = "all" | BugStatus;
 
 const APPLICATION_LABELS: Record<BugApplication, string> = {
   admin_portal: "Admin Portal",
+  email_hub: "Email Hub", 
   money_management: "Money Management",
   stock_control: "Stock Control",
   event_hub: "Event Hub",
+  lottery_management: "Lottery Management",
+  competition_management: "Competition Management",
   public_website: "Public Website",
 };
 

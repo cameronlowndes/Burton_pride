@@ -405,6 +405,22 @@ export default function HomeClient() {
             </Link>
 
             <Link
+              href="/Lottery"
+              className={`
+                ${secondaryButtonClass}
+                border
+                border-yellow-300/40
+                bg-pink-600
+                text-white
+                hover:bg-pink-500
+              `}
+              aria-label="View Burton Pride lotteries. All lotteries are 18 plus only."
+            >
+              <span aria-hidden="true">🎟️</span>
+              <span className="ml-2">Lottery — 18+ Only</span>
+            </Link>
+
+            <Link
               href="#get-involved"
               className={`
                 ${secondaryButtonClass}
@@ -741,6 +757,182 @@ export default function HomeClient() {
             </div>
           </motion.section>
 
+          {/* =====================================================
+              LOTTERY - PROMINENT HOMEPAGE FEATURE
+              ===================================================== */}
+          <motion.section
+            variants={fadeUp}
+            transition={sectionTransition}
+            aria-labelledby="lottery-heading"
+          >
+            <div
+              className="
+                relative
+                overflow-hidden
+                rounded-2xl
+                border-2
+                border-yellow-300
+                bg-gradient-to-r
+                from-purple-700
+                via-pink-600
+                to-fuchsia-600
+                p-2
+                shadow-2xl
+                shadow-pink-500/20
+                transition-colors
+                duration-300
+                sm:rounded-3xl
+                sm:border-4
+                sm:p-4
+                dark:border-white/10
+                dark:bg-[#333333]
+                dark:bg-none
+                dark:shadow-black/40
+              "
+            >
+              <div
+                className="
+                  relative
+                  overflow-hidden
+                  rounded-xl
+                  border
+                  border-white/20
+                  bg-purple-950/90
+                  px-4
+                  py-8
+                  text-center
+                  shadow-2xl
+                  backdrop-blur-md
+                  sm:rounded-[1.4rem]
+                  sm:px-8
+                  sm:py-12
+                  dark:border-white/10
+                  dark:bg-[#292929]
+                "
+              >
+                <div className="pointer-events-none absolute -left-20 -top-20 h-64 w-64 rounded-full bg-pink-400/20 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-yellow-300/15 blur-3xl" />
+
+                <div className="relative">
+                  <p
+                    className="
+                      mb-4
+                      inline-flex
+                      rounded-full
+                      bg-yellow-300
+                      px-4
+                      py-2
+                      text-xs
+                      font-black
+                      uppercase
+                      leading-5
+                      tracking-wide
+                      text-purple-950
+                      shadow-xl
+                      sm:px-5
+                      sm:text-sm
+                    "
+                  >
+                    18+ only
+                  </p>
+
+                  <h2
+                    id="lottery-heading"
+                    className="
+                      text-balance
+                      text-3xl
+                      font-black
+                      leading-tight
+                      text-white
+                      drop-shadow-lg
+                      sm:text-5xl
+                      lg:text-6xl
+                    "
+                  >
+                    <span aria-hidden="true">🎟️</span> Burton Pride Lottery
+                  </h2>
+
+                  <p
+                    className="
+                      mx-auto
+                      mt-5
+                      max-w-3xl
+                      text-base
+                      font-medium
+                      leading-7
+                      text-white/95
+                      sm:text-lg
+                      sm:leading-8
+                      lg:text-xl
+                    "
+                  >
+                    Take part in Burton Pride fundraising lotteries and help support
+                    our community work, events, inclusion projects and future Pride
+                    activities.
+                  </p>
+
+                  <div
+                    className="
+                      mx-auto
+                      mt-6
+                      max-w-3xl
+                      rounded-2xl
+                      border
+                      border-yellow-300/30
+                      bg-yellow-300/10
+                      px-5
+                      py-4
+                      text-sm
+                      font-bold
+                      leading-6
+                      text-yellow-100
+                      sm:text-base
+                    "
+                  >
+                    All Burton Pride lotteries are strictly <strong>18+ only</strong>.
+                    Nobody under 18 may enter, buy a ticket or have a ticket purchased
+                    for them.
+                  </div>
+
+                  <div className="mx-auto mt-7 flex max-w-3xl flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
+                    <Link
+                      href="/Lottery"
+                      className={`
+                        ${primaryButtonClass}
+                        bg-yellow-300
+                        text-purple-950
+                        shadow-yellow-300/30
+                        hover:bg-white
+                      `}
+                    >
+                      <span aria-hidden="true">🎟️</span>
+                      <span className="ml-2">View Our Lotteries</span>
+                    </Link>
+
+                    <Link
+                      href="/lottery/terms"
+                      className={`
+                        ${secondaryButtonClass}
+                        border
+                        border-white/20
+                        bg-white/10
+                        text-white
+                        hover:bg-white/20
+                      `}
+                    >
+                      Lottery Terms
+                    </Link>
+                  </div>
+
+                  <p className="mt-5 text-sm font-bold leading-6 text-white/75">
+                    Every ticket helps Burton Pride continue supporting the local
+                    LGBTQIA+ community.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </motion.section>
+
           <motion.section
             id="next-event"
             variants={fadeUp}
@@ -990,12 +1182,18 @@ export default function HomeClient() {
                 Get involved with your local Pride
               </h2>
               <p className="mx-auto mt-3 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
-                Donate, volunteer or support Burton Pride as a sponsor. Every bit of
-                support helps keep Pride community-led, welcoming and free to attend.
+                Donate, volunteer, support Burton Pride as a sponsor or take part in one
+                of our fundraising lotteries. Every bit of support helps keep Pride
+                community-led, welcoming and free to attend.
               </p>
+
+              <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-yellow-300/30 bg-yellow-300/10 px-4 py-3 text-sm font-bold leading-6 text-yellow-100">
+                Burton Pride lotteries are strictly <strong>18+ only</strong>. No person under
+                18 may enter, buy a ticket or have a ticket purchased on their behalf.
+              </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 sm:gap-5">
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-5 xl:grid-cols-4">
               <Link
                 href="/DonateToUs"
                 className={`
@@ -1105,6 +1303,50 @@ export default function HomeClient() {
                 <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
                   See who supports your local grassroots Pride.
                 </p>
+              </Link>
+
+              <Link
+                href="/Lottery"
+                className={`
+                  ${glassCardClass}
+                  group
+                  flex
+                  min-h-40
+                  flex-col
+                  items-center
+                  justify-center
+                  border-yellow-300/30
+                  bg-yellow-300/10
+                  p-5
+                  text-center
+                  transition-transform
+                  duration-200
+                  focus-visible:outline
+                  focus-visible:outline-4
+                  focus-visible:outline-offset-4
+                  focus-visible:outline-yellow-300
+                  active:scale-[0.98]
+                  motion-safe:hover:-translate-y-1
+                  motion-safe:hover:bg-yellow-300/15
+                  dark:hover:bg-[#3d3d3d]
+                `}
+                aria-label="View Burton Pride lotteries. All lotteries are strictly for people aged 18 or over."
+              >
+                <span className="text-4xl sm:text-5xl" aria-hidden="true">
+                  🎟️
+                </span>
+
+                <h3 className="mt-3 text-xl font-black sm:text-2xl">
+                  Lottery
+                </h3>
+
+                <p className="mt-2 max-w-sm text-sm leading-6 text-white/90 sm:text-base">
+                  View current Burton Pride lotteries and help support our community work.
+                </p>
+
+                <span className="mt-3 rounded-full bg-yellow-300 px-3 py-1 text-xs font-black uppercase tracking-wide text-purple-950">
+                  18+ only
+                </span>
               </Link>
             </div>
           </motion.section>

@@ -11,7 +11,7 @@ import {
 export const metadata = {
   title: "General Lottery Terms & Conditions | Burton Pride C.I.C.",
   description:
-    "Read the official General Lottery Terms & Conditions that apply to Burton Pride C.I.C. lotteries and raffles.",
+    "Read the official General Lottery Terms & Conditions for Burton Pride C.I.C. lotteries and raffles. All Burton Pride lotteries are strictly 18+.",
 };
 
 type TermsItem = {
@@ -76,7 +76,7 @@ const termsSections: TermsSection[] = [
       { type: "bullet", text: "draw method;" },
       { type: "bullet", text: "prizes and number of winners;" },
       { type: "bullet", text: "eligibility requirements;" },
-      { type: "bullet", text: "minimum age;" },
+      { type: "bullet", text: "the fixed minimum age of 18;" },
       { type: "bullet", text: "geographic restrictions;" },
       { type: "bullet", text: "methods of purchasing tickets;" },
       { type: "bullet", text: "maximum tickets per person or per transaction;" },
@@ -85,6 +85,7 @@ const termsSections: TermsSection[] = [
       { type: "bullet", text: "specific fundraising purpose; and" },
       { type: "bullet", text: "any other conditions relevant to that particular lottery." },
       { type: "paragraph", text: "Individual Lottery Terms will be made available before a person completes their entry. Purchasing a ticket means that the entrant also agrees to those Individual Lottery Terms." },
+      { type: "paragraph", text: "All Burton Pride lotteries are strictly for people aged 18 or over. Individual Lottery Terms may include additional eligibility conditions, but they must not reduce the minimum age below 18." },
     ],
   },
   {
@@ -119,11 +120,11 @@ const termsSections: TermsSection[] = [
   {
     title: "7. Eligibility",
     items: [
-      { type: "paragraph", text: "Eligibility may vary between lotteries." },
-      { type: "paragraph", text: "The minimum age and any geographic restrictions applying to an individual lottery will be clearly stated before entry. A person must meet all eligibility requirements for the lottery they wish to enter." },
+      { type: "paragraph", text: "All Burton Pride lotteries are strictly for people aged 18 or over. No Burton Pride lottery will permit entry by anyone under the age of 18." },
+      { type: "paragraph", text: "Other eligibility requirements, including any geographic restrictions, may vary between lotteries and will be clearly stated before entry. A person must meet every eligibility requirement for the lottery they wish to enter." },
       { type: "paragraph", text: "You must not:" },
-      { type: "bullet", text: "enter a lottery if you do not meet its minimum age;" },
-      { type: "bullet", text: "purchase a ticket on behalf of someone who would not legally be permitted to enter;" },
+      { type: "bullet", text: "enter, purchase or otherwise obtain a lottery ticket if you are under 18;" },
+      { type: "bullet", text: "purchase, obtain, hold or transfer a ticket on behalf of, or for the benefit of, anyone under 18;" },
       { type: "bullet", text: "provide false information about your age or identity;" },
       { type: "bullet", text: "provide false or deliberately misleading contact information;" },
       { type: "bullet", text: "attempt to enter from a location excluded by the Individual Lottery Terms; or" },
@@ -132,12 +133,14 @@ const termsSections: TermsSection[] = [
     ],
   },
   {
-    title: "8. Age Requirements",
+    title: "8. Age Requirements — 18+ Only",
     items: [
-      { type: "paragraph", text: "The minimum age applying to each lottery will be shown in its Individual Lottery Terms. Different lottery types may be subject to different legal requirements." },
-      { type: "paragraph", text: "Burton Pride C.I.C. may also choose to impose a higher minimum age than the statutory minimum where considered appropriate." },
-      { type: "paragraph", text: "By purchasing a lottery ticket, you confirm that you satisfy the minimum age requirement stated for that lottery." },
-      { type: "paragraph", text: "Burton Pride C.I.C. may request reasonable evidence of age before confirming an entry, confirming a winner or releasing a prize." },
+      { type: "paragraph", text: "Every lottery, raffle or other permitted lottery activity promoted by Burton Pride C.I.C. is strictly limited to people aged 18 or over." },
+      { type: "paragraph", text: "No person under the age of 18 may enter, purchase, obtain, hold or be the intended beneficiary of a Burton Pride lottery ticket." },
+      { type: "paragraph", text: "A parent, guardian, family member, friend or any other person must not purchase or obtain a Burton Pride lottery ticket for someone under 18." },
+      { type: "paragraph", text: "Individual Lottery Terms may set additional eligibility conditions where required, but they must not reduce the minimum age below 18." },
+      { type: "paragraph", text: "By purchasing or otherwise obtaining a lottery ticket, you confirm that you are aged 18 or over." },
+      { type: "paragraph", text: "Burton Pride C.I.C. may request reasonable evidence of age before confirming an entry, confirming a winner or releasing a prize. If satisfactory evidence cannot be provided, the entry may be invalidated and any prize may be withheld where permitted by law." },
     ],
   },
   {
@@ -160,7 +163,7 @@ const termsSections: TermsSection[] = [
   {
     title: "10. Buying Lottery Tickets",
     items: [
-      { type: "paragraph", text: "Tickets may be available through one or more approved sales methods, including:" },
+      { type: "paragraph", text: "Tickets are only available to people aged 18 or over and may be available through one or more approved sales methods, including:" },
       { type: "bullet", text: "the Burton Pride website;" },
       { type: "bullet", text: "authorised Burton Pride events;" },
       { type: "bullet", text: "authorised Burton Pride representatives;" },
@@ -168,6 +171,7 @@ const termsSections: TermsSection[] = [
       { type: "bullet", text: "another permitted method identified in the Individual Lottery Terms." },
       { type: "paragraph", text: "Not every sales method will necessarily be available for every lottery. The individual lottery page will explain how tickets for that particular lottery can be purchased." },
       { type: "paragraph", text: "Tickets must not be purchased through an unauthorised person or unofficial website claiming to represent Burton Pride C.I.C." },
+      { type: "paragraph", text: "Burton Pride C.I.C. does not permit the sale, issue or transfer of lottery tickets to anyone under 18 or for the benefit of anyone under 18." },
     ],
   },
   {
@@ -237,7 +241,7 @@ const termsSections: TermsSection[] = [
       { type: "paragraph", text: "Only valid entries will be included in a lottery draw. An entry may be invalid where:" },
       { type: "bullet", text: "payment was not completed;" },
       { type: "bullet", text: "payment was reversed or cancelled;" },
-      { type: "bullet", text: "the entrant was not eligible;" },
+      { type: "bullet", text: "the entrant was under 18 or otherwise not eligible;" },
       { type: "bullet", text: "false information was supplied;" },
       { type: "bullet", text: "the ticket was issued because of a technical error;" },
       { type: "bullet", text: "the ticket was cancelled or refunded;" },
@@ -333,7 +337,7 @@ const termsSections: TermsSection[] = [
       { type: "paragraph", text: "Burton Pride C.I.C. will contact winners using the contact information supplied when entering." },
       { type: "paragraph", text: "Burton Pride C.I.C. may ask the winner to confirm:" },
       { type: "bullet", text: "identity;" },
-      { type: "bullet", text: "age;" },
+      { type: "bullet", text: "that they are aged 18 or over;" },
       { type: "bullet", text: "eligibility;" },
       { type: "bullet", text: "contact information; and" },
       { type: "bullet", text: "ownership of the winning entry" },
@@ -537,7 +541,7 @@ const termsSections: TermsSection[] = [
   {
     title: "37. Responsible Participation",
     items: [
-      { type: "paragraph", text: "Burton Pride C.I.C. wants its lotteries to be a positive way for supporters to contribute to community fundraising." },
+      { type: "paragraph", text: "Burton Pride C.I.C. wants its lotteries to be a positive way for adult supporters aged 18 or over to contribute to community fundraising." },
       { type: "paragraph", text: "Lottery participation should be treated as entertainment and fundraising, not as a way of making money." },
       { type: "paragraph", text: "Only spend what you are comfortable spending. Purchasing more tickets does not guarantee that you will win." },
       { type: "paragraph", text: "Where appropriate, Burton Pride C.I.C. may provide links to information about safer gambling and support services." },
@@ -600,7 +604,9 @@ const termsSections: TermsSection[] = [
       { type: "paragraph", text: "By completing a lottery ticket purchase or otherwise submitting a valid entry, you confirm that:" },
       { type: "bullet", text: "you have read these General Lottery Terms & Conditions;" },
       { type: "bullet", text: "you have read the Individual Lottery Terms;" },
-      { type: "bullet", text: "you satisfy the eligibility requirements;" },
+      { type: "bullet", text: "you are aged 18 or over;" },
+      { type: "bullet", text: "you are not purchasing, obtaining, holding or transferring a ticket for the benefit of anyone under 18;" },
+      { type: "bullet", text: "you satisfy the other eligibility requirements;" },
       { type: "bullet", text: "the information you have provided is accurate;" },
       { type: "bullet", text: "you understand that winning is not guaranteed; and" },
       { type: "bullet", text: "you agree to comply with the applicable rules." },
@@ -633,7 +639,7 @@ export default function LotteryTermsPage() {
     <>
       <MetaHead
         title="General Lottery Terms & Conditions | Burton Pride C.I.C."
-        description="Read the General Lottery Terms & Conditions that apply across Burton Pride C.I.C. lotteries and raffles. Individual lotteries may also have their own specific terms."
+        description="Read the General Lottery Terms & Conditions that apply across Burton Pride C.I.C. lotteries and raffles. All Burton Pride lotteries are strictly 18+."
         keywords="Burton Pride lottery terms, Burton Pride raffle terms, lottery terms and conditions, Burton Pride C.I.C., raffle rules, lottery rules"
       />
 
@@ -766,7 +772,7 @@ export default function LotteryTermsPage() {
                   dark:bg-white/[0.05]
                 "
               >
-                Version 1.0
+                Version 1.1
               </span>
 
               <span
@@ -781,7 +787,7 @@ export default function LotteryTermsPage() {
                   dark:bg-white/[0.05]
                 "
               >
-                Last updated: August 2026
+                Last updated: September 2026
               </span>
             </div>
 
@@ -867,13 +873,67 @@ export default function LotteryTermsPage() {
                     System. Every individual lottery should also have its own
                     Individual Lottery Terms covering that lottery&apos;s
                     specific ticket price, dates, prizes, draw method,
-                    eligibility rules and any special conditions.
+                    eligibility rules and any special conditions. All Burton Pride lotteries are strictly 18+.
                   </p>
                 </div>
               </div>
             </section>
 
         
+
+            {/* 18+ AGE RESTRICTION */}
+            <section
+              className="
+                mt-6
+                rounded-2xl
+                border
+                border-red-300
+                bg-red-50
+                p-5
+                dark:border-red-400/25
+                dark:bg-red-500/10
+              "
+            >
+              <div className="flex items-start gap-3">
+                <CircleAlert
+                  className="
+                    mt-0.5
+                    h-5
+                    w-5
+                    shrink-0
+                    text-red-700
+                    dark:text-red-300
+                  "
+                />
+
+                <div>
+                  <h2
+                    className="
+                      text-lg
+                      font-black
+                      text-red-950
+                      dark:text-red-100
+                    "
+                  >
+                    18+ only
+                  </h2>
+
+                  <p
+                    className="
+                      mt-2
+                      leading-7
+                      text-red-950/80
+                      dark:text-white/75
+                    "
+                  >
+                    All Burton Pride lotteries are strictly for people aged 18 or
+                    over. No person under 18 may enter, buy, obtain, hold or be
+                    given a Burton Pride lottery ticket, including where another
+                    person attempts to purchase a ticket on their behalf.
+                  </p>
+                </div>
+              </div>
+            </section>
 
             {/* LOTTERY REGISTRATION */}
             <section
@@ -984,7 +1044,7 @@ export default function LotteryTermsPage() {
                     Each Burton Pride lottery may also have its own Individual
                     Lottery Terms. You should read both these General Lottery
                     Terms and the specific terms shown for the lottery you wish
-                    to enter before purchasing a ticket.
+                    to enter before purchasing a ticket. Individual Lottery Terms may add other eligibility requirements, but no Burton Pride lottery may reduce the minimum age below 18.
                   </p>
 
                   <Link
