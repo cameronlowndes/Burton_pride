@@ -3,6 +3,10 @@ import {
   NextResponse,
 } from "next/server";
 
+import {
+  randomInt,
+} from "node:crypto";
+
 import Stripe from "stripe";
 import bcrypt from "bcryptjs";
 import { Resend } from "resend";
@@ -1817,25 +1821,164 @@ async function getUsedNumericTicketNumbers(
   return used;
 }
 
-function getNextNumericTicketNumber(
+function getRandomUnusedTicketNumber(
   used: Set<number>,
   maxTickets: number,
 ) {
-  for (
-    let number = 1;
-    number <= maxTickets;
-    number += 1
-  ) {
-    if (
-      !used.has(
-        number,
+  const usedNumbers =
+    Array.from(
+      used,
+    )
+      .filter(
+        (
+          number,
+        ) =>
+          Number.isInteger(
+            number,
+          ) &&
+          number >= 1 &&
+          number <= maxTickets,
       )
-    ) {
-      return number;
-    }
+      .sort(
+        (
+          first,
+          second,
+        ) =>
+          first - second,
+      );
+
+  const availableCount =
+    maxTickets -
+    usedNumbers.length;
+
+  if (
+    availableCount < 1
+  ) {
+    return null;
   }
 
-  return null;
+  // Pick a uniform random position from every unused number and map
+  // it through the gaps between issued numbers. Runtime depends on
+  // issued ticket count, not a maximum range that may exceed 2bn.
+  let availableIndex =
+    randomInt(
+      availableCount,
+    );
+
+  let previousUsedNumber =
+    0;
+
+  for (
+    const usedNumber of
+    usedNumbers
+  ) {
+    const gapSize =
+      usedNumber -
+      previousUsedNumber -
+      1;
+
+    if (
+      availableIndex <
+        gapSize
+    ) {
+      return (
+        previousUsedNumber +
+        availableIndex +
+        1
+      );
+    }
+
+    availableIndex -=
+      gapSize;
+
+    previousUsedNumber =
+      usedNumber;
+  }
+
+  return (
+    previousUsedNumber +
+    availableIndex +
+    1
+  );
+}
+
+function shuffleManualTicketsForDisplay(
+  tickets: ManualPaidTicket[],
+) {
+  const shuffled =
+    [
+      ...tickets,
+    ];
+
+  for (
+    let index =
+      shuffled.length - 1;
+    index > 0;
+    index -= 1
+  ) {
+    const swapIndex =
+      randomInt(
+        index + 1,
+      );
+
+    [
+      shuffled[index],
+      shuffled[swapIndex],
+    ] = [
+      shuffled[swapIndex],
+      shuffled[index],
+    ];
+  }
+
+  const isAscending =
+    shuffled.length > 1 &&
+    shuffled.every(
+      (
+        ticket,
+        index,
+      ) => {
+        if (
+          index === 0
+        ) {
+          return true;
+        }
+
+        const previousNumber =
+          parseNumericTicketNumber(
+            shuffled[
+              index - 1
+            ].ticket_number,
+          );
+
+        const currentNumber =
+          parseNumericTicketNumber(
+            ticket.ticket_number,
+          );
+
+        return (
+          previousNumber !==
+            null &&
+          currentNumber !==
+            null &&
+          previousNumber <
+            currentNumber
+        );
+      },
+    );
+
+  if (
+    isAscending
+  ) {
+    [
+      shuffled[0],
+      shuffled[1],
+    ] = [
+      shuffled[1],
+      shuffled[0],
+    ];
+  }
+
+  return shuffled;
 }
 
 
@@ -2271,7 +2414,7 @@ async function createMissingManualPaidTickets(
         attempt += 1
       ) {
         const nextNumber =
-          getNextNumericTicketNumber(
+          getRandomUnusedTicketNumber(
             used,
             maxTickets,
           );
@@ -2506,7 +2649,8 @@ async function recordManualPaymentNotification({
 async function sendPaidOrderEmails({
   order,
   lottery,
-  tickets,
+  tickets:
+    suppliedTickets,
   source,
 }: {
   order: ManualPaidOrder;
@@ -2514,6 +2658,11 @@ async function sendPaidOrderEmails({
   tickets: ManualPaidTicket[];
   source: "stripe" | "manual" | "ticket_recovery";
 }) {
+  const tickets =
+    shuffleManualTicketsForDisplay(
+      suppliedTickets,
+    );
+
   if (
     !process.env.RESEND_API_KEY
   ) {
