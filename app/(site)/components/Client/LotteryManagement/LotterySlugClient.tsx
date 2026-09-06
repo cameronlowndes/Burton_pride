@@ -479,6 +479,39 @@ export default function LotterySlugClient({
 
                   marketing_opt_in:
                     form.marketingOptIn,
+
+                  acceptances: {
+                    age_confirmation: {
+                      accepted:
+                        form.ageConfirmed,
+
+                      version: `${lottery.minimum_age}+`,
+                    },
+
+                    eligibility_confirmation: {
+                      accepted:
+                        form.eligibilityConfirmed,
+
+                      version:
+                        lottery.geographic_eligibility,
+                    },
+
+                    terms_acceptance: {
+                      accepted:
+                        form.termsAccepted,
+
+                      version:
+                        lottery.terms_version,
+                    },
+
+                    marketing_opt_in: {
+                      accepted:
+                        form.marketingOptIn,
+
+                      version:
+                        lottery.privacy_notice_version,
+                    },
+                  },
                 },
               ),
           },

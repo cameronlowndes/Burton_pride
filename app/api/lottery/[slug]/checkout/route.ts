@@ -3,6 +3,15 @@ import {
   NextResponse,
 } from "next/server";
 
+import {
+  createHash,
+  randomInt,
+} from "node:crypto";
+
+import {
+  isIP,
+} from "node:net";
+
 import Stripe from "stripe";
 import { Resend } from "resend";
 
@@ -65,6 +74,206 @@ function createOrderReference() {
       10,
     )
     .toUpperCase()}`;
+}
+
+function getClientIp(
+  request: NextRequest,
+) {
+  const forwardedFor =
+    request.headers
+      .get(
+        "x-forwarded-for",
+      )
+      ?.split(",")[0]
+      ?.trim();
+
+  const candidate =
+    forwardedFor ||
+    request.headers
+      .get(
+        "x-real-ip",
+      )
+      ?.trim() ||
+    null;
+
+  if (
+    !candidate ||
+    isIP(candidate) ===
+      0
+  ) {
+    return null;
+  }
+
+  return candidate;
+}
+
+async function recordLotteryAcceptances({
+  request,
+  lotteryId,
+  orderId,
+  minimumAge,
+  geographicEligibility,
+  termsVersion,
+  privacyNoticeVersion,
+  ageConfirmed,
+  eligibilityConfirmed,
+  termsAccepted,
+  marketingOptIn,
+}: {
+  request: NextRequest;
+  lotteryId: string;
+  orderId: string;
+  minimumAge: number;
+  geographicEligibility:
+    | string
+    | null;
+  termsVersion:
+    | string
+    | null;
+  privacyNoticeVersion:
+    | string
+    | null;
+  ageConfirmed: boolean;
+  eligibilityConfirmed: boolean;
+  termsAccepted: boolean;
+  marketingOptIn: boolean;
+}) {
+  const acceptedAt =
+    new Date()
+      .toISOString();
+
+  const ipAddress =
+    getClientIp(
+      request,
+    );
+
+  const {
+    error,
+  } =
+    await supabaseAdmin
+      .from(
+        "lottery_acceptances",
+      )
+      .insert([
+        {
+          lottery_id:
+            lotteryId,
+
+          order_id:
+            orderId,
+
+          acceptance_type:
+            "age_confirmation",
+
+          version:
+            `minimum-age:${minimumAge}`,
+
+          accepted:
+            ageConfirmed,
+
+          accepted_at:
+            acceptedAt,
+
+          ip_address:
+            ipAddress,
+        },
+
+        {
+          lottery_id:
+            lotteryId,
+
+          order_id:
+            orderId,
+
+          acceptance_type:
+            "eligibility_confirmation",
+
+          version:
+            geographicEligibility,
+
+          accepted:
+            eligibilityConfirmed,
+
+          accepted_at:
+            acceptedAt,
+
+          ip_address:
+            ipAddress,
+        },
+
+        {
+          lottery_id:
+            lotteryId,
+
+          order_id:
+            orderId,
+
+          acceptance_type:
+            "terms_acceptance",
+
+          version:
+            termsVersion,
+
+          accepted:
+            termsAccepted,
+
+          accepted_at:
+            acceptedAt,
+
+          ip_address:
+            ipAddress,
+        },
+
+        {
+          lottery_id:
+            lotteryId,
+
+          order_id:
+            orderId,
+
+          acceptance_type:
+            "marketing_opt_in",
+
+          version:
+            privacyNoticeVersion,
+
+          accepted:
+            marketingOptIn,
+
+          accepted_at:
+            acceptedAt,
+
+          ip_address:
+            ipAddress,
+        },
+      ]);
+
+  if (error) {
+    console.error(
+      "Lottery acceptance creation failed:",
+      {
+        code:
+          error.code,
+
+        message:
+          error.message,
+
+        details:
+          error.details,
+
+        hint:
+          error.hint,
+
+        lotteryId,
+
+        orderId,
+      },
+    );
+
+    throw new Error(
+      "Unable to save the lottery confirmations.",
+    );
+  }
 }
 
 
@@ -271,25 +480,165 @@ async function getUsedNumericTicketNumbers(
   return used;
 }
 
-function getNextNumericTicketNumber(
+function getRandomUnusedTicketNumber(
   used: Set<number>,
   maxTickets: number,
 ) {
-  for (
-    let number = 1;
-    number <= maxTickets;
-    number += 1
-  ) {
-    if (
-      !used.has(
-        number,
+  const usedNumbers =
+    Array.from(
+      used,
+    )
+      .filter(
+        (
+          number,
+        ) =>
+          Number.isInteger(
+            number,
+          ) &&
+          number >= 1 &&
+          number <= maxTickets,
       )
-    ) {
-      return number;
-    }
+      .sort(
+        (
+          first,
+          second,
+        ) =>
+          first - second,
+      );
+
+  const availableCount =
+    maxTickets -
+    usedNumbers.length;
+
+  if (
+    availableCount < 1
+  ) {
+    return null;
   }
 
-  return null;
+  // Choose a random zero-based position from all currently unused
+  // numbers, then map it through the gaps between issued numbers.
+  // This is uniform, cryptographically random and does not scan up to
+  // maxTickets (which can be as large as 2,147,483,647).
+  let availableIndex =
+    randomInt(
+      availableCount,
+    );
+
+  let previousUsedNumber =
+    0;
+
+  for (
+    const usedNumber of
+    usedNumbers
+  ) {
+    const gapSize =
+      usedNumber -
+      previousUsedNumber -
+      1;
+
+    if (
+      availableIndex < gapSize
+    ) {
+      return (
+        previousUsedNumber +
+        availableIndex +
+        1
+      );
+    }
+
+    availableIndex -=
+      gapSize;
+
+    previousUsedNumber =
+      usedNumber;
+  }
+
+  return (
+    previousUsedNumber +
+    availableIndex +
+    1
+  );
+}
+
+function shuffleTicketsForDisplay(
+  tickets: TicketForEmail[],
+) {
+  const shuffled =
+    [
+      ...tickets,
+    ];
+
+  for (
+    let index =
+      shuffled.length - 1;
+    index > 0;
+    index -= 1
+  ) {
+    const swapIndex =
+      randomInt(
+        index + 1,
+      );
+
+    [
+      shuffled[index],
+      shuffled[swapIndex],
+    ] = [
+      shuffled[swapIndex],
+      shuffled[index],
+    ];
+  }
+
+  // Never present a multi-ticket result in ascending numeric order.
+  const isAscending =
+    shuffled.length > 1 &&
+    shuffled.every(
+      (
+        ticket,
+        index,
+      ) => {
+        if (
+          index === 0
+        ) {
+          return true;
+        }
+
+        const previousNumber =
+          parseNumericTicketNumber(
+            shuffled[
+              index - 1
+            ].ticket_number,
+          );
+
+        const currentNumber =
+          parseNumericTicketNumber(
+            ticket.ticket_number,
+          );
+
+        return (
+          previousNumber !==
+            null &&
+          currentNumber !==
+            null &&
+          previousNumber <
+            currentNumber
+        );
+      },
+    );
+
+  if (
+    isAscending
+  ) {
+    [
+      shuffled[0],
+      shuffled[1],
+    ] = [
+      shuffled[1],
+      shuffled[0],
+    ];
+  }
+
+  return shuffled;
 }
 
 
@@ -298,11 +647,13 @@ async function sendLotteryEmail({
   subject,
   html,
   text,
+  idempotencyKey,
 }: {
   to: string;
   subject: string;
   html: string;
   text: string;
+  idempotencyKey: string;
 }) {
   const apiKey =
     process.env.RESEND_API_KEY;
@@ -317,23 +668,28 @@ async function sendLotteryEmail({
     data,
     error,
   } =
-    await resend.emails.send({
-      from:
-        LOTTERY_FROM_EMAIL,
+    await resend.emails.send(
+      {
+        from:
+          LOTTERY_FROM_EMAIL,
 
-      to: [
-        to,
-      ],
+        to: [
+          to,
+        ],
 
-      subject,
+        subject,
 
-      html,
+        html,
 
-      text,
+        text,
 
-      replyTo:
-        LOTTERY_INFO_EMAIL,
-    });
+        replyTo:
+          LOTTERY_INFO_EMAIL,
+      },
+      {
+        idempotencyKey,
+      },
+    );
 
   if (error) {
     throw new Error(
@@ -343,6 +699,75 @@ async function sendLotteryEmail({
   }
 
   return data;
+}
+
+function createEmailIdempotencyKey(
+  orderId: string,
+  notificationType: string,
+) {
+  return `lottery-${notificationType}-${orderId}`;
+}
+
+function createNotificationId(
+  orderId: string,
+  notificationType: string,
+  recipient: string,
+) {
+  const hash =
+    createHash(
+      "sha256",
+    )
+      .update(
+        `${orderId}|${notificationType}|${recipient.toLowerCase()}`,
+      )
+      .digest(
+        "hex",
+      )
+      .slice(
+        0,
+        32,
+      )
+      .split("");
+  hash[12] =
+    "5";
+
+  hash[16] =
+    (
+      (
+        Number.parseInt(
+          hash[16],
+          16,
+        ) &
+        0x3
+      ) |
+      0x8
+    ).toString(16);
+
+  const value =
+    hash.join("");
+
+  return [
+    value.slice(
+      0,
+      8,
+    ),
+    value.slice(
+      8,
+      12,
+    ),
+    value.slice(
+      12,
+      16,
+    ),
+    value.slice(
+      16,
+      20,
+    ),
+    value.slice(
+      20,
+      32,
+    ),
+  ].join("-");
 }
 
 async function notificationAlreadySent(
@@ -394,18 +819,24 @@ async function notificationAlreadySent(
 }
 
 async function recordLotteryNotification({
+  lotteryId,
   orderId,
   notificationType,
   recipient,
   status,
+  providerMessageId = null,
   errorMessage = null,
 }: {
+  lotteryId: string;
   orderId: string;
   notificationType: string;
   recipient: string;
   status:
     | "sent"
     | "failed";
+  providerMessageId?:
+    | string
+    | null;
   errorMessage?:
     | string
     | null;
@@ -421,7 +852,17 @@ async function recordLotteryNotification({
       .from(
         "lottery_notifications",
       )
-      .insert({
+      .upsert({
+        id:
+          createNotificationId(
+            orderId,
+            notificationType,
+            recipient,
+          ),
+
+        lottery_id:
+          lotteryId,
+
         order_id:
           orderId,
 
@@ -431,6 +872,9 @@ async function recordLotteryNotification({
         recipient,
 
         status,
+
+        provider_message_id:
+          providerMessageId,
 
         sent_at:
           status === "sent"
@@ -444,11 +888,14 @@ async function recordLotteryNotification({
 
         error_message:
           errorMessage,
+      }, {
+        onConflict:
+          "id",
       });
 
   if (error) {
     console.error(
-      "Lottery notification history insert failed:",
+      "Lottery notification history upsert failed:",
       error,
     );
   }
@@ -549,22 +996,13 @@ async function issueLotteryTickets(
       | TicketForEmail
       | null =
       null;
-
-    /*
-     * A composite unique index on:
-     *
-     *   (lottery_id, ticket_number)
-     *
-     * protects against two checkout requests selecting the
-     * same number at the same time.
-     */
     for (
       let attempt = 0;
       attempt < maxTickets;
       attempt += 1
     ) {
       const nextNumber =
-        getNextNumericTicketNumber(
+        getRandomUnusedTicketNumber(
           used,
           maxTickets,
         );
@@ -633,10 +1071,6 @@ async function issueLotteryTickets(
         insertError?.code ===
         "23505"
       ) {
-        /*
-         * Another request used this number first.
-         * Mark it as unavailable locally and try the next number.
-         */
         used.add(
           nextNumber,
         );
@@ -694,6 +1128,47 @@ function ticketNumbersText(
         `- ${ticket.ticket_number}`,
     )
     .join("\n");
+}
+
+function getCompleteOrderTickets(
+  order: PaidOrder,
+  tickets: TicketForEmail[],
+) {
+  const uniqueTickets =
+    Array.from(
+      new Map(
+        tickets.map(
+          (
+            ticket,
+          ) => [
+            ticket.id,
+            ticket,
+          ],
+        ),
+      ).values(),
+    );
+
+  const expectedQuantity =
+    Number(
+      order.quantity,
+    );
+
+  if (
+    !Number.isInteger(
+      expectedQuantity,
+    ) ||
+    expectedQuantity < 1 ||
+    uniqueTickets.length !==
+      expectedQuantity
+  ) {
+    throw new Error(
+      `The customer email was not sent because the order requires ${expectedQuantity} ticket(s), but ${uniqueTickets.length} complete ticket record(s) were loaded.`,
+    );
+  }
+
+  return shuffleTicketsForDisplay(
+    uniqueTickets,
+  );
 }
 
 function customerEmailHtml({
@@ -773,6 +1248,27 @@ function customerEmailHtml({
       <p style="margin:18px 0 0;text-align:center;font-size:12px;line-height:1.6;color:#64748b;">
         This is an automated lottery confirmation from Burton Pride.
       </p>
+
+      <div style="margin:14px 0 0;padding:18px;border-radius:14px;background:#ffffff;border:1px solid #e2e8f0;color:#475569;font-size:12px;line-height:1.65;">
+        <p style="margin:0 0 10px;font-weight:700;color:#172033;">
+          This is an official Burton Pride lottery.
+        </p>
+        <p style="margin:0 0 10px;">
+          The promoter of Burton Pride lotteries is <strong>Burton Pride C.I.C.</strong>
+        </p>
+        <p style="margin:0 0 10px;">
+          Burton Pride C.I.C. is a grassroots, community-led Community Interest Company created to support the LGBTQIA+ community and allies in Burton upon Trent and the surrounding area.
+        </p>
+        <p style="margin:0 0 10px;">
+          Where a lottery is operated under Burton Pride C.I.C.'s small society lottery registration, the relevant registration information will be displayed on the individual lottery page or within its Individual Lottery Terms.
+        </p>
+        <p style="margin:0 0 10px;">
+          Where another permission, licence, exemption or lottery category applies, this will also be identified where required.
+        </p>
+        <p style="margin:0;">
+          Burton Pride C.I.C.'s small society lottery registration number is <strong>SL0507</strong>, issued by East Staffordshire Borough Council.
+        </p>
+      </div>
     </div>
   </body>
 </html>`;
@@ -814,7 +1310,19 @@ Draw: ${formatDateTime(
 Please keep this email safe until the draw has taken place.
 
 Good luck,
-Burton Pride`;
+Burton Pride
+
+This is an official Burton Pride lottery.
+
+The promoter of Burton Pride lotteries is Burton Pride C.I.C.
+
+Burton Pride C.I.C. is a grassroots, community-led Community Interest Company created to support the LGBTQIA+ community and allies in Burton upon Trent and the surrounding area.
+
+Where a lottery is operated under Burton Pride C.I.C.'s small society lottery registration, the relevant registration information will be displayed on the individual lottery page or within its Individual Lottery Terms.
+
+Where another permission, licence, exemption or lottery category applies, this will also be identified where required.
+
+Burton Pride C.I.C.'s small society lottery registration number is SL0507, issued by East Staffordshire Borough Council.`;
 }
 
 function internalEmailHtml({
@@ -944,6 +1452,11 @@ async function sendPaidEntryEmails({
       | "failed"
       | "skipped";
   };
+  const orderTickets =
+    getCompleteOrderTickets(
+      order,
+      tickets,
+    );
 
   const customerType =
     "paid_entry_customer_confirmation";
@@ -957,29 +1470,41 @@ async function sendPaidEntryEmails({
 
   if (!customerSent) {
     try {
-      await sendLotteryEmail({
-        to:
-          order.purchaser_email,
+      const sentEmail =
+        await sendLotteryEmail({
+          to:
+            order.purchaser_email,
 
-        subject:
-          `Your ${lottery.title} lottery number${tickets.length === 1 ? "" : "s"}`,
+          subject:
+            `Your ${lottery.title} lottery number${orderTickets.length === 1 ? "" : "s"}`,
 
-        html:
-          customerEmailHtml({
-            order,
-            lottery,
-            tickets,
-          }),
+          html:
+            customerEmailHtml({
+              order,
+              lottery,
+              tickets:
+                orderTickets,
+            }),
 
-        text:
-          customerEmailText({
-            order,
-            lottery,
-            tickets,
-          }),
-      });
+          text:
+            customerEmailText({
+              order,
+              lottery,
+              tickets:
+                orderTickets,
+            }),
+
+          idempotencyKey:
+            createEmailIdempotencyKey(
+              order.id,
+              customerType,
+            ),
+        });
 
       await recordLotteryNotification({
+        lotteryId:
+          order.lottery_id,
+
         orderId:
           order.id,
 
@@ -991,6 +1516,10 @@ async function sendPaidEntryEmails({
 
         status:
           "sent",
+
+        providerMessageId:
+          sentEmail?.id ??
+          null,
       });
 
       results.customer =
@@ -1010,6 +1539,9 @@ async function sendPaidEntryEmails({
       );
 
       await recordLotteryNotification({
+        lotteryId:
+          order.lottery_id,
+
         orderId:
           order.id,
 
@@ -1043,29 +1575,41 @@ async function sendPaidEntryEmails({
 
   if (!internalSent) {
     try {
-      await sendLotteryEmail({
-        to:
-          LOTTERY_INFO_EMAIL,
+      const sentEmail =
+        await sendLotteryEmail({
+          to:
+            LOTTERY_INFO_EMAIL,
 
-        subject:
-          `New lottery entry: ${order.purchaser_name} - ${lottery.title}`,
+          subject:
+            `New lottery entry: ${order.purchaser_name} - ${lottery.title}`,
 
-        html:
-          internalEmailHtml({
-            order,
-            lottery,
-            tickets,
-          }),
+          html:
+            internalEmailHtml({
+              order,
+              lottery,
+              tickets:
+                orderTickets,
+            }),
 
-        text:
-          internalEmailText({
-            order,
-            lottery,
-            tickets,
-          }),
-      });
+          text:
+            internalEmailText({
+              order,
+              lottery,
+              tickets:
+                orderTickets,
+            }),
+
+          idempotencyKey:
+            createEmailIdempotencyKey(
+              order.id,
+              internalType,
+            ),
+        });
 
       await recordLotteryNotification({
+        lotteryId:
+          order.lottery_id,
+
         orderId:
           order.id,
 
@@ -1077,6 +1621,10 @@ async function sendPaidEntryEmails({
 
         status:
           "sent",
+
+        providerMessageId:
+          sentEmail?.id ??
+          null,
       });
 
       results.internal =
@@ -1096,6 +1644,9 @@ async function sendPaidEntryEmails({
       );
 
       await recordLotteryNotification({
+        lotteryId:
+          order.lottery_id,
+
         orderId:
           order.id,
 
@@ -1465,13 +2016,6 @@ export async function GET(
           customerEmailStatus,
       });
     }
-
-    /*
-     * Backwards compatibility:
-     * if an older Stripe Checkout Session still points at the API URL,
-     * finish the paid order and immediately move the browser to the
-     * correct public confirmation page.
-     */
     successPage.searchParams.set(
       "payment",
       "success",
@@ -1533,11 +2077,7 @@ export async function POST(
     null;
 
   try {
-    /*
-     * =====================================================
-     * SLUG
-     * =====================================================
-     */
+  
     const {
       slug: rawSlug,
     } =
@@ -1569,12 +2109,6 @@ export async function POST(
         400,
       );
     }
-
-    /*
-     * =====================================================
-     * REQUEST BODY
-     * =====================================================
-     */
     let body: Record<
       string,
       unknown
@@ -1624,11 +2158,6 @@ export async function POST(
           0,
       );
 
-    /*
-     * =====================================================
-     * VALIDATION
-     * =====================================================
-     */
     if (!fullName) {
       return response(
         {
@@ -1738,24 +2267,6 @@ export async function POST(
         400,
       );
     }
-
-    /*
-     * =====================================================
-     * LOAD LOTTERY BY SLUG
-     *
-     * This is the critical part.
-     *
-     * /api/Lottery/test/checkout
-     *
-     * resolves:
-     *
-     * slug = test
-     *
-     * and then finds:
-     *
-     * lotteries.slug = test
-     * =====================================================
-     */
     const {
       data: lottery,
       error:
@@ -1779,6 +2290,7 @@ export async function POST(
           sales_open_at,
           sales_close_at,
           draw_at,
+          geographic_eligibility,
           terms_version,
           privacy_notice_version,
           show_in_directory,
@@ -1860,12 +2372,6 @@ export async function POST(
         404,
       );
     }
-
-    /*
-     * =====================================================
-     * PUBLIC VISIBILITY
-     * =====================================================
-     */
     const publicVisible =
       lottery.show_in_directory ===
         true ||
@@ -1888,12 +2394,6 @@ export async function POST(
         409,
       );
     }
-
-    /*
-     * =====================================================
-     * STATUS
-     * =====================================================
-     */
     if (
       lottery.status !==
         "live" ||
@@ -1921,16 +2421,10 @@ export async function POST(
         409,
       );
     }
-
-    /*
-     * =====================================================
-     * MINIMUM AGE
-     * =====================================================
-     */
     const minimumAge =
       Number(
         lottery.minimum_age ??
-          16,
+          18,
       );
 
     if (
@@ -1949,12 +2443,6 @@ export async function POST(
         500,
       );
     }
-
-    /*
-     * =====================================================
-     * SALES WINDOW
-     * =====================================================
-     */
     const now =
       Date.now();
 
@@ -2025,12 +2513,6 @@ export async function POST(
         );
       }
     }
-
-    /*
-     * =====================================================
-     * PRICE
-     * =====================================================
-     */
     const unitPricePence =
       typeof lottery.ticket_price_pence ===
         "number"
@@ -2071,12 +2553,6 @@ export async function POST(
         500,
       );
     }
-
-    /*
-     * =====================================================
-     * MAXIMUM TICKETS
-     * =====================================================
-     */
     if (
       typeof lottery.max_tickets ===
         "number" &&
@@ -2180,24 +2656,12 @@ export async function POST(
         );
       }
     }
-
-    /*
-     * =====================================================
-     * TOTAL
-     * =====================================================
-     */
     const totalPence =
       unitPricePence *
       quantity;
 
     const orderReference =
       createOrderReference();
-
-    /*
-     * =====================================================
-     * CREATE PENDING ORDER
-     * =====================================================
-     */
     const {
       data: order,
       error:
@@ -2295,12 +2759,45 @@ export async function POST(
 
     orderId =
       order.id;
+    await recordLotteryAcceptances({
+      request,
 
-    /*
-     * =====================================================
-     * STRIPE
-     * =====================================================
-     */
+      lotteryId:
+        lottery.id,
+
+      orderId:
+        order.id,
+
+      minimumAge,
+
+      geographicEligibility:
+        lottery.geographic_eligibility ??
+        null,
+
+      termsVersion:
+        lottery.terms_version ??
+        null,
+
+      privacyNoticeVersion:
+        lottery.privacy_notice_version ??
+        null,
+
+      ageConfirmed:
+        body.age_confirmed ===
+        true,
+
+      eligibilityConfirmed:
+        body.eligibility_confirmed ===
+        true,
+
+      termsAccepted:
+        body.terms_accepted ===
+        true,
+
+      marketingOptIn:
+        body.marketing_opt_in ===
+        true,
+    });
     const origin =
       new URL(
         request.url,
@@ -2389,12 +2886,6 @@ export async function POST(
           },
         },
       );
-
-    /*
-     * =====================================================
-     * SAVE STRIPE SESSION
-     * =====================================================
-     */
     await supabaseAdmin
       .from(
         "lottery_orders",
@@ -2424,12 +2915,6 @@ export async function POST(
         500,
       );
     }
-
-    /*
-     * =====================================================
-     * SUCCESS
-     * =====================================================
-     */
     return response({
       ok: true,
 
@@ -2465,11 +2950,6 @@ export async function POST(
       "Lottery slug checkout error:",
       error,
     );
-
-    /*
-     * If an order was created before Stripe failed,
-     * mark it as failed.
-     */
     if (
       orderId
     ) {
