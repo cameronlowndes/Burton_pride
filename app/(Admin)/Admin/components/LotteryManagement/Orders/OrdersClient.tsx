@@ -104,7 +104,24 @@ type ApiResponse = {
   };
 };
 
+type LotteryAuditEvent = {
+  lottery_id: string;
+  lottery_title: string;
+  entity_type: "lottery_order";
+  entity_id: string;
+  action_code: string;
+  action_label: string;
+  action_group: "lottery" | "payment" | "ticket";
+  risk_level: "low" | "medium" | "high" | "critical";
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+  before_data?: Record<string, unknown> | null;
+  after_data?: Record<string, unknown> | null;
+};
+
 const API_ROUTE = "/api/admin/lotterymanagement/orders";
+const AUDIT_LOGS_API =
+  "/api/admin/lotterymanagement/audit-logs";
 const MAIN_ADMIN_PASSWORD_API =
   "/api/admin/settings/delete-password/";
 
@@ -164,6 +181,92 @@ async function readJson(res: Response): Promise<ApiResponse> {
   } catch {
     return { ok: false, error: "The API returned invalid JSON." };
   }
+}
+
+async function reportLotteryAuditEvent(
+  event: LotteryAuditEvent,
+) {
+  let lastError =
+    "The audit log API did not accept the event.";
+
+  // Retry once for a temporary network or server failure. The audit API
+  // must derive the acting admin, IP address and device context from the
+  // authenticated request; passwords are deliberately never included.
+  for (
+    let attempt = 0;
+    attempt < 2;
+    attempt += 1
+  ) {
+    try {
+      const response =
+        await fetch(
+          AUDIT_LOGS_API,
+          {
+            method:
+              "POST",
+
+            cache:
+              "no-store",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                ...event,
+
+                metadata: {
+                  source:
+                    "lottery_management_orders",
+
+                  route:
+                    API_ROUTE,
+
+                  ...(event.metadata || {}),
+                },
+              }),
+          },
+        );
+
+      const data =
+        await readJson(
+          response,
+        );
+
+      if (
+        response.ok &&
+        data.ok
+      ) {
+        return true;
+      }
+
+      lastError =
+        data.error ||
+        data.message ||
+        lastError;
+    } catch (
+      caught: any
+    ) {
+      lastError =
+        caught?.message ||
+        lastError;
+    }
+  }
+
+  console.error(
+    "Lottery Management audit event failed:",
+    lastError,
+  );
+
+  return false;
 }
 
 export default function OrdersClient() {
@@ -880,6 +983,70 @@ export default function OrdersClient() {
         );
       }
 
+      const auditSaved =
+        await reportLotteryAuditEvent({
+          lottery_id:
+            editOrder.lottery_id,
+
+          lottery_title:
+            editOrder.lottery_title,
+
+          entity_type:
+            "lottery_order",
+
+          entity_id:
+            editOrder.id,
+
+          action_code:
+            "order.updated",
+
+          action_label:
+            "Lottery order details updated",
+
+          action_group:
+            "lottery",
+
+          risk_level:
+            "high",
+
+          metadata: {
+            outcome:
+              "success",
+
+            order_reference:
+              editOrder.order_reference,
+          },
+
+          before_data: {
+            purchaser_name:
+              editOrder.purchaser_name,
+
+            purchaser_email:
+              editOrder.purchaser_email,
+
+            purchaser_phone:
+              editOrder.purchaser_phone,
+
+            marketing_opt_in:
+              editOrder.marketing_opt_in,
+          },
+
+          after_data: {
+            purchaser_name:
+              cleanName,
+
+            purchaser_email:
+              cleanEmail,
+
+            purchaser_phone:
+              cleanPhone ||
+              null,
+
+            marketing_opt_in:
+              editDraft.marketing_opt_in,
+          },
+        });
+
       setEditOrder(
         null,
       );
@@ -901,17 +1068,59 @@ export default function OrdersClient() {
       );
 
       setNotice(
-        data.message ||
-          "The order details have been updated.",
+        auditSaved
+          ? data.message ||
+            "The order details have been updated."
+          : "The order details were updated, but the audit log could not be saved. Please report this to a main admin.",
       );
 
       await loadOrders();
     } catch (
       caught: any
     ) {
-      setEditError(
+      const failureMessage =
         caught?.message ||
-          "The order changes could not be saved.",
+        "The order changes could not be saved.";
+
+      await reportLotteryAuditEvent({
+        lottery_id:
+          editOrder.lottery_id,
+
+        lottery_title:
+          editOrder.lottery_title,
+
+        entity_type:
+          "lottery_order",
+
+        entity_id:
+          editOrder.id,
+
+        action_code:
+          "order.update_failed",
+
+        action_label:
+          "Lottery order update failed",
+
+        action_group:
+          "lottery",
+
+        risk_level:
+          "high",
+
+        reason:
+          failureMessage,
+
+        metadata: {
+          outcome:
+            "failed",
+
+          order_reference:
+            editOrder.order_reference,
+        },
+      });
+
+      setEditError(
+        failureMessage,
       );
     } finally {
       setSavingEdit(
@@ -1124,6 +1333,78 @@ export default function OrdersClient() {
         );
       }
 
+      const auditSaved =
+        await reportLotteryAuditEvent({
+          lottery_id:
+            orderToUpdate.lottery_id,
+
+          lottery_title:
+            orderToUpdate.lottery_title,
+
+          entity_type:
+            "lottery_order",
+
+          entity_id:
+            orderToUpdate.id,
+
+          action_code:
+            "payment.manually_marked_paid",
+
+          action_label:
+            "Lottery order manually marked as paid",
+
+          action_group:
+            "payment",
+
+          risk_level:
+            "critical",
+
+          metadata: {
+            outcome:
+              "success",
+
+            order_reference:
+              orderToUpdate.order_reference,
+
+            confirmation_email_sent:
+              data.email?.sent ??
+              null,
+
+            issued_ticket_numbers:
+              (data.tickets || []).map(
+                (
+                  ticket,
+                ) =>
+                  ticket.ticket_number,
+              ),
+          },
+
+          before_data: {
+            payment_status:
+              orderToUpdate.payment_status,
+
+            paid_at:
+              orderToUpdate.paid_at,
+
+            ticket_count:
+              orderToUpdate.ticket_count,
+          },
+
+          after_data: {
+            payment_status:
+              data.payment_status ||
+              "paid",
+
+            paid_at:
+              data.paid_at ||
+              null,
+
+            ticket_count:
+              data.tickets?.length ??
+              orderToUpdate.ticket_count,
+          },
+        });
+
       setMarkPaidOrder(
         null,
       );
@@ -1138,22 +1419,64 @@ export default function OrdersClient() {
       );
 
       setNotice(
-        data.message ||
-          (
-            data.email?.sent ===
-            false
-              ? "The order is paid and ticket numbers were issued, but the confirmation email needs attention."
-              : "The order is now paid. Ticket numbers were issued and the confirmation email was sent."
-          ),
+        auditSaved
+          ? data.message ||
+            (
+              data.email?.sent ===
+              false
+                ? "The order is paid and ticket numbers were issued, but the confirmation email needs attention."
+                : "The order is now paid. Ticket numbers were issued and the confirmation email was sent."
+            )
+          : "The order was marked as paid, but the audit log could not be saved. Please report this to a main admin.",
       );
 
       await loadOrders();
     } catch (
       err: any
     ) {
-      setMarkPaidError(
+      const failureMessage =
         err?.message ||
-          "The order could not be marked as paid.",
+        "The order could not be marked as paid.";
+
+      await reportLotteryAuditEvent({
+        lottery_id:
+          orderToUpdate.lottery_id,
+
+        lottery_title:
+          orderToUpdate.lottery_title,
+
+        entity_type:
+          "lottery_order",
+
+        entity_id:
+          orderToUpdate.id,
+
+        action_code:
+          "payment.manual_paid_failed",
+
+        action_label:
+          "Manual lottery payment confirmation failed",
+
+        action_group:
+          "payment",
+
+        risk_level:
+          "critical",
+
+        reason:
+          failureMessage,
+
+        metadata: {
+          outcome:
+            "failed",
+
+          order_reference:
+            orderToUpdate.order_reference,
+        },
+      });
+
+      setMarkPaidError(
+        failureMessage,
       );
     } finally {
       setMarkingPaid(
@@ -1214,6 +1537,9 @@ export default function OrdersClient() {
     setIssueTicketError(null);
     setNotice(null);
 
+    const orderToUpdate =
+      issueTicketOrder;
+
     try {
       const passwordResponse = await fetch(MAIN_ADMIN_PASSWORD_API, {
         method: "POST",
@@ -1246,7 +1572,7 @@ export default function OrdersClient() {
         },
         body: JSON.stringify({
           action: "issue_missing_tickets",
-          order_id: issueTicketOrder.id,
+          order_id: orderToUpdate.id,
           main_admin_password: issueTicketPassword,
         }),
       });
@@ -1256,24 +1582,155 @@ export default function OrdersClient() {
       if (!response.ok || !data.ok) {
         throw new Error(
           data.error ||
-            data.message ||
+          data.message ||
             "The missing ticket could not be issued.",
         );
       }
+
+      const auditSaved =
+        await reportLotteryAuditEvent({
+          lottery_id:
+            orderToUpdate.lottery_id,
+
+          lottery_title:
+            orderToUpdate.lottery_title,
+
+          entity_type:
+            "lottery_order",
+
+          entity_id:
+            orderToUpdate.id,
+
+          action_code:
+            "ticket.missing_issued",
+
+          action_label:
+            "Missing lottery tickets issued",
+
+          action_group:
+            "ticket",
+
+          risk_level:
+            "high",
+
+          metadata: {
+            outcome:
+              "success",
+
+            order_reference:
+              orderToUpdate.order_reference,
+
+            confirmation_email_sent:
+              data.email?.sent ??
+              null,
+
+            issued_ticket_numbers:
+              (data.tickets || [])
+                .filter(
+                  (
+                    ticket,
+                  ) =>
+                    !orderToUpdate.tickets.some(
+                      (
+                        existing,
+                      ) =>
+                        existing.id ===
+                        ticket.id,
+                    ),
+                )
+                .map(
+                  (
+                    ticket,
+                  ) =>
+                    ticket.ticket_number,
+                ),
+          },
+
+          before_data: {
+            ticket_count:
+              orderToUpdate.ticket_count,
+
+            ticket_numbers:
+              orderToUpdate.tickets.map(
+                (
+                  ticket,
+                ) =>
+                  ticket.ticket_number,
+              ),
+          },
+
+          after_data: {
+            ticket_count:
+              data.tickets?.length ??
+              orderToUpdate.ticket_count,
+
+            ticket_numbers:
+              (data.tickets ||
+                orderToUpdate.tickets).map(
+                (
+                  ticket,
+                ) =>
+                  ticket.ticket_number,
+              ),
+          },
+        });
 
       setIssueTicketOrder(null);
       setIssueTicketPassword("");
       setShowIssueTicketPassword(false);
       setSelected(null);
       setNotice(
-        data.message ||
-          "The missing ticket was issued and the order was updated.",
+        auditSaved
+          ? data.message ||
+            "The missing ticket was issued and the order was updated."
+          : "The missing ticket was issued, but the audit log could not be saved. Please report this to a main admin.",
       );
 
       await loadOrders();
     } catch (caught: any) {
+      const failureMessage =
+        caught?.message ||
+        "The missing ticket could not be issued.";
+
+      await reportLotteryAuditEvent({
+        lottery_id:
+          orderToUpdate.lottery_id,
+
+        lottery_title:
+          orderToUpdate.lottery_title,
+
+        entity_type:
+          "lottery_order",
+
+        entity_id:
+          orderToUpdate.id,
+
+        action_code:
+          "ticket.missing_issue_failed",
+
+        action_label:
+          "Missing lottery ticket issue failed",
+
+        action_group:
+          "ticket",
+
+        risk_level:
+          "high",
+
+        reason:
+          failureMessage,
+
+        metadata: {
+          outcome:
+            "failed",
+
+          order_reference:
+            orderToUpdate.order_reference,
+        },
+      });
+
       setIssueTicketError(
-        caught?.message || "The missing ticket could not be issued.",
+        failureMessage,
       );
     } finally {
       setIssuingTickets(false);

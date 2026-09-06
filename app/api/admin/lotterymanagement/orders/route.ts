@@ -2788,9 +2788,39 @@ async function sendPaidOrderEmails({
           </div>
 
           <p style="margin:26px 0 0;font-size:15px;line-height:1.7;color:#475569;">
-            Please keep this email safe until the draw has taken place.
+            Please keep this email safe until the draw has taken place. If you purchased more than one
+            ticket, every number shown above is one separate entry.
+          </p>
+
+          <p style="margin:22px 0 0;font-size:15px;line-height:1.7;color:#475569;">
+            Good luck, and thank you for supporting Burton Pride.
           </p>
         </div>
+      </div>
+
+      <p style="margin:18px 0 0;text-align:center;font-size:12px;line-height:1.6;color:#64748b;">
+        This is an automated lottery confirmation from Burton Pride.
+      </p>
+
+      <div style="margin:14px 0 0;padding:18px;border-radius:14px;background:#ffffff;border:1px solid #e2e8f0;color:#475569;font-size:12px;line-height:1.65;">
+        <p style="margin:0 0 10px;font-weight:700;color:#172033;">
+          This is an official Burton Pride lottery.
+        </p>
+        <p style="margin:0 0 10px;">
+          The promoter of Burton Pride lotteries is <strong>Burton Pride C.I.C.</strong>
+        </p>
+        <p style="margin:0 0 10px;">
+          Burton Pride C.I.C. is a grassroots, community-led Community Interest Company created to support the LGBTQIA+ community and allies in Burton upon Trent and the surrounding area.
+        </p>
+        <p style="margin:0 0 10px;">
+          Where a lottery is operated under Burton Pride C.I.C.'s small society lottery registration, the relevant registration information will be displayed on the individual lottery page or within its Individual Lottery Terms.
+        </p>
+        <p style="margin:0 0 10px;">
+          Where another permission, licence, exemption or lottery category applies, this will also be identified where required.
+        </p>
+        <p style="margin:0;">
+          Burton Pride C.I.C.'s small society lottery registration number is <strong>SL0507</strong>, issued by East Staffordshire Borough Council.
+        </p>
       </div>
     </div>
   </body>
@@ -2819,9 +2849,23 @@ Draw: ${formatManualPaidDate(
       lottery.draw_at,
     )}
 
-Please keep this email safe until the draw has taken place.
+Please keep this email safe until the draw has taken place. If you purchased more than one ticket, every number shown above is one separate entry.
 
-Burton Pride Lotteries`;
+Good luck, and thank you for supporting Burton Pride.
+
+This is an automated lottery confirmation from Burton Pride.
+
+This is an official Burton Pride lottery.
+
+The promoter of Burton Pride lotteries is Burton Pride C.I.C.
+
+Burton Pride C.I.C. is a grassroots, community-led Community Interest Company created to support the LGBTQIA+ community and allies in Burton upon Trent and the surrounding area.
+
+Where a lottery is operated under Burton Pride C.I.C.'s small society lottery registration, the relevant registration information will be displayed on the individual lottery page or within its Individual Lottery Terms.
+
+Where another permission, licence, exemption or lottery category applies, this will also be identified where required.
+
+Burton Pride C.I.C.'s small society lottery registration number is SL0507, issued by East Staffordshire Borough Council.`;
 
   const customerResult =
     await resend
