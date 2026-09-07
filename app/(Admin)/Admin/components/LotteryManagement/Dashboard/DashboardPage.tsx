@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  Sparkles,
   Ticket,
   Trophy,
   Users,
@@ -70,6 +71,11 @@ type RecentActivity = {
   createdAt: string;
 };
 
+type AuditLogsResponse = {
+  logs?: unknown;
+  error?: string;
+};
+
 type DashboardResponse = {
   ok?: boolean;
   success?: boolean;
@@ -105,6 +111,8 @@ const EMPTY_SUMMARY: DashboardSummary = {
 
 const LOTTERY_API_ROUTE = "/api/admin/lotterymanagement/lottery";
 const DASHBOARD_API_ROUTE = "/api/admin/lotterymanagement/dashboard";
+const AUDIT_LOGS_API_ROUTE = "/api/admin/lotterymanagement/audit-logs";
+const DEVELOPMENT_REQUESTS_API_ROUTE = "/api/admin/developmentrequests";
 const REQUIRED_MINIMUM_AGE = 18;
 
 type UnknownRecord = Record<string, unknown>;
@@ -359,6 +367,26 @@ function normaliseRecentActivity(body: DashboardResponse) {
   });
 }
 
+function normaliseAuditActivity(body: AuditLogsResponse) {
+  return asArray(body.logs).map((value, index): RecentActivity => {
+    const item = asRecord(value);
+
+    return {
+      id: firstText(item.id) || `audit-activity-${index}`,
+      actionLabel:
+        firstText(item.action_label, item.actionLabel, item.action_code) ||
+        "Lottery change",
+      adminName: firstText(item.admin_name, item.adminName) || null,
+      adminEmail: firstText(item.admin_email, item.adminEmail) || null,
+      lotteryTitle:
+        firstText(item.lottery_title, item.lotteryTitle) || null,
+      createdAt:
+        firstText(item.created_at, item.createdAt) ||
+        new Date().toISOString(),
+    };
+  });
+}
+
 
 function formatMoney(pence: number) {
   return new Intl.NumberFormat("en-GB", {
@@ -554,6 +582,23 @@ export default function LotteryManagementDashboardPage() {
     actual_result: "",
   });
 
+  const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
+  const [featureSubmitting, setFeatureSubmitting] = useState(false);
+  const [featureError, setFeatureError] = useState<string | null>(null);
+  const [featureSuccess, setFeatureSuccess] = useState<{
+    reference: string;
+    message: string;
+  } | null>(null);
+  const [featureForm, setFeatureForm] = useState({
+    priority: "normal",
+    title: "",
+    description: "",
+    why_needed: "",
+    problem_solved: "",
+    who_will_use: "",
+    example_workflow: "",
+  });
+
 
   useEffect(() => {
     void loadDashboard(false);
@@ -580,6 +625,28 @@ export default function LotteryManagementDashboardPage() {
       window.removeEventListener("keydown", handleBugKeyDown);
     };
   }, [bugReportOpen, bugSubmitting]);
+
+  useEffect(() => {
+    if (!featureRequestOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleFeatureKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !featureSubmitting) {
+        setFeatureRequestOpen(false);
+        setFeatureError(null);
+        setFeatureSuccess(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleFeatureKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleFeatureKeyDown);
+    };
+  }, [featureRequestOpen, featureSubmitting]);
 
   useEffect(() => {
     if (!createOpen) return;
@@ -612,17 +679,33 @@ export default function LotteryManagementDashboardPage() {
     setDetails(null);
 
     try {
-      const response = await fetch(DASHBOARD_API_ROUTE, {
+      const [response, auditResponse] = await Promise.all([
+        fetch(DASHBOARD_API_ROUTE, {
           method: "GET",
           headers: {
             Accept: "application/json",
           },
           credentials: "include",
           cache: "no-store",
-        });
+        }),
+        fetch(
+          `${AUDIT_LOGS_API_ROUTE}?page=1&pageSize=10&sort=created_at&direction=desc`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
+            credentials: "include",
+            cache: "no-store",
+          },
+        ),
+      ]);
 
       const body = (await response.json().catch(() => null)) as
         | DashboardResponse
+        | null;
+      const auditBody = (await auditResponse.json().catch(() => null)) as
+        | AuditLogsResponse
         | null;
 
       if (!response.ok || (!body?.success && !body?.ok)) {
@@ -636,7 +719,11 @@ export default function LotteryManagementDashboardPage() {
       setSummary(normaliseSummary(body));
       setUpcoming(normaliseUpcoming(body));
       setWarnings(normaliseWarnings(body));
-      setRecentActivity(normaliseRecentActivity(body));
+      setRecentActivity(
+        auditResponse.ok && auditBody
+          ? normaliseAuditActivity(auditBody)
+          : normaliseRecentActivity(body),
+      );
     } catch (caughtError) {
       const message =
         caughtError instanceof Error
@@ -668,6 +755,114 @@ export default function LotteryManagementDashboardPage() {
       actual_result: "",
     });
     setBugReportOpen(true);
+  }
+
+  function openFeatureRequest() {
+    setFeatureError(null);
+    setFeatureSuccess(null);
+    setFeatureForm({
+      priority: "normal",
+      title: "",
+      description: "",
+      why_needed: "",
+      problem_solved: "",
+      who_will_use: "",
+      example_workflow: "",
+    });
+    setFeatureRequestOpen(true);
+  }
+
+  function closeFeatureRequest() {
+    if (featureSubmitting) return;
+
+    setFeatureRequestOpen(false);
+    setFeatureError(null);
+    setFeatureSuccess(null);
+  }
+
+  function updateFeatureField(
+    name: keyof typeof featureForm,
+    value: string,
+  ) {
+    setFeatureForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  async function submitFeatureRequest() {
+    const title = featureForm.title.trim();
+    const description = featureForm.description.trim();
+
+    if (!title) {
+      setFeatureError("Enter a title for the requested feature.");
+      return;
+    }
+
+    if (!description) {
+      setFeatureError("Explain what you would like added or changed.");
+      return;
+    }
+
+    setFeatureSubmitting(true);
+    setFeatureError(null);
+    setFeatureSuccess(null);
+
+    try {
+      const response = await fetch(DEVELOPMENT_REQUESTS_API_ROUTE, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          application: "lottery_management",
+          priority: featureForm.priority,
+          title,
+          description,
+          why_needed: featureForm.why_needed.trim() || null,
+          problem_solved: featureForm.problem_solved.trim() || null,
+          who_will_use: featureForm.who_will_use.trim() || null,
+          example_workflow: featureForm.example_workflow.trim() || null,
+          page_url:
+            typeof window !== "undefined"
+              ? window.location.href
+              : null,
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+      const savedRequest = result?.request || result?.developmentRequest || result?.data;
+
+      if (!response.ok || !result) {
+        throw new Error(
+          result?.error ||
+            result?.message ||
+            "The feature request could not be submitted.",
+        );
+      }
+
+      setFeatureSuccess({
+        reference:
+          savedRequest?.reference_number ||
+          savedRequest?.reference ||
+          savedRequest?.id ||
+          "Saved",
+        message:
+          result?.message ||
+          "Your feature request has been submitted successfully.",
+      });
+    } catch (submitError) {
+      setFeatureError(
+        submitError instanceof Error
+          ? submitError.message
+          : "The feature request could not be submitted.",
+      );
+    } finally {
+      setFeatureSubmitting(false);
+    }
   }
 
   function closeBugReport() {
@@ -1083,6 +1278,31 @@ export default function LotteryManagementDashboardPage() {
 
             <button
               type="button"
+              onClick={openFeatureRequest}
+              className="
+                inline-flex
+                h-12
+                items-center
+                gap-2
+                rounded-2xl
+                border
+                border-purple-400/20
+                bg-purple-500/10
+                px-5
+                text-sm
+                font-black
+                text-purple-100
+                transition
+                hover:border-purple-300/35
+                hover:bg-purple-500/20
+              "
+            >
+              <Sparkles size={18} />
+              Request a feature
+            </button>
+
+            <button
+              type="button"
               onClick={() => setCreateOpen(true)}
               className="
                 inline-flex
@@ -1463,6 +1683,225 @@ export default function LotteryManagementDashboardPage() {
             })}
           </div>
         </SectionCard>
+
+      {featureRequestOpen ? (
+        <div
+          className="fixed inset-0 z-[10030] flex items-center justify-center bg-black/75 p-3 backdrop-blur-xl sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lottery-feature-request-title"
+        >
+          <button
+            type="button"
+            aria-label="Close feature request"
+            className="absolute inset-0 cursor-default"
+            disabled={featureSubmitting}
+            onClick={closeFeatureRequest}
+          />
+
+          <div className="relative max-h-[94dvh] w-full max-w-5xl overflow-y-auto rounded-[1.5rem] border border-white/10 bg-[#11111f] shadow-2xl sm:rounded-[2rem]">
+            <div className="h-1 bg-gradient-to-r from-purple-500 via-pink-400 to-emerald-400" />
+
+            <div className="p-5 sm:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-white/55">
+                    <Sparkles className="h-4 w-4" />
+                    Burton Pride Development Requests
+                  </div>
+
+                  <h2
+                    id="lottery-feature-request-title"
+                    className="mt-3 text-2xl font-black text-white sm:text-3xl"
+                  >
+                    Request a new feature
+                  </h2>
+
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                    This request is sent directly to the Admin Portal Development Requests system.
+                    Add enough detail so the feature can be reviewed and planned.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeFeatureRequest}
+                  disabled={featureSubmitting}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-full bg-white/10 px-4 py-3 text-sm font-bold text-white/70 transition hover:bg-white/20 hover:text-white disabled:opacity-50"
+                >
+                  Close
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {featureError ? (
+                <div className="mt-6 rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <p className="font-black">Feature request could not be submitted</p>
+                      <p className="mt-1 leading-6 text-red-100/80">{featureError}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {featureSuccess ? (
+                <div className="mt-6 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-5 text-emerald-50">
+                  <div className="flex items-start gap-3">
+                    <Check className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div>
+                      <p className="font-black">Feature request submitted</p>
+                      <p className="mt-1 text-sm leading-6 text-emerald-50/80">
+                        {featureSuccess.message}
+                      </p>
+                      <p className="mt-3 text-sm font-black">
+                        Reference: {featureSuccess.reference}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-8 space-y-6">
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <Field label="Application">
+                      <select
+                        value="lottery_management"
+                        disabled
+                        className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-80`}
+                      >
+                        <option value="lottery_management">Lottery Management</option>
+                      </select>
+                    </Field>
+
+                    <Field label="Priority">
+                      <select
+                        value={featureForm.priority}
+                        onChange={(event) =>
+                          updateFeatureField("priority", event.target.value)
+                        }
+                        className={inputClass}
+                      >
+                        <option value="minor">Minor</option>
+                        <option value="normal">Normal</option>
+                        <option value="senior">Senior / Critical</option>
+                      </select>
+                    </Field>
+
+                    <Field label="Feature title" full required>
+                      <input
+                        value={featureForm.title}
+                        onChange={(event) =>
+                          updateFeatureField("title", event.target.value)
+                        }
+                        className={inputClass}
+                        placeholder="Example: Add a lottery performance comparison report"
+                      />
+                    </Field>
+
+                    <Field label="What would you like added or changed?" full required>
+                      <textarea
+                        value={featureForm.description}
+                        onChange={(event) =>
+                          updateFeatureField("description", event.target.value)
+                        }
+                        className={`${inputClass} min-h-36 resize-y`}
+                        placeholder="Explain the feature, where it should appear and what you would like it to do."
+                      />
+                    </Field>
+
+                    <Field label="Why is this needed?">
+                      <textarea
+                        value={featureForm.why_needed}
+                        onChange={(event) =>
+                          updateFeatureField("why_needed", event.target.value)
+                        }
+                        className={`${inputClass} min-h-28 resize-y`}
+                        placeholder="How would this help Burton Pride or the admins using Lottery Management?"
+                      />
+                    </Field>
+
+                    <Field label="What problem does it solve?">
+                      <textarea
+                        value={featureForm.problem_solved}
+                        onChange={(event) =>
+                          updateFeatureField("problem_solved", event.target.value)
+                        }
+                        className={`${inputClass} min-h-28 resize-y`}
+                        placeholder="Explain the current problem, limitation or extra work this would remove."
+                      />
+                    </Field>
+
+                    <Field label="Who will use it?" full>
+                      <input
+                        value={featureForm.who_will_use}
+                        onChange={(event) =>
+                          updateFeatureField("who_will_use", event.target.value)
+                        }
+                        className={inputClass}
+                        placeholder="Example: Main admins or all Lottery Management users"
+                      />
+                    </Field>
+
+                    <Field label="Example of how it should work" full>
+                      <textarea
+                        value={featureForm.example_workflow}
+                        onChange={(event) =>
+                          updateFeatureField("example_workflow", event.target.value)
+                        }
+                        className={`${inputClass} min-h-36 resize-y`}
+                        placeholder={"1. Open Lottery Management\n2. Go to the relevant page\n3. Select the new option\n4. The requested feature does ..."}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-xs leading-5 text-white/50">
+                    This request is automatically recorded under Lottery Management. The signed-in
+                    administrator is recorded by the Development Requests API.
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-7 flex flex-col-reverse gap-3 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                <Link
+                  href="/Admin/DevelopmentRequests"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-black text-white/70 transition hover:bg-white/10 hover:text-white"
+                >
+                  Open Development Requests
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={closeFeatureRequest}
+                    disabled={featureSubmitting}
+                    className="min-h-11 rounded-2xl bg-white/10 px-5 py-3 text-sm font-black text-white/70 transition hover:bg-white/20 hover:text-white disabled:opacity-50"
+                  >
+                    {featureSuccess ? "Close" : "Cancel"}
+                  </button>
+
+                  {!featureSuccess ? (
+                    <button
+                      type="button"
+                      onClick={submitFeatureRequest}
+                      disabled={featureSubmitting}
+                      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-500 to-fuchsia-500 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {featureSubmitting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      {featureSubmitting ? "Submitting..." : "Submit feature request"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {bugReportOpen ? (
         <div

@@ -5,12 +5,6 @@ import {
   getAuditServiceClient,
   hasLotteryPermission,
 } from "@/lib/lottery/audit-server";
-import {
-  getLotteryAuditErrorReason,
-  tryWriteLotteryAuditLog,
-  writeLotteryAuditLog,
-  type LotteryAuditActor,
-} from "@/lib/lottery/writeAuditLog";
 import type {
   LotteryAuditResponse,
 } from "@/lib/lottery/audit-types";
@@ -33,7 +27,6 @@ const ALLOWED_GROUPS = new Set([
   "winner",
   "compliance",
   "security",
-  "export",
 ]);
 
 const ALLOWED_RISK_LEVELS = new Set([
@@ -42,6 +35,20 @@ const ALLOWED_RISK_LEVELS = new Set([
   "high",
   "critical",
 ]);
+
+// Historical read-only entries are kept in the database, but this endpoint
+// only returns actions that changed lottery data.
+const READ_ONLY_ACTION_CODES = [
+  "security.audit_logs.viewed",
+  "security.audit_logs.permission_denied",
+  "security.audit_logs.invalid_filter",
+  "security.audit_logs.load_failed",
+  "export.audit_logs.csv",
+  "report.exported",
+  "export.exported",
+];
+
+const READ_ONLY_ACTION_CODES_FILTER = `(${READ_ONLY_ACTION_CODES.join(",")})`;
 
 function positiveInt(
   value: string | null,
@@ -55,35 +62,6 @@ function positiveInt(
   }
 
   return max ? Math.min(parsed, max) : parsed;
-}
-
-function optionalString(value: unknown): string | null {
-  return typeof value === "string" && value.trim()
-    ? value.trim()
-    : null;
-}
-
-function getAdminActor(admin: unknown): LotteryAuditActor {
-  const value =
-    admin && typeof admin === "object"
-      ? (admin as Record<string, unknown>)
-      : {};
-
-  return {
-    id:
-      optionalString(value.id) ??
-      optionalString(value.admin_id) ??
-      optionalString(value.adminId) ??
-      optionalString(value.user_id),
-    email:
-      optionalString(value.email) ??
-      optionalString(value.admin_email) ??
-      optionalString(value.adminEmail),
-    name:
-      optionalString(value.name) ??
-      optionalString(value.admin_name) ??
-      optionalString(value.full_name),
-  };
 }
 
 function safeAuditSearch(value: string): string {
@@ -130,8 +108,6 @@ function parseDateBoundary(
 }
 
 export async function GET(request: NextRequest) {
-  let auditActor: LotteryAuditActor | null = null;
-
   try {
     const admin = await getAuthenticatedAdmin();
 
@@ -150,30 +126,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    auditActor = getAdminActor(admin);
-
     if (
       !hasLotteryPermission(
         admin,
         "lottery:audit:view",
       )
     ) {
-      await tryWriteLotteryAuditLog({
-        request,
-        actor: auditActor,
-        actionCode:
-          "security.audit_logs.permission_denied",
-        actionLabel: "Audit log access denied",
-        actionGroup: "security",
-        riskLevel: "high",
-        entityType: "audit_logs",
-        reason:
-          "Administrator attempted to access Lottery Audit Logs without the required permission.",
-        metadata: {
-          requiredPermission: "lottery:audit:view",
-        },
-      });
-
       return NextResponse.json(
         {
           error:
@@ -228,19 +186,6 @@ export async function GET(request: NextRequest) {
         : "desc";
 
     if (group && !ALLOWED_GROUPS.has(group)) {
-      await tryWriteLotteryAuditLog({
-        request,
-        actor: auditActor,
-        actionCode:
-          "security.audit_logs.invalid_filter",
-        actionLabel:
-          "Invalid audit log group filter rejected",
-        actionGroup: "security",
-        riskLevel: "medium",
-        entityType: "audit_logs",
-        reason: "Invalid audit action group supplied.",
-      });
-
       return NextResponse.json(
         { error: "Invalid audit action group." },
         {
@@ -253,19 +198,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (risk && !ALLOWED_RISK_LEVELS.has(risk)) {
-      await tryWriteLotteryAuditLog({
-        request,
-        actor: auditActor,
-        actionCode:
-          "security.audit_logs.invalid_filter",
-        actionLabel:
-          "Invalid audit log risk filter rejected",
-        actionGroup: "security",
-        riskLevel: "medium",
-        entityType: "audit_logs",
-        reason: "Invalid audit risk level supplied.",
-      });
-
       return NextResponse.json(
         { error: "Invalid audit risk level." },
         {
@@ -368,6 +300,12 @@ export async function GET(request: NextRequest) {
           metadata
         `,
         { count: "exact" },
+      )
+      .neq("action_group", "export")
+      .not(
+        "action_code",
+        "in",
+        READ_ONLY_ACTION_CODES_FILTER,
       );
 
     if (group) {
@@ -417,6 +355,12 @@ export async function GET(request: NextRequest) {
       .from("lottery_audit_logs")
       .select(
         "id, created_at, action_group, action_code, risk_level",
+      )
+      .neq("action_group", "export")
+      .not(
+        "action_code",
+        "in",
+        READ_ONLY_ACTION_CODES_FILTER,
       );
 
     if (group) {
@@ -476,51 +420,13 @@ export async function GET(request: NextRequest) {
             row.risk_level === "high" ||
             row.risk_level === "critical",
         ).length,
-        denied: rows.filter(
-          (row) =>
-            row.action_group === "security" &&
-            row.action_code
-              ?.toLowerCase()
-              .includes("permission_denied"),
-        ).length,
-        exports: rows.filter(
-          (row) => row.action_group === "export",
-        ).length,
+        denied: 0,
+        exports: 0,
         draws: rows.filter(
           (row) => row.action_group === "draw",
         ).length,
       },
     };
-
-    /*
-     * Viewing sensitive audit information is itself an audited action.
-     * This write is strict: the response is not released if it cannot
-     * be recorded in lottery_audit_logs.
-     */
-    await writeLotteryAuditLog({
-      request,
-      actor: auditActor,
-      actionCode: "security.audit_logs.viewed",
-      actionLabel: "Viewed lottery audit logs",
-      actionGroup: "security",
-      riskLevel: "medium",
-      entityType: "audit_logs",
-      metadata: {
-        page,
-        pageSize,
-        returnedRows: logs?.length ?? 0,
-        totalMatchingRows: count ?? 0,
-        filters: {
-          group: group || null,
-          risk: risk || null,
-          from: from || null,
-          to: to || null,
-          searchApplied: Boolean(safeSearch),
-        },
-        sort,
-        direction,
-      },
-    });
 
     return NextResponse.json(response, {
       status: 200,
@@ -531,19 +437,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Lottery audit logs API error:", error);
-
-    if (auditActor) {
-      await tryWriteLotteryAuditLog({
-        request,
-        actor: auditActor,
-        actionCode: "security.audit_logs.load_failed",
-        actionLabel: "Lottery audit logs failed to load",
-        actionGroup: "security",
-        riskLevel: "high",
-        entityType: "audit_logs",
-        reason: getLotteryAuditErrorReason(error),
-      });
-    }
 
     return NextResponse.json(
       { error: "Unable to load lottery audit logs." },

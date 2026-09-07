@@ -38,15 +38,17 @@ import {
   X,
   Boxes,
   type LucideIcon,
+  Ticket,
 } from "lucide-react";
 
 const MONEY_SIDEBAR_API = "/api/admin/money-sidebar";
 const ADMIN_LOGOUT_API = "/api/admin/settings/logout";
 const MONEY_ROOT = "/Admin/MoneyManagement";
 const ADMIN_DASHBOARD = "/Admin/Dashboard";
-const StockManagement = "/Admin/StockManagement";
+const STOCK_MANAGEMENT = "/Admin/StockManagement";
 const EVENT_HUB = "/Admin/EventHub";
 const EMAIL_CENTRE = "/Admin/Email/Sending";
+const LOTTERY_MANAGEMENT = "/Admin/LotteryManagement";
 const COLLAPSED_STORAGE_KEY = "burton_money_sidebar_collapsed";
 
 type SidebarItem = {
@@ -1663,8 +1665,12 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
           Open Email Centre
         </UtilityLink>
 
-         <UtilityLink href={StockManagement} icon={Boxes}>
+         <UtilityLink href={STOCK_MANAGEMENT} icon={Boxes}>
           Stock Management
+        </UtilityLink>
+
+        <UtilityLink href={LOTTERY_MANAGEMENT} icon={Ticket}>
+          Lottery Management
         </UtilityLink>
       </div>
     </div>

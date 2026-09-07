@@ -577,30 +577,6 @@ export default function MoneyTransactionsPage() {
                     <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
                   </div>
                 </Link>
-
-                <Link
-                  href="/Admin/MoneyManagement/TrackingMoney/BankBalanceCheck"
-                  className="group rounded-3xl border border-sky-300/20 bg-sky-500/10 p-5 shadow-2xl shadow-black/20 transition hover:-translate-y-1 hover:bg-sky-500/20"
-                >
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20">
-                    <Banknote className="h-6 w-6" />
-                  </div>
-
-                  <h3 className="text-xl font-black text-white">
-                    Manual Bank Balance Check
-                  </h3>
-
-                  <p className="mt-2 text-sm leading-6 text-white/60">
-                    Open the dedicated page to compare the real bank statement
-                    balance with Burton Pride Money In, including completed
-                    refunds received back.
-                  </p>
-
-                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-black text-sky-100">
-                    Open bank balance check
-                    <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                  </div>
-                </Link>
               </div>
             </section>
 

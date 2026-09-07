@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getAuthenticatedAdmin,
+  hasLotteryPermission,
+  writeLotteryAuditSafe,
+} from "@/lib/lottery/audit-server";
 
 const TABLE = "lotteries";
 const REQUIRED_MINIMUM_AGE = 18;
@@ -112,19 +117,30 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
+    const admin = await getAuthenticatedAdmin();
 
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (authError || !user) {
+    if (authError || !user || !admin) {
       return NextResponse.json(
         {
           ok: false,
           error: "Unauthorized.",
         },
         { status: 401 },
+      );
+    }
+
+    if (!hasLotteryPermission(admin, "lottery:view")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "You do not have permission to create lotteries.",
+        },
+        { status: 403 },
       );
     }
 
@@ -478,6 +494,17 @@ export async function POST(req: NextRequest) {
         { status: 500 },
       );
     }
+
+    await writeLotteryAuditSafe({
+      admin,
+      actionCode: "lottery.created",
+      actionLabel: "Lottery created",
+      actionGroup: "lottery",
+      riskLevel: "medium",
+      entityType: "lottery",
+      entityId: data.id,
+      reason: `Lottery "${data.title}" was created as a draft.`,
+    });
 
     return NextResponse.json(
       {

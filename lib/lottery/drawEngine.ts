@@ -1,4 +1,6 @@
 import { createHash, randomInt } from "node:crypto";
+
+import { writeLotteryAuditSafe } from "./audit-server";
 import { lotteryAdminDb, type LotteryAdmin } from "./adminAuth";
 import type { DrawReadinessCheck } from "./types";
 
@@ -21,7 +23,9 @@ export async function getDrawReadiness(lotteryId: string) {
 
   const { data: lottery, error: lotteryError } = await db
     .from("lotteries")
-    .select("id,title,slug,internal_reference,status,sales_close_at,draw_at,compliance_approved_at")
+    .select(
+      "id,title,slug,internal_reference,status,sales_close_at,draw_at,compliance_approved_at",
+    )
     .eq("id", lotteryId)
     .maybeSingle();
 
@@ -30,7 +34,9 @@ export async function getDrawReadiness(lotteryId: string) {
   }
 
   const now = Date.now();
-  const salesCloseMs = lottery.sales_close_at ? new Date(lottery.sales_close_at).getTime() : NaN;
+  const salesCloseMs = lottery.sales_close_at
+    ? new Date(lottery.sales_close_at).getTime()
+    : Number.NaN;
 
   const [
     paidOrdersResult,
@@ -40,19 +46,53 @@ export async function getDrawReadiness(lotteryId: string) {
     unresolvedIntegrityResult,
     completedDrawResult,
   ] = await Promise.all([
-    db.from("lottery_orders").select("id", { count: "exact", head: true })
-      .eq("lottery_id", lotteryId).eq("payment_status", "paid"),
-    db.from("lottery_tickets").select("id", { count: "exact", head: true })
-      .eq("lottery_id", lotteryId).eq("status", "issued"),
-    db.from("lottery_tickets").select("id", { count: "exact", head: true })
-      .eq("lottery_id", lotteryId).in("status", ["void", "refunded", "test"]),
-    db.from("lottery_prizes").select("id", { count: "exact", head: true })
-      .eq("lottery_id", lotteryId).eq("status", "available_for_draw"),
-    db.from("lottery_integrity_warnings").select("id", { count: "exact", head: true })
-      .eq("lottery_id", lotteryId).eq("resolved", false),
-    db.from("lottery_draws").select("id,status").eq("lottery_id", lotteryId)
-      .eq("status", "completed").limit(1),
+    db
+      .from("lottery_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("lottery_id", lotteryId)
+      .eq("payment_status", "paid"),
+    db
+      .from("lottery_tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("lottery_id", lotteryId)
+      .eq("status", "issued"),
+    db
+      .from("lottery_tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("lottery_id", lotteryId)
+      .in("status", ["void", "refunded", "test"]),
+    db
+      .from("lottery_prizes")
+      .select("id", { count: "exact", head: true })
+      .eq("lottery_id", lotteryId)
+      .eq("status", "available_for_draw"),
+    db
+      .from("lottery_integrity_warnings")
+      .select("id", { count: "exact", head: true })
+      .eq("lottery_id", lotteryId)
+      .eq("resolved", false),
+    db
+      .from("lottery_draws")
+      .select("id,status")
+      .eq("lottery_id", lotteryId)
+      .eq("status", "completed")
+      .limit(1),
   ]);
+
+  const queryError =
+    paidOrdersResult.error ||
+    eligibleTicketsResult.error ||
+    excludedTicketsResult.error ||
+    prizesResult.error ||
+    unresolvedIntegrityResult.error ||
+    completedDrawResult.error;
+
+  if (queryError) {
+    throw Object.assign(new Error("The draw readiness checks could not be completed."), {
+      status: 500,
+      cause: queryError,
+    });
+  }
 
   const paidOrders = paidOrdersResult.count ?? 0;
   const eligibleTickets = eligibleTicketsResult.count ?? 0;
@@ -65,8 +105,12 @@ export async function getDrawReadiness(lotteryId: string) {
     {
       key: "sales_closed",
       label: "Sales are closed",
-      ok: ["sales_closed", "draw_ready"].includes(lottery.status) || (!Number.isNaN(salesCloseMs) && salesCloseMs <= now),
-      detail: lottery.sales_close_at ? `Sales close: ${lottery.sales_close_at}` : "No sales closing date is configured.",
+      ok:
+        ["sales_closed", "draw_ready"].includes(lottery.status) ||
+        (!Number.isNaN(salesCloseMs) && salesCloseMs <= now),
+      detail: lottery.sales_close_at
+        ? `Sales close: ${lottery.sales_close_at}`
+        : "No sales closing date is configured.",
     },
     {
       key: "not_cancelled",
@@ -82,7 +126,9 @@ export async function getDrawReadiness(lotteryId: string) {
       key: "integrity",
       label: "No unresolved payment or ticket integrity warnings",
       ok: unresolvedWarnings === 0,
-      detail: unresolvedWarnings ? `${unresolvedWarnings} unresolved warning(s).` : null,
+      detail: unresolvedWarnings
+        ? `${unresolvedWarnings} unresolved warning(s).`
+        : null,
     },
     {
       key: "paid_orders",
@@ -123,35 +169,82 @@ export async function getDrawReadiness(lotteryId: string) {
 }
 
 function shuffleIndexes(length: number) {
-  const indexes = Array.from({ length }, (_, i) => i);
-  for (let i = indexes.length - 1; i > 0; i--) {
-    const j = randomInt(0, i + 1);
-    [indexes[i], indexes[j]] = [indexes[j], indexes[i]];
+  const indexes = Array.from({ length }, (_, index) => index);
+
+  for (let index = indexes.length - 1; index > 0; index -= 1) {
+    const randomIndex = randomInt(0, index + 1);
+    [indexes[index], indexes[randomIndex]] = [
+      indexes[randomIndex],
+      indexes[index],
+    ];
   }
+
   return indexes;
 }
 
-export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) {
+async function failDraw(params: {
+  drawId: string;
+  lotteryTitle: string;
+  reason: string;
+  admin: LotteryAdmin;
+}) {
+  const db = lotteryAdminDb();
+  const { error } = await db.rpc("lottery_fail_draw", {
+    p_draw_id: params.drawId,
+    p_reason: params.reason,
+  });
+
+  if (error) {
+    console.error("Unable to mark lottery draw as failed:", error);
+    return;
+  }
+
+  // This is a real state change, so it belongs in Lottery Management audit logs.
+  await writeLotteryAuditSafe({
+    admin: params.admin,
+    actionCode: "draw.failed",
+    actionLabel: "Lottery draw failed",
+    actionGroup: "draw",
+    riskLevel: "high",
+    entityType: "draw",
+    entityId: params.drawId,
+    reason: `Draw ${params.drawId} for lottery "${params.lotteryTitle}" failed. ${params.reason}`,
+  });
+}
+
+export async function executeSecureDraw(
+  lotteryId: string,
+  admin: LotteryAdmin,
+) {
   const db = lotteryAdminDb();
   const readiness = await getDrawReadiness(lotteryId);
 
   if (!readiness.ready) {
-    throw Object.assign(new Error("This draw is blocked because one or more integrity checks failed."), {
-      status: 409,
-      details: readiness.checks.filter((x) => !x.ok),
-    });
+    // No draw record has changed yet, so a blocked readiness check is not audited.
+    throw Object.assign(
+      new Error(
+        "This draw is blocked because one or more integrity checks failed.",
+      ),
+      {
+        status: 409,
+        details: readiness.checks.filter((check) => !check.ok),
+      },
+    );
   }
 
   /*
    * The database RPC performs the lock, snapshot creation and draw shell
    * atomically. This prevents two admins from starting the same draw at once.
    */
-  const { data: startData, error: startError } = await db.rpc("lottery_begin_draw", {
-    p_lottery_id: lotteryId,
-    p_admin_id: admin.id,
-    p_admin_email: admin.email,
-    p_admin_name: admin.name,
-  });
+  const { data: startData, error: startError } = await db.rpc(
+    "lottery_begin_draw",
+    {
+      p_lottery_id: lotteryId,
+      p_admin_id: admin.id,
+      p_admin_email: admin.email,
+      p_admin_name: admin.name,
+    },
+  );
 
   if (startError) {
     throw Object.assign(new Error("Could not start the secure draw."), {
@@ -161,16 +254,22 @@ export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) 
   }
 
   const drawId = String(startData?.draw_id ?? startData?.[0]?.draw_id ?? "");
+
   if (!drawId) {
     throw new Error("Secure draw initialization did not return a draw ID.");
   }
 
-  const [{ data: tickets, error: ticketError }, { data: prizes, error: prizeError }] = await Promise.all([
-    db.from("lottery_draw_entries")
+  const [
+    { data: tickets, error: ticketError },
+    { data: prizes, error: prizeError },
+  ] = await Promise.all([
+    db
+      .from("lottery_draw_entries")
       .select("ticket_id,lottery_id,order_id,ticket_number")
       .eq("draw_id", drawId)
       .order("ticket_number", { ascending: true }),
-    db.from("lottery_prizes")
+    db
+      .from("lottery_prizes")
       .select("id,name,display_order")
       .eq("lottery_id", lotteryId)
       .eq("status", "available_for_draw")
@@ -178,11 +277,19 @@ export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) 
   ]);
 
   if (ticketError || prizeError || !tickets?.length || !prizes?.length) {
-    await db.rpc("lottery_fail_draw", {
-      p_draw_id: drawId,
-      p_reason: "Snapshot or prizes unavailable after draw initialization.",
+    const failureReason =
+      "Snapshot or prizes unavailable after draw initialization.";
+
+    await failDraw({
+      drawId,
+      lotteryTitle: readiness.lottery.title,
+      reason: failureReason,
+      admin,
     });
-    throw new Error("The draw could not continue because its frozen data was incomplete.");
+
+    throw new Error(
+      "The draw could not continue because its frozen data was incomplete.",
+    );
   }
 
   const normalizedTickets: TicketRow[] = tickets.map((row: any) => ({
@@ -196,22 +303,39 @@ export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) 
   const normalizedPrizes: PrizeRow[] = prizes as PrizeRow[];
 
   if (normalizedPrizes.length > normalizedTickets.length) {
-    await db.rpc("lottery_fail_draw", {
-      p_draw_id: drawId,
-      p_reason: "More prizes than eligible tickets.",
+    const failureReason = "More prizes than eligible tickets.";
+
+    await failDraw({
+      drawId,
+      lotteryTitle: readiness.lottery.title,
+      reason: failureReason,
+      admin,
     });
-    throw Object.assign(new Error("There are more drawable prizes than eligible tickets."), { status: 409 });
+
+    throw Object.assign(
+      new Error("There are more drawable prizes than eligible tickets."),
+      { status: 409 },
+    );
   }
 
   const canonicalSnapshot = normalizedTickets
-    .map((ticket) => `${ticket.id}:${ticket.ticket_number}:${ticket.order_id}`)
+    .map(
+      (ticket) =>
+        `${ticket.id}:${ticket.ticket_number}:${ticket.order_id}`,
+    )
     .join("\n");
 
-  const snapshotHash = createHash("sha256").update(canonicalSnapshot).digest("hex");
-  const winningIndexes = shuffleIndexes(normalizedTickets.length).slice(0, normalizedPrizes.length);
+  const snapshotHash = createHash("sha256")
+    .update(canonicalSnapshot)
+    .digest("hex");
+  const winningIndexes = shuffleIndexes(normalizedTickets.length).slice(
+    0,
+    normalizedPrizes.length,
+  );
 
   const allocations = normalizedPrizes.map((prize, index) => {
     const ticket = normalizedTickets[winningIndexes[index]];
+
     return {
       prize_id: prize.id,
       ticket_id: ticket.id,
@@ -220,22 +344,44 @@ export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) 
     };
   });
 
-  const { data: finishData, error: finishError } = await db.rpc("lottery_complete_draw", {
-    p_draw_id: drawId,
-    p_snapshot_hash: snapshotHash,
-    p_allocations: allocations,
-    p_admin_id: admin.id,
-    p_admin_email: admin.email,
-    p_admin_name: admin.name,
-  });
+  const { data: finishData, error: finishError } = await db.rpc(
+    "lottery_complete_draw",
+    {
+      p_draw_id: drawId,
+      p_snapshot_hash: snapshotHash,
+      p_allocations: allocations,
+      p_admin_id: admin.id,
+      p_admin_email: admin.email,
+      p_admin_name: admin.name,
+    },
+  );
 
   if (finishError) {
-    await db.rpc("lottery_fail_draw", {
-      p_draw_id: drawId,
-      p_reason: "Result commit failed after secure selection.",
+    const failureReason = "Result commit failed after secure selection.";
+
+    await failDraw({
+      drawId,
+      lotteryTitle: readiness.lottery.title,
+      reason: failureReason,
+      admin,
     });
-    throw new Error("The winner selection could not be committed. No result has been published.");
+
+    throw new Error(
+      "The winner selection could not be committed. No result has been published.",
+    );
   }
+
+  // Only the completed state change is logged; readiness checks and page views are not.
+  await writeLotteryAuditSafe({
+    admin,
+    actionCode: "draw.completed",
+    actionLabel: "Lottery draw completed",
+    actionGroup: "draw",
+    riskLevel: "critical",
+    entityType: "draw",
+    entityId: drawId,
+    reason: `Secure draw ${drawId} for lottery "${readiness.lottery.title}" completed with ${normalizedTickets.length} eligible ticket(s) and ${allocations.length} winner allocation(s). Snapshot hash: ${snapshotHash}.`,
+  });
 
   const winners = allocations.map((allocation, index) => ({
     prize_id: allocation.prize_id,
@@ -248,7 +394,10 @@ export async function executeSecureDraw(lotteryId: string, admin: LotteryAdmin) 
   return {
     draw: {
       id: drawId,
-      completed_at: finishData?.completed_at ?? finishData?.[0]?.completed_at ?? new Date().toISOString(),
+      completed_at:
+        finishData?.completed_at ??
+        finishData?.[0]?.completed_at ??
+        new Date().toISOString(),
       eligible_ticket_count: normalizedTickets.length,
       snapshot_hash: snapshotHash,
     },

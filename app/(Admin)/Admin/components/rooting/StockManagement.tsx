@@ -49,6 +49,7 @@ import {
   ShoppingCart,
   Store,
   Tags,
+  Ticket,
   Trophy,
   Truck,
   Users,
@@ -64,6 +65,7 @@ const ADMIN_DASHBOARD = "/Admin/Dashboard";
 const MONEY_MANAGEMENT = "/Admin/MoneyManagement";
 const EVENT_HUB = "/Admin/BurtonPrideEventHub";
 const EMAIL_CENTRE = "/Admin/Email/Sending";
+const LOTTERY_MANAGEMENT = "/Admin/LotteryManagement";
 const COLLAPSED_STORAGE_KEY = "burton_stock_sidebar_collapsed";
 
 type SidebarItem = {
@@ -1771,11 +1773,19 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
          <UtilityLink href={MONEY_MANAGEMENT} icon={Banknote}>
           Money Management
         </UtilityLink>
+
+        <UtilityLink href={STOCK_ROOT} icon={Boxes} newTab>
+          Stock Management
+        </UtilityLink>
+
+        <UtilityLink href={LOTTERY_MANAGEMENT} icon={Ticket} newTab>
+          Lottery Management
+        </UtilityLink>
       </div>
     </div>
   );
 }
-
+  
 function UtilityLink({
   href,
   icon: Icon,

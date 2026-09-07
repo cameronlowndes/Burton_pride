@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import AuditLogs from "../../components/LotteryManagement/AuditLogs/AuditLogsClient";
+import  AuditLogsClient  from "../../components/LotteryManagement/AuditLogs/AuditLogsClient";
 
 export const metadata: Metadata = {
   title: "Audit Logs | Burton Pride Lottery Management",
@@ -11,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function AuditLogsPage() {
-  return <AuditLogs />;
+  return <AuditLogsClient />;
 }

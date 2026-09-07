@@ -146,22 +146,6 @@ export async function GET(
         "lottery:view",
       )
     ) {
-      await writeLotteryAuditSafe({
-        admin,
-        actionCode:
-          "security.lottery_detail.permission_denied",
-        actionLabel:
-          "Lottery detail access denied",
-        actionGroup:
-          "security",
-        riskLevel:
-          "high",
-        entityType:
-          "lottery",
-        reason:
-          "Administrator attempted to view a lottery without lottery:view.",
-      });
-
       return response(
         {
           ok: false,
@@ -540,22 +524,6 @@ export async function PATCH(
         "lottery:view",
       )
     ) {
-      await writeLotteryAuditSafe({
-        admin,
-        actionCode:
-          "security.lottery_update.permission_denied",
-        actionLabel:
-          "Lottery update denied",
-        actionGroup:
-          "security",
-        riskLevel:
-          "high",
-        entityType:
-          "lottery",
-        reason:
-          "Administrator attempted to update a lottery without Lottery Management access.",
-      });
-
       return response(
         {
           ok: false,

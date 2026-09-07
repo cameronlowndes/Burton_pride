@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+
 import {
   lotteryAdminDb,
   requireLotteryPermission,
 } from "@/lib/lottery/adminAuth";
+import { writeLotteryAuditSafe } from "@/lib/lottery/audit-server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +27,31 @@ const ALLOWED_PUBLIC_DISPLAY = new Set([
   "none",
 ]);
 
+const ALLOWED_CONTACT_METHODS = new Set(["email", "phone", "other"]);
+
+function response(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 function cleanNullableString(value: unknown) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function displayStatus(status: string) {
+  return status.replaceAll("_", " ");
+}
+
+function statusRisk(status: string): "medium" | "high" | "critical" {
+  if (["disqualified", "replaced"].includes(status)) return "critical";
+  if (["claimed", "fulfilled", "unclaimed"].includes(status)) return "high";
+  return "medium";
 }
 
 export async function PATCH(
@@ -40,46 +63,69 @@ export async function PATCH(
     const { id } = await context.params;
 
     if (!id) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Winner ID is required.",
-        },
-        { status: 400 },
-      );
+      return response({ ok: false, error: "Winner ID is required." }, 400);
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
 
-    const status =
-      typeof body?.status === "string" ? body.status : null;
-
-    const publicDisplayMode =
-      typeof body?.public_display_mode === "string"
-        ? body.public_display_mode
-        : null;
-
-    if (status && !ALLOWED_STATUSES.has(status)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid winner status.",
-        },
-        { status: 400 },
-      );
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return response({ ok: false, error: "A valid request body is required." }, 400);
     }
+
+    const statusProvided = "status" in body;
+    const status = statusProvided ? String(body.status ?? "").trim() : null;
+
+    if (statusProvided && (!status || !ALLOWED_STATUSES.has(status))) {
+      return response({ ok: false, error: "Invalid winner status." }, 400);
+    }
+
+    const publicDisplayProvided = "public_display_mode" in body;
+    const publicDisplayMode = publicDisplayProvided
+      ? String(body.public_display_mode ?? "").trim()
+      : null;
 
     if (
-      publicDisplayMode &&
-      !ALLOWED_PUBLIC_DISPLAY.has(publicDisplayMode)
+      publicDisplayProvided &&
+      (!publicDisplayMode || !ALLOWED_PUBLIC_DISPLAY.has(publicDisplayMode))
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid public winner display setting.",
-        },
-        { status: 400 },
+      return response(
+        { ok: false, error: "Invalid public winner display setting." },
+        400,
       );
+    }
+
+    const contactAttemptProvided = "contact_attempt" in body;
+    const contactAttempt = contactAttemptProvided ? body.contact_attempt : null;
+
+    if (
+      contactAttemptProvided &&
+      (!contactAttempt ||
+        typeof contactAttempt !== "object" ||
+        Array.isArray(contactAttempt))
+    ) {
+      return response({ ok: false, error: "Invalid contact attempt." }, 400);
+    }
+
+    const contactOutcome = contactAttemptProvided
+      ? cleanNullableString((contactAttempt as Record<string, unknown>).outcome)
+      : null;
+
+    if (contactAttemptProvided && !contactOutcome) {
+      return response(
+        { ok: false, error: "A contact attempt outcome is required." },
+        400,
+      );
+    }
+
+    const requestedContactMethod = contactAttemptProvided
+      ? cleanNullableString((contactAttempt as Record<string, unknown>).method)
+      : null;
+
+    if (
+      requestedContactMethod &&
+      !ALLOWED_CONTACT_METHODS.has(requestedContactMethod)
+    ) {
+      return response({ ok: false, error: "Invalid contact method." }, 400);
     }
 
     const supabase = lotteryAdminDb();
@@ -92,34 +138,22 @@ export async function PATCH(
 
     if (existingError) {
       console.error("Winner lookup error:", existingError);
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Could not load winner record.",
-        },
-        { status: 500 },
-      );
+      return response({ ok: false, error: "Could not load winner record." }, 500);
     }
 
     if (!existing) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Winner not found.",
-        },
-        { status: 404 },
-      );
+      return response({ ok: false, error: "Winner not found." }, 404);
     }
 
     const now = new Date().toISOString();
+    const update: Record<string, unknown> = {};
+    const changedFields: string[] = [];
+    const previousStatus = String(existing.status);
+    const statusChanged = Boolean(status && status !== previousStatus);
 
-    const update: Record<string, unknown> = {
-      updated_at: now,
-    };
-
-    if (status) {
+    if (statusChanged && status) {
       update.status = status;
+      changedFields.push("status");
 
       if (
         ["contacted", "eligibility_confirmed", "claimed", "fulfilled"].includes(
@@ -137,10 +171,7 @@ export async function PATCH(
         update.eligibility_confirmed_at = now;
       }
 
-      if (
-        ["claimed", "fulfilled"].includes(status) &&
-        !existing.claimed_at
-      ) {
+      if (["claimed", "fulfilled"].includes(status) && !existing.claimed_at) {
         update.claimed_at = now;
       }
 
@@ -161,168 +192,179 @@ export async function PATCH(
       }
     }
 
-    if (publicDisplayMode) {
+    if (
+      publicDisplayProvided &&
+      publicDisplayMode !== existing.public_display_mode
+    ) {
       update.public_display_mode = publicDisplayMode;
+      changedFields.push("public display setting");
     }
 
-    if ("fulfilment_method" in body) {
-      update.fulfilment_method = cleanNullableString(
-        body.fulfilment_method,
-      );
-    }
+    const nullableFields = [
+      "fulfilment_method",
+      "fulfilment_notes",
+      "internal_notes",
+    ] as const;
 
-    if ("fulfilment_notes" in body) {
-      update.fulfilment_notes = cleanNullableString(
-        body.fulfilment_notes,
-      );
-    }
+    for (const field of nullableFields) {
+      if (field in body) {
+        const nextValue = cleanNullableString(body[field]);
+        const currentValue = existing[field] ?? null;
 
-    if ("internal_notes" in body) {
-      update.internal_notes = cleanNullableString(
-        body.internal_notes,
-      );
+        if (nextValue !== currentValue) {
+          update[field] = nextValue;
+          changedFields.push(field.replaceAll("_", " "));
+        }
+      }
     }
 
     if ("collection_delivery_date" in body) {
       const value = body.collection_delivery_date;
+      let nextDate: string | null;
 
       if (value === null || value === "") {
-        update.collection_delivery_date = null;
+        nextDate = null;
       } else {
-        const parsed = new Date(value);
+        const parsed = new Date(String(value));
 
         if (Number.isNaN(parsed.getTime())) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: "Invalid collection or delivery date.",
-            },
-            { status: 400 },
+          return response(
+            { ok: false, error: "Invalid collection or delivery date." },
+            400,
           );
         }
 
-        update.collection_delivery_date = parsed.toISOString();
+        nextDate = parsed.toISOString();
+      }
+
+      const currentDate = existing.collection_delivery_date
+        ? new Date(existing.collection_delivery_date).toISOString()
+        : null;
+
+      if (nextDate !== currentDate) {
+        update.collection_delivery_date = nextDate;
+        changedFields.push("collection or delivery date");
       }
     }
 
-    const { data: updated, error: updateError } = await supabase
-      .from("lottery_winners")
-      .update(update)
-      .eq("id", id)
-      .select("*")
-      .single();
+    const winnerChanged = changedFields.length > 0;
 
-    if (updateError) {
-      console.error("Winner PATCH update error:", updateError);
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Could not update winner.",
-        },
-        { status: 500 },
+    if (!winnerChanged && !contactAttemptProvided) {
+      return response(
+        { ok: false, error: "No winner changes were supplied." },
+        400,
       );
     }
 
-    const contactAttempt = body?.contact_attempt;
+    let updated = existing;
 
-    if (
-      contactAttempt &&
-      typeof contactAttempt === "object" &&
-      typeof contactAttempt.outcome === "string" &&
-      contactAttempt.outcome.trim()
-    ) {
-      const method =
-        typeof contactAttempt.method === "string" &&
-        ["email", "phone", "other"].includes(contactAttempt.method)
-          ? contactAttempt.method
-          : "other";
+    if (winnerChanged) {
+      update.updated_at = now;
+
+      const { data, error: updateError } = await supabase
+        .from("lottery_winners")
+        .update(update)
+        .eq("id", id)
+        .select("*")
+        .single();
+
+      if (updateError) {
+        console.error("Winner PATCH update error:", updateError);
+        return response({ ok: false, error: "Could not update winner." }, 500);
+      }
+
+      updated = data;
+    }
+
+    const { data: lottery } = await supabase
+      .from("lotteries")
+      .select("title")
+      .eq("id", existing.lottery_id)
+      .maybeSingle();
+
+    const lotteryTitle = lottery?.title ?? "Unknown lottery";
+
+    if (winnerChanged) {
+      await writeLotteryAuditSafe({
+        admin,
+        actionCode: statusChanged
+          ? `winner.status.${status}`
+          : "winner.updated",
+        actionLabel: statusChanged
+          ? `Winner status changed to ${displayStatus(status as string)}`
+          : "Winner record updated",
+        actionGroup: "winner",
+        riskLevel: statusChanged ? statusRisk(status as string) : "medium",
+        entityType: "winner",
+        entityId: id,
+        reason: statusChanged
+          ? `Winner ${id} for lottery "${lotteryTitle}" changed from ${displayStatus(previousStatus)} to ${displayStatus(status as string)}${changedFields.length > 1 ? `. Other changes: ${changedFields.slice(1).join(", ")}.` : "."}`
+          : `Winner ${id} for lottery "${lotteryTitle}" was updated. Changed: ${changedFields.join(", ")}.`,
+      });
+    }
+
+    if (contactAttemptProvided && contactOutcome) {
+      const contactMethod = requestedContactMethod ?? "other";
 
       const { error: contactError } = await supabase
         .from("lottery_winner_contact_attempts")
         .insert({
           winner_id: id,
-          method,
-          outcome: contactAttempt.outcome.trim(),
-          notes: cleanNullableString(contactAttempt.notes),
+          method: contactMethod,
+          outcome: contactOutcome,
+          notes: cleanNullableString(
+            (contactAttempt as Record<string, unknown>).notes,
+          ),
           attempted_at: now,
-          admin_id: admin?.id ?? null,
-          admin_name: admin?.name ?? admin?.email ?? "Admin",
+          admin_id: admin.id,
+          admin_name: admin.name ?? admin.email ?? "Admin",
         });
 
       if (contactError) {
         console.error("Winner contact attempt insert error:", contactError);
 
-        return NextResponse.json(
+        return response(
           {
             ok: false,
-            error:
-              "Winner was updated, but the contact attempt could not be recorded.",
+            error: winnerChanged
+              ? "Winner was updated and audited, but the contact attempt could not be recorded."
+              : "The contact attempt could not be recorded.",
           },
-          { status: 500 },
+          500,
         );
       }
-    }
 
-    // Best-effort audit logging: do not expose audit failures to the browser,
-    // but keep them visible in server logs.
-    const { error: auditError } = await supabase
-      .from("lottery_audit_logs")
-      .insert({
-        lottery_id: existing.lottery_id,
-        entity_type: "winner",
-        entity_id: id,
-        action_code: "winner.updated",
-        action_label: "Winner record updated",
-        admin_id: admin?.id ?? null,
-        admin_email: admin?.email ?? null,
-        admin_name: admin?.name ?? null,
-        before_data: existing,
-        after_data: updated,
-        created_at: now,
+      await writeLotteryAuditSafe({
+        admin,
+        actionCode: "winner.contact.recorded",
+        actionLabel: "Winner contact attempt recorded",
+        actionGroup: "winner",
+        riskLevel: "medium",
+        entityType: "winner",
+        entityId: id,
+        reason: `${contactMethod} contact attempt recorded for winner ${id} in lottery "${lotteryTitle}". Outcome: ${contactOutcome}.`,
       });
-
-    if (auditError) {
-      console.warn("Winner audit log insert warning:", auditError);
     }
 
-    return NextResponse.json(
-      {
-        ok: true,
-        item: updated,
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
-  } catch (error: any) {
-    const message =
-      typeof error?.message === "string" ? error.message : "";
+    return response({ ok: true, item: updated });
+  } catch (error: unknown) {
+    const status =
+      typeof error === "object" && error && "status" in error
+        ? Number((error as { status?: unknown }).status)
+        : 500;
 
-    if (
-      message.toLowerCase().includes("unauthor") ||
-      message.toLowerCase().includes("permission")
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You do not have permission to manage winners.",
-        },
-        { status: 403 },
+    if (status === 401) {
+      return response({ ok: false, error: "You must be signed in." }, 401);
+    }
+
+    if (status === 403) {
+      return response(
+        { ok: false, error: "You do not have permission to manage winners." },
+        403,
       );
     }
 
     console.error("Winner PATCH unexpected error:", error);
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Could not update winner.",
-      },
-      { status: 500 },
-    );
+    return response({ ok: false, error: "Could not update winner." }, 500);
   }
 }
