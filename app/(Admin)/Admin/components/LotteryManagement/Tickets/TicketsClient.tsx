@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Barcode,
   CheckCircle2,
   ChevronDown,
   Eye,
@@ -18,6 +19,11 @@ import {
   XCircle,
   Beaker,
 } from "lucide-react";
+
+import OrderDetailsModal, {
+  type OrderRecord,
+} from "./TicketsDetailsModal";
+import PaperTicketRegistrationModal from "./PaperTicketRegistrationModal";
 
 type TicketStatus = "reserved" | "issued" | "void" | "refunded" | "winner";
 
@@ -49,6 +55,9 @@ type TicketRecord = {
   winner_at: string | null;
   void_reason: string | null;
   status_reason: string | null;
+  ticket_source?: "online" | "paper" | null;
+  paper_registered_at?: string | null;
+  paper_registered_by?: string | null;
   created_at: string;
   updated_at: string;
   is_payment_valid: boolean;
@@ -63,7 +72,15 @@ type ApiResponse = {
   message?: string;
 };
 
+type OrdersApiResponse = {
+  ok: boolean;
+  items?: OrderRecord[];
+  error?: string;
+  message?: string;
+};
+
 const API_ROUTE = "/api/admin/lotterymanagement/tickets";
+const ORDERS_API_ROUTE = "/api/admin/lotterymanagement/orders";
 
 const STATUS_OPTIONS: Array<{ value: TicketStatus | "all"; label: string }> = [
   { value: "all", label: "All ticket statuses" },
@@ -107,11 +124,24 @@ async function readJson(res: Response): Promise<ApiResponse> {
   }
 }
 
+async function readOrdersJson(res: Response): Promise<OrdersApiResponse> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : { ok: false };
+  } catch {
+    return { ok: false, error: "The Orders API returned invalid JSON." };
+  }
+}
+
 export default function TicketsClient() {
   const [items, setItems] = useState<TicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TicketRecord | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [paperTicketModalOpen, setPaperTicketModalOpen] = useState(false);
   const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -369,6 +399,9 @@ export default function TicketsClient() {
     setTestMode(true);
     setItems(demoTickets);
     setSelected(null);
+    setSelectedOrder(null);
+    setOrderError(null);
+    setPaperTicketModalOpen(false);
     setError(null);
     setSearch("");
     setStatus("all");
@@ -382,24 +415,97 @@ export default function TicketsClient() {
     setTestMode(false);
     setLoading(true);
     setError(null);
+    setSelectedOrder(null);
+    setOrderError(null);
 
     try {
-      const res = await fetch(API_ROUTE, {
-        cache: "no-store",
-        credentials: "include",
-      });
+      const [res, paperRes] = await Promise.all([
+        fetch(API_ROUTE, {
+          cache: "no-store",
+          credentials: "include",
+        }),
+        fetch("/api/admin/lotterymanagement/tickets/paper", {
+          cache: "no-store",
+          credentials: "include",
+        }),
+      ]);
 
-      const data = await readJson(res);
+      const [data, paperData] = await Promise.all([
+        readJson(res),
+        readJson(paperRes),
+      ]);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || data.message || "Failed to load tickets.");
       }
+      if (!paperRes.ok || !paperData.ok) {
+        throw new Error(
+          paperData.error ||
+            paperData.message ||
+            "Failed to load paper tickets.",
+        );
+      }
 
-      setItems(data.items || []);
+      const combined = new Map<string, TicketRecord>();
+      for (const ticket of data.items || []) combined.set(ticket.id, ticket);
+      for (const ticket of paperData.items || []) combined.set(ticket.id, ticket);
+      setItems(Array.from(combined.values()));
     } catch (err: any) {
       setError(err?.message || "Failed to load tickets.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openLinkedOrder(ticket: TicketRecord) {
+    const orderId = ticket.order_id;
+    const orderReference = ticket.order_reference;
+
+    if (!orderId) {
+      setOrderError("This ticket is not linked to an order.");
+      return;
+    }
+
+    if (testMode) {
+      setOrderError(
+        "Demo tickets are not stored in the database, so their linked order cannot be opened.",
+      );
+      return;
+    }
+
+    setOrderLoading(true);
+    setOrderError(null);
+
+    try {
+      const res = await fetch(ORDERS_API_ROUTE, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const data = await readOrdersJson(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data.error || data.message || "Failed to load the linked order.",
+        );
+      }
+
+      const linkedOrder = (data.items || []).find(
+        (order) =>
+          order.id === orderId ||
+          (orderReference !== null &&
+            order.order_reference === orderReference),
+      );
+
+      if (!linkedOrder) {
+        throw new Error("The linked order could not be found.");
+      }
+
+      setSelected(null);
+      setSelectedOrder(linkedOrder);
+    } catch (err: any) {
+      setOrderError(err?.message || "Failed to load the linked order.");
+    } finally {
+      setOrderLoading(false);
     }
   }
 
@@ -474,6 +580,17 @@ export default function TicketsClient() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setPaperTicketModalOpen(true)}
+              disabled={testMode}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+              title={testMode ? "Exit test mode before registering real paper tickets." : undefined}
+            >
+              <Barcode className="h-4 w-4" />
+              Register paper tickets
+            </button>
+
             <button
               type="button"
               onClick={startFullFeatureTest}
@@ -612,7 +729,38 @@ export default function TicketsClient() {
       </section>
 
       {selected ? (
-        <TicketDetailsModal ticket={selected} onClose={() => setSelected(null)} />
+        <TicketDetailsModal
+          ticket={selected}
+          orderLoading={orderLoading}
+          orderError={orderError}
+          onViewOrder={openLinkedOrder}
+          onClose={() => {
+            setSelected(null);
+            setOrderError(null);
+          }}
+        />
+      ) : null}
+
+      {selectedOrder ? (
+        <OrderDetailsModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onMarkPaid={() => {}}
+          onIssueMissingTickets={() => {}}
+          onEdit={() => {}}
+        />
+      ) : null}
+
+      {paperTicketModalOpen ? (
+        <PaperTicketRegistrationModal
+          existingTicketIds={items.map((item) => item.id)}
+          existingTicketNumbers={items.map((item) => item.ticket_number)}
+          onClose={() => setPaperTicketModalOpen(false)}
+          onRegistered={async () => {
+            setPaperTicketModalOpen(false);
+            await loadTickets();
+          }}
+        />
       ) : null}
     </div>
   );
@@ -700,6 +848,13 @@ function TicketRow({
                 Payment warning
               </span>
             ) : null}
+
+            {item.ticket_source === "paper" ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-bold text-cyan-100">
+                <Barcode className="h-3 w-3" />
+                Paper ticket
+              </span>
+            ) : null}
           </div>
 
           <p className="mt-2 text-sm font-semibold text-white/75">{item.lottery_title}</p>
@@ -737,9 +892,15 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function TicketDetailsModal({
   ticket,
+  orderLoading,
+  orderError,
+  onViewOrder,
   onClose,
 }: {
   ticket: TicketRecord;
+  orderLoading: boolean;
+  orderError: string | null;
+  onViewOrder: (ticket: TicketRecord) => void;
   onClose: () => void;
 }) {
   return (
@@ -758,17 +919,41 @@ function TicketDetailsModal({
             <p className="mt-1 text-sm text-white/55">{ticket.lottery_title}</p>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
-            aria-label="Close ticket details"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {ticket.order_id ? (
+              <button
+                type="button"
+                onClick={() => onViewOrder(ticket)}
+                disabled={orderLoading}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-2 text-sm font-extrabold text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-wait disabled:opacity-50"
+              >
+                {orderLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+                {orderLoading ? "Loading order..." : "View order"}
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
+              aria-label="Close ticket details"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto p-5 md:p-6">
+          {orderError ? (
+            <div className="mb-5 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+              {orderError}
+            </div>
+          ) : null}
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <DetailCard icon={<Ticket className="h-4 w-4" />} label="Status" value={statusLabel(ticket.status)} />
             <DetailCard icon={<UserRound className="h-4 w-4" />} label="Purchaser" value={ticket.purchaser_name || "Not linked"} />
@@ -782,6 +967,8 @@ function TicketDetailsModal({
                 rows={[
                   ["Ticket number", ticket.ticket_number],
                   ["Ticket UUID", ticket.id],
+                  ["Ticket source", ticket.ticket_source === "paper" ? "Paper ticket" : "Online ticket"],
+                  ["Paper registered at", formatDate(ticket.paper_registered_at || null)],
                   ["Lottery", ticket.lottery_title],
                   ["Issued at", formatDate(ticket.issued_at)],
                   ["Created at", formatDate(ticket.created_at)],
@@ -810,9 +997,11 @@ function TicketDetailsModal({
             <Panel title="Integrity checks">
               <div className="space-y-3">
                 <IntegrityRow
-                  ok={ticket.status === "reserved" || ticket.is_payment_valid || ["void", "refunded"].includes(ticket.status)}
+                  ok={ticket.ticket_source === "paper" || ticket.status === "reserved" || ticket.is_payment_valid || ["void", "refunded"].includes(ticket.status)}
                   text={
-                    ticket.is_payment_valid
+                    ticket.ticket_source === "paper"
+                      ? "Paper ticket was registered directly and does not require an online payment order."
+                      : ticket.is_payment_valid
                       ? "Ticket is linked to a paid order."
                       : ticket.status === "reserved"
                         ? "Reserved ticket has not yet been issued as a valid paid ticket."

@@ -38,6 +38,10 @@ export async function GET() {
         ticket_price,
         currency,
         max_tickets,
+        paper_tickets_enabled,
+        paper_ticket_start_number,
+        paper_ticket_end_number,
+        paper_ticket_count,
         minimum_age,
         sales_open_at,
         sales_close_at,
@@ -273,12 +277,79 @@ export async function POST(req: NextRequest) {
 
     if (
       maxTickets !== null &&
-      (!Number.isFinite(maxTickets) || maxTickets <= 0)
+      (!Number.isSafeInteger(maxTickets) || maxTickets <= 0)
     ) {
       return NextResponse.json(
         {
           ok: false,
           error: "Maximum tickets must be more than 0.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const paperTicketsEnabled = body.paper_tickets_enabled === true;
+    const paperTicketStartNumber = paperTicketsEnabled
+      ? Number(body.paper_ticket_start_number)
+      : 0;
+    const paperTicketCount = paperTicketsEnabled
+      ? Number(body.paper_ticket_count)
+      : 0;
+
+    if (
+      paperTicketsEnabled &&
+      (!Number.isSafeInteger(paperTicketStartNumber) ||
+        paperTicketStartNumber <= 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Enter a valid first paper ticket number.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      !Number.isSafeInteger(paperTicketCount) ||
+      paperTicketCount < (paperTicketsEnabled ? 1 : 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Enter a valid whole number of paper tickets.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const paperTicketEndNumber =
+      paperTicketStartNumber + paperTicketCount - 1;
+
+    if (
+      paperTicketsEnabled &&
+      !Number.isSafeInteger(paperTicketEndNumber)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The paper ticket number range is too large.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      paperTicketsEnabled &&
+      maxTickets !== null &&
+      paperTicketEndNumber > maxTickets
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "The final paper ticket number cannot be higher than the maximum ticket number.",
         },
         { status: 400 },
       );
@@ -372,6 +443,14 @@ export async function POST(req: NextRequest) {
       ),
 
       max_tickets: maxTickets,
+
+      paper_tickets_enabled: paperTicketsEnabled,
+
+      paper_ticket_start_number: paperTicketsEnabled
+        ? paperTicketStartNumber
+        : null,
+
+      paper_ticket_count: paperTicketCount,
 
       /*
        * HARD-CODED AGE RESTRICTION
@@ -503,7 +582,9 @@ export async function POST(req: NextRequest) {
       riskLevel: "medium",
       entityType: "lottery",
       entityId: data.id,
-      reason: `Lottery "${data.title}" was created as a draft.`,
+      reason: paperTicketsEnabled
+        ? `Lottery "${data.title}" was created as a draft with paper ticket numbers ${paperTicketStartNumber}-${paperTicketEndNumber}.`
+        : `Lottery "${data.title}" was created as a draft.`,
     });
 
     return NextResponse.json(

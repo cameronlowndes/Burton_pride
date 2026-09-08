@@ -28,7 +28,9 @@ const ADMIN_SECURITY_SESSION_COOKIE =
 const SESSION_MAX_AGE = 60 * 60 * 12;
 const TRUSTED_DEVICE_MAX_AGE = 60 * 60 * 24 * 90;
 const TWO_FACTOR_CODE_LENGTH = 6;
-const MAX_TRUSTED_DEVICES = 3;
+// Keep this in sync with the password-login route. Administrators can use up
+// to five approved phones, tablets and computers before removing an old one.
+const MAX_TRUSTED_DEVICES = 5;
 
 type TwoFactorMethod = "email" | "totp";
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
@@ -182,11 +184,16 @@ function failed(
   extra: Record<string, unknown> = {},
   pendingCookies: PendingCookie[] = [],
 ): NextResponse {
+  const error =
+    reason === "device_approval_required"
+      ? "This is a new device and all five trusted-device slots are currently in use. Remove an old trusted device, then sign in again."
+      : "Two-step verification failed.";
+
   return createJsonResponse(
     {
       ok: false,
       authenticated: false,
-      error: "Two-step verification failed.",
+      error,
       reason,
       ...extra,
     },
@@ -1493,7 +1500,7 @@ async function ensureTrustedDeviceAfterMfa(params: {
    * Race-safe second check before insertion.
    * If another request has already filled
    * the final device slot, do not create a
-   * fourth trusted device.
+   * additional trusted device.
    */
   const latestCount =
     await countTrustedDevices(
