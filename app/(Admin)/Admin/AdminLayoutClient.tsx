@@ -1473,34 +1473,20 @@ export default function AdminLayoutClient({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const path = normalisePath(pathname);
+  const [hasMounted, setHasMounted] =
+    useState(false);
 
-  /*
-   * IMPORTANT:
-   *
-   * /Admin/BugTracker owns its entire layout itself.
-   *
-   * AdminLayoutClient must NOT:
-   * - add a background
-   * - add the Admin sidebar
-   * - add the Admin header
-   * - wrap it with AdminProvider
-   * - wrap it with AdminLayoutGate
-   * - run the AdminSessionPresenceBoundary around it
-   * - apply Admin Portal page spacing
-   * - control its colours, width, overflow or positioning
-   *
-   * This keeps everything inside /Admin/BugTracker controlled only by
-   * the Bug Tracker files themselves.
-   */
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+  if (!hasMounted) {
+    return <LoadingPermissionsScreen />;
+  }
+
+  const path = normalisePath(pathname);
   if (isPathOrChild(path, BUG_TRACKER_PREFIX)) {
     return <>{children}</>;
   }
-
-  /*
-   * Stock Management keeps its existing standalone behaviour and
-   * still receives the shared admin session presence security check.
-   */
   if (isPathOrChild(path, STOCK_MANAGEMENT_PREFIX)) {
     return (
       <AdminSessionPresenceBoundary>
@@ -1508,11 +1494,6 @@ export default function AdminLayoutClient({
       </AdminSessionPresenceBoundary>
     );
   }
-
-  /*
-   * All other standard Admin Portal routes continue through the
-   * normal Admin provider, permission gate and security boundary.
-   */
   return (
     <AdminProvider>
       <AdminSessionPresenceBoundary>

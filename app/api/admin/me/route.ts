@@ -15,7 +15,7 @@ const TRUSTED_DEVICE_COOKIE = "burton_admin_trusted_device";
 const ADMIN_SECURITY_SESSION_COOKIE =
   "burton_admin_security_session";
 const REQUIRED_AAL = "aal2";
-const MAX_TRUSTED_DEVICES = 3;
+const MAX_TRUSTED_DEVICES = 5;
 const REQUIRED_PORTAL_PERMISSION = "admin:dashboard:view" as const;
 
 

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 import {
   AlertTriangle,
   Barcode,
@@ -171,6 +178,7 @@ export default function PaperTicketRegistrationModal({
   onRegistered,
 }: Props) {
   const scanInputRef = useRef<HTMLInputElement>(null);
+  const cameraPhotoInputRef = useRef<HTMLInputElement>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraControlsRef = useRef<CameraControls | null>(null);
   const [lotteries, setLotteries] = useState<LotteryOption[]>([]);
@@ -185,6 +193,8 @@ export default function PaperTicketRegistrationModal({
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
+  const [photoScanning, setPhotoScanning] = useState(false);
+  const [liveCameraAvailable, setLiveCameraAvailable] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const existingIdSet = useMemo(
@@ -194,6 +204,66 @@ export default function PaperTicketRegistrationModal({
   const existingNumberSet = useMemo(
     () => new Set(existingTicketNumbers.map(normaliseTicketNumber)),
     [existingTicketNumbers],
+  );
+
+  useEffect(() => {
+    setLiveCameraAvailable(
+      window.isSecureContext &&
+        Boolean(
+          navigator.mediaDevices
+            ?.getUserMedia,
+        ),
+    );
+  }, []);
+
+  const applyCameraResult = useCallback(
+    (
+      rawValue: string,
+      source: "live" | "photo",
+    ) => {
+      const parsed =
+        parseScannerValue(rawValue);
+
+      setCameraError(null);
+      setError(null);
+
+      if (
+        !parsed.ticket_number &&
+        !parsed.ticket_uuid
+      ) {
+        setError(
+          "The barcode was read, but it did not contain a ticket number or UUID.",
+        );
+        return;
+      }
+
+      if (parsed.ticket_number) {
+        setTicketNumber(
+          parsed.ticket_number,
+        );
+      }
+
+      if (parsed.ticket_uuid) {
+        setTicketUuid(
+          parsed.ticket_uuid,
+        );
+      }
+
+      const sourceLabel =
+        source === "photo"
+          ? "Photo"
+          : "Camera";
+
+      setMessage(
+        parsed.ticket_number &&
+          parsed.ticket_uuid
+          ? `${sourceLabel} scan captured the ticket number and UUID. Check them, then add the ticket to the batch.`
+          : parsed.ticket_number
+            ? `${sourceLabel} captured the ticket number. Scan or enter its UUID next.`
+            : `${sourceLabel} captured the ticket UUID. Scan or enter its ticket number next.`,
+      );
+    },
+    [],
   );
 
   useEffect(() => {
@@ -276,34 +346,12 @@ export default function PaperTicketRegistrationModal({
           (result, _scanError, scanControls) => {
             if (!result || cancelled) return;
 
-            const rawValue = result.getText();
-            const parsed = parseScannerValue(rawValue);
             scanControls.stop();
             cameraControlsRef.current = null;
             setCameraOpen(false);
-            setCameraError(null);
-            setError(null);
-
-            if (!parsed.ticket_number && !parsed.ticket_uuid) {
-              setError(
-                "The camera read the barcode, but it did not contain a ticket number or UUID.",
-              );
-              return;
-            }
-
-            if (parsed.ticket_number) {
-              setTicketNumber(parsed.ticket_number);
-            }
-            if (parsed.ticket_uuid) {
-              setTicketUuid(parsed.ticket_uuid);
-            }
-
-            setMessage(
-              parsed.ticket_number && parsed.ticket_uuid
-                ? "Camera scan captured the ticket number and UUID. Check them, then add the ticket to the batch."
-                : parsed.ticket_number
-                  ? "Camera captured the ticket number. Scan or enter its UUID next."
-                  : "Camera captured the ticket UUID. Scan or enter its ticket number next.",
+            applyCameraResult(
+              result.getText(),
+              "live",
             );
           },
         );
@@ -347,7 +395,59 @@ export default function PaperTicketRegistrationModal({
       cameraControlsRef.current?.stop();
       cameraControlsRef.current = null;
     };
-  }, [cameraOpen]);
+  }, [applyCameraResult, cameraOpen]);
+
+  async function handleCameraPhoto(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const file =
+      event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file) return;
+
+    setPhotoScanning(true);
+    setCameraError(null);
+    setError(null);
+    setMessage(null);
+
+    const imageUrl =
+      URL.createObjectURL(file);
+
+    try {
+      const {
+        BrowserMultiFormatReader,
+      } = await import(
+        "@zxing/browser"
+      );
+
+      const reader =
+        new BrowserMultiFormatReader();
+
+      const result =
+        await reader.decodeFromImageUrl(
+          imageUrl,
+        );
+
+      applyCameraResult(
+        result.getText(),
+        "photo",
+      );
+    } catch (caught) {
+      console.warn(
+        "Barcode photo scan failed:",
+        caught,
+      );
+
+      setCameraError(
+        "No barcode could be read from that photo. Fill the frame with the barcode, keep the image clear and try again.",
+      );
+    } finally {
+      URL.revokeObjectURL(imageUrl);
+      setPhotoScanning(false);
+    }
+  }
 
   function stopCamera() {
     cameraControlsRef.current?.stop();
@@ -550,12 +650,14 @@ export default function PaperTicketRegistrationModal({
                   Scan with phone camera
                 </h3>
                 <p className="mt-1 text-sm leading-6 text-emerald-100/65">
-                  Uses your phone’s rear camera. Your browser will ask permission
-                  before the camera starts.
+                  {liveCameraAvailable
+                    ? "Use the live rear-camera scanner or take a barcode photo."
+                    : "This HTTP connection uses your phone’s camera app to take a barcode photo."}
                 </p>
               </div>
 
-              {!cameraOpen ? (
+              {!cameraOpen &&
+              liveCameraAvailable ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -570,6 +672,58 @@ export default function PaperTicketRegistrationModal({
                 </button>
               ) : null}
             </div>
+
+            <input
+              ref={cameraPhotoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) =>
+                void handleCameraPhoto(
+                  event,
+                )
+              }
+              disabled={
+                submitting ||
+                photoScanning
+              }
+              className="sr-only"
+              aria-label="Take or upload a barcode photo"
+            />
+
+            <button
+              type="button"
+              onClick={() =>
+                cameraPhotoInputRef.current
+                  ?.click()
+              }
+              disabled={
+                submitting ||
+                photoScanning ||
+                cameraOpen
+              }
+              className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/25 bg-emerald-950/30 px-4 py-3 text-sm font-extrabold text-emerald-100 hover:bg-emerald-950/50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {photoScanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Camera className="h-4 w-4" />
+              )}
+              {photoScanning
+                ? "Reading barcode photo…"
+                : liveCameraAvailable
+                  ? "Take or upload barcode photo"
+                  : "Open camera and take barcode photo"}
+            </button>
+
+            {!liveCameraAvailable ? (
+              <div className="mt-3 flex items-start gap-3 rounded-xl border border-blue-300/20 bg-blue-500/10 p-3 text-sm leading-6 text-blue-100/80">
+                <Camera className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Live preview needs HTTPS, but taking a photo works on this HTTP address.
+                </span>
+              </div>
+            ) : null}
 
             {cameraOpen ? (
               <div className="mt-4 overflow-hidden rounded-2xl border border-white/15 bg-black">
