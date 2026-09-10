@@ -1,25 +1,19 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   AlertTriangle,
   Barcode,
-  Camera,
-  CameraOff,
   CheckCircle2,
-  Keyboard,
+  ExternalLink,
+  FileImage,
   Loader2,
-  Plus,
-  ScanLine,
-  Ticket,
-  Trash2,
+  LockKeyhole,
+  Printer,
+  ShieldCheck,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -30,19 +24,6 @@ type LotteryOption = {
   status?: string | null;
 };
 
-type PaperTicketDraft = {
-  ticket_uuid: string;
-  ticket_number: string;
-};
-
-type ApiResponse = {
-  ok: boolean;
-  items?: unknown[];
-  created_count?: number;
-  error?: string;
-  message?: string;
-};
-
 type LotteriesApiResponse = {
   ok: boolean;
   items?: LotteryOption[];
@@ -50,108 +31,75 @@ type LotteriesApiResponse = {
   message?: string;
 };
 
+type PaperBatchApiResponse = {
+  ok: boolean;
+  batch_id?: string;
+  batch_reference?: string;
+  created_count?: number;
+  status?: string;
+  ready_to_print_url?: string;
+  error?: string;
+  message?: string;
+};
+
+type GeneratedBatch = {
+  batchId: string;
+  batchReference: string;
+  createdCount: number;
+  status: string;
+  readyToPrintUrl: string;
+};
+
 type Props = {
-  existingTicketIds: string[];
-  existingTicketNumbers: string[];
+  // Optional during migration so existing callers do not break.
+  existingTicketIds?: string[];
+  existingTicketNumbers?: string[];
   onClose: () => void;
   onRegistered: () => void | Promise<void>;
 };
 
-type CameraControls = {
-  stop: () => void;
-};
+type DesignSide = "front" | "back";
+type DuplexFlip = "long_edge" | "short_edge";
+type CodeFormat = "qr" | "qr_and_code128";
 
-const PAPER_TICKETS_API =
-  "/api/admin/lotterymanagement/tickets/paper";
 const LOTTERIES_API = "/api/admin/lotterymanagement/lottery";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const UUID_SEARCH_PATTERN =
-  /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
-const TICKET_NUMBER_PATTERN = /^[A-Z0-9][A-Z0-9._/-]{2,63}$/;
-const MAX_BATCH_SIZE = 100;
+const PAPER_BATCHES_API =
+  "/api/admin/lotterymanagement/tickets/paper/batches";
+const READY_TO_PRINT_ROUTE =
+  "/Admin/LotteryManagement/PaperTickets/ReadyToPrint";
+const REGISTER_EXISTING_ROUTE =
+  "/Admin/LotteryManagement/PaperTickets/RegisterExisting";
 
-function normaliseTicketNumber(value: string) {
-  return value.trim().toUpperCase();
+const MAX_DESIGN_BYTES = 15 * 1024 * 1024;
+const MAX_BATCH_SIZE = 5000;
+const ACCEPTED_DESIGN_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+function safeInternalRoute(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const route = value.trim();
+  return route.startsWith("/") && !route.startsWith("//")
+    ? route
+    : fallback;
 }
 
-function normaliseUuid(value: string) {
-  return value.trim().toLowerCase();
-}
+function validateDesignFile(file: File, side: DesignSide) {
+  const label = side === "front" ? "Front" : "Back";
 
-function parseScannerValue(value: string): Partial<PaperTicketDraft> {
-  const raw = value.trim();
-  if (!raw) return {};
-
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const possibleUuid = String(
-      parsed.ticket_uuid ?? parsed.ticketUuid ?? parsed.uuid ?? parsed.id ?? "",
-    );
-    const possibleNumber = String(
-      parsed.ticket_number ??
-        parsed.ticketNumber ??
-        parsed.number ??
-        parsed.code ??
-        "",
-    );
-
-    return {
-      ticket_uuid: normaliseUuid(possibleUuid),
-      ticket_number: normaliseTicketNumber(possibleNumber),
-    };
-  } catch {
-    // Normal barcode text continues below.
+  if (!ACCEPTED_DESIGN_TYPES.has(file.type)) {
+    return `${label} artwork must be a PNG, JPEG or WebP image.`;
   }
-
-  try {
-    const url = new URL(raw);
-    const possibleUuid =
-      url.searchParams.get("ticket_uuid") ||
-      url.searchParams.get("uuid") ||
-      url.searchParams.get("id") ||
-      "";
-    const possibleNumber =
-      url.searchParams.get("ticket_number") ||
-      url.searchParams.get("number") ||
-      url.searchParams.get("code") ||
-      "";
-
-    if (possibleUuid || possibleNumber) {
-      return {
-        ticket_uuid: normaliseUuid(possibleUuid),
-        ticket_number: normaliseTicketNumber(possibleNumber),
-      };
-    }
-  } catch {
-    // A scanner does not have to return a URL.
+  if (file.size > MAX_DESIGN_BYTES) {
+    return `${label} artwork must be 15 MB or smaller.`;
   }
-
-  const uuidMatch = raw.match(UUID_SEARCH_PATTERN)?.[0] || "";
-  if (uuidMatch) {
-    const remainder = raw
-      .replace(uuidMatch, " ")
-      .replace(/[|,;:\t]+/g, " ")
-      .trim()
-      .split(/\s+/)
-      .find((part) => TICKET_NUMBER_PATTERN.test(normaliseTicketNumber(part)));
-
-    return {
-      ticket_uuid: normaliseUuid(uuidMatch),
-      ticket_number: remainder ? normaliseTicketNumber(remainder) : "",
-    };
-  }
-
-  if (UUID_PATTERN.test(raw)) {
-    return { ticket_uuid: normaliseUuid(raw) };
-  }
-
-  return { ticket_number: normaliseTicketNumber(raw) };
+  return null;
 }
 
 async function readJson<T>(response: Response): Promise<T> {
   const text = await response.text();
-
   if (!text) return { ok: false } as T;
 
   try {
@@ -160,130 +108,160 @@ async function readJson<T>(response: Response): Promise<T> {
     const endpoint = response.url
       ? new URL(response.url).pathname
       : "the requested API route";
-
     if (text.trimStart().startsWith("<")) {
       throw new Error(
-        `${endpoint} returned a web page instead of JSON. Check that this API route exists and is deployed.`,
+        `${endpoint} returned a web page instead of JSON. Check that the API route exists and is deployed.`,
       );
     }
-
     throw new Error(`${endpoint} returned an invalid response.`);
   }
 }
 
+function DesignUpload({
+  side,
+  file,
+  previewUrl,
+  disabled,
+  required,
+  onChange,
+  onRemove,
+}: {
+  side: DesignSide;
+  file: File | null;
+  previewUrl: string | null;
+  disabled: boolean;
+  required: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onRemove: () => void;
+}) {
+  const label = side === "front" ? "Front artwork" : "Back artwork";
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h4 className="flex items-center gap-2 font-extrabold text-white">
+            <FileImage className="h-4 w-4 text-purple-200" />
+            {label}
+            {required ? <span className="text-red-300">*</span> : null}
+          </h4>
+          <p className="mt-1 text-xs leading-5 text-white/45">
+            {side === "front"
+              ? "Upload the approved ticket picture. The system adds the unique ticket number."
+              : "Optional. Without one, the system creates a clean back for the secure codes and required wording."}
+          </p>
+        </div>
+
+        {file ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={disabled}
+            className="rounded-lg border border-red-300/20 p-2 text-red-200 hover:bg-red-500/10 disabled:opacity-40"
+            aria-label={`Remove ${label.toLowerCase()}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+
+      {previewUrl ? (
+        <div className="relative aspect-[3/2] overflow-hidden rounded-xl border border-white/10 bg-black/40">
+          <Image
+            src={previewUrl}
+            alt={`${label} preview`}
+            fill
+            unoptimized
+            sizes="(max-width: 768px) 100vw, 45vw"
+            className="object-contain"
+          />
+        </div>
+      ) : (
+        <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-white/20 bg-white/[0.03] p-5 text-center hover:bg-white/[0.06]">
+          <Upload className="h-6 w-6 text-purple-200" />
+          <span className="mt-3 text-sm font-bold text-white">
+            Choose {side} artwork
+          </span>
+          <span className="mt-1 text-xs text-white/40">
+            PNG, JPEG or WebP, up to 15 MB
+          </span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={onChange}
+            disabled={disabled}
+            className="sr-only"
+          />
+        </label>
+      )}
+
+      {file ? (
+        <p className="mt-2 truncate text-xs text-white/45" title={file.name}>
+          {file.name}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function PaperTicketRegistrationModal({
-  existingTicketIds,
-  existingTicketNumbers,
   onClose,
   onRegistered,
 }: Props) {
-  const scanInputRef = useRef<HTMLInputElement>(null);
-  const cameraPhotoInputRef = useRef<HTMLInputElement>(null);
-  const cameraVideoRef = useRef<HTMLVideoElement>(null);
-  const cameraControlsRef = useRef<CameraControls | null>(null);
   const [lotteries, setLotteries] = useState<LotteryOption[]>([]);
   const [lotteriesLoading, setLotteriesLoading] = useState(true);
   const [lotteryId, setLotteryId] = useState("");
-  const [scanValue, setScanValue] = useState("");
-  const [ticketNumber, setTicketNumber] = useState("");
-  const [ticketUuid, setTicketUuid] = useState("");
-  const [drafts, setDrafts] = useState<PaperTicketDraft[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState("100");
+  const [ticketsPerSheet, setTicketsPerSheet] = useState("4");
+  const [duplexFlip, setDuplexFlip] = useState<DuplexFlip>("long_edge");
+  const [codeFormat, setCodeFormat] =
+    useState<CodeFormat>("qr_and_code128");
+  const [frontDesign, setFrontDesign] = useState<File | null>(null);
+  const [backDesign, setBackDesign] = useState<File | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraStarting, setCameraStarting] = useState(false);
-  const [photoScanning, setPhotoScanning] = useState(false);
-  const [liveCameraAvailable, setLiveCameraAvailable] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [generatedBatch, setGeneratedBatch] =
+    useState<GeneratedBatch | null>(null);
 
-  const existingIdSet = useMemo(
-    () => new Set(existingTicketIds.map(normaliseUuid)),
-    [existingTicketIds],
+  const frontPreviewUrl = useMemo(
+    () => (frontDesign ? URL.createObjectURL(frontDesign) : null),
+    [frontDesign],
   );
-  const existingNumberSet = useMemo(
-    () => new Set(existingTicketNumbers.map(normaliseTicketNumber)),
-    [existingTicketNumbers],
+  const backPreviewUrl = useMemo(
+    () => (backDesign ? URL.createObjectURL(backDesign) : null),
+    [backDesign],
   );
 
   useEffect(() => {
-    setLiveCameraAvailable(
-      window.isSecureContext &&
-        Boolean(
-          navigator.mediaDevices
-            ?.getUserMedia,
-        ),
-    );
-  }, []);
+    return () => {
+      if (frontPreviewUrl) URL.revokeObjectURL(frontPreviewUrl);
+    };
+  }, [frontPreviewUrl]);
 
-  const applyCameraResult = useCallback(
-    (
-      rawValue: string,
-      source: "live" | "photo",
-    ) => {
-      const parsed =
-        parseScannerValue(rawValue);
-
-      setCameraError(null);
-      setError(null);
-
-      if (
-        !parsed.ticket_number &&
-        !parsed.ticket_uuid
-      ) {
-        setError(
-          "The barcode was read, but it did not contain a ticket number or UUID.",
-        );
-        return;
-      }
-
-      if (parsed.ticket_number) {
-        setTicketNumber(
-          parsed.ticket_number,
-        );
-      }
-
-      if (parsed.ticket_uuid) {
-        setTicketUuid(
-          parsed.ticket_uuid,
-        );
-      }
-
-      const sourceLabel =
-        source === "photo"
-          ? "Photo"
-          : "Camera";
-
-      setMessage(
-        parsed.ticket_number &&
-          parsed.ticket_uuid
-          ? `${sourceLabel} scan captured the ticket number and UUID. Check them, then add the ticket to the batch.`
-          : parsed.ticket_number
-            ? `${sourceLabel} captured the ticket number. Scan or enter its UUID next.`
-            : `${sourceLabel} captured the ticket UUID. Scan or enter its ticket number next.`,
-      );
-    },
-    [],
-  );
+  useEffect(() => {
+    return () => {
+      if (backPreviewUrl) URL.revokeObjectURL(backPreviewUrl);
+    };
+  }, [backPreviewUrl]);
 
   useEffect(() => {
     let active = true;
 
     async function loadLotteries() {
       setLotteriesLoading(true);
+      setError(null);
       try {
         const response = await fetch(LOTTERIES_API, {
           cache: "no-store",
           credentials: "include",
         });
         const data = await readJson<LotteriesApiResponse>(response);
-
         if (!response.ok || !data.ok) {
           throw new Error(
             data.error || data.message || "Unable to load lotteries.",
           );
         }
-
         if (!active) return;
         const options = data.items || [];
         setLotteries(options);
@@ -301,291 +279,101 @@ export default function PaperTicketRegistrationModal({
     }
 
     void loadLotteries();
-    const focusTimer = window.setTimeout(() => scanInputRef.current?.focus(), 50);
-
     return () => {
       active = false;
-      window.clearTimeout(focusTimer);
     };
   }, []);
 
-  useEffect(() => {
-    if (!cameraOpen) return;
-
-    let cancelled = false;
-    let controls: CameraControls | null = null;
-
-    async function beginCameraScan() {
-      setCameraStarting(true);
-      setCameraError(null);
-
-      try {
-        if (!window.isSecureContext) {
-          throw new Error(
-            "Phone camera scanning requires HTTPS. Open the admin portal using its secure https:// address.",
-          );
-        }
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error("Camera access is not supported by this browser.");
-        }
-
-        const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        if (cancelled || !cameraVideoRef.current) return;
-
-        const reader = new BrowserMultiFormatReader();
-        controls = await reader.decodeFromConstraints(
-          {
-            audio: false,
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          },
-          cameraVideoRef.current,
-          (result, _scanError, scanControls) => {
-            if (!result || cancelled) return;
-
-            scanControls.stop();
-            cameraControlsRef.current = null;
-            setCameraOpen(false);
-            applyCameraResult(
-              result.getText(),
-              "live",
-            );
-          },
-        );
-
-        if (cancelled) {
-          controls.stop();
-          return;
-        }
-
-        cameraControlsRef.current = controls;
-      } catch (caught) {
-        if (cancelled) return;
-
-        setCameraOpen(false);
-        const cameraFailure = caught as { name?: string; message?: string };
-        if (cameraFailure.name === "NotAllowedError") {
-          setCameraError(
-            "Camera permission was blocked. Allow camera access for this website in your phone settings, then try again.",
-          );
-        } else if (cameraFailure.name === "NotFoundError") {
-          setCameraError("No camera was found on this device.");
-        } else if (cameraFailure.name === "NotReadableError") {
-          setCameraError(
-            "The camera is already being used by another app. Close it and try again.",
-          );
-        } else {
-          setCameraError(
-            cameraFailure.message || "The phone camera could not be started.",
-          );
-        }
-      } finally {
-        if (!cancelled) setCameraStarting(false);
-      }
-    }
-
-    void beginCameraScan();
-
-    return () => {
-      cancelled = true;
-      controls?.stop();
-      cameraControlsRef.current?.stop();
-      cameraControlsRef.current = null;
-    };
-  }, [applyCameraResult, cameraOpen]);
-
-  async function handleCameraPhoto(
+  function selectDesign(
+    side: DesignSide,
     event: ChangeEvent<HTMLInputElement>,
   ) {
-    const file =
-      event.target.files?.[0];
-
+    const file = event.target.files?.[0] || null;
     event.target.value = "";
-
+    setError(null);
     if (!file) return;
 
-    setPhotoScanning(true);
-    setCameraError(null);
-    setError(null);
-    setMessage(null);
-
-    const imageUrl =
-      URL.createObjectURL(file);
-
-    try {
-      const {
-        BrowserMultiFormatReader,
-      } = await import(
-        "@zxing/browser"
-      );
-
-      const reader =
-        new BrowserMultiFormatReader();
-
-      const result =
-        await reader.decodeFromImageUrl(
-          imageUrl,
-        );
-
-      applyCameraResult(
-        result.getText(),
-        "photo",
-      );
-    } catch (caught) {
-      console.warn(
-        "Barcode photo scan failed:",
-        caught,
-      );
-
-      setCameraError(
-        "No barcode could be read from that photo. Fill the frame with the barcode, keep the image clear and try again.",
-      );
-    } finally {
-      URL.revokeObjectURL(imageUrl);
-      setPhotoScanning(false);
-    }
-  }
-
-  function stopCamera() {
-    cameraControlsRef.current?.stop();
-    cameraControlsRef.current = null;
-
-    const stream = cameraVideoRef.current?.srcObject;
-    if (stream instanceof MediaStream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-
-    setCameraOpen(false);
-    setCameraStarting(false);
-  }
-
-  function closeModal() {
-    stopCamera();
-    onClose();
-  }
-
-  function addDraft(numberValue = ticketNumber, uuidValue = ticketUuid) {
-    const number = normaliseTicketNumber(numberValue);
-    const uuid = normaliseUuid(uuidValue);
-
-    setError(null);
-    setMessage(null);
-
-    if (!number || !uuid) {
-      setError("Enter or scan both the ticket number and ticket UUID.");
-      return false;
-    }
-    if (!TICKET_NUMBER_PATTERN.test(number)) {
-      setError(
-        "Ticket numbers must be 3–64 characters using letters, numbers, dots, dashes, slashes or underscores.",
-      );
-      return false;
-    }
-    if (!UUID_PATTERN.test(uuid)) {
-      setError("The ticket UUID is not a valid UUID.");
-      return false;
-    }
-    if (drafts.length >= MAX_BATCH_SIZE) {
-      setError(`You can register up to ${MAX_BATCH_SIZE} tickets at a time.`);
-      return false;
-    }
-    if (
-      existingNumberSet.has(number) ||
-      drafts.some((draft) => draft.ticket_number === number)
-    ) {
-      setError(`Ticket number ${number} is already registered or in this batch.`);
-      return false;
-    }
-    if (
-      existingIdSet.has(uuid) ||
-      drafts.some((draft) => draft.ticket_uuid === uuid)
-    ) {
-      setError(`Ticket UUID ${uuid} is already registered or in this batch.`);
-      return false;
-    }
-
-    setDrafts((current) => [
-      ...current,
-      { ticket_number: number, ticket_uuid: uuid },
-    ]);
-    setTicketNumber("");
-    setTicketUuid("");
-    setScanValue("");
-    setMessage(`Added ${number} to the registration batch.`);
-    window.setTimeout(() => scanInputRef.current?.focus(), 0);
-    return true;
-  }
-
-  function handleScannerInput() {
-    const parsed = parseScannerValue(scanValue);
-    const nextNumber = parsed.ticket_number || ticketNumber;
-    const nextUuid = parsed.ticket_uuid || ticketUuid;
-
-    setTicketNumber(nextNumber);
-    setTicketUuid(nextUuid);
-    setScanValue("");
-    setError(null);
-
-    if (nextNumber && nextUuid) {
-      addDraft(nextNumber, nextUuid);
+    const validationError = validateDesignFile(file, side);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    setMessage(
-      nextNumber
-        ? "Ticket number captured. Scan or enter its UUID next."
-        : nextUuid
-          ? "Ticket UUID captured. Scan or enter its ticket number next."
-          : "The barcode did not contain a ticket number or UUID.",
-    );
-    window.setTimeout(() => scanInputRef.current?.focus(), 0);
+    if (side === "front") setFrontDesign(file);
+    else setBackDesign(file);
   }
 
-  async function registerTickets() {
+  async function generateBatch() {
+    const parsedQuantity = Number.parseInt(quantity, 10);
+    setError(null);
+    setGeneratedBatch(null);
+
     if (!lotteryId) {
-      setError("Select the lottery these paper tickets belong to.");
+      setError("Select the lottery for this paper-ticket batch.");
       return;
     }
-    if (!drafts.length) {
-      setError("Add at least one paper ticket before registering.");
+    if (
+      !Number.isInteger(parsedQuantity) ||
+      parsedQuantity < 1 ||
+      parsedQuantity > MAX_BATCH_SIZE
+    ) {
+      setError(`Enter between 1 and ${MAX_BATCH_SIZE} paper tickets.`);
+      return;
+    }
+    if (!frontDesign) {
+      setError("Upload the approved front ticket artwork.");
+      return;
+    }
+    if (!confirmed) {
+      setError("Confirm the artwork and quantity before generating the batch.");
       return;
     }
 
     setSubmitting(true);
-    setError(null);
-    setMessage(null);
-
     try {
-      const response = await fetch(PAPER_TICKETS_API, {
+      const formData = new FormData();
+      formData.set("lottery_id", lotteryId);
+      formData.set("quantity", String(parsedQuantity));
+      formData.set("page_size", "A4");
+      formData.set("tickets_per_sheet", ticketsPerSheet);
+      formData.set("duplex_flip", duplexFlip);
+      formData.set("code_format", codeFormat);
+      formData.set("front_design", frontDesign);
+      if (backDesign) formData.set("back_design", backDesign);
+
+      const response = await fetch(PAPER_BATCHES_API, {
         method: "POST",
         cache: "no-store",
         credentials: "include",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          lottery_id: lotteryId,
-          tickets: drafts,
-        }),
+        headers: { Accept: "application/json" },
+        body: formData,
       });
-      const data = await readJson<ApiResponse>(response);
+      const data = await readJson<PaperBatchApiResponse>(response);
 
-      if (!response.ok || !data.ok) {
+      if (!response.ok || !data.ok || !data.batch_id) {
         throw new Error(
-          data.error || data.message || "The paper tickets could not be registered.",
+          data.error ||
+            data.message ||
+            "The paper-ticket batch could not be generated.",
         );
       }
 
+      setGeneratedBatch({
+        batchId: data.batch_id,
+        batchReference: data.batch_reference || data.batch_id,
+        createdCount: data.created_count || parsedQuantity,
+        status: data.status || "ready_to_print",
+        readyToPrintUrl: safeInternalRoute(
+          data.ready_to_print_url,
+          `${READY_TO_PRINT_ROUTE}?batch=${encodeURIComponent(data.batch_id)}`,
+        ),
+      });
       await onRegistered();
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "The paper tickets could not be registered.",
+          : "The paper-ticket batch could not be generated.",
       );
     } finally {
       setSubmitting(false);
@@ -597,281 +385,255 @@ export default function PaperTicketRegistrationModal({
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm md:p-6"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="paper-ticket-registration-title"
+      aria-labelledby="paper-ticket-generation-title"
     >
-      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+      <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
           <div className="flex items-start gap-3">
-            <div className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-emerald-200">
-              <Barcode className="h-5 w-5" />
+            <div className="rounded-2xl border border-purple-300/20 bg-purple-500/10 p-3 text-purple-200">
+              <Printer className="h-5 w-5" />
             </div>
             <div>
               <h2
-                id="paper-ticket-registration-title"
+                id="paper-ticket-generation-title"
                 className="text-xl font-extrabold text-white"
               >
-                Register paper tickets
+                Generate paper ticket batch
               </h2>
               <p className="mt-1 text-sm text-white/55">
-                Type the printed details or scan the barcode on each ticket.
+                Create secure tickets and place them in Ready to Print.
               </p>
             </div>
           </div>
-
           <button
             type="button"
-            onClick={closeModal}
+            onClick={onClose}
             disabled={submitting}
             className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10 disabled:opacity-40"
-            aria-label="Close paper-ticket registration"
+            aria-label="Close paper-ticket generation"
           >
             <X className="h-5 w-5" />
           </button>
         </header>
 
         <div className="overflow-y-auto p-5 md:p-6">
-          <div className="mb-6 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100/80">
-            <div className="flex items-start gap-3">
-              <ScanLine className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>
-                USB and Bluetooth barcode scanners normally act like a keyboard.
-                Keep the scan box focused and scan the code. A scanner that sends
-                Enter will process it automatically. You can scan one combined code,
-                or scan the number and UUID separately.
-              </p>
-            </div>
-          </div>
-
           <section className="mb-6 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-200" />
               <div>
-                <h3 className="flex items-center gap-2 font-extrabold text-emerald-100">
-                  <Camera className="h-5 w-5" />
-                  Scan with phone camera
+                <h3 className="font-extrabold text-emerald-100">
+                  Secure generation
                 </h3>
-                <p className="mt-1 text-sm leading-6 text-emerald-100/65">
-                  {liveCameraAvailable
-                    ? "Use the live rear-camera scanner or take a barcode photo."
-                    : "This HTTP connection uses your phone’s camera app to take a barcode photo."}
+                <p className="mt-1 text-sm leading-6 text-emerald-100/70">
+                  This page sends only the lottery, print settings and artwork.
+                  The server must create every ticket number, UUID and barcode
+                  token. Those security values cannot be entered here.
                 </p>
               </div>
-
-              {!cameraOpen &&
-              liveCameraAvailable ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCameraError(null);
-                    setCameraOpen(true);
-                  }}
-                  disabled={submitting}
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-3 text-sm font-extrabold text-emerald-950 hover:bg-emerald-200 disabled:opacity-40"
-                >
-                  <Camera className="h-4 w-4" />
-                  Open phone camera
-                </button>
-              ) : null}
             </div>
-
-            <input
-              ref={cameraPhotoInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(event) =>
-                void handleCameraPhoto(
-                  event,
-                )
-              }
-              disabled={
-                submitting ||
-                photoScanning
-              }
-              className="sr-only"
-              aria-label="Take or upload a barcode photo"
-            />
-
-            <button
-              type="button"
-              onClick={() =>
-                cameraPhotoInputRef.current
-                  ?.click()
-              }
-              disabled={
-                submitting ||
-                photoScanning ||
-                cameraOpen
-              }
-              className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-200/25 bg-emerald-950/30 px-4 py-3 text-sm font-extrabold text-emerald-100 hover:bg-emerald-950/50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {photoScanning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Camera className="h-4 w-4" />
-              )}
-              {photoScanning
-                ? "Reading barcode photo…"
-                : liveCameraAvailable
-                  ? "Take or upload barcode photo"
-                  : "Open camera and take barcode photo"}
-            </button>
-
-            {!liveCameraAvailable ? (
-              <div className="mt-3 flex items-start gap-3 rounded-xl border border-blue-300/20 bg-blue-500/10 p-3 text-sm leading-6 text-blue-100/80">
-                <Camera className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  Live preview needs HTTPS, but taking a photo works on this HTTP address.
-                </span>
-              </div>
-            ) : null}
-
-            {cameraOpen ? (
-              <div className="mt-4 overflow-hidden rounded-2xl border border-white/15 bg-black">
-                <div className="relative aspect-[4/3] w-full">
-                  <video
-                    ref={cameraVideoRef}
-                    className="h-full w-full object-cover"
-                    muted
-                    playsInline
-                    aria-label="Live phone camera barcode scanner"
-                  />
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8">
-                    <div className="h-32 w-full max-w-md rounded-2xl border-2 border-emerald-300 shadow-[0_0_0_999px_rgba(0,0,0,0.35)]" />
-                  </div>
-                  {cameraStarting ? (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-sm font-bold text-white">
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Starting camera…
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-col gap-3 border-t border-white/10 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs text-white/60">
-                    Hold the barcode inside the green box until it is detected.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={stopCamera}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10"
-                  >
-                    <CameraOff className="h-4 w-4" />
-                    Stop camera
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {cameraError ? (
-              <div className="mt-4 flex items-start gap-3 rounded-xl border border-red-400/25 bg-red-500/10 p-3 text-sm text-red-100">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{cameraError}</span>
-              </div>
-            ) : null}
           </section>
 
-          <label className="block">
-            <span className="mb-2 block text-sm font-bold text-white/75">Lottery</span>
-            <select
-              value={lotteryId}
-              onChange={(event) => setLotteryId(event.target.value)}
-              disabled={lotteriesLoading || submitting}
-              className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-emerald-400/50 disabled:opacity-50"
-            >
-              {lotteriesLoading ? <option value="">Loading lotteries...</option> : null}
-              {!lotteriesLoading && !lotteries.length ? (
-                <option value="">No lotteries available</option>
-              ) : null}
-              {lotteries.map((lottery) => (
-                <option key={lottery.id} value={lottery.id}>
-                  {lottery.title}
-                  {lottery.status ? ` (${lottery.status})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="mt-5 rounded-2xl border border-purple-300/20 bg-purple-500/10 p-4">
-            <label className="block">
-              <span className="mb-2 flex items-center gap-2 text-sm font-bold text-purple-100">
-                <Barcode className="h-4 w-4" />
-                Barcode scanner input
-              </span>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  ref={scanInputRef}
-                  value={scanValue}
-                  onChange={(event) => setScanValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      handleScannerInput();
-                    }
-                  }}
-                  disabled={submitting}
-                  autoComplete="off"
-                  placeholder="Focus here, then scan the barcode"
-                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-purple-300/50"
-                />
-                <button
-                  type="button"
-                  onClick={handleScannerInput}
-                  disabled={submitting || !scanValue.trim()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-300 px-4 py-3 text-sm font-extrabold text-purple-950 disabled:opacity-40"
-                >
-                  <ScanLine className="h-4 w-4" />
-                  Process scan
-                </button>
+          {generatedBatch ? (
+            <section className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 p-5">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-200" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-lg font-extrabold text-emerald-100">
+                    Paper tickets generated
+                  </h3>
+                  <p className="mt-1 text-sm leading-6 text-emerald-100/70">
+                    {generatedBatch.createdCount} secure tickets were created in
+                    batch {generatedBatch.batchReference}. Check the print preview
+                    and test a barcode before confirming the batch as printed.
+                  </p>
+                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                    <div>
+                      <dt className="text-emerald-100/50">Tickets</dt>
+                      <dd className="mt-1 font-extrabold text-emerald-50">
+                        {generatedBatch.createdCount}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-emerald-100/50">Batch</dt>
+                      <dd className="mt-1 break-all font-mono text-xs text-emerald-50">
+                        {generatedBatch.batchReference}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-emerald-100/50">Status</dt>
+                      <dd className="mt-1 font-extrabold capitalize text-emerald-50">
+                        {generatedBatch.status.replaceAll("_", " ")}
+                      </dd>
+                    </div>
+                  </dl>
+                  <Link
+                    href={generatedBatch.readyToPrintUrl}
+                    className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-300 px-4 py-3 text-sm font-extrabold text-emerald-950 hover:bg-emerald-200"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Open Ready to Print
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </div>
               </div>
-            </label>
-          </div>
+            </section>
+          ) : (
+            <>
+              <section className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-white/75">
+                    Lottery <span className="text-red-300">*</span>
+                  </span>
+                  <select
+                    value={lotteryId}
+                    onChange={(event) => setLotteryId(event.target.value)}
+                    disabled={lotteriesLoading || submitting}
+                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-purple-300/50 disabled:opacity-50"
+                  >
+                    {lotteriesLoading ? (
+                      <option value="">Loading lotteries...</option>
+                    ) : null}
+                    {!lotteriesLoading && !lotteries.length ? (
+                      <option value="">No lotteries available</option>
+                    ) : null}
+                    {lotteries.map((lottery) => (
+                      <option key={lottery.id} value={lottery.id}>
+                        {lottery.title}
+                        {lottery.status ? ` (${lottery.status})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-          <div className="my-5 flex items-center gap-3 text-xs font-bold uppercase tracking-wider text-white/35">
-            <div className="h-px flex-1 bg-white/10" />
-            <Keyboard className="h-4 w-4" />
-            Or type manually
-            <div className="h-px flex-1 bg-white/10" />
-          </div>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold text-white/75">
+                    Number of paper tickets <span className="text-red-300">*</span>
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={MAX_BATCH_SIZE}
+                    step="1"
+                    inputMode="numeric"
+                    value={quantity}
+                    onChange={(event) => setQuantity(event.target.value)}
+                    disabled={submitting}
+                    className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none focus:border-purple-300/50 disabled:opacity-50"
+                  />
+                  <span className="mt-1 block text-xs text-white/40">
+                    Maximum {MAX_BATCH_SIZE.toLocaleString()} per batch.
+                  </span>
+                </label>
+              </section>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-white/75">
-                Ticket number
-              </span>
-              <input
-                value={ticketNumber}
-                onChange={(event) =>
-                  setTicketNumber(normaliseTicketNumber(event.target.value))
-                }
-                disabled={submitting}
-                placeholder="Example: BP-2026-000501"
-                className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-400/50"
-              />
-            </label>
+              <section className="mt-6">
+                <h3 className="font-extrabold text-white">Ticket artwork</h3>
+                <p className="mb-3 mt-1 text-sm text-white/50">
+                  Leave clear space for the generated ticket number and secure
+                  codes.
+                </p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <DesignUpload
+                    side="front"
+                    file={frontDesign}
+                    previewUrl={frontPreviewUrl}
+                    disabled={submitting}
+                    required
+                    onChange={(event) => selectDesign("front", event)}
+                    onRemove={() => setFrontDesign(null)}
+                  />
+                  <DesignUpload
+                    side="back"
+                    file={backDesign}
+                    previewUrl={backPreviewUrl}
+                    disabled={submitting}
+                    required={false}
+                    onChange={(event) => selectDesign("back", event)}
+                    onRemove={() => setBackDesign(null)}
+                  />
+                </div>
+              </section>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-white/75">
-                Ticket UUID
-              </span>
-              <input
-                value={ticketUuid}
-                onChange={(event) => setTicketUuid(normaliseUuid(event.target.value))}
-                disabled={submitting}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 font-mono text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-400/50"
-              />
-            </label>
-          </div>
+              <section className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <h3 className="font-extrabold text-white">Print settings</h3>
+                <p className="mb-4 mt-1 text-sm text-white/50">
+                  This first version creates a duplex A4 print-ready PDF.
+                </p>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-white/70">
+                      Tickets per sheet
+                    </span>
+                    <select
+                      value={ticketsPerSheet}
+                      onChange={(event) => setTicketsPerSheet(event.target.value)}
+                      disabled={submitting}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="2">2 large tickets</option>
+                      <option value="4">4 tickets</option>
+                      <option value="6">6 small tickets</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-white/70">
+                      Duplex printing
+                    </span>
+                    <select
+                      value={duplexFlip}
+                      onChange={(event) =>
+                        setDuplexFlip(event.target.value as DuplexFlip)
+                      }
+                      disabled={submitting}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="long_edge">Flip on long edge</option>
+                      <option value="short_edge">Flip on short edge</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-white/70">
+                      Code on ticket back
+                    </span>
+                    <select
+                      value={codeFormat}
+                      onChange={(event) =>
+                        setCodeFormat(event.target.value as CodeFormat)
+                      }
+                      disabled={submitting}
+                      className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="qr_and_code128">QR and Code 128</option>
+                      <option value="qr">QR code only</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
 
-          <button
-            type="button"
-            onClick={() => addDraft()}
-            disabled={submitting}
-            className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300/25 bg-emerald-500/10 px-4 py-3 text-sm font-extrabold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-40"
-          >
-            <Plus className="h-4 w-4" />
-            Add ticket to batch
-          </button>
+              <section className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                    disabled={submitting}
+                    className="mt-1 h-5 w-5 shrink-0 accent-amber-300"
+                  />
+                  <span>
+                    <span className="flex items-center gap-2 font-extrabold text-amber-100">
+                      <LockKeyhole className="h-4 w-4" />
+                      Confirm batch generation
+                    </span>
+                    <span className="mt-1 block text-sm leading-6 text-amber-100/70">
+                      I checked the lottery, quantity and artwork. The server will
+                      lock every ticket number, UUID and barcode token. Later
+                      changes must use the controlled void or reprint process.
+                    </span>
+                  </span>
+                </label>
+              </section>
+            </>
+          )}
 
           {error ? (
             <div className="mt-5 flex items-start gap-3 rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-100">
@@ -880,87 +642,53 @@ export default function PaperTicketRegistrationModal({
             </div>
           ) : null}
 
-          {message ? (
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <span>{message}</span>
+          {!generatedBatch ? (
+            <div className="mt-6 flex flex-col gap-2 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-5 text-white/40">
+                Already have externally printed tickets? Keep that as a separate
+                registration workflow.
+              </p>
+              <Link
+                href={REGISTER_EXISTING_ROUTE}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-xs font-bold text-white/75 hover:bg-white/10"
+              >
+                <Barcode className="h-4 w-4" />
+                Register existing tickets
+              </Link>
             </div>
           ) : null}
-
-          <section className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="font-extrabold text-white">Tickets ready to register</h3>
-                <p className="mt-1 text-xs text-white/45">
-                  {drafts.length} of {MAX_BATCH_SIZE} tickets in this batch
-                </p>
-              </div>
-              <Ticket className="h-5 w-5 text-white/45" />
-            </div>
-
-            {drafts.length ? (
-              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                {drafts.map((draft) => (
-                  <div
-                    key={draft.ticket_uuid}
-                    className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/5 p-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-bold text-white">{draft.ticket_number}</div>
-                      <div className="mt-1 break-all font-mono text-xs text-white/45">
-                        {draft.ticket_uuid}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setDrafts((current) =>
-                          current.filter(
-                            (item) => item.ticket_uuid !== draft.ticket_uuid,
-                          ),
-                        )
-                      }
-                      disabled={submitting}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 py-2 text-xs font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-40"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-white/15 p-6 text-center text-sm text-white/40">
-                Scan or type the first paper ticket above.
-              </div>
-            )}
-          </section>
         </div>
 
         <footer className="flex flex-col-reverse gap-3 border-t border-white/10 p-5 sm:flex-row sm:justify-end md:p-6">
           <button
             type="button"
-            onClick={closeModal}
+            onClick={onClose}
             disabled={submitting}
             className="rounded-xl border border-white/15 px-5 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-40"
           >
-            Cancel
+            {generatedBatch ? "Close" : "Cancel"}
           </button>
-          <button
-            type="button"
-            onClick={registerTickets}
-            disabled={submitting || !lotteryId || !drafts.length}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            {submitting
-              ? "Registering tickets..."
-              : `Register ${drafts.length} paper ticket${drafts.length === 1 ? "" : "s"}`}
-          </button>
+          {!generatedBatch ? (
+            <button
+              type="button"
+              onClick={() => void generateBatch()}
+              disabled={
+                submitting ||
+                lotteriesLoading ||
+                !lotteryId ||
+                !frontDesign ||
+                !confirmed
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-purple-300 px-5 py-3 text-sm font-extrabold text-purple-950 hover:bg-purple-200 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4" />
+              )}
+              {submitting ? "Generating secure tickets..." : "Generate paper batch"}
+            </button>
+          ) : null}
         </footer>
       </div>
     </div>

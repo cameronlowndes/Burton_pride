@@ -1492,7 +1492,7 @@ function LotteryRow({
   onCloseSales: () => void;
   onGoLive: () => void;
 }) {
-  const publicUrl = `/lottery/${item.slug}`;
+  const publicUrl = `/Lottery/${item.slug}`;
 
   const canGoLive = [
     "draft",

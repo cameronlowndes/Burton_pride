@@ -31,8 +31,6 @@ export type CreatedLottery = {
   max_tickets: number | null;
   paper_tickets_enabled: boolean;
   paper_ticket_count: number;
-  paper_ticket_start_number: number | null;
-  paper_ticket_end_number?: number | null;
   minimum_age: number;
   sales_open_at: string | null;
   sales_close_at: string | null;
@@ -73,8 +71,6 @@ const INITIAL_FORM = {
   currency: "GBP",
   max_tickets: "",
   paper_tickets_enabled: false,
-  paper_ticket_start_number: "1",
-  paper_ticket_count: "",
   minimum_age: "18",
   promoting_society_legal_name: "Burton Pride C.I.C.",
   registration_licence_type: "",
@@ -203,39 +199,7 @@ export default function CreateLotteryModal({
         (!Number.isSafeInteger(Number(createForm.max_tickets)) ||
           Number(createForm.max_tickets) <= 0)
       ) {
-        return "Maximum tickets must be more than 0.";
-      }
-
-      if (createForm.paper_tickets_enabled) {
-        const paperTicketStartNumber = Number(
-          createForm.paper_ticket_start_number,
-        );
-        const paperTicketCount = Number(createForm.paper_ticket_count);
-
-        if (
-          !Number.isSafeInteger(paperTicketStartNumber) ||
-          paperTicketStartNumber <= 0
-        ) {
-          return "Enter the first paper ticket number.";
-        }
-
-        if (!Number.isSafeInteger(paperTicketCount) || paperTicketCount <= 0) {
-          return "Enter the number of paper tickets you will use.";
-        }
-
-        const paperTicketEndNumber =
-          paperTicketStartNumber + paperTicketCount - 1;
-
-        if (!Number.isSafeInteger(paperTicketEndNumber)) {
-          return "The paper ticket number range is too large.";
-        }
-
-        if (
-          createForm.max_tickets &&
-          paperTicketEndNumber > Number(createForm.max_tickets)
-        ) {
-          return "The final paper ticket number cannot be higher than the maximum ticket number.";
-        }
+        return "Maximum total entries must be more than 0.";
       }
     }
 
@@ -288,17 +252,7 @@ export default function CreateLotteryModal({
           currency: createForm.currency,
           max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
           paper_tickets_enabled: createForm.paper_tickets_enabled,
-          paper_ticket_start_number: createForm.paper_tickets_enabled
-            ? Number(createForm.paper_ticket_start_number)
-            : null,
-          paper_ticket_end_number: createForm.paper_tickets_enabled
-            ? Number(createForm.paper_ticket_start_number) +
-              Number(createForm.paper_ticket_count) -
-              1
-            : null,
-          paper_ticket_count: createForm.paper_tickets_enabled
-            ? Number(createForm.paper_ticket_count)
-            : 0,
+          paper_ticket_count: 0,
           minimum_age: REQUIRED_MINIMUM_AGE,
           sales_open_at: createForm.sales_open_at || null,
           sales_close_at: createForm.sales_close_at || null,
@@ -324,12 +278,8 @@ export default function CreateLotteryModal({
         minimum_age: REQUIRED_MINIMUM_AGE,
         max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
         paper_tickets_enabled: createForm.paper_tickets_enabled,
-        paper_ticket_start_number: createForm.paper_tickets_enabled
-          ? Number(createForm.paper_ticket_start_number)
-          : null,
-        paper_ticket_count: createForm.paper_tickets_enabled
-          ? Number(createForm.paper_ticket_count)
-          : 0,
+        paper_ticket_start_number: null,
+        paper_ticket_count: 0,
         maximum_proceeds: createForm.maximum_proceeds ? Number(createForm.maximum_proceeds) : null,
         maximum_prize_value: createForm.maximum_prize_value ? Number(createForm.maximum_prize_value) : null,
         publication_at: createForm.publication_at || null,
@@ -614,8 +564,8 @@ export default function CreateLotteryModal({
                   </Field>
 
                   <Field
-                    label="Maximum tickets"
-                    hint="This is the highest ticket number available, including online and paper tickets."
+                    label="Maximum total entries"
+                    hint="Optional capacity across online and sold paper tickets. This is a quantity, not the highest ticket number."
                   >
                     <input
                       type="number"
@@ -630,87 +580,29 @@ export default function CreateLotteryModal({
                   <ToggleField
                     label="This lottery will use paper tickets"
                     checked={createForm.paper_tickets_enabled}
-                    onChange={(value) => {
-                      updateCreateField("paper_tickets_enabled", value);
-
-                      if (!value) {
-                        updateCreateField("paper_ticket_count", "");
-                      }
-                    }}
+                    onChange={(value) =>
+                      updateCreateField("paper_tickets_enabled", value)
+                    }
                   />
 
                   {createForm.paper_tickets_enabled ? (
-                    <Field
-                      label="First paper ticket number"
-                      required
-                      hint="Enter the number printed on the first physical ticket."
-                    >
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        inputMode="numeric"
-                        value={createForm.paper_ticket_start_number}
-                        onChange={(e) =>
-                          updateCreateField(
-                            "paper_ticket_start_number",
-                            e.target.value,
-                          )
-                        }
-                        className={inputClass}
-                        placeholder="e.g. 1"
-                      />
-                    </Field>
-                  ) : null}
-
-                  {createForm.paper_tickets_enabled ? (
-                    <Field
-                      label="Number of paper tickets"
-                      required
-                      hint="Enter the total number of printed tickets. Duplicate ticket numbers are blocked by the database."
-                    >
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        inputMode="numeric"
-                        value={createForm.paper_ticket_count}
-                        onChange={(e) =>
-                          updateCreateField("paper_ticket_count", e.target.value)
-                        }
-                        className={inputClass}
-                        placeholder="e.g. 500"
-                      />
-                    </Field>
-                  ) : null}
-
-                  {createForm.paper_tickets_enabled &&
-                  Number.isSafeInteger(
-                    Number(createForm.paper_ticket_start_number),
-                  ) &&
-                  Number(createForm.paper_ticket_start_number) > 0 &&
-                  Number.isInteger(Number(createForm.paper_ticket_count)) &&
-                  Number(createForm.paper_ticket_count) > 0 &&
-                  Number.isSafeInteger(
-                    Number(createForm.paper_ticket_start_number) +
-                      Number(createForm.paper_ticket_count) -
-                      1,
-                  ) ? (
-                    <div className="md:col-span-2 rounded-2xl border border-blue-400/25 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
-                      Paper ticket numbers <strong>
-                        {Number(
-                          createForm.paper_ticket_start_number,
-                        ).toLocaleString("en-GB")}
-                      </strong>{" "}
-                      to <strong>
-                        {(
-                          Number(createForm.paper_ticket_start_number) +
-                          Number(createForm.paper_ticket_count) -
-                          1
-                        ).toLocaleString("en-GB")}
-                      </strong>{" "}
-                      will be reserved. Online tickets will automatically skip
-                      this range.
+                    <div className="md:col-span-2 rounded-2xl border border-blue-400/25 bg-blue-500/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-200" />
+                        <div>
+                          <h3 className="font-extrabold text-blue-100">
+                            Generate the paper tickets after creating this draft
+                          </h3>
+                          <p className="mt-1 text-sm leading-6 text-blue-100/75">
+                            This option enables paper ticketing but does not
+                            create or reserve numbered tickets. After the lottery
+                            is created, open Paper Tickets and generate a secure
+                            print batch. The server will create random ticket
+                            numbers, UUIDs and barcode tokens and check the
+                            maximum total entry limit before creating the batch.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
 
