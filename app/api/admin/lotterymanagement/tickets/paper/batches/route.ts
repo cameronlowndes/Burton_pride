@@ -108,13 +108,11 @@ async function hasValidImageSignature(file: File) {
 }
 
 function randomCode(length: number) {
-  // Ambiguous characters are omitted so printed numbers are easier to read.
   const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
   const output: string[] = [];
 
   while (output.length < length) {
     for (const byte of randomBytes(Math.max(16, length))) {
-      // Rejection sampling avoids modulo bias.
       const limit = 256 - (256 % alphabet.length);
       if (byte >= limit) continue;
       output.push(alphabet[byte % alphabet.length]);
@@ -466,10 +464,6 @@ export async function POST(request: NextRequest) {
       );
       uploadedPaths.push(backDesignPath);
     }
-
-    // The RPC must create the batch, every ticket and its audit record inside
-    // one Postgres transaction. supabase-js cannot group separate writes into
-    // one transaction.
     const tickets = createTickets(lottery, quantity, verificationBaseUrl);
     const { data, error } = await database.rpc(CREATE_BATCH_RPC, {
       p_lottery_id: lottery.id,

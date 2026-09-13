@@ -1,18 +1,15 @@
 import type { Metadata } from "next";
-
-import AdminDashboardClient from "../components/LotteryManagement/Dashboard/DashboardPage";
+import DashboardClient from "../components/LotteryManagement/Dashboard/DashboardPage";
 
 export const metadata: Metadata = {
-  title: "Lottery Dashboard",
-  description: "Restricted Burton Pride administration dashboard For running the Lottery.",
-
+  title: "Dashboard | Burton Pride Lottery Management",
   robots: {
     index: false,
     follow: false,
-    nocache: true,
   },
+  referrer: "no-referrer",
 };
 
-export default function AdminDashboardPage() {
-  return <AdminDashboardClient />;
+export default function DashboardPage() {
+  return <DashboardClient />;
 }
