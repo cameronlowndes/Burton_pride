@@ -35,7 +35,8 @@ type CheckoutCompletion = {
   order_reference?: string;
   ticket_count?: number;
   email_status?: "sent" | "failed";
-  error?: string;
+  error?: unknown;
+  code?: string;
 };
 
 export const metadata = {
@@ -78,6 +79,61 @@ function normaliseOrigin(
 }
 
 async function getRequestOrigin() {
+  const requestHeaders =
+    await headers();
+
+  const forwardedHost =
+    requestHeaders
+      .get(
+        "x-forwarded-host",
+      )
+      ?.split(
+        ",",
+      )[0]
+      ?.trim();
+
+  const requestHost =
+    forwardedHost ||
+    requestHeaders
+      .get(
+        "host",
+      )
+      ?.trim();
+
+  if (
+    requestHost
+  ) {
+    const forwardedProtocol =
+      requestHeaders
+        .get(
+          "x-forwarded-proto",
+        )
+        ?.split(
+          ",",
+        )[0]
+        ?.trim()
+        .toLowerCase();
+
+    const protocol =
+      forwardedProtocol ===
+        "http"
+        ? "http"
+        : "https";
+
+    const requestOrigin =
+      normaliseOrigin(
+        `${protocol}://${requestHost}`,
+      );
+
+    if (
+      requestOrigin
+    ) {
+      return requestOrigin;
+    }
+  }
+
+  // Only use these when this request does not include a usable host. A
+  // configured URL can point at a previous Vercel deployment after a release.
   const configuredOrigin =
     process.env.NEXT_PUBLIC_SITE_URL
       ?.trim();
@@ -101,68 +157,35 @@ async function getRequestOrigin() {
     process.env.VERCEL_URL
       ?.trim();
 
-  if (
-    vercelHost
-  ) {
-    const normalised =
-      normaliseOrigin(
+  return vercelHost
+    ? normaliseOrigin(
         `https://${vercelHost}`,
-      );
+      )
+    : null;
+}
 
-    if (
-      normalised
-    ) {
-      return normalised;
-    }
+function checkoutErrorMessage(
+  error: unknown,
+) {
+  if (
+    typeof error ===
+    "string"
+  ) {
+    return error.trim() || null;
   }
-
-  const requestHeaders =
-    await headers();
-
-  const forwardedHost =
-    requestHeaders
-      .get(
-        "x-forwarded-host",
-      )
-      ?.split(
-        ",",
-      )[0]
-      ?.trim();
-
-  const requestHost =
-    forwardedHost ||
-    requestHeaders
-      .get(
-        "host",
-      )
-      ?.trim();
 
   if (
-    !requestHost
+    error &&
+    typeof error ===
+      "object" &&
+    "message" in error &&
+    typeof error.message ===
+      "string"
   ) {
-    return null;
+    return error.message.trim() || null;
   }
 
-  const forwardedProtocol =
-    requestHeaders
-      .get(
-        "x-forwarded-proto",
-      )
-      ?.split(
-        ",",
-      )[0]
-      ?.trim()
-      .toLowerCase();
-
-  const protocol =
-    forwardedProtocol ===
-      "http"
-      ? "http"
-      : "https";
-
-  return normaliseOrigin(
-    `${protocol}://${requestHost}`,
-  );
+  return null;
 }
 
 async function completeCheckoutAndSendEmail({
@@ -214,17 +237,56 @@ async function completeCheckoutAndSendEmail({
       },
     );
 
-  const data =
-    await response
-      .json() as CheckoutCompletion;
+  const responseBody =
+    await response.text();
+
+  let data: CheckoutCompletion;
+
+  try {
+    data =
+      JSON.parse(
+        responseBody,
+      ) as CheckoutCompletion;
+  } catch {
+    console.error(
+      "Lottery checkout completion returned a non-JSON response:",
+      {
+        status: response.status,
+        contentType:
+          response.headers.get(
+            "content-type",
+          ),
+        bodyPreview:
+          responseBody.slice(
+            0,
+            500,
+          ),
+      },
+    );
+
+    throw new Error(
+      "We could not finalise your lottery entry yet. Your payment is safe; please contact us if your confirmation does not arrive shortly.",
+    );
+  }
 
   if (
     !response.ok ||
     !data.ok
   ) {
+    console.error(
+      "Lottery checkout completion API returned an error:",
+      {
+        status: response.status,
+        code: data.code,
+        error: data.error,
+      },
+    );
+
     throw new Error(
-      data.error ||
-        "The lottery entry could not be finalised.",
+      checkoutErrorMessage(
+        data.error,
+      ) ||
+        "We could not finalise your lottery entry yet. Your payment is safe; please contact us if your confirmation does not arrive shortly.",
     );
   }
 

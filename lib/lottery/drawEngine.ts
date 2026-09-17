@@ -100,6 +100,14 @@ export async function getDrawReadiness(lotteryId: string) {
   const prizesAvailable = prizesResult.count ?? 0;
   const unresolvedWarnings = unresolvedIntegrityResult.count ?? 0;
   const alreadyCompleted = (completedDrawResult.data?.length ?? 0) > 0;
+  // Older lotteries that have already progressed to live, sales closed or
+  // draw ready may not have a legacy compliance_approved_at timestamp. Those
+  // lifecycle states are only reached after the lottery has been approved.
+  const complianceApproved =
+    Boolean(lottery.compliance_approved_at) ||
+    ["scheduled", "live", "sales_closed", "draw_ready"].includes(
+      lottery.status,
+    );
 
   const checks: DrawReadinessCheck[] = [
     {
@@ -120,7 +128,12 @@ export async function getDrawReadiness(lotteryId: string) {
     {
       key: "compliance",
       label: "Compliance approval is valid",
-      ok: Boolean(lottery.compliance_approved_at),
+      ok: complianceApproved,
+      detail: lottery.compliance_approved_at
+        ? "A compliance approval timestamp is recorded."
+        : complianceApproved
+          ? `Compliance is accepted from the current lottery state: ${lottery.status.replaceAll("_", " ")}.`
+          : "Approve the lottery through the compliance process before it can be drawn.",
     },
     {
       key: "integrity",
@@ -147,6 +160,15 @@ export async function getDrawReadiness(lotteryId: string) {
       label: "Prizes are available for allocation",
       ok: prizesAvailable > 0,
       detail: `${prizesAvailable} prize(s) available for draw.`,
+    },
+    {
+      key: "prize_ticket_capacity",
+      label: "There are enough tickets for every prize",
+      ok: prizesAvailable <= eligibleTickets,
+      detail:
+        prizesAvailable <= eligibleTickets
+          ? `${eligibleTickets} eligible ticket(s) can cover ${prizesAvailable} prize(s).`
+          : `This draw has ${prizesAvailable} prize(s), but only ${eligibleTickets} eligible ticket(s). Issue or sell ${prizesAvailable - eligibleTickets} more ticket(s), or return that many prizes to Draft before drawing.`,
     },
     {
       key: "not_completed",
@@ -247,9 +269,23 @@ export async function executeSecureDraw(
   );
 
   if (startError) {
+    console.error("Secure draw start RPC failed:", {
+      lotteryId,
+      code: startError.code,
+      message: startError.message,
+      details: startError.details,
+      hint: startError.hint,
+    });
+
     throw Object.assign(new Error("Could not start the secure draw."), {
       status: 409,
-      cause: startError,
+      code: "DRAW_START_RPC_FAILED",
+      details: {
+        database_code: startError.code ?? null,
+        database_message: startError.message ?? null,
+        database_details: startError.details ?? null,
+        database_hint: startError.hint ?? null,
+      },
     });
   }
 

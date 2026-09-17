@@ -2,6 +2,8 @@ import {
   NextRequest,
   NextResponse,
 } from "next/server";
+import bcrypt from "bcryptjs";
+import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 import {
   getAuthenticatedAdmin,
@@ -14,6 +16,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const REQUIRED_MINIMUM_AGE = 18;
+const DELETE_PASSWORD_ACTION_KEY = "delete_all_donations";
 
 type LotteryStatus =
   | "draft"
@@ -94,6 +97,66 @@ function safeDetails(
   }
 
   return value;
+}
+
+function getMainAdminRole(
+  admin: unknown,
+) {
+  if (!admin || typeof admin !== "object") {
+    return null;
+  }
+
+  const candidate = admin as {
+    role?: unknown;
+  };
+
+  return typeof candidate.role === "string"
+    ? candidate.role
+    : null;
+}
+
+async function verifyMainAdminDeletePassword(
+  password: string,
+) {
+  const { data: setting, error } = await supabaseAdmin
+    .from("admin_delete_settings")
+    .select("password_hash")
+    .eq("action_key", DELETE_PASSWORD_ACTION_KEY)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      "Lottery delete password lookup failed:",
+      error,
+    );
+
+    return {
+      ok: false,
+      status: 500,
+      code: "LOTTERY_DELETE_PASSWORD_SETTINGS_FAILED",
+    };
+  }
+
+  if (!setting?.password_hash) {
+    return {
+      ok: false,
+      status: 400,
+      code: "LOTTERY_DELETE_PASSWORD_NOT_SET",
+    };
+  }
+
+  const matches = await bcrypt.compare(
+    password,
+    setting.password_hash,
+  );
+
+  return {
+    ok: matches,
+    status: matches ? 200 : 403,
+    code: matches
+      ? null
+      : "LOTTERY_DELETE_PASSWORD_INCORRECT",
+  };
 }
 
 /*
@@ -1759,6 +1822,337 @@ export async function PATCH(
               ? error.message
               : "Unknown error",
         }),
+      },
+      500,
+    );
+  }
+}
+
+/*
+ * =========================================================
+ * PERMANENTLY DELETE AN UNUSED LOTTERY
+ *
+ * DELETE
+ * /api/admin/lotterymanagement/lottery/[id]
+ *
+ * This deliberately permits deletion only for unused drafts.
+ * Live, completed, or historic lotteries must be archived so
+ * Burton Pride retains its lottery and financial audit history.
+ * =========================================================
+ */
+export async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
+  const requestId = createRequestId();
+
+  try {
+    const admin = await getAuthenticatedAdmin();
+
+    if (!admin) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_AUTH_REQUIRED",
+          error: "You must be signed in to delete a lottery.",
+          request_id: requestId,
+        },
+        401,
+      );
+    }
+
+    if (getMainAdminRole(admin) !== "main_admin") {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_MAIN_ADMIN_REQUIRED",
+          error: "Only the main administrator can permanently delete a lottery.",
+          request_id: requestId,
+        },
+        403,
+      );
+    }
+
+    const { id: rawId } = await context.params;
+    const id = decodeURIComponent(rawId).trim();
+
+    if (!id || !isValidUuid(id)) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_INVALID_ID",
+          error: "The lottery ID is invalid.",
+          request_id: requestId,
+        },
+        400,
+      );
+    }
+
+    let body: Record<string, unknown>;
+
+    try {
+      body = await request.json();
+    } catch {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_INVALID_JSON_BODY",
+          error: "The request body is not valid JSON.",
+          request_id: requestId,
+        },
+        400,
+      );
+    }
+
+    const confirmationTitle =
+      typeof body.confirmation_title === "string"
+        ? body.confirmation_title
+        : "";
+    const password =
+      typeof body.main_admin_password === "string"
+        ? body.main_admin_password
+        : "";
+
+    if (!confirmationTitle || !password) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_CONFIRMATION_REQUIRED",
+          error: "Enter the exact lottery name and the main administrator password.",
+          request_id: requestId,
+        },
+        400,
+      );
+    }
+
+    /*
+     * Verify the password in this route as well as in the UI's
+     * earlier password check. A caller must not be able to bypass
+     * password protection by calling DELETE directly.
+     */
+    const passwordCheck = await verifyMainAdminDeletePassword(password);
+
+    if (!passwordCheck.ok) {
+      return response(
+        {
+          ok: false,
+          code:
+            passwordCheck.code ??
+            (passwordCheck.status === 429
+              ? "LOTTERY_DELETE_PASSWORD_RATE_LIMITED"
+              : "LOTTERY_DELETE_PASSWORD_INCORRECT"),
+          error:
+            passwordCheck.status === 429
+              ? "Too many password attempts. Please wait and try again."
+              : passwordCheck.code ===
+                  "LOTTERY_DELETE_PASSWORD_NOT_SET"
+                ? "No main administrator delete password has been set yet."
+                : passwordCheck.code ===
+                    "LOTTERY_DELETE_PASSWORD_SETTINGS_FAILED"
+                  ? "The delete-password settings could not be read."
+                  : "The main administrator password could not be verified.",
+          request_id: requestId,
+        },
+        passwordCheck.status,
+      );
+    }
+
+    const db = getAuditServiceClient();
+    const { data: lottery, error: lotteryError } = await db
+      .from("lotteries")
+      .select("id, title, slug, status, is_active")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (lotteryError) {
+      console.error(
+        `[${requestId}] Lottery lookup before DELETE failed:`,
+        lotteryError,
+      );
+
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_LOOKUP_FAILED",
+          error: "Unable to load the lottery before deleting it.",
+          request_id: requestId,
+          details: {
+            database_code: lotteryError.code ?? null,
+            database_message: lotteryError.message ?? null,
+          },
+        },
+        500,
+      );
+    }
+
+    if (!lottery) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_NOT_FOUND",
+          error: "Lottery not found or it has already been deleted.",
+          request_id: requestId,
+        },
+        404,
+      );
+    }
+
+    if (confirmationTitle !== lottery.title) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_TITLE_MISMATCH",
+          error: "The lottery name does not exactly match the lottery being deleted.",
+          request_id: requestId,
+        },
+        400,
+      );
+    }
+
+    if (lottery.status !== "draft" || lottery.is_active) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_ARCHIVE_REQUIRED",
+          error:
+            "Only inactive draft lotteries can be permanently deleted. Archive any live, completed, cancelled or historic lottery instead.",
+          request_id: requestId,
+          details: {
+            current_status: lottery.status,
+            is_active: lottery.is_active,
+          },
+        },
+        409,
+      );
+    }
+
+    const [
+      ordersResult,
+      ticketsResult,
+      prizesResult,
+      winnersResult,
+      refundsResult,
+    ] = await Promise.all([
+      db.from("lottery_orders").select("id", { count: "exact", head: true }).eq("lottery_id", id),
+      db.from("lottery_tickets").select("id", { count: "exact", head: true }).eq("lottery_id", id),
+      db.from("lottery_prizes").select("id", { count: "exact", head: true }).eq("lottery_id", id),
+      db.from("lottery_winners").select("id", { count: "exact", head: true }).eq("lottery_id", id),
+      db.from("lottery_refunds").select("id", { count: "exact", head: true }).eq("lottery_id", id),
+    ]);
+
+    const dependencyResults = [
+      ["orders", ordersResult],
+      ["tickets", ticketsResult],
+      ["prizes", prizesResult],
+      ["winners", winnersResult],
+      ["refunds", refundsResult],
+    ] as const;
+
+    const dependencyError = dependencyResults.find(
+      ([, result]) => result.error,
+    );
+
+    if (dependencyError) {
+      const [table, result] = dependencyError;
+
+      console.error(
+        `[${requestId}] Lottery DELETE dependency check failed for ${table}:`,
+        result.error,
+      );
+
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_DEPENDENCY_CHECK_FAILED",
+          error: "The lottery could not be checked for related records, so it was not deleted.",
+          request_id: requestId,
+        },
+        500,
+      );
+    }
+
+    const dependencies = Object.fromEntries(
+      dependencyResults.map(([table, result]) => [
+        table,
+        result.count ?? 0,
+      ]),
+    );
+    const hasDependencies = Object.values(dependencies).some(
+      (count) => Number(count) > 0,
+    );
+
+    if (hasDependencies) {
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_BLOCKED",
+          error:
+            "This lottery has related records and cannot be permanently deleted. Archive it to retain its history.",
+          request_id: requestId,
+          details: { dependencies },
+        },
+        409,
+      );
+    }
+
+    const { error: deleteError } = await db
+      .from("lotteries")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      console.error(
+        `[${requestId}] Lottery DELETE database error:`,
+        deleteError,
+      );
+
+      return response(
+        {
+          ok: false,
+          code: "LOTTERY_DELETE_DATABASE_FAILED",
+          error: "The lottery could not be permanently deleted.",
+          request_id: requestId,
+          details: {
+            database_code: deleteError.code ?? null,
+            database_message: deleteError.message ?? null,
+          },
+        },
+        500,
+      );
+    }
+
+    await writeLotteryAuditSafe({
+      admin,
+      actionCode: "lottery.permanently_deleted",
+      actionLabel: "Lottery permanently deleted",
+      actionGroup: "lottery",
+      riskLevel: "critical",
+      entityType: "lottery",
+      entityId: lottery.id,
+      reason: `Unused draft lottery "${lottery.title}" was permanently deleted by the main administrator.`,
+    });
+
+    return response({
+      ok: true,
+      message: "Lottery permanently deleted.",
+      request_id: requestId,
+      deleted: {
+        id: lottery.id,
+        title: lottery.title,
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[${requestId}] Lottery DELETE API error:`,
+      error,
+    );
+
+    return response(
+      {
+        ok: false,
+        code: "LOTTERY_DELETE_UNEXPECTED_ERROR",
+        error: "An unexpected error occurred while deleting the lottery.",
+        request_id: requestId,
       },
       500,
     );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import LiveDrawSettingsPanel from "./LiveDrawSettingsPanel";
 import {
   AlertTriangle,
   CalendarDays,
@@ -102,6 +103,15 @@ type DrawResult = {
   }>;
   error?: string;
   message?: string;
+  code?: string;
+  request_id?: string;
+  details?: unknown;
+};
+
+type DrawErrorDiagnostics = {
+  code?: string;
+  requestId?: string;
+  details?: unknown;
 };
 
 type FilterStatus = "all" | "ready" | "upcoming" | "completed" | "review";
@@ -110,11 +120,38 @@ type SortMode = "draw_date" | "sales_close" | "title" | "tickets";
 const DRAW_LIST_ROUTE = "/api/admin/lotterymanagement/draws";
 
 function drawReadinessRoute(id: string) {
-  return `/api/admin/lottery/draws/${id}/draw-readiness`;
+  return `/api/admin/lotterymanagement/draws/${id}/draw-readiness`;
 }
 
 function runDrawRoute(id: string) {
   return `/api/admin/lotterymanagement/draws/${id}/draw`;
+}
+
+function apiErrorMessage(value: unknown, fallback: string) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "message" in value &&
+    typeof value.message === "string" &&
+    value.message.trim()
+  ) {
+    return value.message.trim();
+  }
+
+  return fallback;
+}
+
+function isReadinessResponse(value: unknown): value is ReadinessResponse {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "lottery" in value &&
+      "metrics" in value &&
+      "checks" in value &&
+      Array.isArray(value.checks),
+  );
 }
 
 function formatDate(value: string | null) {
@@ -188,6 +225,8 @@ export default function DrawsClient() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDiagnostics, setErrorDiagnostics] =
+    useState<DrawErrorDiagnostics | null>(null);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<FilterStatus>("all");
@@ -204,6 +243,7 @@ export default function DrawsClient() {
   const loadDraws = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setErrorDiagnostics(null);
 
     try {
       const response = await fetch(DRAW_LIST_ROUTE, {
@@ -401,6 +441,7 @@ export default function DrawsClient() {
     setConfirm(false);
     setLoadingReadiness(true);
     setError(null);
+    setErrorDiagnostics(null);
 
     try {
       const response = await fetch(drawReadinessRoute(item.id), {
@@ -432,6 +473,7 @@ export default function DrawsClient() {
 
     setRunning(true);
     setError(null);
+    setErrorDiagnostics(null);
 
     if (testMode) {
       try {
@@ -492,13 +534,48 @@ export default function DrawsClient() {
         }),
       });
 
-      const data = await readJson<DrawResult>(response);
+      const data = await readJson<DrawResult & Partial<ReadinessResponse>>(response);
 
       if (!response.ok || data.ok === false) {
+        setErrorDiagnostics({
+          code: data.code,
+          requestId: data.request_id,
+          details: data.details,
+        });
+
+        // The secure route repeats every pre-draw check immediately before it
+        // freezes tickets. When it blocks a draw, show those exact checks.
+        if (isReadinessResponse(data)) {
+          setReadiness({
+            ...data,
+            ok: true,
+          });
+        } else if (response.status === 409) {
+          // Older draw routes only return a short 409 message. Fetch the
+          // read-only readiness result so the operator can see what to fix.
+          try {
+            const diagnosticResponse = await fetch(
+              drawReadinessRoute(selected.id),
+              { cache: "no-store", credentials: "include" },
+            );
+            const diagnostic = await readJson<ReadinessResponse>(
+              diagnosticResponse,
+            );
+
+            if (diagnosticResponse.ok && isReadinessResponse(diagnostic)) {
+              setReadiness(diagnostic);
+            }
+          } catch {
+            // Keep the original draw error. The error panel gives safe next
+            // steps even if the diagnostic request is unavailable.
+          }
+        }
+
         throw new Error(
-          data.error ||
-            data.message ||
+          apiErrorMessage(
+            data.error || data.message,
             "The draw could not be completed.",
+          ),
         );
       }
 
@@ -569,12 +646,12 @@ export default function DrawsClient() {
       </section>
 
       {error ? (
-        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        </div>
+        <DrawErrorPanel
+          error={error}
+          lottery={selected}
+          readiness={readiness}
+          diagnostics={errorDiagnostics}
+        />
       ) : null}
 
       {/* Search & filters - same structure as Prizes */}
@@ -678,10 +755,127 @@ export default function DrawsClient() {
               setResult(null);
               setConfirm(false);
               setTestMode(false);
+              setErrorDiagnostics(null);
             }
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function DrawErrorPanel({
+  error,
+  lottery,
+  readiness,
+  diagnostics,
+}: {
+  error: string;
+  lottery: LotteryDrawListItem | null;
+  readiness: ReadinessResponse | null;
+  diagnostics: DrawErrorDiagnostics | null;
+}) {
+  const failedChecks = (readiness?.checks || []).filter((check) => !check.ok);
+  const metrics = readiness?.metrics;
+  const isBlockedDraw = /blocked|integrity|409|could not be completed/i.test(error);
+
+  return (
+    <section className="rounded-2xl border border-red-400/35 bg-red-500/10 p-5 text-red-50 shadow-lg">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-red-300/25 bg-red-500/15 text-red-200">
+          <AlertTriangle className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-red-200">
+            Draw action needed
+          </p>
+          <h2 className="mt-1 text-base font-extrabold text-white">
+            {isBlockedDraw ? "The secure draw has been stopped safely" : "The draw could not be loaded"}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-red-100/90">{error}</p>
+        </div>
+      </div>
+
+      {lottery || metrics ? (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <ErrorMetric label="Lottery" value={lottery?.title || readiness?.lottery.title || "Not identified"} />
+          <ErrorMetric label="Paid orders" value={String(metrics?.paid_orders ?? lottery?.paid_orders ?? 0)} />
+          <ErrorMetric label="Eligible tickets" value={String(metrics?.eligible_tickets ?? lottery?.eligible_tickets ?? 0)} />
+          <ErrorMetric label="Excluded tickets" value={String(metrics?.excluded_tickets ?? lottery?.excluded_tickets ?? 0)} />
+          <ErrorMetric label="Prizes ready" value={String(metrics?.prizes_available ?? lottery?.prizes_available ?? 0)} />
+        </div>
+      ) : null}
+
+      {failedChecks.length ? (
+        <div className="mt-5 rounded-xl border border-red-300/15 bg-black/15 p-4">
+          <h3 className="font-bold text-white">What needs fixing</h3>
+          <ul className="mt-3 space-y-3">
+            {failedChecks.map((check) => (
+              <li key={check.key} className="rounded-lg border border-red-300/10 bg-red-950/15 px-3 py-2">
+                <p className="text-sm font-bold text-red-100">{check.label}</p>
+                {check.detail ? <p className="mt-1 text-xs leading-5 text-red-100/70">{check.detail}</p> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : isBlockedDraw ? (
+        <div className="mt-5 rounded-xl border border-red-300/15 bg-black/15 p-4 text-sm leading-6 text-red-100/80">
+          <strong className="text-white">Next step:</strong> Open this draw to run the detailed readiness check. Confirm the lottery is in a drawable state, sales are closed, both ticket records are issued and eligible, all prizes are marked Ready for draw, and there are no integrity warnings.
+        </div>
+      ) : null}
+
+      {diagnostics ? (
+        <DrawDiagnosticDetails diagnostics={diagnostics} />
+      ) : null}
+    </section>
+  );
+}
+
+function DrawDiagnosticDetails({
+  diagnostics,
+}: {
+  diagnostics: DrawErrorDiagnostics;
+}) {
+  const details =
+    diagnostics.details && typeof diagnostics.details === "object"
+      ? (diagnostics.details as Record<string, unknown>)
+      : null;
+
+  const rows = [
+    ["Error code", diagnostics.code],
+    ["Request ID", diagnostics.requestId],
+    ["Database code", details?.database_code],
+    ["Database message", details?.database_message],
+    ["Database hint", details?.database_hint],
+    ["Database details", details?.database_details],
+  ].filter(([, value]) => typeof value === "string" && value.trim()) as Array<
+    [string, string]
+  >;
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.14em] text-white/55">
+        Technical details for the admin
+      </p>
+      <dl className="mt-3 space-y-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-4">
+            <dt className="text-xs font-bold text-white/55">{label}</dt>
+            <dd className="break-words font-mono text-xs leading-5 text-white/85">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function ErrorMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-red-300/15 bg-black/15 p-3">
+      <p className="text-[10px] font-black uppercase tracking-wide text-red-100/55">{label}</p>
+      <p className="mt-1 break-words text-sm font-extrabold text-white">{value}</p>
     </div>
   );
 }
@@ -901,6 +1095,12 @@ function DrawModal({
                   </p>
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {!testMode ? (
+            <div className="mb-6">
+              <LiveDrawSettingsPanel lotteryId={item.id} />
             </div>
           ) : null}
 

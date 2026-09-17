@@ -60,9 +60,19 @@ type PrizeRecord = {
   winner_claimed: boolean | null;
 };
 
+type LotteryOption = {
+  id: string;
+  title: string;
+  slug: string;
+  status: string;
+  is_active: boolean;
+  draw_at: string | null;
+};
+
 type ApiResponse = {
   ok: boolean;
   items?: PrizeRecord[];
+  lotteries?: LotteryOption[];
   item?: PrizeRecord;
   error?: string;
   message?: string;
@@ -74,7 +84,7 @@ const STATUS_OPTIONS: Array<{ value: PrizeStatus | "all"; label: string }> = [
   { value: "all", label: "All prize statuses" },
   { value: "draft", label: "Draft" },
   { value: "confirmed", label: "Confirmed" },
-  { value: "available_for_draw", label: "Available for draw" },
+  { value: "available_for_draw", label: "Ready for draw" },
   { value: "allocated", label: "Allocated" },
   { value: "claimed", label: "Claimed" },
   { value: "fulfilled", label: "Fulfilled" },
@@ -82,8 +92,16 @@ const STATUS_OPTIONS: Array<{ value: PrizeStatus | "all"; label: string }> = [
   { value: "withdrawn", label: "Withdrawn" },
 ];
 
+const PRIZE_LEVEL_OPTIONS = [
+  { value: "Bronze", label: "Bronze prize", displayOrder: 3 },
+  { value: "Silver", label: "Silver prize", displayOrder: 2 },
+  { value: "Gold", label: "Gold prize", displayOrder: 1 },
+] as const;
+
 const inputClass =
   "w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35";
+
+const readableOptionClass = "bg-white text-slate-950";
 
 function statusLabel(status: PrizeStatus) {
   return STATUS_OPTIONS.find((x) => x.value === status)?.label || status;
@@ -101,6 +119,15 @@ function statusClass(status: PrizeStatus) {
     withdrawn: "border-red-400/25 bg-red-500/10 text-red-200",
   };
   return map[status];
+}
+
+function prizeTierOrder(name: string) {
+  const normalised = name.trim().toLowerCase();
+
+  if (normalised.includes("bronze")) return 1;
+  if (normalised.includes("silver")) return 2;
+  if (normalised.includes("gold")) return 3;
+  return 99;
 }
 
 function formatMoney(value: number | null) {
@@ -131,6 +158,7 @@ async function readJson(res: Response): Promise<ApiResponse> {
 
 export default function PrizesClient() {
   const [items, setItems] = useState<PrizeRecord[]>([]);
+  const [lotteryOptions, setLotteryOptions] = useState<LotteryOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +166,7 @@ export default function PrizesClient() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<PrizeRecord | null>(null);
   const [testMode, setTestMode] = useState(false);
+  const [updatingPrizeId, setUpdatingPrizeId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<PrizeStatus | "all">("all");
@@ -414,6 +443,7 @@ export default function PrizesClient() {
       }
 
       setItems(data.items || []);
+      setLotteryOptions(data.lotteries || []);
     } catch (err: any) {
       setError(err?.message || "Failed to load prizes.");
     } finally {
@@ -422,10 +452,32 @@ export default function PrizesClient() {
   }
 
   const lotteries = useMemo(() => {
-    const map = new Map<string, string>();
-    items.forEach((item) => map.set(item.lottery_id, item.lottery_title));
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [items]);
+    const map = new Map<string, LotteryOption>();
+
+    lotteryOptions.forEach((lottery) => {
+      map.set(lottery.id, lottery);
+    });
+
+    items.forEach((item) => {
+      if (!map.has(item.lottery_id)) {
+        map.set(item.lottery_id, {
+          id: item.lottery_id,
+          title: item.lottery_title,
+          slug: item.lottery_slug,
+          status: "historical",
+          is_active: false,
+          draw_at: null,
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const dateA = a.draw_at ? new Date(a.draw_at).getTime() : Number.MAX_SAFE_INTEGER;
+      const dateB = b.draw_at ? new Date(b.draw_at).getTime() : Number.MAX_SAFE_INTEGER;
+
+      return dateA - dateB || a.title.localeCompare(b.title);
+    });
+  }, [items, lotteryOptions]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -460,7 +512,12 @@ export default function PrizesClient() {
         case "name_asc":
           return a.name.localeCompare(b.name);
         default:
-          return Number(a.display_order) - Number(b.display_order);
+      const tierOrder = prizeTierOrder(a.name) - prizeTierOrder(b.name);
+      return (
+        tierOrder ||
+        Number(a.display_order) - Number(b.display_order) ||
+        a.name.localeCompare(b.name)
+      );
       }
     });
   }, [items, search, status, lotteryId, source, sort]);
@@ -476,7 +533,7 @@ export default function PrizesClient() {
   function openCreate() {
     setEditing(null);
     setForm({
-      lottery_id: lotteries[0]?.[0] || "",
+      lottery_id: lotteries[0]?.id || "",
       name: "",
       description: "",
       image_url: "",
@@ -485,7 +542,14 @@ export default function PrizesClient() {
       is_donated: false,
       donor_name: "",
       sponsor_name: "",
-      display_order: String(items.length),
+      display_order: String(
+        Math.max(
+          0,
+          ...items
+            .filter((item) => item.lottery_id === lotteries[0]?.id)
+            .map((item) => Number(item.display_order) || 0),
+        ) + 1,
+      ),
       eligibility_restrictions: "",
       fulfilment_requirements: "",
       fulfilment_notes: "",
@@ -569,7 +633,7 @@ export default function PrizesClient() {
         );
       } else {
         const lotteryTitle =
-          lotteries.find(([id]) => id === form.lottery_id)?.[1] ||
+          lotteries.find((lottery) => lottery.id === form.lottery_id)?.title ||
           "Test Lottery";
 
         const newPrize: PrizeRecord = {
@@ -655,6 +719,69 @@ export default function PrizesClient() {
       setError(err?.message || "Failed to save prize.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function makePrizeReadyForDraw(item: PrizeRecord) {
+    if (item.status !== "draft" && item.status !== "confirmed") return;
+
+    setUpdatingPrizeId(item.id);
+    setError(null);
+
+    const payload = {
+      id: item.id,
+      lottery_id: item.lottery_id,
+      name: item.name,
+      description: item.description,
+      image_url: item.image_url,
+      quantity: item.quantity,
+      declared_value: item.declared_value,
+      is_donated: item.is_donated,
+      donor_name: item.donor_name,
+      sponsor_name: item.sponsor_name,
+      display_order: item.display_order,
+      eligibility_restrictions: item.eligibility_restrictions,
+      fulfilment_requirements: item.fulfilment_requirements,
+      fulfilment_notes: item.fulfilment_notes,
+      status: "available_for_draw" as PrizeStatus,
+    };
+
+    try {
+      if (testMode) {
+        setItems((current) =>
+          current.map((prize) =>
+            prize.id === item.id
+              ? {
+                  ...prize,
+                  status: "available_for_draw",
+                  updated_at: new Date().toISOString(),
+                }
+              : prize,
+          ),
+        );
+        return;
+      }
+
+      const response = await fetch(API_ROUTE, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await readJson(response);
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error || data.message || "Could not make this prize ready for the draw.",
+        );
+      }
+
+      await loadPrizes();
+    } catch (err: any) {
+      setError(err?.message || "Could not make this prize ready for the draw.");
+    } finally {
+      setUpdatingPrizeId(null);
     }
   }
 
@@ -763,9 +890,9 @@ export default function PrizesClient() {
 
           <Select value={lotteryId} onChange={setLotteryId}>
             <option value="all">All lotteries</option>
-            {lotteries.map(([id, title]) => (
-              <option key={id} value={id}>
-                {title}
+            {lotteries.map((lottery) => (
+              <option key={lottery.id} value={lottery.id} className={readableOptionClass}>
+                {lottery.title}
               </option>
             ))}
           </Select>
@@ -813,10 +940,12 @@ export default function PrizesClient() {
             {filtered.map((item) => (
               <PrizeRow
                 key={item.id}
-                item={item}
-                onView={() => setSelected(item)}
-                onEdit={() => openEdit(item)}
-              />
+              item={item}
+              onView={() => setSelected(item)}
+              onEdit={() => openEdit(item)}
+              onMakeReady={() => makePrizeReadyForDraw(item)}
+              makingReady={updatingPrizeId === item.id}
+            />
             ))}
           </div>
         )}
@@ -864,7 +993,7 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
+        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none [&>option]:bg-white [&>option]:text-slate-950"
       >
         {children}
       </select>
@@ -877,10 +1006,14 @@ function PrizeRow({
   item,
   onView,
   onEdit,
+  onMakeReady,
+  makingReady,
 }: {
   item: PrizeRecord;
   onView: () => void;
   onEdit: () => void;
+  onMakeReady: () => void;
+  makingReady: boolean;
 }) {
   return (
     <article className="rounded-2xl border border-white/10 bg-black/20 p-5">
@@ -953,6 +1086,22 @@ function PrizeRow({
             <Pencil className="h-3.5 w-3.5" />
             Edit
           </button>
+
+          {item.status === "draft" || item.status === "confirmed" ? (
+            <button
+              type="button"
+              onClick={onMakeReady}
+              disabled={makingReady}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {makingReady ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              Make ready for draw
+            </button>
+          ) : null}
         </div>
       </div>
     </article>
@@ -1086,7 +1235,7 @@ function PrizeEditor({
 }: {
   form: any;
   setForm: React.Dispatch<React.SetStateAction<any>>;
-  lotteries: Array<[string, string]>;
+  lotteries: LotteryOption[];
   editing: PrizeRecord | null;
   saving: boolean;
   onClose: () => void;
@@ -1126,22 +1275,58 @@ function PrizeEditor({
               <select
                 value={form.lottery_id}
                 onChange={(e) => setForm((p: any) => ({ ...p, lottery_id: e.target.value }))}
-                className={inputClass}
+                className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`}
                 disabled={Boolean(editing)}
               >
-                <option value="">Select lottery</option>
-                {lotteries.map(([id, title]) => (
-                  <option key={id} value={id}>{title}</option>
+                <option value="" className={readableOptionClass}>
+                  Select lottery
+                </option>
+                {lotteries.map((lottery) => (
+                  <option
+                    key={lottery.id}
+                    value={lottery.id}
+                    className={readableOptionClass}
+                  >
+                    {lottery.title} — {lottery.status === "live" ? "Live" : lottery.status.replaceAll("_", " ")}
+                  </option>
                 ))}
               </select>
             </Field>
 
-            <Field label="Prize name" required>
-              <input
+            <Field label="Prize level" required>
+              <select
                 value={form.name}
-                onChange={(e) => setForm((p: any) => ({ ...p, name: e.target.value }))}
-                className={inputClass}
-              />
+                onChange={(e) => {
+                  const level = PRIZE_LEVEL_OPTIONS.find(
+                    (option) => option.value === e.target.value,
+                  );
+
+                  setForm((previous: any) => ({
+                    ...previous,
+                    name: e.target.value,
+                    display_order: level
+                      ? String(level.displayOrder)
+                      : previous.display_order,
+                  }));
+                }}
+                className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`}
+              >
+                <option value="" className={readableOptionClass}>
+                  Select prize level
+                </option>
+                {PRIZE_LEVEL_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    className={readableOptionClass}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs leading-5 text-white/50">
+                Select Bronze, Silver or Gold. The display order is set automatically.
+              </p>
             </Field>
 
             <Field label="Quantity" required>
@@ -1169,12 +1354,21 @@ function PrizeEditor({
               <select
                 value={form.status}
                 onChange={(e) => setForm((p: any) => ({ ...p, status: e.target.value }))}
-                className={inputClass}
+                className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`}
               >
                 {STATUS_OPTIONS.filter((x) => x.value !== "all").map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    className={readableOptionClass}
+                  >
+                    {option.label}
+                  </option>
                 ))}
               </select>
+              <p className="mt-2 text-xs leading-5 text-white/50">
+                Draft means you are still setting up the prize. Confirmed means it has been checked. Ready for draw means it can be included when the secure draw runs.
+              </p>
             </Field>
 
             <Field label="Display order">

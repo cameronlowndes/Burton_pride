@@ -2324,18 +2324,50 @@ function PrizeCard({
   showValue:
     boolean;
 }) {
+  const prizeName = prize.name.trim().toLowerCase();
+  const theme = prizeName.includes("gold")
+    ? {
+        label: "Gold prize",
+        card: "border-yellow-400/35 bg-gradient-to-br from-yellow-500/15 via-[#151515] to-[#101010]",
+        icon: "border-yellow-300/40 bg-yellow-400 text-yellow-950 shadow-[0_0_28px_rgba(250,204,21,0.24)]",
+        eyebrow: "text-yellow-200",
+        value: "border-yellow-300/25 bg-yellow-400/15 text-yellow-100",
+      }
+    : prizeName.includes("silver")
+      ? {
+          label: "Silver prize",
+          card: "border-slate-300/35 bg-gradient-to-br from-slate-300/15 via-[#151515] to-[#101010]",
+          icon: "border-slate-200/50 bg-slate-200 text-slate-900 shadow-[0_0_28px_rgba(226,232,240,0.16)]",
+          eyebrow: "text-slate-200",
+          value: "border-slate-200/25 bg-slate-100/10 text-slate-100",
+        }
+      : prizeName.includes("bronze")
+        ? {
+            label: "Bronze prize",
+            card: "border-orange-400/35 bg-gradient-to-br from-orange-500/15 via-[#151515] to-[#101010]",
+            icon: "border-orange-300/40 bg-orange-500 text-orange-950 shadow-[0_0_28px_rgba(249,115,22,0.2)]",
+            eyebrow: "text-orange-200",
+            value: "border-orange-300/25 bg-orange-500/15 text-orange-100",
+          }
+        : {
+            label: "Prize",
+            card: "border-purple-400/25 bg-gradient-to-br from-purple-500/10 via-[#151515] to-[#101010]",
+            icon: "border-purple-300/35 bg-purple-500 text-white",
+            eyebrow: "text-purple-200",
+            value: "border-purple-300/25 bg-purple-500/15 text-purple-100",
+          };
+
+  const formattedValue =
+    prize.declared_value === null
+      ? null
+      : new Intl.NumberFormat("en-GB", {
+          style: "currency",
+          currency: "GBP",
+        }).format(Number(prize.declared_value));
+
   return (
     <article
-      className="
-        overflow-hidden
-        rounded-[1.5rem]
-        border
-        border-slate-200
-        bg-slate-50
-
-        dark:border-white/10
-        dark:bg-white/[0.03]
-      "
+      className={`group relative overflow-hidden rounded-[1.5rem] border p-5 transition duration-200 hover:-translate-y-1 hover:shadow-2xl ${theme.card}`}
     >
       {prize.image_url && (
         <img
@@ -2343,130 +2375,52 @@ function PrizeCard({
             prize.image_url
           }
           alt=""
-          className="h-44 w-full object-cover"
+          className="-mx-5 -mt-5 mb-5 h-44 w-[calc(100%+2.5rem)] object-cover"
         />
       )}
 
-      <div className="p-5">
-        <Trophy
-          className="
-            h-6
-            w-6
-            text-yellow-500
-
-            dark:text-yellow-300
-          "
-        />
-
-        <h3
-          className="
-            mt-3
-            text-lg
-            font-black
-            text-slate-950
-
-            dark:text-white
-          "
-        >
-          {prize.name}
-        </h3>
-
-        {prize.description && (
-          <p
-            className="
-              mt-2
-              text-sm
-              leading-6
-              text-slate-600
-
-              dark:text-white/60
-            "
-          >
-            {
-              prize.description
-            }
-          </p>
-        )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {prize.quantity >
-            1 && (
-            <span
-              className="
-                rounded-full
-                bg-purple-100
-                px-3
-                py-1
-                text-xs
-                font-black
-                text-purple-700
-
-                dark:bg-purple-500/15
-                dark:text-purple-200
-              "
-            >
-              {
-                prize.quantity
-              }{" "}
-              available
-            </span>
-          )}
-
-          {showValue &&
-            prize.declared_value !==
-              null && (
-              <span
-                className="
-                  rounded-full
-                  bg-green-100
-                  px-3
-                  py-1
-                  text-xs
-                  font-black
-                  text-green-700
-
-                  dark:bg-green-500/15
-                  dark:text-green-200
-                "
-              >
-                Value{" "}
-                {new Intl.NumberFormat(
-                  "en-GB",
-                  {
-                    style:
-                      "currency",
-
-                    currency:
-                      "GBP",
-                  },
-                ).format(
-                  Number(
-                    prize.declared_value,
-                  ),
-                )}
-              </span>
-            )}
+      <div className="flex items-start justify-between gap-4">
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${theme.icon}`}>
+          <Trophy className="h-6 w-6" />
         </div>
 
-        {prize.sponsor_name && (
-          <p
-            className="
-              mt-3
-              text-xs
-              text-slate-500
-
-              dark:text-white/40
-            "
-          >
-            Prize supplied by{" "}
-            <strong>
-              {
-                prize.sponsor_name
-              }
-            </strong>
-          </p>
-        )}
+        {prize.quantity > 1 ? (
+          <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-xs font-black text-white/85">
+            {prize.quantity} prizes
+          </span>
+        ) : null}
       </div>
+
+      <p className={`mt-5 text-xs font-black uppercase tracking-[0.16em] ${theme.eyebrow}`}>
+        {theme.label}
+      </p>
+
+      <h3 className="mt-1 text-2xl font-black tracking-tight text-white">
+        {prize.name}
+      </h3>
+
+      {prize.description && (
+        <p className="mt-3 min-h-12 text-sm leading-6 text-white/65">
+          {prize.description}
+        </p>
+      )}
+
+      {showValue && formattedValue ? (
+        <div className={`mt-5 rounded-2xl border px-4 py-3 ${theme.value}`}>
+          <div className="text-[10px] font-black uppercase tracking-[0.14em] opacity-70">
+            Prize value
+          </div>
+          <div className="mt-1 text-2xl font-black tracking-tight">
+            {formattedValue}
+          </div>
+        </div>
+      ) : null}
+
+      {prize.sponsor_name && (
+        <p className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-white/50">
+          Supplied by <strong className="font-bold text-white/80">{prize.sponsor_name}</strong>
+        </p>
+      )}
     </article>
   );
 }

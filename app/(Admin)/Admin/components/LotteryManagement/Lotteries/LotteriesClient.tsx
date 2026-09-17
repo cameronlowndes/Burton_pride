@@ -20,6 +20,7 @@ import {
   Copy,
   ExternalLink,
   Eye,
+  EyeOff,
   Filter,
   Loader2,
   LockKeyhole,
@@ -1753,6 +1754,7 @@ function DeleteLotteryModal({
   const titleMatches = confirmation === item.title;
   const canDelete =
     titleMatches && password.length > 0 && !busy;
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   return (
     <div
@@ -1888,14 +1890,14 @@ function DeleteLotteryModal({
 
               <input
                 id="delete-lottery-password"
-                type="password"
+                type={passwordVisible ? "text" : "password"}
                 value={password}
                 onChange={(event) =>
                   onPasswordChange(event.target.value)
                 }
                 disabled={busy}
                 autoComplete="current-password"
-                className="w-full rounded-2xl border border-white/10 bg-black/25 py-3 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-red-400/60 focus:ring-2 focus:ring-red-400/20 disabled:opacity-50"
+                className="w-full rounded-2xl border border-white/10 bg-black/25 py-3 pl-11 pr-12 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-red-400/60 focus:ring-2 focus:ring-red-400/20 disabled:opacity-50"
                 placeholder="Enter main-admin password"
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && canDelete) {
@@ -1903,6 +1905,25 @@ function DeleteLotteryModal({
                   }
                 }}
               />
+
+              <button
+                type="button"
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                disabled={busy}
+                className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl text-white/55 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-400/50 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={
+                  passwordVisible ? "Hide password" : "Show password"
+                }
+                title={
+                  passwordVisible ? "Hide password" : "Show password"
+                }
+              >
+                {passwordVisible ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
             </div>
           </div>
 

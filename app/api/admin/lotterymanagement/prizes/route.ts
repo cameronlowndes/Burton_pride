@@ -20,6 +20,15 @@ const ALLOWED_STATUSES = new Set([
   "withdrawn",
 ]);
 
+const PRIZEABLE_LOTTERY_STATUSES = [
+  "draft",
+  "compliance_review",
+  "scheduled",
+  "live",
+  "sales_closed",
+  "draw_ready",
+] as const;
+
 function response(body: unknown, status = 200) {
   return NextResponse.json(body, {
     status,
@@ -119,7 +128,7 @@ export async function GET() {
       ...new Set(rows.map((item) => item.allocated_winner_id).filter(Boolean)),
     ] as string[];
 
-    const [lotteriesResult, winnersResult] = await Promise.all([
+    const [lotteriesResult, winnersResult, lotteryOptionsResult] = await Promise.all([
       lotteryIds.length
         ? db.from("lotteries").select("id,title,slug").in("id", lotteryIds)
         : Promise.resolve({ data: [], error: null }),
@@ -129,9 +138,19 @@ export async function GET() {
             .select("id,winner_name,winner_email,claimed")
             .in("id", winnerIds)
         : Promise.resolve({ data: [], error: null }),
+      db
+        .from("lotteries")
+        .select("id,title,slug,status,is_active,draw_at")
+        .in("status", [...PRIZEABLE_LOTTERY_STATUSES])
+        .order("draw_at", { ascending: true, nullsFirst: false })
+        .order("title", { ascending: true }),
     ]);
 
-    if (lotteriesResult.error || winnersResult.error) {
+    if (
+      lotteriesResult.error ||
+      winnersResult.error ||
+      lotteryOptionsResult.error
+    ) {
       return response(
         { ok: false, error: "Unable to load complete prize data." },
         500,
@@ -163,7 +182,11 @@ export async function GET() {
       };
     });
 
-    return response({ ok: true, items });
+    return response({
+      ok: true,
+      items,
+      lotteries: lotteryOptionsResult.data || [],
+    });
   } catch (error) {
     console.error("Prize API GET error:", error);
     return response({ ok: false, error: "Unable to load prizes." }, 500);
