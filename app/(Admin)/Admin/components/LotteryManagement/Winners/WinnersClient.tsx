@@ -80,6 +80,8 @@ type WinnerRecord = {
     | "first_name"
     | "ticket_number"
     | "none";
+  public_display_consent: boolean;
+  public_results_published_at: string | null;
   replacement_winner_id: string | null;
   original_winner_id: string | null;
   contact_attempts: ContactAttempt[];
@@ -93,6 +95,22 @@ type ApiResponse = {
   item?: WinnerRecord;
   error?: string;
   message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+};
+
+type RequestError = {
+  title: string;
+  method: "GET" | "PATCH";
+  endpoint: string;
+  status?: number;
+  statusText?: string;
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+  troubleshooting: string[];
 };
 
 type WinnerFilter =
@@ -104,6 +122,83 @@ type WinnerFilter =
   | "issues";
 
 const API_ROUTE = "/api/admin/lotterymanagement/winners";
+
+function getApiMessage(data: ApiResponse) {
+  return data.error || data.message || "The server did not provide an error message.";
+}
+
+function getApiDetails(data: ApiResponse) {
+  return data.details || data.hint || undefined;
+}
+
+function makeRequestError({
+  title,
+  method,
+  endpoint,
+  response,
+  data,
+}: {
+  title: string;
+  method: "GET" | "PATCH";
+  endpoint: string;
+  response: Response;
+  data: ApiResponse;
+}): RequestError {
+  const isAuthError = response.status === 401 || response.status === 403;
+  const isServerError = response.status >= 500;
+
+  return {
+    title,
+    method,
+    endpoint,
+    status: response.status,
+    statusText: response.statusText,
+    code: data.code,
+    message: getApiMessage(data),
+    details: getApiDetails(data),
+    hint: data.hint,
+    troubleshooting: isAuthError
+      ? [
+          "Your admin session may have expired. Refresh the page and sign in again.",
+          "Check that your account has permission to view or manage lottery winners.",
+        ]
+      : isServerError
+        ? [
+            "This is a server-side error. Check the Next.js terminal logs for this request.",
+            "Check that the winners API route, Supabase connection and lottery tables are available.",
+          ]
+        : [
+            "Check the request data and the API validation rules.",
+            "Use the request details below to find the matching server log entry.",
+          ],
+  };
+}
+
+function makeNetworkError({
+  title,
+  method,
+  endpoint,
+  cause,
+}: {
+  title: string;
+  method: "GET" | "PATCH";
+  endpoint: string;
+  cause: unknown;
+}): RequestError {
+  const message = cause instanceof Error ? cause.message : "Unknown network error";
+
+  return {
+    title,
+    method,
+    endpoint,
+    message,
+    troubleshooting: [
+      "The browser could not complete the request. Check your internet connection and refresh the page.",
+      "Make sure the Next.js development server is running and the API route exists.",
+      "If this continues, check the browser Network tab and the Next.js terminal logs.",
+    ],
+  };
+}
 
 const STATUS_OPTIONS: Array<{
   value: WinnerStatus | "all";
@@ -182,7 +277,14 @@ async function readJson(res: Response): Promise<ApiResponse> {
   try {
     return text ? JSON.parse(text) : { ok: false };
   } catch {
-    return { ok: false, error: "The API returned invalid JSON." };
+    return {
+      ok: false,
+      error: "The API returned invalid JSON.",
+      code: "INVALID_JSON_RESPONSE",
+      details: text
+        ? `Response preview: ${text.slice(0, 500)}`
+        : "The response body was empty.",
+    };
   }
 }
 
@@ -190,7 +292,7 @@ export default function WinnersClient() {
   const [items, setItems] = useState<WinnerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<RequestError | null>(null);
   const [selected, setSelected] = useState<WinnerRecord | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
   const [testMode, setTestMode] = useState(false);
@@ -207,6 +309,8 @@ export default function WinnersClient() {
     contact_outcome: "",
     contact_notes: "",
     public_display_mode: "first_name",
+    public_display_consent: false,
+    publish_to_live_draw: false,
     fulfilment_method: "",
     collection_delivery_date: "",
     fulfilment_notes: "",
@@ -232,14 +336,28 @@ export default function WinnersClient() {
       const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Failed to load winners.",
+        setError(
+          makeRequestError({
+            title: "Could not load winner records",
+            method: "GET",
+            endpoint: API_ROUTE,
+            response: res,
+            data,
+          }),
         );
+        return;
       }
 
       setItems(data.items || []);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load winners.");
+    } catch (err: unknown) {
+      setError(
+        makeNetworkError({
+          title: "Could not load winner records",
+          method: "GET",
+          endpoint: API_ROUTE,
+          cause: err,
+        }),
+      );
     } finally {
       setLoading(false);
     }
@@ -454,6 +572,8 @@ export default function WinnersClient() {
       contact_outcome: "",
       contact_notes: "",
       public_display_mode: item.public_display_mode,
+      public_display_consent: item.public_display_consent,
+      publish_to_live_draw: Boolean(item.public_results_published_at),
       fulfilment_method: item.fulfilment_method || "",
       collection_delivery_date: toLocalInput(item.collection_delivery_date),
       fulfilment_notes: item.fulfilment_notes || "",
@@ -469,6 +589,26 @@ export default function WinnersClient() {
 
     setSaving(true);
     setError(null);
+
+    const nameDisplaySelected = ["full_name", "first_name"].includes(
+      form.public_display_mode,
+    );
+
+    if (nameDisplaySelected && !form.public_display_consent) {
+      setError({
+        title: "Public permission is required",
+        method: "PATCH",
+        endpoint: `${API_ROUTE}/${selected.id}`,
+        message:
+          "You cannot publish a winner's name until you have recorded their permission.",
+        troubleshooting: [
+          "Ask the winner whether they agree to their full name or first name being published.",
+          "Tick the permission box, or choose Ticket number only / Do not show winner identity.",
+        ],
+      });
+      setSaving(false);
+      return;
+    }
 
     const now = new Date().toISOString();
 
@@ -499,6 +639,11 @@ export default function WinnersClient() {
               | "first_name"
               | "ticket_number"
               | "none",
+            public_display_consent: form.public_display_consent,
+            public_results_published_at:
+              form.publish_to_live_draw && form.public_display_mode !== "none"
+                ? item.public_results_published_at || now
+                : null,
             fulfilment_method: form.fulfilment_method.trim() || null,
             collection_delivery_date: form.collection_delivery_date
               ? new Date(form.collection_delivery_date).toISOString()
@@ -552,6 +697,8 @@ export default function WinnersClient() {
         id: selected.id,
         status: form.status,
         public_display_mode: form.public_display_mode,
+        public_display_consent: form.public_display_consent,
+        publish_to_live_draw: form.publish_to_live_draw,
         fulfilment_method: form.fulfilment_method.trim() || null,
         collection_delivery_date: form.collection_delivery_date
           ? new Date(form.collection_delivery_date).toISOString()
@@ -578,16 +725,30 @@ export default function WinnersClient() {
       const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Failed to update winner.",
+        setError(
+          makeRequestError({
+            title: "Could not save winner changes",
+            method: "PATCH",
+            endpoint: `${API_ROUTE}/${selected.id}`,
+            response: res,
+            data,
+          }),
         );
+        return;
       }
 
       setManageOpen(false);
       setSelected(null);
       await loadWinners();
-    } catch (err: any) {
-      setError(err?.message || "Failed to update winner.");
+    } catch (err: unknown) {
+      setError(
+        makeNetworkError({
+          title: "Could not save winner changes",
+          method: "PATCH",
+          endpoint: `${API_ROUTE}/${selected.id}`,
+          cause: err,
+        }),
+      );
     } finally {
       setSaving(false);
     }
@@ -678,9 +839,7 @@ export default function WinnersClient() {
       </section>
 
       {error ? (
-        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
-          {error}
-        </div>
+        <RequestErrorAlert error={error} onRetry={loadWinners} />
       ) : null}
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
@@ -799,6 +958,7 @@ export default function WinnersClient() {
           setForm={setForm}
           saving={saving}
           testMode={testMode}
+          error={error}
           onClose={() => {
             if (!saving) {
               setManageOpen(false);
@@ -809,6 +969,97 @@ export default function WinnersClient() {
         />
       ) : null}
     </div>
+  );
+}
+
+function RequestErrorAlert({
+  error,
+  onRetry,
+  retryLabel = "Try loading winners again",
+}: {
+  error: RequestError;
+  onRetry: () => void;
+  retryLabel?: string;
+}) {
+  return (
+    <section
+      className="rounded-2xl border border-red-400/40 bg-red-500/10 p-5 text-red-100"
+      role="alert"
+      aria-live="assertive"
+    >
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
+
+        <div className="min-w-0 flex-1">
+          <h2 className="font-extrabold">{error.title}</h2>
+          <p className="mt-1 text-sm leading-6 text-red-100/90">
+            {error.message}
+          </p>
+
+          <dl className="mt-4 grid gap-3 rounded-xl border border-red-300/20 bg-black/20 p-4 text-xs sm:grid-cols-2">
+            <div>
+              <dt className="font-bold uppercase tracking-wide text-red-100/60">
+                Request
+              </dt>
+              <dd className="mt-1 break-all font-mono text-red-50">
+                {error.method} {error.endpoint}
+              </dd>
+            </div>
+
+            <div>
+              <dt className="font-bold uppercase tracking-wide text-red-100/60">
+                HTTP status
+              </dt>
+              <dd className="mt-1 font-mono text-red-50">
+                {error.status
+                  ? `${error.status}${error.statusText ? ` ${error.statusText}` : ""}`
+                  : "No HTTP response received"}
+              </dd>
+            </div>
+
+            {error.code ? (
+              <div>
+                <dt className="font-bold uppercase tracking-wide text-red-100/60">
+                  Error code
+                </dt>
+                <dd className="mt-1 break-all font-mono text-red-50">
+                  {error.code}
+                </dd>
+              </div>
+            ) : null}
+
+            {error.details ? (
+              <div className="sm:col-span-2">
+                <dt className="font-bold uppercase tracking-wide text-red-100/60">
+                  Server detail
+                </dt>
+                <dd className="mt-1 whitespace-pre-wrap break-words font-mono text-red-50">
+                  {error.details}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+
+          <div className="mt-4">
+            <h3 className="text-sm font-bold">What to check</h3>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-red-100/85">
+              {error.troubleshooting.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          </div>
+
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-red-200/30 bg-red-950/20 px-4 py-2 text-sm font-bold text-red-50 hover:bg-red-950/40"
+          >
+            <RefreshCw className="h-4 w-4" />
+            {retryLabel}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -859,6 +1110,14 @@ function WinnerRow({
             <Info
               label="Public result"
               value={publicWinnerDisplay(item)}
+            />
+            <Info
+              label="Live Draw page"
+              value={
+                item.public_results_published_at
+                  ? "Published"
+                  : "Not published"
+              }
             />
             <Info
               label="Fulfilment"
@@ -1010,6 +1269,7 @@ function ManageWinnerModal({
   setForm,
   saving,
   testMode,
+  error,
   onClose,
   onSave,
 }: {
@@ -1018,6 +1278,7 @@ function ManageWinnerModal({
   setForm: React.Dispatch<React.SetStateAction<any>>;
   saving: boolean;
   testMode: boolean;
+  error: RequestError | null;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -1031,6 +1292,16 @@ function ManageWinnerModal({
       {testMode ? (
         <div className="mb-5 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
           Test mode — these changes only update the fake records on this page.
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mb-5">
+          <RequestErrorAlert
+            error={error}
+            onRetry={onSave}
+            retryLabel="Try saving winner again"
+          />
         </div>
       ) : null}
 
@@ -1173,6 +1444,46 @@ function ManageWinnerModal({
                 <option value="none">Do not show winner identity</option>
               </select>
             </Field>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/80">
+              <input
+                type="checkbox"
+                checked={form.public_display_consent}
+                onChange={(e) =>
+                  setForm((p: any) => ({
+                    ...p,
+                    public_display_consent: e.target.checked,
+                    public_display_mode: e.target.checked
+                      ? p.public_display_mode
+                      : "none",
+                    publish_to_live_draw: e.target.checked
+                      ? p.publish_to_live_draw
+                      : false,
+                  }))
+                }
+                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-black/30 text-fuchsia-500"
+              />
+              <span>
+                <strong className="block text-white">Winner gave permission to be named publicly</strong>
+                Only tick this when the winner has agreed to the selected name display.
+              </span>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 p-3 text-sm text-white/80">
+              <input
+                type="checkbox"
+                checked={form.publish_to_live_draw}
+                disabled={!form.public_display_consent || form.public_display_mode === "none"}
+                onChange={(e) =>
+                  setForm((p: any) => ({ ...p, publish_to_live_draw: e.target.checked }))
+                }
+                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-black/30 text-fuchsia-500 disabled:opacity-40"
+              />
+              <span>
+                <strong className="block text-white">Publish on the Live Draw page</strong>
+                This publishes only the approved name or ticket number. It never publishes email or phone details.
+              </span>
+            </label>
 
             <Field label="Internal notes">
               <textarea
@@ -1557,6 +1868,8 @@ function makeTestWinner({
       : null,
     internal_notes: null,
     public_display_mode: publicMode,
+    public_display_consent: publicMode !== "none",
+    public_results_published_at: null,
     replacement_winner_id: null,
     original_winner_id: null,
     contact_attempts: attempts,

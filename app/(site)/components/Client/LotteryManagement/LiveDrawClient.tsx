@@ -24,6 +24,11 @@ type LiveDrawResponse = {
     started_at: string | null;
     ended_at: string | null;
   };
+};
+
+type PublishedWinnersResponse = {
+  ok: boolean;
+  error?: string;
   results?: Array<{
     id: string;
     display_order: number;
@@ -63,6 +68,9 @@ function getCountdownParts(drawAt: string | null | undefined, now: number) {
 
 export default function LiveDrawClient({ slug }: { slug: string }) {
   const [data, setData] = useState<LiveDrawResponse | null>(null);
+  const [publishedResults, setPublishedResults] = useState<
+    NonNullable<PublishedWinnersResponse["results"]>
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
@@ -84,7 +92,18 @@ export default function LiveDrawClient({ slug }: { slug: string }) {
         throw new Error(next.error || "Unable to load the live draw.");
       }
 
+      const publishedResponse = await fetch(
+        `/api/lottery/${encodeURIComponent(slug)}/published-winners`,
+        { cache: "no-store" },
+      );
+      const published = (await publishedResponse.json()) as PublishedWinnersResponse;
+
+      if (!publishedResponse.ok || !published.ok) {
+        throw new Error(published.error || "Unable to load published winners.");
+      }
+
       setData(next);
+      setPublishedResults(published.results || []);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load the live draw.");
@@ -200,7 +219,7 @@ export default function LiveDrawClient({ slug }: { slug: string }) {
             <aside className="rounded-[2rem] border border-white/10 bg-[#12131d]/95 p-6 shadow-xl lg:sticky lg:top-24 lg:self-start">
               <div className="flex items-center gap-3"><div className="rounded-2xl bg-gradient-to-br from-yellow-300 to-yellow-500 p-3 text-black shadow-[0_0_24px_rgba(250,204,21,0.22)]"><Trophy className="h-5 w-5" /></div><div><p className="text-xs font-black uppercase tracking-[0.14em] text-yellow-200">Draw results</p><h2 className="text-xl font-black">Winners</h2></div></div>
               <div className="mt-6 space-y-3">
-                {data?.results?.length ? data.results.map((result, index) => (
+                {publishedResults.length ? publishedResults.map((result, index) => (
                   <div key={result.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 transition hover:border-fuchsia-300/30 hover:bg-white/[0.04]"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/15 text-xs font-black text-fuchsia-100">{index + 1}</div><div><p className="text-xs font-bold uppercase tracking-wide text-fuchsia-200">{result.prize_label}</p><p className="mt-1 text-base font-black">{result.winner_display_label}</p></div></div>
                 )) : <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm leading-6 text-white/60"><Trophy className="mb-3 h-5 w-5 text-white/25" />Winners will appear here after their result has been verified and published.</div>}
               </div>

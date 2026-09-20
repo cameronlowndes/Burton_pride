@@ -165,9 +165,8 @@ export default function HomeClient() {
     >
       <div
         className="
-          mx-auto
           w-full
-          max-w-[1600px]
+          max-w-none
           px-3
           py-4
           sm:px-6
@@ -436,10 +435,9 @@ export default function HomeClient() {
 
         <div
           className="
-            mx-auto
             mt-6
             w-full
-            max-w-7xl
+            max-w-none
             space-y-6
             sm:mt-10
             sm:space-y-10
@@ -450,7 +448,9 @@ export default function HomeClient() {
           {/* =====================================================
               DONATION - MOVED NEAR TOP OF HOME PAGE
               ===================================================== */}
-          <motion.section
+          <div className="grid gap-6 sm:gap-8 md:grid-cols-2 md:items-stretch md:gap-8">
+            <motion.section
+            className="h-full"
             variants={fadeUp}
             transition={sectionTransition}
             aria-labelledby="donation-heading"
@@ -458,6 +458,7 @@ export default function HomeClient() {
             <div
               className="
                 relative
+                h-full
                 overflow-hidden
                 rounded-2xl
                 border-2
@@ -483,6 +484,9 @@ export default function HomeClient() {
               <div
                 className="
                   relative
+                  flex
+                  h-full
+                  flex-col
                   rounded-xl
                   border
                   border-white/20
@@ -503,6 +507,7 @@ export default function HomeClient() {
                   className="
                     mb-4
                     inline-flex
+                    self-center
                     rounded-full
                     bg-yellow-300
                     px-4
@@ -755,12 +760,13 @@ export default function HomeClient() {
                 </p>
               </div>
             </div>
-          </motion.section>
+            </motion.section>
 
-          {/* =====================================================
+            {/* =====================================================
               LOTTERY - PROMINENT HOMEPAGE FEATURE
               ===================================================== */}
-          <motion.section
+            <motion.section
+            className="h-full"
             variants={fadeUp}
             transition={sectionTransition}
             aria-labelledby="lottery-heading"
@@ -768,6 +774,7 @@ export default function HomeClient() {
             <div
               className="
                 relative
+                h-full
                 overflow-hidden
                 rounded-2xl
                 border-2
@@ -793,6 +800,9 @@ export default function HomeClient() {
               <div
                 className="
                   relative
+                  flex
+                  h-full
+                  flex-col
                   overflow-hidden
                   rounded-xl
                   border
@@ -813,11 +823,12 @@ export default function HomeClient() {
                 <div className="pointer-events-none absolute -left-20 -top-20 h-64 w-64 rounded-full bg-pink-400/20 blur-3xl" />
                 <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-yellow-300/15 blur-3xl" />
 
-                <div className="relative">
+                <div className="relative flex h-full flex-col justify-center">
                   <p
                     className="
                       mb-4
                       inline-flex
+                      self-center
                       rounded-full
                       bg-yellow-300
                       px-4
@@ -931,7 +942,8 @@ export default function HomeClient() {
                 </div>
               </div>
             </div>
-          </motion.section>
+            </motion.section>
+          </div>
 
           <motion.section
             id="next-event"
@@ -1446,7 +1458,7 @@ export default function HomeClient() {
                   </div>
                 </div>
 
-                <div className="grid gap-3">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div
                     className="
                       rounded-xl
@@ -1775,7 +1787,7 @@ export default function HomeClient() {
           {/* =====================================================
               VOLUNTEER AND COLLABORATE
               ===================================================== */}
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-2">
             <motion.section
               variants={fadeUp}
               transition={sectionTransition}
