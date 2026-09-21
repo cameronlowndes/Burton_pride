@@ -18,6 +18,7 @@ import {
   Heart,
   Loader2,
   LockKeyhole,
+  Radio,
   ShieldCheck,
   ShoppingCart,
   Sparkles,
@@ -820,6 +821,40 @@ export default function LotterySlugClient({
         >
           <Ticket className="h-4 w-4" />
           Terms for this lottery
+        </Link>
+
+        <Link
+          href={`/Lottery/${encodeURIComponent(lottery.slug)}/LiveDraw`}
+          className="
+            inline-flex
+            min-h-11
+            items-center
+            justify-center
+            gap-2
+            rounded-full
+            border
+            border-purple-300
+            bg-purple-50
+            px-4
+            py-2.5
+            text-sm
+            font-black
+            text-purple-800
+            transition
+            hover:border-purple-500
+            hover:bg-purple-100
+            focus-visible:outline-none
+            focus-visible:ring-2
+            focus-visible:ring-purple-600
+            focus-visible:ring-offset-2
+            dark:border-purple-300/30
+            dark:bg-purple-400/10
+            dark:text-purple-100
+            dark:hover:bg-purple-400/20
+          "
+        >
+          <Radio className="h-4 w-4" />
+          Open Live Draw
         </Link>
       </div>
 

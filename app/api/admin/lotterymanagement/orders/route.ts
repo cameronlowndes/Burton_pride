@@ -19,6 +19,10 @@ import {
   supabaseAdmin,
 } from "@/lib/supabase/supabaseAdmin";
 
+import {
+  issueTicketsForPaidOrder,
+} from "@/lib/lottery/secureTicketIssuance";
+
 export const runtime =
   "nodejs";
 
@@ -44,10 +48,6 @@ const LOTTERY_INFO_EMAIL =
 const DELETE_SETTINGS_TABLE =
   "admin_delete_settings";
 
-/*
- * This is the same saved password used by:
- * /api/admin/settings/delete-password
- */
 const MAIN_ADMIN_PASSWORD_ACTION_KEY =
   "delete_all_donations";
 
@@ -95,24 +95,6 @@ function jsonResponse(
   );
 }
 
-/**
- * Reconcile stale pending orders with Stripe before the
- * admin order register is returned.
- *
- * Stripe is checked first. When Stripe confirms a payment is paid,
- * this API finalises the order directly through Supabase:
- *
- * 1. Verifies Stripe says the session is paid.
- * 2. Verifies Stripe metadata belongs to the Supabase order.
- * 3. Verifies the paid amount matches the Supabase order total.
- * 4. Updates lottery_orders.payment_status to "paid".
- * 5. Sets paid_at and keeps the Stripe session reference.
- * 6. Creates missing lottery_tickets directly in Supabase.
- * 7. Sends the customer confirmation through Resend.
- * 8. Sends the internal Burton Pride notification through Resend.
- *
- * There is no server-to-server request to a Vercel deployment.
- */
 async function finaliseStripePaidOrderInSupabase({
   session,
   pendingOrder,
@@ -120,10 +102,6 @@ async function finaliseStripePaidOrderInSupabase({
   session: Stripe.Checkout.Session;
   pendingOrder: PendingOrderForSync;
 }) {
-  /*
-   * Load the complete order directly from Supabase.
-   * No request is made back through Vercel.
-   */
   const {
     data:
       orderData,
@@ -275,10 +253,6 @@ async function finaliseStripePaidOrderInSupabase({
     );
   }
 
-  /*
-   * Claim the pending order directly in Supabase.
-   * The payment status is only changed after Stripe has returned "paid".
-   */
   const paidAt =
     new Date()
       .toISOString();
@@ -327,10 +301,6 @@ async function finaliseStripePaidOrderInSupabase({
     );
   }
 
-  /*
-   * If another request completed it at the same time, verify that
-   * Supabase now says paid and then continue idempotently.
-   */
   if (
     !paidRow
   ) {
@@ -382,11 +352,6 @@ async function finaliseStripePaidOrderInSupabase({
   order.payment_status =
     "paid";
 
-  /*
-   * Create any missing ticket numbers in lottery_tickets.
-   * Existing tickets are reused, so a refresh does not create
-   * a second set of lottery numbers.
-   */
   const {
     tickets,
   } =
@@ -597,11 +562,6 @@ async function reconcilePendingStripeOrders(): Promise<StripeSyncSummary> {
       ),
     );
 
-  /*
-   * Run sequentially instead of starting dozens of Stripe
-   * requests at the same time. The admin register normally has
-   * only a small number of stale pending orders.
-   */
   for (
     const order of
     candidates
@@ -642,10 +602,6 @@ async function reconcilePendingStripeOrders(): Promise<StripeSyncSummary> {
             sessionId,
           );
 
-      /*
-       * A pending or unpaid Stripe session must remain pending
-       * in the Burton Pride system.
-       */
       if (
         session.payment_status !==
         "paid"
@@ -653,10 +609,6 @@ async function reconcilePendingStripeOrders(): Promise<StripeSyncSummary> {
         continue;
       }
 
-      /*
-       * Do quick checks here before asking the finaliser to run.
-       * The finaliser repeats the important checks server-side.
-       */
       if (
         session.metadata?.type !==
           "burton_pride_lottery" ||
@@ -780,11 +732,6 @@ export async function GET(
   request: NextRequest,
 ) {
   try {
-    /*
-     * =====================================================
-     * AUTHENTICATION
-     * =====================================================
-     */
     const authClient =
       await createClient();
 
@@ -813,27 +760,10 @@ export async function GET(
       );
     }
 
-    /*
-     * =====================================================
-     * PAYMENT RECONCILIATION
-     * =====================================================
-     *
-     * If a Stripe test/live payment succeeded but the browser
-     * did not finish the public confirmation request, this
-     * gives the admin register another safe opportunity to
-     * complete the order.
-     */
     const stripeSync =
       await reconcilePendingStripeOrders();
 
-    /*
-     * =====================================================
-     * LOAD ORDERS AFTER STRIPE SYNC
-     * =====================================================
-     *
-     * This query happens AFTER reconciliation so an order that
-     * was just completed will already return payment_status=paid.
-     */
+  
     const {
       data:
         orders,
@@ -930,11 +860,7 @@ export async function GET(
             item.id,
         );
 
-    /*
-     * =====================================================
-     * SUPPORTING DATA
-     * =====================================================
-     */
+
     const [
       lotteriesResult,
       ticketsResult,
@@ -1149,12 +1075,6 @@ export async function GET(
         500,
       );
     }
-
-    /*
-     * =====================================================
-     * LOOKUP MAPS
-     * =====================================================
-     */
     const lotteries =
       new Map(
         (
@@ -1335,11 +1255,6 @@ export async function GET(
       );
     }
 
-    /*
-     * =====================================================
-     * RESPONSE ITEMS
-     * =====================================================
-     */
     const items =
       orderRows.map(
         (
@@ -1418,10 +1333,7 @@ export async function GET(
                 0,
               ),
 
-            /*
-             * payment_status comes directly from lottery_orders
-             * AFTER Stripe reconciliation.
-             */
+      
             payment_status:
               order.payment_status,
 
@@ -1567,11 +1479,6 @@ export async function GET(
         },
       );
 
-    /*
-     * =====================================================
-     * SUCCESS
-     * =====================================================
-     */
     return jsonResponse({
       ok: true,
 
@@ -1857,9 +1764,6 @@ function getRandomUnusedTicketNumber(
     return null;
   }
 
-  // Pick a uniform random position from every unused number and map
-  // it through the gaps between issued numbers. Runtime depends on
-  // issued ticket count, not a maximum range that may exceed 2bn.
   let availableIndex =
     randomInt(
       availableCount,
@@ -2014,10 +1918,6 @@ async function getCurrentMainAdminForManualPayment() {
     };
   }
 
-  /*
-   * admin_users is linked to Supabase Auth through supabase_user_id.
-   * Email is used only as a fallback for older linked admin records.
-   */
   let {
     data:
       adminData,
@@ -2169,12 +2069,6 @@ async function verifyManualPaymentMainAdminPassword(
     };
   }
 
-  /*
-   * This is intentionally the same password record used by
-   * /api/admin/settings/delete-password.
-   *
-   * The password itself is never stored or written to logs.
-   */
   const {
     data:
       setting,
@@ -2338,14 +2232,45 @@ async function createMissingManualPaidTickets(
   order: ManualPaidOrder,
   lottery: ManualPaidLottery,
 ) {
-  const tickets =
+  const previousTickets =
     await loadManualPaidTickets(
       order.id,
     );
 
-  const createdIds:
-    string[] =
-    [];
+  const tickets =
+    await issueTicketsForPaidOrder(
+      {
+        id: order.id,
+        lottery_id: order.lottery_id,
+        quantity: order.quantity,
+        payment_status: "paid",
+      },
+      {
+        id: lottery.id,
+        max_tickets: lottery.max_tickets,
+      },
+    );
+
+  const existingTicketIds =
+    new Set(
+      previousTickets.map(
+        (ticket) =>
+          ticket.id,
+      ),
+    );
+
+  const createdIds: string[] =
+    tickets
+      .filter(
+        (ticket) =>
+          !existingTicketIds.has(
+            ticket.id,
+          ),
+      )
+      .map(
+        (ticket) =>
+          ticket.id,
+      );
 
   const required =
     Math.max(
@@ -2434,10 +2359,8 @@ async function createMissingManualPaidTickets(
           );
 
         const {
-          data:
-            inserted,
-          error:
-            insertError,
+          data: inserted,
+          error: insertError,
         } =
           await supabaseAdmin
             .from(
@@ -2469,11 +2392,14 @@ async function createMissingManualPaidTickets(
           !insertError &&
           inserted
         ) {
-          created =
+          const createdTicket =
             inserted as ManualPaidTicket;
 
+          created =
+            createdTicket;
+
           createdIds.push(
-            created.id,
+            createdTicket.id!,
           );
 
           used.add(
@@ -4388,15 +4314,47 @@ export async function PATCH(
       error,
     );
 
+    const message =
+      error instanceof Error
+        ? error.message
+        : "The protected lottery order action could not be completed.";
+
+    const ticketCapacityError =
+      message.includes(
+        "sold out",
+      ) ||
+      message.includes(
+        "no unique numbers remain",
+      );
+
+    const ticketConstraintError =
+      message.includes(
+        "global ticket_number unique rule",
+      );
+
     return jsonResponse(
       {
         ok:
           false,
 
         error:
-          "The protected lottery order action could not be completed.",
+          ticketConstraintError
+            ? "Ticket issuing is blocked by an old database rule. Run the lottery ticket-number database migration, then try again."
+            : ticketCapacityError
+            ? "No unique ticket numbers remain for this lottery. Increase its ticket range or close ticket sales."
+            : "The protected lottery order action could not be completed.",
+
+        code:
+          ticketConstraintError
+            ? "ticket_number_constraint_needs_migration"
+            : ticketCapacityError
+            ? "ticket_number_unavailable"
+            : "protected_order_action_failed",
       },
-      500,
+      ticketConstraintError ||
+      ticketCapacityError
+        ? 409
+        : 500,
     );
   }
 }

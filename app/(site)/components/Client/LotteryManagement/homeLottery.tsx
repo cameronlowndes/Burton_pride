@@ -8,6 +8,7 @@ import {
   Gift,
   Heart,
   Loader2,
+  Radio,
   ShieldCheck,
   Sparkles,
   Ticket,
@@ -1034,36 +1035,74 @@ function LotteryCardComponent({
           </div>
         )}
 
-        <Link
-          href={`/Lottery/${lottery.slug}`}
-          className="
-            mt-6
-            inline-flex
-            min-h-12
-            w-full
-            items-center
-            justify-center
-            gap-2
-            rounded-full
-            bg-yellow-300
-            px-5
-            py-3
-            text-sm
-            font-black
-            text-purple-950
-            shadow-lg
-            transition
-            hover:scale-[1.02]
-            hover:bg-yellow-200
-            dark:hover:bg-white
-          "
-        >
-          {getButtonText(
-            lottery.status,
-          )}
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <Link
+            href={`/Lottery/${lottery.slug}`}
+            className="
+              inline-flex
+              min-h-12
+              items-center
+              justify-center
+              gap-2
+              rounded-full
+              bg-yellow-300
+              px-5
+              py-3
+              text-sm
+              font-black
+              text-purple-950
+              shadow-lg
+              transition
+              hover:scale-[1.02]
+              hover:bg-yellow-200
+              focus-visible:outline-none
+              focus-visible:ring-2
+              focus-visible:ring-purple-600
+              focus-visible:ring-offset-2
+              dark:hover:bg-white
+            "
+          >
+            {getButtonText(
+              lottery.status,
+            )}
 
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+
+          <Link
+            href={`/Lottery/${lottery.slug}/LiveDraw`}
+            className="
+              inline-flex
+              min-h-12
+              items-center
+              justify-center
+              gap-2
+              rounded-full
+              border
+              border-purple-300
+              bg-purple-50
+              px-5
+              py-3
+              text-sm
+              font-black
+              text-purple-800
+              transition
+              hover:border-purple-500
+              hover:bg-purple-100
+              focus-visible:outline-none
+              focus-visible:ring-2
+              focus-visible:ring-purple-600
+              focus-visible:ring-offset-2
+              dark:border-purple-300/30
+              dark:bg-purple-400/10
+              dark:text-purple-100
+              dark:hover:bg-purple-400/20
+            "
+          >
+            <Radio className="h-4 w-4" />
+            Open Live Draw
+          </Link>
+        </div>
       </div>
     </article>
   );

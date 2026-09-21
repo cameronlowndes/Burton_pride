@@ -19,6 +19,10 @@ import {
   supabaseAdmin,
 } from "@/lib/supabase/supabaseAdmin";
 
+import {
+  issueTicketsForPaidOrder,
+} from "@/lib/lottery/secureTicketIssuance";
+
 export const runtime =
   "nodejs";
 
@@ -409,7 +413,7 @@ function parseNumericTicketNumber(
     ).trim();
 
   if (
-    !/^[1-9][0-9]*$/.test(
+    !/^[0-9]+$/.test(
       text,
     )
   ) {
@@ -421,11 +425,37 @@ function parseNumericTicketNumber(
       text,
     );
 
-  return Number.isSafeInteger(
-    number,
+  return (
+    Number.isSafeInteger(
+      number,
+    ) &&
+    number >= 1
   )
     ? number
     : null;
+}
+
+function formatRandomTicketNumber(
+  ticketNumber: number,
+  maxTickets: number,
+) {
+  // A fixed width makes a ticket a proper reference such as 004218,
+  // rather than displaying as "1", "2", "3". The underlying number is
+  // still allocated with crypto.randomInt below, not in issue order.
+  const width =
+    Math.max(
+      4,
+      String(
+        maxTickets,
+      ).length,
+    );
+
+  return String(
+    ticketNumber,
+  ).padStart(
+    width,
+    "0",
+  );
 }
 
 async function getUsedNumericTicketNumbers(
@@ -1017,8 +1047,9 @@ async function issueLotteryTickets(
       }
 
       const ticketNumber =
-        String(
+        formatRandomTicketNumber(
           nextNumber,
+          maxTickets,
         );
 
       const {
@@ -1872,11 +1903,14 @@ async function completePaidLotteryCheckout(
   order.payment_reference =
     session.id;
 
+  // Checkout and Lottery Management both use the same server-side allocator.
+  // Never generate ticket numbers in browser code or before Stripe confirms
+  // that this order is paid.
   const tickets =
-    await issueLotteryTickets(
-        order,
-        lottery,
-      );
+    await issueTicketsForPaidOrder(
+      order,
+      lottery,
+    );
 
   const emailResults =
     await sendPaidEntryEmails({
