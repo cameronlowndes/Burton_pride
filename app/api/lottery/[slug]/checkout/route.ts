@@ -1862,68 +1862,32 @@ async function completePaidLotteryCheckout(
     );
   }
 
-  const paidAt =
-    new Date()
-      .toISOString();
+  // The Stripe webhook owns payment reconciliation, ticket issuance and email.
+  // This GET route is read-only; revisiting the success page cannot send again.
+  const { data: ticketRows, error: ticketError } = await supabaseAdmin
+    .from("lottery_tickets")
+    .select("id,ticket_number,status,issued_at")
+    .eq("order_id", order.id)
+    .order("issued_at", { ascending: true });
 
-  const {
-    error:
-      paymentUpdateError,
-  } =
-    await supabaseAdmin
-      .from(
-        "lottery_orders",
-      )
-      .update({
-        payment_status:
-          "paid",
-
-        payment_reference:
-          session.id,
-
-        paid_at:
-          paidAt,
-      })
-      .eq(
-        "id",
-        order.id,
-      );
-
-  if (
-    paymentUpdateError
-  ) {
-    throw new Error(
-      `Unable to mark the lottery order as paid: ${paymentUpdateError.message}`,
-    );
+  if (ticketError) {
+    throw new Error(`Unable to load order tickets: ${ticketError.message}`);
   }
 
-  order.payment_status =
-    "paid";
-
-  order.payment_reference =
-    session.id;
-
-  // Checkout and Lottery Management both use the same server-side allocator.
-  // Never generate ticket numbers in browser code or before Stripe confirms
-  // that this order is paid.
-  const tickets =
-    await issueTicketsForPaidOrder(
-      order,
-      lottery,
-    );
-
-  const emailResults =
-    await sendPaidEntryEmails({
-      order,
-      lottery,
-      tickets,
-    });
+  const tickets = (ticketRows ?? []) as TicketForEmail[];
+  const customerSent = await notificationAlreadySent(
+    order.id,
+    "paid_entry_customer_confirmation",
+    order.purchaser_email,
+  );
 
   return {
     order,
     lottery,
     tickets,
-    emailResults,
+    emailResults: {
+      customer: customerSent ? "sent" : "pending",
+    },
   };
 }
 
@@ -2026,18 +1990,17 @@ export async function GET(
       );
 
     const customerEmailStatus =
-      completion
-        .emailResults
-        .customer ===
-        "failed"
-        ? "failed"
-        : "sent";
+      completion.emailResults.customer;
 
     if (wantsJson) {
       return response({
         ok: true,
         payment_status:
-          "paid",
+          session.payment_status,
+        fulfilment_status:
+          completion.tickets.length === Number(completion.order.quantity)
+            ? "issued"
+            : "processing",
         order_reference:
           completion
             .order
@@ -2052,7 +2015,9 @@ export async function GET(
     }
     successPage.searchParams.set(
       "payment",
-      "success",
+      completion.tickets.length === Number(completion.order.quantity)
+        ? "success"
+        : "processing",
     );
 
     successPage.searchParams.set(

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   ChevronDown,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  X,
   XCircle,
 } from "lucide-react";
 
@@ -51,6 +53,14 @@ type ApiResponse = {
   error?: string;
 };
 
+type AcceptanceGroup = {
+  orderId: string;
+  order: AcceptanceOrder | null;
+  lottery: AcceptanceLottery | null;
+  records: AcceptanceRecord[];
+  latestAt: string;
+};
+
 const API_ROUTE = "/api/admin/lotterymanagement/acceptances";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -81,6 +91,10 @@ export default function AcceptancesClient() {
   const [type, setType] = useState("all");
   const [choice, setChoice] = useState("all");
   const [exporting, setExporting] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   async function loadRecords() {
     setLoading(true);
@@ -111,6 +125,7 @@ export default function AcceptancesClient() {
 
   useEffect(() => {
     loadRecords();
+    setMounted(true);
   }, []);
 
   const filtered = useMemo(() => {
@@ -134,6 +149,43 @@ export default function AcceptancesClient() {
       return matchesSearch && matchesType && matchesChoice;
     });
   }, [items, search, type, choice]);
+
+  // Filters decide which orders appear; opening one shows its complete record.
+  const groups = useMemo(() => {
+    const byOrder = new Map<string, AcceptanceGroup>();
+    for (const item of items) {
+      const group = byOrder.get(item.order_id) ?? {
+        orderId: item.order_id,
+        order: item.order,
+        lottery: item.lottery,
+        records: [],
+        latestAt: item.accepted_at,
+      };
+      group.records.push(item);
+      group.order ??= item.order;
+      group.lottery ??= item.lottery;
+      if (item.accepted_at > group.latestAt) group.latestAt = item.accepted_at;
+      byOrder.set(item.order_id, group);
+    }
+    return [...byOrder.values()].sort((a, b) => b.latestAt.localeCompare(a.latestAt));
+  }, [items]);
+
+  const matchingOrderIds = useMemo(
+    () => new Set(filtered.map((item) => item.order_id)),
+    [filtered],
+  );
+  const visibleGroups = groups.filter((group) => matchingOrderIds.has(group.orderId));
+  const selectedGroup = groups.find((group) => group.orderId === selectedOrderId);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (selectedOrderId && dialog && !dialog.open) dialog.showModal();
+  }, [selectedOrderId, mounted]);
+
+  function openOrder(orderId: string, trigger: HTMLTableRowElement) {
+    triggerRef.current = trigger.querySelector("button");
+    setSelectedOrderId(orderId);
+  }
 
   const orderCount = new Set(items.map((item) => item.order_id)).size;
   const marketingYes = items.filter(
@@ -559,15 +611,22 @@ export default function AcceptancesClient() {
         </section>
 
         <section className="grid gap-3 rounded-3xl border border-white/10 bg-white/[0.07] p-4 backdrop-blur-xl md:grid-cols-[minmax(0,1fr)_260px_220px]">
-          <label className="relative">
+          <div className="relative">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
             <input
+              aria-label="Search declarations by order, purchaser, email or lottery"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search order, purchaser, email or lottery..."
-              className="h-12 w-full rounded-2xl border border-white/10 bg-black/20 pl-11 pr-4 text-white outline-none placeholder:text-white/30 focus:border-purple-400/60"
+              className="h-12 w-full rounded-2xl border border-white/10 bg-black/20 pl-11 pr-12 text-white outline-none placeholder:text-white/30 focus:border-purple-400/60 focus-visible:ring-2 focus-visible:ring-purple-400"
             />
-          </label>
+            {search ? (
+              <button type="button" aria-label="Clear search" onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400">
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
           <Select value={type} onChange={setType}>
             <option value="all">All declaration types</option>
             {Object.entries(TYPE_LABELS).map(([value, label]) => (
@@ -593,7 +652,7 @@ export default function AcceptancesClient() {
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               Loading declaration records...
             </div>
-          ) : !filtered.length ? (
+          ) : !visibleGroups.length ? (
             <div className="p-10 text-center">
               <FileCheck2 className="mx-auto h-9 w-9 text-white/30" />
               <h2 className="mt-3 font-black">No declaration records found</h2>
@@ -603,59 +662,139 @@ export default function AcceptancesClient() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-[1150px] w-full text-left text-sm">
+              <table className="min-w-[740px] w-full text-left text-sm">
                 <thead className="border-b border-white/10 bg-black/20 text-xs uppercase tracking-wide text-white/45">
                   <tr>
-                    <th className="px-5 py-4">Recorded</th>
-                    <th className="px-5 py-4">Order &amp; purchaser</th>
-                    <th className="px-5 py-4">Lottery</th>
-                    <th className="px-5 py-4">Declaration</th>
-                    <th className="px-5 py-4">Choice</th>
-                    <th className="px-5 py-4">Version</th>
-                    <th className="px-5 py-4">Payment</th>
-                    <th className="px-5 py-4">IP address</th>
+                    <th scope="col" className="px-5 py-4">Order &amp; purchaser</th>
+                    <th scope="col" className="px-5 py-4">Recorded</th>
+                    <th scope="col" className="px-5 py-4">Declarations</th>
+                    <th scope="col" className="px-5 py-4">Marketing</th>
+                    <th scope="col" className="px-5 py-4">Payment</th>
+                    <th scope="col" className="px-5 py-4">Lottery</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
-                  {filtered.map((item) => (
-                    <tr key={item.id} className="hover:bg-white/[0.04]">
-                      <td className="whitespace-nowrap px-5 py-4 text-white/65">
-                        {formatDate(item.accepted_at)}
-                      </td>
+                  {visibleGroups.map((group) => {
+                    const marketing = [...group.records].reverse().find((item) => item.acceptance_type === "marketing_opt_in");
+                    return (
+                    <tr key={group.orderId}
+                      onClick={(event) => openOrder(group.orderId, event.currentTarget)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openOrder(group.orderId, event.currentTarget);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`Open declarations for order ${group.order?.order_reference || group.orderId}`}
+                      className="cursor-pointer hover:bg-white/[0.08] focus-visible:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400">
                       <td className="px-5 py-4">
-                        <div className="font-black">{item.order?.order_reference || item.order_id}</div>
-                        <div className="mt-1 text-white/55">{item.order?.purchaser_name || "Not provided"}</div>
-                        <div className="text-xs text-white/40">{item.order?.purchaser_email || "Not provided"}</div>
+                        <button type="button" onClick={(event) => {
+                          event.stopPropagation();
+                          triggerRef.current = event.currentTarget;
+                          setSelectedOrderId(group.orderId);
+                        }} className="rounded-md text-left font-black text-purple-200 underline underline-offset-4 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-purple-400"
+                          aria-label={`Open declarations for order ${group.order?.order_reference || group.orderId}`}>
+                          {group.order?.order_reference || group.orderId}
+                        </button>
+                        <div className="mt-1 text-white/65">{group.order?.purchaser_name || "Not provided"}</div>
+                        <div className="text-xs text-white/45">{group.order?.purchaser_email || "Not provided"}</div>
                       </td>
-                      <td className="px-5 py-4 font-semibold text-white/75">
-                        {item.lottery?.title || item.lottery_id}
-                      </td>
-                      <td className="px-5 py-4 font-semibold">
-                        {typeLabel(item.acceptance_type)}
-                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-white/65">{formatDate(group.latestAt)}</td>
+                      <td className="px-5 py-4 text-white/75">{group.records.length} recorded <span className="ml-1 text-xs font-bold text-purple-300">View details</span></td>
                       <td className="px-5 py-4">
                         <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-black ${
-                          item.accepted
+                          marketing?.accepted
                             ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
                             : "border-slate-400/20 bg-white/5 text-white/55"
                         }`}>
-                          {item.accepted ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                          {item.accepted ? "Yes" : "No"}
+                          {marketing ? (marketing.accepted ? "Opted in" : "Declined") : "Not recorded"}
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-white/55">{item.version || "Not recorded"}</td>
-                      <td className="px-5 py-4 capitalize text-white/65">{item.order?.payment_status || "Unknown"}</td>
-                      <td className="px-5 py-4 font-mono text-xs text-white/45">{item.ip_address || "Not available"}</td>
+                      <td className="px-5 py-4 capitalize text-white/65">{group.order?.payment_status || "Unknown"}</td>
+                      <td className="px-5 py-4 font-semibold text-white/75">{group.lottery?.title || group.records[0]?.lottery_id}</td>
                     </tr>
-                  ))}
+                  );})}
                 </tbody>
               </table>
             </div>
           )}
         </section>
+
+        {mounted && selectedGroup ? createPortal(
+          <dialog ref={dialogRef} aria-labelledby="acceptance-dialog-title"
+            onClose={() => {
+              setSelectedOrderId(null);
+              triggerRef.current?.focus();
+            }}
+            onClick={(event) => {
+              if (event.target === dialogRef.current) dialogRef.current.close();
+            }}
+            className="fixed left-1/2 top-1/2 m-0 max-h-[min(90dvh,850px)] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-white/15 bg-[#151d2a] p-0 text-white shadow-2xl backdrop:bg-slate-950/80">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/10 bg-[#151d2a] px-5 py-5 sm:px-7">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.16em] text-purple-300">Order declarations</div>
+                <h2 id="acceptance-dialog-title" className="mt-1 break-all text-xl font-black sm:text-2xl">
+                  {selectedGroup.order?.order_reference || selectedGroup.orderId}
+                </h2>
+              </div>
+              <button type="button" aria-label="Close order details" onClick={() => dialogRef.current?.close()}
+                className="rounded-xl border border-white/15 p-2.5 text-white/75 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-6 px-5 py-6 sm:px-7">
+              <dl className="grid gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-5 sm:grid-cols-2">
+                <Detail label="Purchaser" value={selectedGroup.order?.purchaser_name || "Not provided"} />
+                <div>
+                  <dt className="text-xs font-bold uppercase tracking-wide text-white/45">Email</dt>
+                  <dd className="mt-1 break-all font-semibold">
+                    {selectedGroup.order?.purchaser_email ? (
+                      <a className="text-purple-200 underline underline-offset-4 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-400"
+                        href={`mailto:${selectedGroup.order.purchaser_email}`}>{selectedGroup.order.purchaser_email}</a>
+                    ) : "Not provided"}
+                  </dd>
+                </div>
+                <Detail label="Lottery" value={selectedGroup.lottery?.title || selectedGroup.records[0]?.lottery_id || "Unknown"} />
+                <Detail label="Payment" value={selectedGroup.order?.payment_status || "Unknown"} />
+                <Detail label="Tickets" value={String(selectedGroup.order?.quantity ?? "Not recorded")} />
+                <Detail label="Latest record" value={formatDate(selectedGroup.latestAt)} />
+              </dl>
+              <section aria-label="Recorded declarations">
+                <h3 className="mb-3 text-lg font-black">All recorded choices ({selectedGroup.records.length})</h3>
+                <div className="space-y-3">
+                  {[...selectedGroup.records].sort((a, b) => a.accepted_at.localeCompare(b.accepted_at)).map((item) => (
+                    <div key={item.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="font-bold">{typeLabel(item.acceptance_type)}</h4>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${item.accepted
+                          ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-400/20 bg-white/5 text-white/65"}`}>
+                          {item.accepted ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                          {item.accepted ? "Yes" : "No"}
+                        </span>
+                      </div>
+                      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                        <Detail label="Recorded" value={formatDate(item.accepted_at)} />
+                        <Detail label="Version / response" value={item.version || "Not recorded"} />
+                        <Detail label="IP address" value={item.ip_address || "Not available"} />
+                      </dl>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </dialog>, document.body
+        ) : null}
       </div>
     </main>
   );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return <div><dt className="text-xs font-bold uppercase tracking-wide text-white/45">{label}</dt>
+    <dd className="mt-1 break-words text-sm font-semibold text-white/90">{value}</dd></div>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

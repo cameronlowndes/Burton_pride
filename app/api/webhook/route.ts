@@ -1,8 +1,10 @@
 import Stripe from "stripe";
+import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { issueTicketsForPaidOrder } from "@/lib/lottery/secureTicketIssuance";
 
 export const runtime = "nodejs";
 
@@ -102,6 +104,7 @@ type LotteryForWebhook = {
   title: string;
   slug: string;
   draw_at: string | null;
+  max_tickets: number | null;
 };
 
 type LotteryIssuedTicket = {
@@ -141,23 +144,6 @@ function formatLotteryDateTime(value: string | null) {
     minute: "2-digit",
     timeZone: "Europe/London",
   });
-}
-
-function createLotteryTicketNumberForSlot(
-  order: LotteryPaidOrder,
-  slot: number
-) {
-  const yearMatch = String(order.order_reference || "").match(/LOT-(\d{4})-/i);
-  const year = yearMatch?.[1] || String(new Date().getFullYear());
-
-  const orderPart = String(order.order_reference || order.id)
-    .replace(/^LOT-\d{4}-/i, "")
-    .replace(/[^A-Z0-9]/gi, "")
-    .toUpperCase()
-    .slice(-10)
-    .padStart(10, "0");
-
-  return `BP-${year}-${orderPart}-${String(slot).padStart(3, "0")}`;
 }
 
 async function lotteryNotificationAlreadySent(
@@ -212,87 +198,6 @@ async function recordLotteryWebhookNotification({
   }
 }
 
-async function loadLotteryTicketsForOrder(orderId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("lottery_tickets")
-    .select("id,ticket_number,status,issued_at")
-    .eq("order_id", orderId)
-    .order("issued_at", { ascending: true });
-
-  if (error) {
-    throw new Error(`Unable to load lottery tickets: ${error.message}`);
-  }
-
-  return (data || []) as LotteryIssuedTicket[];
-}
-
-async function issueMissingLotteryTickets(order: LotteryPaidOrder) {
-  const quantity = Math.max(0, Math.floor(Number(order.quantity || 0)));
-
-  if (quantity < 1) {
-    throw new Error("Lottery order has an invalid ticket quantity.");
-  }
-
-  let tickets = await loadLotteryTicketsForOrder(order.id);
-
-  if (tickets.length > quantity) {
-    throw new Error(
-      `Lottery reconciliation failed: order ${order.order_reference} has ${tickets.length} ticket records but quantity is ${quantity}.`
-    );
-  }
-
-  /*
-   * Ticket numbers are deterministic per order/slot. This makes webhook
-   * retries idempotent when lottery_tickets(lottery_id, ticket_number)
-   * has the required unique constraint.
-   */
-  for (let slot = tickets.length + 1; slot <= quantity; slot += 1) {
-    const ticketNumber = createLotteryTicketNumberForSlot(order, slot);
-
-    const { data: insertedTicket, error: insertError } = await supabaseAdmin
-      .from("lottery_tickets")
-      .insert({
-        lottery_id: order.lottery_id,
-        order_id: order.id,
-        ticket_number: ticketNumber,
-        status: "issued",
-        issued_at: new Date().toISOString(),
-      })
-      .select("id,ticket_number,status,issued_at")
-      .single();
-
-    if (!insertError && insertedTicket) {
-      tickets.push(insertedTicket as LotteryIssuedTicket);
-      continue;
-    }
-
-    if (insertError?.code === "23505") {
-      // A duplicate delivery/race may have created this exact slot already.
-      tickets = await loadLotteryTicketsForOrder(order.id);
-
-      if (tickets.length >= slot) {
-        continue;
-      }
-    }
-
-    throw new Error(
-      `Unable to issue lottery ticket ${ticketNumber}: ${
-        insertError?.message || "Unknown database error"
-      }`
-    );
-  }
-
-  tickets = await loadLotteryTicketsForOrder(order.id);
-
-  if (tickets.length !== quantity) {
-    throw new Error(
-      `Lottery reconciliation failed: expected ${quantity} tickets but found ${tickets.length}.`
-    );
-  }
-
-  return tickets;
-}
-
 function lotteryTicketNumbersHtml(tickets: LotteryIssuedTicket[]) {
   return tickets
     .map(
@@ -314,11 +219,13 @@ async function sendLotteryWebhookEmail({
   subject,
   html,
   text,
+  idempotencyKey,
 }: {
   to: string;
   subject: string;
   html: string;
   text: string;
+  idempotencyKey: string;
 }) {
   if (!process.env.RESEND_API_KEY) {
     throw new Error("RESEND_API_KEY is not configured.");
@@ -331,7 +238,7 @@ async function sendLotteryWebhookEmail({
     subject,
     html,
     text,
-  });
+  }, { idempotencyKey });
 
   if (error) {
     throw new Error(error.message || "Resend rejected the lottery email.");
@@ -370,6 +277,9 @@ async function sendLotteryPaidEmails({
       try {
         await sendLotteryWebhookEmail({
           to: customerEmail,
+          idempotencyKey: createHash("sha256")
+            .update(`${order.id}:${customerType}:${customerEmail}`)
+            .digest("hex"),
           subject: `Your ${lottery.title} lottery number${
             tickets.length === 1 ? "" : "s"
           }`,
@@ -478,6 +388,9 @@ async function sendLotteryPaidEmails({
     try {
       await sendLotteryWebhookEmail({
         to: recipient,
+        idempotencyKey: createHash("sha256")
+          .update(`${order.id}:${internalType}:${recipient.toLowerCase()}`)
+          .digest("hex"),
         subject: `New lottery entry: ${order.purchaser_name} - ${lottery.title}`,
         html: `
           <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.7;color:#111827;max-width:700px;margin:0 auto;">
@@ -634,7 +547,7 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
 
   const { data: lotteryData, error: lotteryError } = await supabaseAdmin
     .from("lotteries")
-    .select("id,title,slug,draw_at")
+    .select("id,title,slug,draw_at,max_tickets")
     .eq("id", order.lottery_id)
     .single();
 
@@ -674,9 +587,33 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
   order.payment_reference = session.id;
   order.paid_at = paidAt;
 
+  // Record whether another path got here first. The shared allocator is
+  // idempotent and will return existing numbers without replacing them.
+  const { data: beforeTickets, error: beforeTicketsError } = await supabaseAdmin
+    .from("lottery_tickets")
+    .select("id,ticket_number")
+    .eq("order_id", order.id);
+  if (beforeTicketsError) {
+    throw new Error(`Could not inspect tickets before issuance: ${beforeTicketsError.message}`);
+  }
+  console.info("LOTTERY_RANDOM_ALLOCATOR_V3 before", {
+    orderId: order.id,
+    existingNumbers: (beforeTickets ?? []).map((ticket) => ticket.ticket_number),
+  });
+
   // IMPORTANT: payment is confirmed before ticket allocation.
   // If allocation fails, throw so Stripe retries the webhook safely.
-  const tickets = await issueMissingLotteryTickets(order);
+  const tickets = await issueTicketsForPaidOrder(order, lottery);
+  console.info("LOTTERY_RANDOM_ALLOCATOR_V3 after", {
+    orderId: order.id,
+    issuedNumbers: tickets.map((ticket) => ticket.ticket_number),
+  });
+
+  if (tickets.length !== Number(order.quantity)) {
+    throw new Error(
+      `Lottery reconciliation failed: expected ${order.quantity} tickets but found ${tickets.length}.`
+    );
+  }
 
   console.log("Lottery order reconciled and tickets issued:", {
     orderId: order.id,
