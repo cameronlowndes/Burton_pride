@@ -1416,6 +1416,55 @@ export async function PATCH(
     }
 
     /*
+     * Eligibility and legal text fields on the lottery edit page.
+     * A blank value clears the field; an omitted field is left unchanged.
+     */
+    const optionalTextFields = [
+      "geographic_eligibility",
+      "terms_version",
+      "privacy_notice_version",
+      "responsible_gambling_info",
+    ] as const;
+
+    for (const field of optionalTextFields) {
+      if (body[field] === undefined) continue;
+      if (body[field] !== null && typeof body[field] !== "string") {
+        return response(
+          {
+            ok: false,
+            code: "LOTTERY_INVALID_TEXT_FIELD",
+            error: `${field} must be text or null.`,
+            request_id: requestId,
+            details: { field },
+          },
+          400,
+        );
+      }
+      update[field] = (body[field] as string | null)?.trim() || null;
+    }
+
+    if (body.winner_display_mode !== undefined) {
+      const mode = body.winner_display_mode;
+      if (
+        mode !== "full_name" &&
+        mode !== "first_name" &&
+        mode !== "ticket_number" &&
+        mode !== "none"
+      ) {
+        return response(
+          {
+            ok: false,
+            code: "LOTTERY_INVALID_WINNER_DISPLAY_MODE",
+            error: "Select a valid winner display mode.",
+            request_id: requestId,
+          },
+          400,
+        );
+      }
+      update.winner_display_mode = mode;
+    }
+
+    /*
      * =====================================================
      * DATE FIELDS
      * =====================================================

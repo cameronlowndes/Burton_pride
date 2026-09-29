@@ -251,7 +251,7 @@ export default function CreateLotteryModal({
           ticket_price: Number(createForm.ticket_price),
           currency: createForm.currency,
           max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
-          paper_tickets_enabled: createForm.paper_tickets_enabled,
+          paper_tickets_enabled: false,
           paper_ticket_count: 0,
           minimum_age: REQUIRED_MINIMUM_AGE,
           sales_open_at: createForm.sales_open_at || null,
@@ -277,7 +277,7 @@ export default function CreateLotteryModal({
         ticket_price: Number(createForm.ticket_price),
         minimum_age: REQUIRED_MINIMUM_AGE,
         max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
-        paper_tickets_enabled: createForm.paper_tickets_enabled,
+        paper_tickets_enabled: false,
         paper_ticket_start_number: null,
         paper_ticket_count: 0,
         maximum_proceeds: createForm.maximum_proceeds ? Number(createForm.maximum_proceeds) : null,
@@ -565,7 +565,7 @@ export default function CreateLotteryModal({
 
                   <Field
                     label="Maximum total entries"
-                    hint="Optional capacity across online and sold paper tickets. This is a quantity, not the highest ticket number."
+                    hint="Optional capacity for ticket entries. Enter a quantity, not a ticket number."
                   >
                     <input
                       type="number"
@@ -577,34 +577,17 @@ export default function CreateLotteryModal({
                     />
                   </Field>
 
-                  <ToggleField
-                    label="This lottery will use paper tickets"
-                    checked={createForm.paper_tickets_enabled}
-                    onChange={(value) =>
-                      updateCreateField("paper_tickets_enabled", value)
-                    }
-                  />
-
-                  {createForm.paper_tickets_enabled ? (
-                    <div className="md:col-span-2 rounded-2xl border border-blue-400/25 bg-blue-500/10 p-4">
-                      <div className="flex items-start gap-3">
-                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-200" />
-                        <div>
-                          <h3 className="font-extrabold text-blue-100">
-                            Generate the paper tickets after creating this draft
-                          </h3>
-                          <p className="mt-1 text-sm leading-6 text-blue-100/75">
-                            This option enables paper ticketing but does not
-                            create or reserve numbered tickets. After the lottery
-                            is created, open Paper Tickets and generate a secure
-                            print batch. The server will create random ticket
-                            numbers, UUIDs and barcode tokens and check the
-                            maximum total entry limit before creating the batch.
-                          </p>
-                        </div>
-                      </div>
+                  <div className="md:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-4" role="status">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-bold text-white">Paper tickets</h3>
+                      <span className="rounded-full border border-white/20 px-3 py-1 text-xs font-bold text-white/80">
+                        Coming soon
+                      </span>
                     </div>
-                  ) : null}
+                    <p className="mt-2 text-sm leading-6 text-white/65">
+                      Paper ticket features will come soon. New lotteries use online tickets for now.
+                    </p>
+                  </div>
 
                   <Field label="Minimum participant age">
                     <div className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3">

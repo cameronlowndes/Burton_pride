@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
   AlertTriangle,
   Barcode,
@@ -20,10 +20,18 @@ import {
   Beaker,
 } from "lucide-react";
 
-import OrderDetailsModal, {
-  type OrderRecord,
-} from "./TicketsDetailsModal";
-import PaperTicketRegistrationModal from "./PaperTicketRegistrationModal";
+
+
+type OrderRecord = any;
+
+type OrderDetailsModalProps = {
+  order: OrderRecord;
+  onClose: () => void;
+  onMarkPaid?: () => void;
+  onIssueMissingTickets?: () => void;
+  onEdit?: () => void;
+};
+
 
 type TicketStatus = "reserved" | "issued" | "void" | "refunded" | "winner";
 
@@ -141,7 +149,6 @@ export default function TicketsClient() {
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
-  const [paperTicketModalOpen, setPaperTicketModalOpen] = useState(false);
   const [testMode, setTestMode] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -401,7 +408,6 @@ export default function TicketsClient() {
     setSelected(null);
     setSelectedOrder(null);
     setOrderError(null);
-    setPaperTicketModalOpen(false);
     setError(null);
     setSearch("");
     setStatus("all");
@@ -419,38 +425,16 @@ export default function TicketsClient() {
     setOrderError(null);
 
     try {
-      const [res, paperRes] = await Promise.all([
-        fetch(API_ROUTE, {
-          cache: "no-store",
-          credentials: "include",
-        }),
-        fetch("/api/admin/lotterymanagement/tickets/paper", {
-          cache: "no-store",
-          credentials: "include",
-        }),
-      ]);
-
-      const [data, paperData] = await Promise.all([
-        readJson(res),
-        readJson(paperRes),
-      ]);
-
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || data.message || "Failed to load tickets.");
-      }
-      if (!paperRes.ok || !paperData.ok) {
-        throw new Error(
-          paperData.error ||
-            paperData.message ||
-            "Failed to load paper tickets.",
-        );
-      }
-
-      const combined = new Map<string, TicketRecord>();
-      for (const ticket of data.items || []) combined.set(ticket.id, ticket);
-      for (const ticket of paperData.items || []) combined.set(ticket.id, ticket);
-      setItems(Array.from(combined.values()));
-    } catch (err: any) {
+      const res = await fetch(API_ROUTE, {
+      cache: "no-store",
+      credentials: "include",
+    });
+    const data = await readJson(res);
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || data.message || "Failed to load tickets.");
+    }
+    setItems(data.items || []);
+  } catch (err: any) {
       setError(err?.message || "Failed to load tickets.");
     } finally {
       setLoading(false);
@@ -582,17 +566,6 @@ export default function TicketsClient() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => setPaperTicketModalOpen(true)}
-              disabled={testMode}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-5 py-3 text-sm font-extrabold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-              title={testMode ? "Exit test mode before registering real paper tickets." : undefined}
-            >
-              <Barcode className="h-4 w-4" />
-              Register paper tickets
-            </button>
-
-            <button
-              type="button"
               onClick={startFullFeatureTest}
               className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
             >
@@ -612,6 +585,10 @@ export default function TicketsClient() {
           </div>
         </div>
       </section>
+
+      <div className="rounded-2xl border border-purple-400/20 bg-purple-500/10 p-4 text-sm text-purple-100" role="status">
+        Paper ticket features are coming soon. The ticket register shows available online ticket records.
+      </div>
 
       {testMode ? (
         <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
@@ -751,17 +728,6 @@ export default function TicketsClient() {
         />
       ) : null}
 
-      {paperTicketModalOpen ? (
-        <PaperTicketRegistrationModal
-          existingTicketIds={items.map((item) => item.id)}
-          existingTicketNumbers={items.map((item) => item.ticket_number)}
-          onClose={() => setPaperTicketModalOpen(false)}
-          onRegistered={async () => {
-            setPaperTicketModalOpen(false);
-            await loadTickets();
-          }}
-        />
-      ) : null}
     </div>
   );
 }
@@ -968,7 +934,6 @@ function TicketDetailsModal({
                   ["Ticket number", ticket.ticket_number],
                   ["Ticket UUID", ticket.id],
                   ["Ticket source", ticket.ticket_source === "paper" ? "Paper ticket" : "Online ticket"],
-                  ["Paper registered at", formatDate(ticket.paper_registered_at || null)],
                   ["Lottery", ticket.lottery_title],
                   ["Issued at", formatDate(ticket.issued_at)],
                   ["Created at", formatDate(ticket.created_at)],
@@ -1044,6 +1009,108 @@ function TicketDetailsModal({
                   No ticket status events have been recorded yet.
                 </div>
               )}
+            </Panel>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailsModal({
+  order,
+  onClose,
+  onMarkPaid,
+  onIssueMissingTickets,
+  onEdit,
+}: OrderDetailsModalProps) {
+  const orderReference = order?.order_reference ?? "Unknown order";
+  const purchaserName = order?.purchaser_name ?? order?.customer_name ?? "Not provided";
+  const totalAmount = order?.total_amount ?? order?.amount ?? "—";
+  const paymentStatus = order?.payment_status ?? order?.status ?? "Unknown";
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="order-details-title"
+    >
+      <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
+          <div>
+            <h2 id="order-details-title" className="text-xl font-extrabold text-white">
+              Order {orderReference}
+            </h2>
+            <p className="mt-1 text-sm text-white/55">
+              {order?.id ? `Order ID: ${order.id}` : "Linked order details"}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
+            aria-label="Close order details"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-5 md:p-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <DetailCard icon={<UserRound className="h-4 w-4" />} label="Purchaser" value={String(purchaserName)} />
+            <DetailCard icon={<ShieldCheck className="h-4 w-4" />} label="Payment status" value={String(paymentStatus)} />
+            <DetailCard icon={<Ticket className="h-4 w-4" />} label="Order total" value={String(totalAmount)} />
+            <DetailCard icon={<Trophy className="h-4 w-4" />} label="Items" value={String(order?.tickets_count ?? order?.items?.length ?? "—")} />
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <Panel title="Order summary">
+              <DetailRows
+                rows={[
+                  ["Order reference", String(orderReference)],
+                  ["Order ID", String(order?.id ?? "Not recorded")],
+                  ["Purchaser", String(purchaserName)],
+                  ["Payment status", String(paymentStatus)],
+                  ["Total", String(totalAmount)],
+                  ["Created", formatDate(order?.created_at ?? null)],
+                ]}
+              />
+            </Panel>
+
+            <Panel title="Actions">
+              <div className="space-y-3">
+                {onMarkPaid ? (
+                  <button
+                    type="button"
+                    onClick={onMarkPaid}
+                    className="w-full rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-extrabold text-emerald-100 hover:bg-emerald-500/20"
+                  >
+                    Mark as paid
+                  </button>
+                ) : null}
+
+                {onIssueMissingTickets ? (
+                  <button
+                    type="button"
+                    onClick={onIssueMissingTickets}
+                    className="w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm font-extrabold text-amber-100 hover:bg-amber-500/20"
+                  >
+                    Issue missing tickets
+                  </button>
+                ) : null}
+
+                {onEdit ? (
+                  <button
+                    type="button"
+                    onClick={onEdit}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-extrabold text-white hover:bg-white/10"
+                  >
+                    Edit order
+                  </button>
+                ) : null}
+              </div>
             </Panel>
           </div>
         </div>

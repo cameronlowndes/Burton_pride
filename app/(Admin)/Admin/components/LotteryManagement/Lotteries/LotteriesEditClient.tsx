@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -190,8 +191,6 @@ type Lottery = {
 };
 
 type EditForm = {
-  paperTicketsEnabled: boolean;
-
   title: string;
 
   shortSummary: string;
@@ -403,6 +402,60 @@ async function readJson(
   }
 }
 
+const EDIT_COLUMNS: Record<keyof EditForm, string[]> = {
+  title: ["title"], shortSummary: ["short_summary"],
+  description: ["description"], fundraisingPurpose: ["fundraising_purpose"],
+  heroImageUrl: ["hero_image_url"], status: ["status"],
+  ticketPrice: ["ticket_price"], currency: ["currency"],
+  minimumAge: ["minimum_age"], maxTickets: ["max_tickets"],
+  publicationAt: ["publication_at"], salesOpenAt: ["sales_open_at"],
+  salesCloseAt: ["sales_close_at"], drawAt: ["draw_at"],
+  resultsPublishAt: ["results_publish_at"],
+  geographicEligibility: ["geographic_eligibility"],
+  termsVersion: ["terms_version"], privacyNoticeVersion: ["privacy_notice_version"],
+  responsibleGamblingInfo: ["responsible_gambling_info"],
+  showInDirectory: ["show_in_public_directory"],
+  allowPageBeforeSales: ["allow_page_before_sales"],
+  showTicketCount: ["show_ticket_count"], showAmountRaised: ["show_amount_raised"],
+  showRemainingTickets: ["show_remaining_tickets"], showPrizeValues: ["show_prize_values"],
+  countdownEnabled: ["countdown_enabled"],
+  winnerDisplayMode: ["winner_display_mode"], isFeatured: ["is_featured"],
+};
+
+function lotteryToEditForm(item: Lottery): EditForm {
+  return {
+      title: item.title || "",
+      shortSummary: item.short_summary || "",
+      description: item.description || "",
+      fundraisingPurpose: item.fundraising_purpose || "",
+      heroImageUrl: item.hero_image_url || "",
+      status: item.status,
+      ticketPrice: Number(item.ticket_price ?? (item.ticket_price_pence ?? 0) / 100).toFixed(2),
+      currency: item.currency || "GBP",
+      minimumAge: String(REQUIRED_MINIMUM_AGE),
+      maxTickets: item.max_tickets != null ? String(item.max_tickets) : "",
+      publicationAt: toDateTimeLocal(item.publication_at),
+      salesOpenAt: toDateTimeLocal(item.sales_open_at),
+      salesCloseAt: toDateTimeLocal(item.sales_close_at),
+      drawAt: toDateTimeLocal(item.draw_at),
+      resultsPublishAt: toDateTimeLocal(item.results_publish_at),
+      geographicEligibility: item.geographic_eligibility || "",
+      termsVersion: item.terms_version || "",
+      privacyNoticeVersion: item.privacy_notice_version || "",
+      responsibleGamblingInfo: item.responsible_gambling_info || "",
+      showInDirectory: typeof item.show_in_public_directory === "boolean" ? item.show_in_public_directory : item.show_in_directory === true,
+      allowPageBeforeSales: item.allow_page_before_sales === true,
+      showTicketCount: item.show_ticket_count === true,
+      showAmountRaised: item.show_amount_raised === true,
+      showRemainingTickets: item.show_remaining_tickets === true,
+      showPrizeValues: item.show_prize_values === true,
+      countdownEnabled: item.countdown_enabled === true,
+      winnerDisplayMode: item.winner_display_mode || "ticket_number",
+      isFeatured: item.is_featured === true,
+  };
+}
+
+
 export default function EditLotteryPage({
   params,
 }: PageProps) {
@@ -461,6 +514,8 @@ export default function EditLotteryPage({
     setConfirmSave,
   ] =
     useState(false);
+
+  const editVersion = useRef(0);
 
   /*
    * =====================================================
@@ -559,7 +614,6 @@ export default function EditLotteryPage({
         );
 
         setForm({
-          paperTicketsEnabled: item.paper_tickets_enabled === true,
           title:
             item.title ||
             "",
@@ -583,21 +637,7 @@ export default function EditLotteryPage({
           status:
             item.status,
 
-          ticketPrice:
-            typeof item.ticket_price ===
-            "number"
-              ? item.ticket_price.toFixed(
-                  2,
-                )
-              : typeof item.ticket_price_pence ===
-                    "number"
-                ? (
-                    item.ticket_price_pence /
-                    100
-                  ).toFixed(
-                    2,
-                  )
-                : "",
+          ticketPrice: Number(item.ticket_price ?? (item.ticket_price_pence ?? 0) / 100).toFixed(2),
 
           currency:
             item.currency ||
@@ -658,10 +698,9 @@ export default function EditLotteryPage({
             "",
 
           showInDirectory:
-            item.show_in_public_directory ===
-              true ||
-            item.show_in_directory ===
-              true,
+            typeof item.show_in_public_directory === "boolean"
+              ? item.show_in_public_directory
+              : item.show_in_directory === true,
 
           allowPageBeforeSales:
             item.allow_page_before_sales ===
@@ -746,6 +785,7 @@ export default function EditLotteryPage({
     key: K,
     value: EditForm[K],
   ) {
+    editVersion.current += 1;
     setForm(
       (current) =>
         current
@@ -766,79 +806,13 @@ export default function EditLotteryPage({
    * DIRTY CHECK
    * =====================================================
    */
-  const hasChanges =
-    useMemo(() => {
-      if (
-        !form ||
-        !lottery
-      ) {
-        return false;
-      }
-
-      const price =
-        Number(
-          form.ticketPrice,
-        );
-
-      return (
-        form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) ||
-        form.maxTickets !== (lottery.max_tickets != null ? String(lottery.max_tickets) : "") ||
-        form.title !==
-          lottery.title ||
-        form.shortSummary !==
-          (
-            lottery.short_summary ||
-            ""
-          ) ||
-        form.description !==
-          (
-            lottery.description ||
-            ""
-          ) ||
-        form.fundraisingPurpose !==
-          (
-            lottery.fundraising_purpose ||
-            ""
-          ) ||
-        form.heroImageUrl !==
-          (
-            lottery.hero_image_url ||
-            ""
-          ) ||
-        form.status !==
-          lottery.status ||
-        (
-          Number.isFinite(
-            price,
-          )
-            ? price
-            : 0
-        ) !==
-          Number(
-            lottery.ticket_price ??
-              (
-                lottery.ticket_price_pence ??
-                0
-              ) /
-                100,
-          ) ||
-        form.showInDirectory !==
-          (
-            lottery.show_in_public_directory ===
-              true ||
-            lottery.show_in_directory ===
-              true
-          ) ||
-        form.isFeatured !==
-          (
-            lottery.is_featured ===
-            true
-          )
-      );
-    }, [
-      form,
-      lottery,
-    ]);
+  const hasChanges = useMemo(() => {
+    if (!form || !lottery) return false;
+    const initial = lotteryToEditForm(lottery);
+    return (Object.keys(initial) as (keyof EditForm)[]).some(
+      key => form[key] !== initial[key],
+    );
+  }, [form, lottery]);
 
   /*
    * =====================================================
@@ -974,6 +948,8 @@ export default function EditLotteryPage({
       return;
     }
 
+    const submittedVersion = editVersion.current;
+
     setConfirmSave(
       false,
     );
@@ -990,7 +966,7 @@ export default function EditLotteryPage({
       )}`;
 
     try {
-      const body = {
+      const fullBody = {
         title:
           form.title.trim(),
 
@@ -1025,8 +1001,6 @@ export default function EditLotteryPage({
 
         minimum_age:
           REQUIRED_MINIMUM_AGE,
-
-        paper_tickets_enabled: form.paperTicketsEnabled,
 
         max_tickets:
           form.maxTickets
@@ -1076,12 +1050,6 @@ export default function EditLotteryPage({
           form.responsibleGamblingInfo.trim() ||
           null,
 
-        /*
-         * Keep old and new names synced.
-         */
-        show_in_directory:
-          form.showInDirectory,
-
         show_in_public_directory:
           form.showInDirectory,
 
@@ -1109,6 +1077,17 @@ export default function EditLotteryPage({
         is_featured:
           form.isFeatured,
       };
+
+      const baseline = lotteryToEditForm(lottery);
+      const changedColumns = new Set(
+        (Object.keys(baseline) as (keyof EditForm)[])
+          .filter(key => form[key] !== baseline[key])
+          .flatMap(key => EDIT_COLUMNS[key]),
+      );
+      const body = Object.fromEntries(
+        Object.entries(fullBody).filter(([key]) => changedColumns.has(key)),
+      );
+      if (!Object.keys(body).length) return;
 
       const response =
         await fetch(
@@ -1171,19 +1150,6 @@ export default function EditLotteryPage({
         return;
       }
 
-      if (
-        data.item
-      ) {
-        setLottery(
-          data.item,
-        );
-      }
-
-      setSuccess(
-        data.message ||
-          "Lottery updated successfully.",
-      );
-
       /*
        * Reload to ensure all values shown on screen match
        * what Supabase actually stored.
@@ -1208,30 +1174,34 @@ export default function EditLotteryPage({
           refresh,
         );
 
-      if (
-        refresh.ok &&
-        refreshed.ok &&
-        refreshed.item
-      ) {
-        const item =
-          refreshed.item;
+      if (!refresh.ok || !refreshed.ok || !refreshed.item) {
+        throw new Error("The save request completed, but the saved lottery could not be reloaded. Please reload the page and check your changes.");
+      }
 
-        if (
-          form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) &&
-          item.paper_tickets_enabled !== form.paperTicketsEnabled
-        ) {
-          setSuccess(null);
-          throw new Error(
-            "The lottery API did not confirm the paper-ticket setting. Ensure GET returns paper_tickets_enabled and PATCH saves this boolean. Other lottery changes may already have been saved.",
-          );
+      {
+        const item = refreshed.item;
+        const actual: Record<string, unknown> = { ...item };
+        actual.ticket_price = item.ticket_price ?? (item.ticket_price_pence ?? 0) / 100;
+        const mismatches = Object.entries(body).filter(([key, expected]) => {
+          const received = actual[key];
+          if (key.endsWith("_at")) {
+            return expected === null ? received != null :
+              !received || new Date(String(expected)).getTime() !== new Date(String(received)).getTime();
+          }
+          if (key === "ticket_price" || key === "max_tickets" || key === "minimum_age") {
+            return expected === null ? received != null : Number(expected) !== Number(received);
+          }
+          return expected !== received;
+        }).map(([key]) => key);
+        if (mismatches.length) {
+          throw new Error(`The API did not save or return these fields: ${mismatches.join(", ")}. Your edits remain on screen so you can retry.`);
         }
 
         setLottery(
           item,
         );
 
-        setForm({
-          paperTicketsEnabled: item.paper_tickets_enabled === true,
+        setForm(current => editVersion.current === submittedVersion ? ({
           title:
             item.title ||
             "",
@@ -1326,10 +1296,9 @@ export default function EditLotteryPage({
             "",
 
           showInDirectory:
-            item.show_in_public_directory ===
-              true ||
-            item.show_in_directory ===
-              true,
+            typeof item.show_in_public_directory === "boolean"
+              ? item.show_in_public_directory
+              : item.show_in_directory === true,
 
           allowPageBeforeSales:
             item.allow_page_before_sales ===
@@ -1362,7 +1331,10 @@ export default function EditLotteryPage({
           isFeatured:
             item.is_featured ===
             true,
-        });
+        }) : current);
+        setSuccess(editVersion.current === submittedVersion
+          ? "Lottery changes saved and verified."
+          : "Earlier changes saved. You have newer unsaved edits.");
       }
     } catch (
       problem: any
@@ -1994,52 +1966,16 @@ export default function EditLotteryPage({
           <FormCard
             icon={<Ticket />}
             title="Paper tickets"
-            description="Enable paper ticketing and manage printed ticket batches."
+            description="Paper ticket features will come soon."
           >
-            <Toggle
-              label="This lottery will use paper tickets"
-              description="Save this setting before generating a paper ticket batch."
-              checked={form.paperTicketsEnabled}
-              onChange={(value) => updateField("paperTicketsEnabled", value)}
-            />
-
-            <div className="mt-5 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
-              Ticket numbers, UUIDs and barcode tokens are generated by the server
-              when you create a batch. You do not need to enter a first or last
-              ticket number here. Maximum tickets is the combined capacity for
-              online and paper tickets.
-            </div>
-
-            {form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) && (
-              <p className="mt-4 text-sm text-amber-200">
-                You have an unsaved paper-ticket setting. Use Save changes above.
+            <div className="rounded-2xl border border-white/15 bg-white/5 p-5" role="status">
+              <span className="rounded-full border border-purple-300/25 bg-purple-500/15 px-3 py-1 text-xs font-bold text-purple-100">
+                Coming soon
+              </span>
+              <p className="mt-3 text-sm leading-6 text-white/65">
+                Paper ticket setup and printing are temporarily unavailable.
               </p>
-            )}
-
-            {lottery.paper_tickets_enabled === true && (
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Link
-                  href="/Admin/LotteryManagement/PaperTickets"
-                  className="inline-flex items-center gap-2 rounded-xl border border-purple-400/30 bg-purple-500/15 px-4 py-3 text-sm font-bold text-purple-100 hover:bg-purple-500/25"
-                >
-                  <Ticket className="h-4 w-4" />
-                  Open paper ticket generator
-                </Link>
-                <Link
-                  href="/Admin/LotteryManagement/PaperTickets/ReadyToPrint"
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/5"
-                >
-                  <FileText className="h-4 w-4" />
-                  Ready to Print
-                </Link>
-              </div>
-            )}
-            <p className="mt-4 text-xs leading-5 text-white/50">
-              Select this lottery in the paper ticket generator, create a batch,
-              then generate its PDF in Ready to Print. Confirming printing leaves
-              tickets reserved until the sale and registration workflow is completed.
-              Changing this setting does not cancel existing batches.
-            </p>
+            </div>
           </FormCard>
 
           {/* DATES */}
