@@ -1,512 +1,451 @@
 "use client";
-
-import { useEffect, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  BarChart3,
-  Beaker,
-  CheckCircle2,
-  ChevronDown,
-  Download,
-  FileArchive,
-  FileSpreadsheet,
-  Filter,
-  Loader2,
-  PoundSterling,
-  Printer,
-  RefreshCw,
-  Search,
-  Ticket,
-  Trophy,
-  UsersRound,
-  WalletCards,
-  X,
-} from "lucide-react";
-
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { AlertTriangle, BarChart3, CheckCircle2, ChevronDown, Download, FileArchive, FileSpreadsheet, Filter, Loader2, PoundSterling, Printer, RefreshCw, Search, Ticket, Trophy, UsersRound, WalletCards, X, } from "lucide-react";
 type LotteryReport = {
-  lottery_id: string;
-  lottery_title: string;
-  lottery_slug: string;
-  lottery_status: string;
-  lottery_type: string;
-  created_at: string;
-  sales_open_at: string | null;
-  sales_close_at: string | null;
-  draw_at: string | null;
-
-  gross_proceeds: number;
-  paid_orders: number;
-  tickets_sold: number;
-  average_order_value: number;
-  refunds: number;
-  payment_fees: number;
-  net_funds: number;
-  prize_costs: number;
-  good_cause_amount: number;
-
-  winners: number;
-  unclaimed_prizes: number;
-  failed_payments: number;
-  disputed_payments: number;
-  compliance_warnings: number;
+    lottery_id: string;
+    lottery_title: string;
+    lottery_slug: string;
+    lottery_status: string;
+    lottery_type: string;
+    created_at: string;
+    sales_open_at: string | null;
+    sales_close_at: string | null;
+    draw_at: string | null;
+    gross_proceeds: number | null;
+    paid_orders: number | null;
+    tickets_sold: number | null;
+    average_order_value: number | null;
+    refunds: number | null;
+    payment_fees: number | null;
+    net_funds: number | null;
+    prize_costs: number | null;
+    good_cause_amount: number | null;
+    winners: number | null;
+    unclaimed_prizes: number | null;
+    failed_payments: number | null;
+    disputed_payments: number | null;
+    compliance_warnings: number | null;
 };
-
-type ApiResponse = {
-  ok: boolean;
-  items?: LotteryReport[];
-  error?: string;
-  message?: string;
-};
-
 type PaperDrawLottery = {
-  id: string;
-  title: string;
-  slug: string;
-  status: string;
-  draw_at: string | null;
-  sales_close_at: string | null;
+    id: string;
+    title: string;
+    slug: string;
+    status: string;
+    draw_at: string | null;
+    sales_close_at: string | null;
 };
-
 type PaperDrawTicket = {
-  id: string;
-  ticket_number: string;
-  order_reference: string;
-  issued_at: string | null;
+    id: string;
+    ticket_number: string;
+    order_reference: string;
+    issued_at: string | null;
 };
-
-type PaperDrawResponse = {
-  ok: boolean;
-  lotteries?: PaperDrawLottery[];
-  lottery?: PaperDrawLottery | null;
-  tickets?: PaperDrawTicket[];
-  generated_at?: string;
-  error?: string;
-};
-
-type ExportType =
-  | "entrants"
-  | "tickets"
-  | "orders"
-  | "prizes"
-  | "winners"
-  | "audit"
-  | "regulatory"
-  | "archive"
-  | "paper_draw";
-
+type ExportType = "entrants" | "tickets" | "orders" | "prizes" | "winners" | "audit" | "regulatory" | "archive" | "paper_draw";
 const API_ROUTE = "/api/admin/lotterymanagement/reports";
-
 const EXPORT_OPTIONS: Array<{
-  type: ExportType;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
+    type: ExportType;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
 }> = [
-  {
-    type: "entrants",
-    title: "Entrants export",
-    description: "Entrant/customer records for the selected lottery.",
-    icon: <UsersRound className="h-5 w-5" />,
-  },
-  {
-    type: "tickets",
-    title: "Issued ticket register",
-    description: "Ticket numbers, status and linked order information.",
-    icon: <Ticket className="h-5 w-5" />,
-  },
-  {
-    type: "paper_draw",
-    title: "Paper draw ticket sheets",
-    description:
-      "Open a low-ink A4 print page containing every eligible issued ticket.",
-    icon: <Printer className="h-5 w-5" />,
-  },
-  {
-    type: "orders",
-    title: "Orders & payments",
-    description: "Orders, payment status, totals and refund information.",
-    icon: <WalletCards className="h-5 w-5" />,
-  },
-  {
-    type: "prizes",
-    title: "Prize register",
-    description: "Prize values, donors, allocation and fulfilment.",
-    icon: <Trophy className="h-5 w-5" />,
-  },
-  {
-    type: "winners",
-    title: "Winner report",
-    description: "Winner status, ticket, prize and fulfilment records.",
-    icon: <Trophy className="h-5 w-5" />,
-  },
-  {
-    type: "audit",
-    title: "Audit log export",
-    description: "Security-sensitive and outcome-changing admin actions.",
-    icon: <FileSpreadsheet className="h-5 w-5" />,
-  },
-  {
-    type: "regulatory",
-    title: "Regulatory return data",
-    description: "Data required to support licensing/local-authority returns.",
-    icon: <FileSpreadsheet className="h-5 w-5" />,
-  },
-  {
-    type: "archive",
-    title: "Full lottery archive pack",
-    description: "Complete archive pack for the selected lottery.",
-    icon: <FileArchive className="h-5 w-5" />,
-  },
+    {
+        type: "entrants",
+        title: "Entrants export",
+        description: "Entrant/customer records for the selected lottery.",
+        icon: <UsersRound className="h-5 w-5"/>,
+    },
+    {
+        type: "tickets",
+        title: "Issued ticket register",
+        description: "Ticket numbers, status and linked order information.",
+        icon: <Ticket className="h-5 w-5"/>,
+    },
+    {
+        type: "paper_draw",
+        title: "Paper draw ticket sheets",
+        description: "Preview and print the ticket register returned by the server.",
+        icon: <Printer className="h-5 w-5"/>,
+    },
+    {
+        type: "orders",
+        title: "Orders & payments",
+        description: "Orders, payment status, totals and refund information.",
+        icon: <WalletCards className="h-5 w-5"/>,
+    },
+    {
+        type: "prizes",
+        title: "Prize register",
+        description: "Prize values, donors, allocation and fulfilment.",
+        icon: <Trophy className="h-5 w-5"/>,
+    },
+    {
+        type: "winners",
+        title: "Winner report",
+        description: "Winner status, ticket, prize and fulfilment records.",
+        icon: <Trophy className="h-5 w-5"/>,
+    },
+    {
+        type: "audit",
+        title: "Audit log export",
+        description: "Security-sensitive and outcome-changing admin actions.",
+        icon: <FileSpreadsheet className="h-5 w-5"/>,
+    },
+    {
+        type: "regulatory",
+        title: "Regulatory return data",
+        description: "Reported figures to review and reconcile before preparing a return.",
+        icon: <FileSpreadsheet className="h-5 w-5"/>,
+    },
+    {
+        type: "archive",
+        title: "Full lottery archive pack",
+        description: "Server-generated archive for one selected lottery; review contents.",
+        icon: <FileArchive className="h-5 w-5"/>,
+    },
 ];
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format(Number(value || 0));
+const MAX_REPORTS = 1000;
+const MAX_PRINT_TICKETS = 10000;
+const PAGE_SIZE = 25;
+const JSON_LIMIT = 5 * 1024 * 1024;
+const EXPORT_LIMIT = 50 * 1024 * 1024;
+const MONEY_FIELDS = ["gross_proceeds", "average_order_value", "refunds", "payment_fees", "net_funds", "prize_costs", "good_cause_amount"] as const;
+const COUNT_FIELDS = ["paid_orders", "tickets_sold", "winners", "unclaimed_prizes", "failed_payments", "disputed_payments", "compliance_warnings"] as const;
+type NumericField = typeof MONEY_FIELDS[number] | typeof COUNT_FIELDS[number];
+function formatCount(value: number | null) { return value === null ? "Unavailable" : value.toLocaleString("en-GB"); }
+function formatMoney(value: number | null) {
+    return value === null || !Number.isFinite(value) ? "Unavailable" : new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(value);
 }
-
 function formatDate(value: string | null) {
-  if (!value) return "Not recorded";
-
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Europe/London",
-  }).format(new Date(value));
+    if (!value || !Number.isFinite(new Date(value).getTime()))
+        return "Not recorded";
+    return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/London" }).format(new Date(value));
 }
-
-async function readJson(res: Response): Promise<ApiResponse> {
-  const text = await res.text();
-
-  try {
-    return text ? JSON.parse(text) : { ok: false };
-  } catch {
-    return { ok: false, error: "The API returned invalid JSON." };
-  }
+function reportYear(value: string) {
+    return Number.isFinite(new Date(value).getTime()) ? new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone: "Europe/London" }).format(new Date(value)) : "";
 }
-
+function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function requiredText(value: unknown): string {
+    if (typeof value !== "string" || !value.trim() || value.length > 500)
+        throw new Error("The server returned an invalid record.");
+    return value;
+}
+function nullableDate(value: unknown): string | null { return typeof value === "string" && Number.isFinite(new Date(value).getTime()) ? value : null; }
+function normalizeReports(value: unknown): LotteryReport[] {
+    if (!Array.isArray(value) || value.length > MAX_REPORTS)
+        throw new Error("The report response is invalid or too large. Ask for a server-paginated report.");
+    const ids = new Set<string>();
+    return value.map(raw => {
+        if (!record(raw))
+            throw new Error("The server returned an invalid record.");
+        const lottery_id = requiredText(raw.lottery_id);
+        if (ids.has(lottery_id))
+            throw new Error("The server returned duplicate lottery reports.");
+        ids.add(lottery_id);
+        const row = { lottery_id, lottery_title: requiredText(raw.lottery_title), lottery_slug: requiredText(raw.lottery_slug), lottery_status: requiredText(raw.lottery_status), lottery_type: typeof raw.lottery_type === "string" ? raw.lottery_type : "Unavailable", created_at: nullableDate(raw.created_at) ?? "", sales_open_at: nullableDate(raw.sales_open_at), sales_close_at: nullableDate(raw.sales_close_at), draw_at: nullableDate(raw.draw_at) } as LotteryReport;
+        for (const key of [...MONEY_FIELDS, ...COUNT_FIELDS]) {
+            const v = raw[key];
+            row[key] = typeof v === "number" && Number.isFinite(v) && (!COUNT_FIELDS.includes(key as typeof COUNT_FIELDS[number]) || (Number.isSafeInteger(v) && v >= 0)) ? v : null;
+        }
+        return row;
+    });
+}
+function sumFields(rows: LotteryReport[], keys: readonly NumericField[]): number | null {
+    let total = 0;
+    for (const row of rows)
+        for (const key of keys) {
+            if (row[key] === null)
+                return null;
+            total += row[key];
+        }
+    return Number.isFinite(total) ? total : null;
+}
+async function boundedBytes(response: Response, limit: number): Promise<Uint8Array> {
+    if (Number(response.headers.get("content-length")) > limit)
+        throw new Error("The response is too large. Request a smaller scope.");
+    if (!response.body)
+        throw new Error("The server returned an empty response.");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            length += value.length;
+            if (length > limit)
+                throw new Error("The response is too large. Request a smaller scope.");
+            chunks.push(value);
+        }
+    }
+    catch (error) {
+        await reader.cancel().catch(() => { });
+        throw error;
+    }
+    finally {
+        reader.releaseLock();
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return bytes;
+}
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+    try {
+        const value: unknown = JSON.parse(new TextDecoder().decode(await boundedBytes(response, JSON_LIMIT)));
+        if (record(value))
+            return value;
+    }
+    catch (error) {
+        if (error instanceof Error && error.message.includes("too large"))
+            throw error;
+    }
+    throw new Error("The server returned an invalid report response.");
+}
+class ReportRequestError extends Error {
+    constructor(message: string, public status: number) { super(message); }
+}
+function responseError(response: Response) {
+    return new ReportRequestError(response.status === 401 ? "Your session has expired. Sign in again." : response.status === 403 ? "You do not have permission to access this report." : "The report request failed. Try again or contact support.", response.status);
+}
+async function request<T>(url: string, controller: AbortController, consume: (response: Response) => Promise<T>): Promise<T> {
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+        const response = await fetch(url, { method: "GET", credentials: "include", cache: "no-store", signal: controller.signal, headers: { Accept: "application/json, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/zip" } });
+        if (!response.ok)
+            throw responseError(response);
+        const result = await consume(response);
+        if (controller.signal.aborted)
+            throw new Error("The request was interrupted. Try again.");
+        return result;
+    }
+    catch (error) {
+        if (controller.signal.aborted)
+            throw new Error("The request was interrupted or timed out. Try again.");
+        throw error;
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+async function exportBlob(response: Response): Promise<{
+    blob: Blob;
+    extension: "zip" | "xlsx";
+}> {
+    const mime = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!["application/zip", "application/x-zip-compressed", "application/octet-stream", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].includes(mime))
+        throw new Error("The server did not return a supported export file.");
+    const bytes = await boundedBytes(response, EXPORT_LIMIT);
+    if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 3 || bytes[3] !== 4)
+        throw new Error("The server did not return a valid export container.");
+    // ZIP signature is a format check, not verification of workbook contents.
+    const disposition = response.headers.get("content-disposition") ?? "";
+    const filename = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";\r\n]+)/i)?.[1]?.trim();
+    const extension = filename?.toLowerCase().endsWith(".xlsx") ? "xlsx" : filename?.toLowerCase().endsWith(".zip") ? "zip" : mime.includes("spreadsheetml") ? "xlsx" : mime.includes("zip") ? "zip" : null;
+    if (!extension)
+        throw new Error("The export file format could not be identified.");
+    return { blob: new Blob([new Uint8Array(bytes).buffer], { type: mime }), extension };
+}
+function Modal({ children, onClose, titleId, className = "" }: {
+    children: React.ReactNode;
+    onClose: () => void;
+    titleId: string;
+    className?: string;
+}) {
+    const ref = useRef<HTMLDialogElement>(null);
+    useEffect(() => {
+        const dialog = ref.current;
+        const previous = document.activeElement as HTMLElement | null;
+        const overflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        dialog?.showModal();
+        return () => { dialog?.close(); document.body.style.overflow = overflow; if (previous?.isConnected)
+            previous.focus(); };
+    }, []);
+    return <dialog ref={ref} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }} className={`max-h-[95vh] w-[95vw] max-w-6xl overflow-y-auto rounded-3xl border border-white/15 bg-[#15172a] p-0 text-white backdrop:bg-black/80 ${className}`}>{children}</dialog>;
+}
 export default function ReportsClient() {
-  const [items, setItems] = useState<LotteryReport[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState<ExportType | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [testMode, setTestMode] = useState(false);
-  const [paperDrawOpen, setPaperDrawOpen] = useState(false);
-
-  const [search, setSearch] = useState("");
-  const [lotteryId, setLotteryId] = useState("all");
-  const [status, setStatus] = useState("all");
-  const [year, setYear] = useState("all");
-  const [sort, setSort] = useState("gross_desc");
-
-  useEffect(() => {
-    loadReports();
-  }, []);
-
-  async function loadReports() {
-    setTestMode(false);
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch(API_ROUTE, {
-        cache: "no-store",
-        credentials: "include",
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Failed to load lottery reports.",
-        );
-      }
-
-      setItems(data.items || []);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load lottery reports.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function startFullFeatureTest() {
-    const now = Date.now();
-
-    const demo: LotteryReport[] = [
-      {
-        lottery_id: "test-lottery-1",
-        lottery_title: "Test Summer Raffle 2026",
-        lottery_slug: "test-summer-raffle-2026",
-        lottery_status: "completed",
-        lottery_type: "small_society",
-        created_at: new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_open_at: new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_close_at: new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
-        draw_at: new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString(),
-        gross_proceeds: 1450,
-        paid_orders: 382,
-        tickets_sold: 1450,
-        average_order_value: 3.8,
-        refunds: 24,
-        payment_fees: 39.25,
-        net_funds: 1386.75,
-        prize_costs: 100,
-        good_cause_amount: 1286.75,
-        winners: 4,
-        unclaimed_prizes: 1,
-        failed_payments: 7,
-        disputed_payments: 1,
-        compliance_warnings: 0,
-      },
-      {
-        lottery_id: "test-lottery-2",
-        lottery_title: "Test Christmas Raffle 2026",
-        lottery_slug: "test-christmas-raffle-2026",
-        lottery_status: "live",
-        lottery_type: "small_society",
-        created_at: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_open_at: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_close_at: new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        draw_at: new Date(now + 15 * 24 * 60 * 60 * 1000).toISOString(),
-        gross_proceeds: 820,
-        paid_orders: 214,
-        tickets_sold: 410,
-        average_order_value: 3.83,
-        refunds: 12,
-        payment_fees: 22.5,
-        net_funds: 785.5,
-        prize_costs: 80,
-        good_cause_amount: 705.5,
-        winners: 0,
-        unclaimed_prizes: 0,
-        failed_payments: 5,
-        disputed_payments: 0,
-        compliance_warnings: 1,
-      },
-      {
-        lottery_id: "test-lottery-3",
-        lottery_title: "Test Community Fundraiser",
-        lottery_slug: "test-community-fundraiser",
-        lottery_status: "sales_closed",
-        lottery_type: "small_society",
-        created_at: new Date(now - 35 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_open_at: new Date(now - 28 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_close_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
-        draw_at: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
-        gross_proceeds: 560,
-        paid_orders: 145,
-        tickets_sold: 560,
-        average_order_value: 3.86,
-        refunds: 8,
-        payment_fees: 15.2,
-        net_funds: 536.8,
-        prize_costs: 50,
-        good_cause_amount: 486.8,
-        winners: 0,
-        unclaimed_prizes: 0,
-        failed_payments: 2,
-        disputed_payments: 1,
-        compliance_warnings: 0,
-      },
-      {
-        lottery_id: "test-lottery-4",
-        lottery_title: "Test Archived Lottery",
-        lottery_slug: "test-archived-lottery",
-        lottery_status: "archived",
-        lottery_type: "small_society",
-        created_at: new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_open_at: new Date(now - 340 * 24 * 60 * 60 * 1000).toISOString(),
-        sales_close_at: new Date(now - 300 * 24 * 60 * 60 * 1000).toISOString(),
-        draw_at: new Date(now - 299 * 24 * 60 * 60 * 1000).toISOString(),
-        gross_proceeds: 980,
-        paid_orders: 250,
-        tickets_sold: 980,
-        average_order_value: 3.92,
-        refunds: 16,
-        payment_fees: 28.8,
-        net_funds: 935.2,
-        prize_costs: 75,
-        good_cause_amount: 860.2,
-        winners: 3,
-        unclaimed_prizes: 0,
-        failed_payments: 4,
-        disputed_payments: 0,
-        compliance_warnings: 0,
-      },
-    ];
-
-    setTestMode(true);
-    setItems(demo);
-    setError(null);
-    setSearch("");
-    setLotteryId("all");
-    setStatus("all");
-    setYear("all");
-    setSort("gross_desc");
-    setLoading(false);
-  }
-
-  const lotteries = useMemo(
-    () =>
-      items
+    const [items, setItems] = useState<LotteryReport[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState<ExportType | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [paperDrawOpen, setPaperDrawOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const [lotteryId, setLotteryId] = useState("all");
+    const [status, setStatus] = useState("all");
+    const [year, setYear] = useState("all");
+    const [sort, setSort] = useState("gross_desc");
+    const [page, setPage] = useState(1);
+    const [loaded, setLoaded] = useState(false);
+    const [notice, setNotice] = useState("");
+    const [pendingExport, setPendingExport] = useState<{
+        type: Exclude<ExportType, "paper_draw">;
+        lotteryId: string;
+        year: string;
+        title: string;
+    } | null>(null);
+    const loadController = useRef<AbortController | null>(null);
+    const exportController = useRef<AbortController | null>(null);
+    const exportBusy = useRef(false);
+    const mounted = useRef(false);
+    const downloadUrls = useRef(new Set<string>());
+    const clearDeniedData = useCallback(() => {
+        setItems([]);
+        setLoaded(false);
+        setLoading(false);
+        setPendingExport(null);
+        setPaperDrawOpen(false);
+        setNotice("");
+        setError("Report access was denied or your session expired. Sign in with the required permissions.");
+        loadController.current?.abort();
+        loadController.current = null;
+        exportController.current?.abort();
+    }, []);
+    const loadLotteryReports = useCallback(async () => {
+        loadController.current?.abort();
+        const controller = new AbortController();
+        loadController.current = controller;
+        setLoading(true);
+        setLoaded(false);
+        setItems([]);
+        setError(null);
+        try {
+            const rows = await request(API_ROUTE, controller, async (response) => {
+                const data = await readJson(response);
+                if (data.ok !== true)
+                    throw new Error("Unable to load lottery reports.");
+                return normalizeReports(data.items);
+            });
+            if (mounted.current && loadController.current === controller) {
+                setItems(rows);
+                setLoaded(true);
+            }
+        }
+        catch (error) {
+            if (mounted.current && loadController.current === controller) {
+                if (error instanceof ReportRequestError && [401, 403].includes(error.status))
+                    clearDeniedData();
+                setError(error instanceof Error ? error.message : "Unable to load lottery reports.");
+            }
+        }
+        finally {
+            if (mounted.current && loadController.current === controller)
+                setLoading(false);
+        }
+    }, [clearDeniedData]);
+    useEffect(() => {
+        mounted.current = true;
+        void loadLotteryReports();
+        return () => { mounted.current = false; loadController.current?.abort(); exportController.current?.abort(); for (const url of downloadUrls.current)
+            URL.revokeObjectURL(url); downloadUrls.current.clear(); };
+    }, [loadLotteryReports]);
+    useEffect(() => { setPage(1); }, [search, lotteryId, status, year, sort, items]);
+    const lotteries = useMemo(() => items
         .map((item) => [item.lottery_id, item.lottery_title] as const)
-        .sort((a, b) => a[1].localeCompare(b[1])),
-    [items],
-  );
-
-  const statuses = useMemo(
-    () =>
-      Array.from(new Set(items.map((x) => x.lottery_status).filter(Boolean))).sort(),
-    [items],
-  );
-
-  const years = useMemo(
-    () =>
-      Array.from(
-        new Set(items.map((x) => new Date(x.created_at).getFullYear().toString())),
-      ).sort((a, b) => Number(b) - Number(a)),
-    [items],
-  );
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-
-    const result = items.filter((item) => {
-      const matchesSearch =
-        !q ||
-        item.lottery_title.toLowerCase().includes(q) ||
-        item.lottery_slug.toLowerCase().includes(q) ||
-        item.lottery_id.toLowerCase().includes(q);
-
-      const matchesLottery =
-        lotteryId === "all" || item.lottery_id === lotteryId;
-
-      const matchesStatus =
-        status === "all" || item.lottery_status === status;
-
-      const matchesYear =
-        year === "all" ||
-        new Date(item.created_at).getFullYear().toString() === year;
-
-      return matchesSearch && matchesLottery && matchesStatus && matchesYear;
-    });
-
-    return result.sort((a, b) => {
-      switch (sort) {
-        case "gross_asc":
-          return a.gross_proceeds - b.gross_proceeds;
-        case "tickets_desc":
-          return b.tickets_sold - a.tickets_sold;
-        case "orders_desc":
-          return b.paid_orders - a.paid_orders;
-        case "newest":
-          return +new Date(b.created_at) - +new Date(a.created_at);
-        default:
-          return b.gross_proceeds - a.gross_proceeds;
-      }
-    });
-  }, [items, search, lotteryId, status, year, sort]);
-
-  const totals = useMemo(
-    () =>
-      filtered.reduce(
-        (acc, item) => {
-          acc.gross += item.gross_proceeds;
-          acc.orders += item.paid_orders;
-          acc.tickets += item.tickets_sold;
-          acc.refunds += item.refunds;
-          acc.fees += item.payment_fees;
-          acc.net += item.net_funds;
-          acc.prizes += item.prize_costs;
-          acc.goodCause += item.good_cause_amount;
-          acc.winners += item.winners;
-          acc.unclaimed += item.unclaimed_prizes;
-          acc.problems +=
-            item.failed_payments +
-            item.disputed_payments +
-            item.compliance_warnings;
-          return acc;
-        },
-        {
-          gross: 0,
-          orders: 0,
-          tickets: 0,
-          refunds: 0,
-          fees: 0,
-          net: 0,
-          prizes: 0,
-          goodCause: 0,
-          winners: 0,
-          unclaimed: 0,
-          problems: 0,
-        },
-      ),
-    [filtered],
-  );
-
-  const averageOrder =
-    totals.orders > 0 ? totals.gross / totals.orders : 0;
-
-  async function exportReport(type: ExportType) {
-    if (exporting) return;
-
-    if (type === "paper_draw") {
-      setPaperDrawOpen(true);
-      return;
+        .sort((a, b) => a[1].localeCompare(b[1])), [items]);
+    const statuses = useMemo(() => Array.from(new Set(items.map((x) => x.lottery_status).filter(Boolean))).sort(), [items]);
+    const years = useMemo(() => Array.from(new Set(items.map((x) => reportYear(x.created_at)).filter(Boolean))).sort((a, b) => Number(b) - Number(a)), [items]);
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        const result = items.filter((item) => {
+            const matchesSearch = !q ||
+                item.lottery_title.toLowerCase().includes(q) ||
+                item.lottery_slug.toLowerCase().includes(q) ||
+                item.lottery_id.toLowerCase().includes(q);
+            const matchesLottery = lotteryId === "all" || item.lottery_id === lotteryId;
+            const matchesStatus = status === "all" || item.lottery_status === status;
+            const matchesYear = year === "all" ||
+                reportYear(item.created_at) === year;
+            return matchesSearch && matchesLottery && matchesStatus && matchesYear;
+        });
+        return result.sort((a, b) => {
+            switch (sort) {
+                case "gross_asc":
+                    return (a.gross_proceeds ?? Infinity) - (b.gross_proceeds ?? Infinity);
+                case "tickets_desc":
+                    return (b.tickets_sold ?? -Infinity) - (a.tickets_sold ?? -Infinity);
+                case "orders_desc":
+                    return (b.paid_orders ?? -Infinity) - (a.paid_orders ?? -Infinity);
+                case "newest":
+                    return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+                default:
+                    return (b.gross_proceeds ?? -Infinity) - (a.gross_proceeds ?? -Infinity);
+            }
+        });
+    }, [items, search, lotteryId, status, year, sort]);
+    const totals = useMemo(() => {
+        const sum = (...keys: NumericField[]) => loaded ? sumFields(filtered, keys) : null;
+        return { gross: sum("gross_proceeds"), orders: sum("paid_orders"), tickets: sum("tickets_sold"), refunds: sum("refunds"), fees: sum("payment_fees"), net: sum("net_funds"), prizes: sum("prize_costs"), goodCause: sum("good_cause_amount"), problems: sum("failed_payments", "disputed_payments", "compliance_warnings") };
+    }, [filtered, loaded]);
+    const averageOrder = totals.orders !== null && totals.orders > 0 && totals.gross !== null ? totals.gross / totals.orders : null;
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const currentPage = Math.min(page, pageCount);
+    function prepareExport(type: ExportType) {
+        if (exportBusy.current || !loaded || loading)
+            return;
+        if (type === "paper_draw") {
+            setPaperDrawOpen(true);
+            return;
+        }
+        if (type === "archive" && lotteryId === "all") {
+            setError("Choose a specific lottery for an archive pack.");
+            return;
+        }
+        setPendingExport({ type, lotteryId, year, title: lotteryId === "all" ? "All lotteries" : lotteries.find(([id]) => id === lotteryId)?.[1] ?? lotteryId });
     }
-
-    setExporting(type);
-    setError(null);
-
-    try {
-      const params = new URLSearchParams();
-      params.set("type", type);
-      if (testMode) params.set("test", "1");
-      if (lotteryId !== "all") params.set("lottery_id", lotteryId);
-      if (year !== "all") params.set("year", year);
-
-      const res = await fetch(`${API_ROUTE}/export?${params.toString()}`, {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const data = await readJson(res);
-        throw new Error(data.error || "Failed to generate report export.");
-      }
-
-      const blob = await res.blob();
-      const disposition = res.headers.get("content-disposition") || "";
-      const match = disposition.match(/filename="?([^"]+)"?/i);
-      const filename =
-        match?.[1] ||
-        `burton-pride-lottery-${type}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setError(err?.message || "Failed to generate report export.");
-    } finally {
-      setExporting(null);
+    async function exportReport() {
+        const scope = pendingExport;
+        if (!scope || exportBusy.current)
+            return;
+        exportBusy.current = true;
+        const controller = new AbortController();
+        exportController.current = controller;
+        setExporting(scope.type);
+        setPendingExport(null);
+        setError(null);
+        setNotice("");
+        try {
+            const params = new URLSearchParams({ type: scope.type });
+            if (scope.lotteryId !== "all")
+                params.set("lottery_id", scope.lotteryId);
+            if (scope.year !== "all")
+                params.set("year", scope.year);
+            const file = await request(`${API_ROUTE}/export?${params}`, controller, exportBlob);
+            if (!mounted.current)
+                return;
+            const url = URL.createObjectURL(file.blob);
+            downloadUrls.current.add(url);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `burton-pride-lottery-${scope.type}-${new Date().toISOString().slice(0, 10)}.${file.extension}`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            setTimeout(() => { URL.revokeObjectURL(url); downloadUrls.current.delete(url); }, 1000);
+            setNotice("Download started. Review the file before sharing or using it for a return.");
+        }
+        catch (error) {
+            if (mounted.current) {
+                if (error instanceof ReportRequestError && [401, 403].includes(error.status))
+                    clearDeniedData();
+                setError(error instanceof Error ? error.message : "Unable to download the report.");
+            }
+        }
+        finally {
+            exportBusy.current = false;
+            if (mounted.current)
+                setExporting(null);
+        }
     }
-  }
-
-  return (
-    <div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
+    return (<div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
       <section className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10">
-              <BarChart3 className="h-5 w-5 text-white" />
+              <BarChart3 className="h-5 w-5 text-white"/>
             </div>
 
             <div>
@@ -521,98 +460,42 @@ export default function ReportsClient() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={startFullFeatureTest}
-              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
-            >
-              <Beaker className="h-4 w-4" />
-              Test full feature
-            </button>
-
-            <button
-              type="button"
-              onClick={loadReports}
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-              />
+            <button type="button" onClick={() => void loadLotteryReports()} disabled={loading} className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}/>
               Refresh
             </button>
           </div>
         </div>
       </section>
 
-      {testMode ? (
-        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          <div className="flex items-start gap-3">
-            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <div className="font-bold">Test mode is active</div>
-              <div className="mt-1 text-yellow-100/70">
-                These are fake reporting records. You can test filters, totals
-                and all export buttons without reading or changing real
-                Supabase data.
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <div role="note" className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+        These are API-reported figures. Payment fees, net funds and good-cause amounts are unverified estimates and require ledger reconciliation. A zero fee does not confirm that no fees were charged. Warning counts do not establish compliance approval.
+      </div>
+      {notice && <p role="status" className="text-sm text-white/70">{notice}</p>}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          label="Gross proceeds"
-          value={formatMoney(totals.gross)}
-          icon={<PoundSterling className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Paid orders"
-          value={String(totals.orders)}
-          icon={<WalletCards className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Tickets sold"
-          value={String(totals.tickets)}
-          icon={<Ticket className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Average order"
-          value={formatMoney(averageOrder)}
-          icon={<BarChart3 className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Net funds"
-          value={formatMoney(totals.net)}
-          icon={<CheckCircle2 className="h-5 w-5" />}
-        />
+        <StatCard label="Gross proceeds" value={formatMoney(totals.gross)} icon={<PoundSterling className="h-5 w-5"/>}/>
+        <StatCard label="Paid orders" value={formatCount(totals.orders)} icon={<WalletCards className="h-5 w-5"/>}/>
+        <StatCard label="Tickets sold" value={formatCount(totals.tickets)} icon={<Ticket className="h-5 w-5"/>}/>
+        <StatCard label="Average order" value={formatMoney(averageOrder)} icon={<BarChart3 className="h-5 w-5"/>}/>
+        <StatCard label="Net funds (unverified)" value={formatMoney(totals.net)} icon={<CheckCircle2 className="h-5 w-5"/>}/>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Refunds" value={formatMoney(totals.refunds)} />
-        <MetricCard label="Payment fees" value={formatMoney(totals.fees)} />
-        <MetricCard label="Prize costs" value={formatMoney(totals.prizes)} />
-        <MetricCard
-          label="Good cause"
-          value={formatMoney(totals.goodCause)}
-        />
-        <MetricCard
-          label="Needs attention"
-          value={String(totals.problems)}
-          warning={totals.problems > 0}
-        />
+        <MetricCard label="Refunds" value={formatMoney(totals.refunds)}/>
+        <MetricCard label="Fees (unverified)" value={formatMoney(totals.fees)}/>
+        <MetricCard label="Prize costs" value={formatMoney(totals.prizes)}/>
+        <MetricCard label="Good cause (unverified)" value={formatMoney(totals.goodCause)}/>
+        <MetricCard label="Needs attention" value={formatCount(totals.problems)} warning={(totals.problems ?? 0) > 0}/>
       </section>
 
-      {error ? (
-        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+      {error ? (<div role="alert" className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
-        </div>
-      ) : null}
+        </div>) : null}
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
         <div className="mb-5 flex items-center gap-2">
-          <Filter className="h-4 w-4 text-white/65" />
+          <Filter className="h-4 w-4 text-white/65"/>
           <h2 className="text-lg font-bold text-white">
             Search &amp; filters
           </h2>
@@ -620,45 +503,34 @@ export default function ReportsClient() {
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="relative xl:col-span-2">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Lottery title, slug or ID..."
-              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"
-            />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"/>
+            <input aria-label="Search lottery reports" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Lottery title, slug or ID..." className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"/>
           </div>
 
-          <Select value={lotteryId} onChange={setLotteryId}>
+          <Select label="Lottery" value={lotteryId} onChange={setLotteryId}>
             <option value="all">All lotteries</option>
-            {lotteries.map(([id, title]) => (
-              <option key={id} value={id}>
+            {lotteries.map(([id, title]) => (<option key={id} value={id}>
                 {title}
-              </option>
-            ))}
+              </option>))}
           </Select>
 
-          <Select value={status} onChange={setStatus}>
+          <Select label="Status" value={status} onChange={setStatus}>
             <option value="all">All statuses</option>
-            {statuses.map((value) => (
-              <option key={value} value={value}>
+            {statuses.map((value) => (<option key={value} value={value}>
                 {value.replaceAll("_", " ")}
-              </option>
-            ))}
+              </option>))}
           </Select>
 
-          <Select value={year} onChange={setYear}>
+          <Select label="Created year" value={year} onChange={setYear}>
             <option value="all">All years</option>
-            {years.map((value) => (
-              <option key={value} value={value}>
+            {years.map((value) => (<option key={value} value={value}>
                 {value}
-              </option>
-            ))}
+              </option>))}
           </Select>
         </div>
 
         <div className="mt-3 max-w-sm">
-          <Select value={sort} onChange={setSort}>
+          <Select label="Sort reports" value={sort} onChange={setSort}>
             <option value="gross_desc">Highest gross proceeds</option>
             <option value="gross_asc">Lowest gross proceeds</option>
             <option value="tickets_desc">Most tickets sold</option>
@@ -674,33 +546,31 @@ export default function ReportsClient() {
             Lottery performance
           </h2>
           <p className="mt-1 text-sm text-white/50">
-            Showing {filtered.length} of {items.length} lottery reports
+            {loaded ? `Showing ${filtered.length} of ${items.length} lottery reports` : "Report data is unavailable"}
           </p>
         </div>
 
-        {loading ? (
-          <div className="flex min-h-52 items-center justify-center text-white/65">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        {loading ? (<div className="flex min-h-52 items-center justify-center text-white/65">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin"/>
             Loading reports...
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
-            <BarChart3 className="mx-auto h-8 w-8 text-white/30" />
+          </div>) : !loaded ? (<p className="text-white/60">Report data could not be loaded. Use Refresh to try again.</p>) : filtered.length === 0 ? (<div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
+            <BarChart3 className="mx-auto h-8 w-8 text-white/30"/>
             <h3 className="mt-3 font-bold text-white">
               No report data found
             </h3>
             <p className="mt-1 text-sm text-white/50">
               Change the filters or wait for lottery activity to be recorded.
             </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filtered.map((item) => (
-              <ReportRow key={item.lottery_id} item={item} />
-            ))}
-          </div>
-        )}
+          </div>) : (<div className="space-y-4">
+            {filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((item) => (<ReportRow key={item.lottery_id} item={item}/>))}
+          </div>)}
       </section>
+
+      {loaded && filtered.length > PAGE_SIZE && <nav aria-label="Report pages" className="flex items-center justify-between gap-3 text-sm text-white">
+        <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded-xl border border-white/15 px-4 py-3 disabled:opacity-40">Previous</button>
+        <span>Page {currentPage} of {pageCount}</span>
+        <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded-xl border border-white/15 px-4 py-3 disabled:opacity-40">Next</button>
+      </nav>}
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
         <div className="mb-5">
@@ -708,30 +578,17 @@ export default function ReportsClient() {
             Exports &amp; archive
           </h2>
           <p className="mt-1 text-sm leading-6 text-white/50">
-            Generate styled Excel workbooks for operational, financial, winner, audit and regulatory records for the selected lottery.
+            Downloads use only the chosen lottery and year. Search, status, sort and pagination affect the on-screen register only. Exports may contain personal or sensitive records; review their scope before downloading.
           </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {EXPORT_OPTIONS.map((option) => (
-            <button
-              key={option.type}
-              type="button"
-              onClick={() => exportReport(option.type)}
-              disabled={Boolean(exporting)}
-              className="group rounded-2xl border border-white/10 bg-black/20 p-5 text-left transition hover:border-white/20 hover:bg-white/5 disabled:opacity-50"
-            >
+          {EXPORT_OPTIONS.map((option) => (<button key={option.type} type="button" onClick={() => prepareExport(option.type)} disabled={Boolean(exporting) || !loaded || loading} className="group rounded-2xl border border-white/10 bg-black/20 p-5 text-left transition hover:border-white/20 hover:bg-white/5 disabled:opacity-50">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/65">
                   {option.icon}
                 </div>
-                {exporting === option.type ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-white/55" />
-                ) : option.type === "paper_draw" ? (
-                  <Printer className="h-4 w-4 text-white/35 transition group-hover:text-white/65" />
-                ) : (
-                  <Download className="h-4 w-4 text-white/35 transition group-hover:text-white/65" />
-                )}
+                {exporting === option.type ? (<Loader2 className="h-4 w-4 animate-spin text-white/55"/>) : option.type === "paper_draw" ? (<Printer className="h-4 w-4 text-white/35 transition group-hover:text-white/65"/>) : (<Download className="h-4 w-4 text-white/35 transition group-hover:text-white/65"/>)}
               </div>
 
               <h3 className="mt-4 font-extrabold text-white">
@@ -740,137 +597,145 @@ export default function ReportsClient() {
               <p className="mt-1 text-xs leading-5 text-white/45">
                 {option.description}
               </p>
-            </button>
-          ))}
+            </button>))}
         </div>
       </section>
 
       <section className="rounded-3xl border border-blue-400/20 bg-blue-500/10 p-5">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-blue-200" />
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-blue-200"/>
           <div>
             <h3 className="font-bold text-blue-100">
-              Finance source of truth
+              Report limitations
             </h3>
             <p className="mt-1 text-sm leading-6 text-blue-100/70">
-              Lottery Management remains the source of truth for individual
-              entries, tickets and lottery activity. Any future Money
-              Management integration should receive approved accounting
-              transactions rather than replace these lottery records.
+              Financial returns require verified payment fees, refunds, prize costs and ledger transactions. Export access and dataset permissions must be enforced and audited by the server. This screen cannot verify either requirement.
             </p>
           </div>
         </div>
       </section>
 
-      <PaperDrawModal
-        open={paperDrawOpen}
-        initialLotteryId={lotteryId === "all" || testMode ? "" : lotteryId}
-        onClose={() => setPaperDrawOpen(false)}
-      />
-    </div>
-  );
+      {pendingExport && <Modal titleId="export-title" onClose={() => setPendingExport(null)}>
+        <div className="space-y-4 p-6">
+          <h2 id="export-title" className="text-xl font-bold">Download {EXPORT_OPTIONS.find(option => option.type === pendingExport.type)?.title}</h2>
+          <p>Lottery: {pendingExport.title}. Year: {pendingExport.year === "all" ? "All years" : pendingExport.year}.</p>
+          <p className="text-sm leading-6 text-white/65">Search and status filters are not applied. The server determines which rows and fields are included. This download may contain personal data. Regulatory figures require reconciliation before submission.</p>
+          <div className="flex gap-3">
+            <button autoFocus type="button" onClick={() => setPendingExport(null)} className="rounded-xl border border-white/15 px-4 py-3">Cancel</button>
+            <button type="button" onClick={() => void exportReport()} className="rounded-xl bg-white px-4 py-3 font-bold text-black">Download</button>
+          </div>
+        </div>
+      </Modal>}
+      {paperDrawOpen && <PaperDrawModal open={paperDrawOpen} initialLotteryId={lotteryId === "all" ? "" : lotteryId} onDenied={clearDeniedData} onClose={() => setPaperDrawOpen(false)}/>}
+    </div>);
 }
-
-function PaperDrawModal({
-  open,
-  initialLotteryId,
-  onClose,
-}: {
-  open: boolean;
-  initialLotteryId: string;
-  onClose: () => void;
-}) {
-  const [selectedLotteryId, setSelectedLotteryId] = useState("");
-  const [lotteries, setLotteries] = useState<PaperDrawLottery[]>([]);
-  const [lottery, setLottery] = useState<PaperDrawLottery | null>(null);
-  const [tickets, setTickets] = useState<PaperDrawTicket[]>([]);
-  const [generatedAt, setGeneratedAt] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    if (!open) return;
-    setSelectedLotteryId(initialLotteryId);
-  }, [open, initialLotteryId]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const controller = new AbortController();
-
-    async function loadPaperDraw() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const params = new URLSearchParams();
-        if (selectedLotteryId) {
-          params.set("lottery_id", selectedLotteryId);
-        }
-
-        const response = await fetch(
-          `/api/admin/lotterymanagement/reports/paper-draw?${params.toString()}`,
-          {
-            credentials: "include",
-            cache: "no-store",
-            signal: controller.signal,
-          },
-        );
-        const data = (await response.json()) as PaperDrawResponse;
-
-        if (!response.ok || !data.ok) {
-          throw new Error(data.error || "Unable to prepare paper draw tickets.");
-        }
-
-        setLotteries(data.lotteries || []);
-        setLottery(data.lottery || null);
-        setTickets(data.tickets || []);
-        setGeneratedAt(data.generated_at || new Date().toISOString());
-      } catch (loadError) {
-        if (controller.signal.aborted) return;
-        setLottery(null);
-        setTickets([]);
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Unable to prepare paper draw tickets.",
-        );
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-
-    void loadPaperDraw();
-    return () => controller.abort();
-  }, [open, selectedLotteryId, reloadKey]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-
-    document.addEventListener("keydown", closeOnEscape);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.removeEventListener("keydown", closeOnEscape);
-      document.body.style.overflow = previousOverflow;
+function normalizePaperDraw(raw: Record<string, unknown>, selectedId: string) {
+    const parseLottery = (value: unknown): PaperDrawLottery => {
+        if (!record(value))
+            throw new Error("The server returned an invalid lottery.");
+        return { id: requiredText(value.id), title: requiredText(value.title), slug: requiredText(value.slug), status: requiredText(value.status), draw_at: nullableDate(value.draw_at), sales_close_at: nullableDate(value.sales_close_at) };
     };
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div
-      className="paper-draw-overlay fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/80 p-3 backdrop-blur-sm sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="paper-draw-title"
-    >
+    if (raw.lotteries !== undefined && (!Array.isArray(raw.lotteries) || raw.lotteries.length > MAX_REPORTS))
+        throw new Error("The server returned an invalid lottery list.");
+    const lotteries = (raw.lotteries === undefined ? [] : raw.lotteries as unknown[]).map(parseLottery);
+    if (new Set(lotteries.map(item => item.id)).size !== lotteries.length)
+        throw new Error("The server returned duplicate lotteries.");
+    if (!selectedId)
+        return { lotteries, lottery: null, tickets: [], generated_at: "" };
+    const lottery = parseLottery(raw.lottery);
+    if (lottery.id !== selectedId)
+        throw new Error("The server returned tickets for a different lottery.");
+    if (!Array.isArray(raw.tickets) || raw.tickets.length > MAX_PRINT_TICKETS)
+        throw new Error("The ticket register is invalid or too large. Request a bounded server-generated print file.");
+    const ids = new Set<string>();
+    const numbers = new Set<string>();
+    const tickets = raw.tickets.map(value => {
+        if (!record(value))
+            throw new Error("The server returned an invalid ticket.");
+        const id = requiredText(value.id);
+        const ticket_number = requiredText(value.ticket_number);
+        if (ids.has(id) || numbers.has(ticket_number))
+            throw new Error("The server returned duplicate print tickets.");
+        ids.add(id);
+        numbers.add(ticket_number);
+        return { id, ticket_number, order_reference: requiredText(value.order_reference), issued_at: nullableDate(value.issued_at) };
+    });
+    if (!lotteries.some(item => item.id === lottery.id))
+        lotteries.push(lottery);
+    return { lotteries, lottery, tickets, generated_at: nullableDate(raw.generated_at) ?? "" };
+}
+function PaperDrawModal({ onDenied, open, initialLotteryId, onClose, }: {
+    onDenied: () => void;
+    open: boolean;
+    initialLotteryId: string;
+    onClose: () => void;
+}) {
+    const [selectedLotteryId, setSelectedLotteryId] = useState(initialLotteryId);
+    const [lotteries, setLotteries] = useState<PaperDrawLottery[]>([]);
+    const [lottery, setLottery] = useState<PaperDrawLottery | null>(null);
+    const [tickets, setTickets] = useState<PaperDrawTicket[]>([]);
+    const [generatedAt, setGeneratedAt] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [reloadKey, setReloadKey] = useState(0);
+    useEffect(() => {
+        if (!open)
+            return;
+        setSelectedLotteryId(initialLotteryId);
+    }, [open, initialLotteryId]);
+    useEffect(() => {
+        if (!open)
+            return;
+        const controller = new AbortController();
+        let active = true;
+        async function loadPaperDraw() {
+            setLoading(true);
+            setError("");
+            setLottery(null);
+            setTickets([]);
+            setGeneratedAt("");
+            try {
+                const params = new URLSearchParams();
+                if (selectedLotteryId) {
+                    params.set("lottery_id", selectedLotteryId);
+                }
+                const data = await request(`${API_ROUTE}/paper-draw?${params}`, controller, async (response) => {
+                    const raw = await readJson(response);
+                    if (raw.ok !== true)
+                        throw new Error("Unable to prepare paper draw tickets.");
+                    return normalizePaperDraw(raw, selectedLotteryId);
+                });
+                if (controller.signal.aborted || !active)
+                    return;
+                setLotteries(data.lotteries);
+                setLottery(data.lottery);
+                setTickets(data.tickets);
+                setGeneratedAt(data.generated_at);
+            }
+            catch (loadError) {
+                if (!active)
+                    return;
+                if (loadError instanceof ReportRequestError && [401, 403].includes(loadError.status)) {
+                    onDenied();
+                    return;
+                }
+                setLottery(null);
+                setTickets([]);
+                setError(loadError instanceof Error
+                    ? loadError.message
+                    : "Unable to prepare paper draw tickets.");
+            }
+            finally {
+                if (active)
+                    setLoading(false);
+            }
+        }
+        void loadPaperDraw();
+        return () => { active = false; controller.abort(); };
+    }, [open, selectedLotteryId, reloadKey, onDenied]);
+    if (!open)
+        return null;
+    return (<Modal className="paper-draw-overlay" titleId="paper-draw-title" onClose={onClose}>
       <div className="paper-draw-modal my-auto w-full max-w-6xl overflow-hidden rounded-3xl border border-white/15 bg-[#15172a] shadow-2xl">
         <header className="paper-draw-controls sticky top-0 z-10 border-b border-white/10 bg-[#15172a] p-5 text-white sm:p-6">
           <div className="flex items-start justify-between gap-4">
@@ -879,78 +744,49 @@ function PaperDrawModal({
                 Paper draw ticket sheets
               </h2>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-white/55">
-                Preview and print low-ink slips for issued tickets belonging to paid orders.
+                Preview server-returned ticket slips. Paid-order eligibility, completeness and a secure draw snapshot must be verified by the server before using these for a draw.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 text-white/65 hover:bg-white/10 hover:text-white"
-              aria-label="Close paper draw popup"
-            >
-              <X className="h-5 w-5" />
+            <button type="button" onClick={onClose} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/15 text-white/65 hover:bg-white/10 hover:text-white" autoFocus aria-label="Close paper draw popup">
+              <X className="h-5 w-5"/>
             </button>
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
             <label className="text-sm font-bold">
               Lottery
-              <select
-                value={selectedLotteryId}
-                onChange={(event) => setSelectedLotteryId(event.target.value)}
-                className="mt-2 min-h-11 w-full rounded-xl border border-white/15 bg-slate-950 px-3 text-white"
-              >
+              <select value={selectedLotteryId} onChange={(event) => setSelectedLotteryId(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-white/15 bg-slate-950 px-3 text-white">
                 <option value="">Choose a lottery</option>
-                {lotteries.map((item) => (
-                  <option key={item.id} value={item.id}>
+                {lotteries.map((item) => (<option key={item.id} value={item.id}>
                     {item.title}
-                  </option>
-                ))}
+                  </option>))}
               </select>
             </label>
 
-            <button
-              type="button"
-              onClick={() => setReloadKey((value) => value + 1)}
-              disabled={loading}
-              className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 font-bold disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <button type="button" onClick={() => setReloadKey((value) => value + 1)} disabled={loading} className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 font-bold disabled:opacity-50">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}/>
               Refresh
             </button>
 
-            <button
-              type="button"
-              onClick={() => window.print()}
-              disabled={loading || tickets.length === 0}
-              className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-yellow-300 px-5 font-black text-purple-950 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Printer className="h-4 w-4" />
+            <button type="button" onClick={() => { if (!loading && lottery?.id === selectedLotteryId && tickets.length && !error)
+        window.print(); }} disabled={loading || tickets.length === 0 || !lottery || lottery.id !== selectedLotteryId || Boolean(error)} className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-yellow-300 px-5 font-black text-purple-950 disabled:cursor-not-allowed disabled:opacity-45">
+              <Printer className="h-4 w-4"/>
               Print {tickets.length || ""} tickets
             </button>
           </div>
         </header>
 
         <div className="max-h-[72vh] overflow-y-auto p-4 sm:p-6">
-          {error ? (
-            <div className="paper-draw-controls rounded-2xl border border-red-300 bg-red-50 p-5 font-bold text-red-800">
+          {error ? (<div className="paper-draw-controls rounded-2xl border border-red-300 bg-red-50 p-5 font-bold text-red-800">
               {error}
-            </div>
-          ) : loading ? (
-            <div className="paper-draw-controls flex min-h-56 items-center justify-center text-white/60">
-              <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+            </div>) : loading ? (<div className="paper-draw-controls flex min-h-56 items-center justify-center text-white/60">
+              <Loader2 className="mr-3 h-5 w-5 animate-spin"/>
               Preparing tickets…
-            </div>
-          ) : !selectedLotteryId ? (
-            <div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
+            </div>) : !selectedLotteryId ? (<div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
               Choose a lottery to preview its paper draw tickets.
-            </div>
-          ) : lottery && tickets.length === 0 ? (
-            <div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
-              No eligible issued tickets were found for paid orders in this lottery.
-            </div>
-          ) : lottery ? (
-            <main className="paper-draw-print bg-white p-5 text-black sm:p-7">
+            </div>) : lottery && tickets.length === 0 ? (<div className="paper-draw-controls rounded-2xl border border-dashed border-white/20 p-10 text-center text-white/60">
+              No tickets were returned for this lottery.
+            </div>) : lottery ? (<main className="paper-draw-print bg-white p-5 text-black sm:p-7">
               <header className="paper-draw-print-header mb-5 border-b-2 border-black pb-4">
                 <div className="flex items-start justify-between gap-5">
                   <div>
@@ -959,7 +795,7 @@ function PaperDrawModal({
                     </p>
                     <h3 className="mt-1 text-2xl font-black">{lottery.title}</h3>
                   </div>
-                  <Ticket className="h-8 w-8" aria-hidden="true" />
+                  <Ticket className="h-8 w-8" aria-hidden="true"/>
                 </div>
                 <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
                   <p><strong>Tickets:</strong> {tickets.length}</p>
@@ -967,16 +803,12 @@ function PaperDrawModal({
                   <p><strong>Prepared:</strong> {formatDate(generatedAt || null)}</p>
                 </div>
                 <p className="mt-2 text-[11px] text-slate-600">
-                  Cut along the dashed lines and fold each slip before drawing.
+                  Server-returned ticket register. Verify draw eligibility and completeness before use. Cut along the dashed lines.
                 </p>
               </header>
 
               <div className="paper-ticket-grid grid gap-4 sm:grid-cols-2">
-                {tickets.map((item) => (
-                  <article
-                    key={item.id}
-                    className="paper-ticket flex min-h-36 break-inside-avoid flex-col justify-between border border-dashed border-slate-500 p-4 text-black"
-                  >
+                {tickets.map((item) => (<article key={item.id} className="paper-ticket flex min-h-36 break-inside-avoid flex-col justify-between border border-dashed border-slate-500 p-4 text-black">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-[10px] font-bold uppercase tracking-[0.14em]">
@@ -992,15 +824,13 @@ function PaperDrawModal({
                     <p className="border-t border-slate-300 pt-2 text-[10px]">
                       Order reference: <strong>{item.order_reference}</strong>
                     </p>
-                  </article>
-                ))}
+                  </article>))}
               </div>
-            </main>
-          ) : null}
+            </main>) : null}
         </div>
       </div>
 
-      <style jsx global>{`
+      <style>{`
         @page {
           size: A4 portrait;
           margin: 8mm;
@@ -1074,18 +904,13 @@ function PaperDrawModal({
           }
         }
       `}</style>
-    </div>
-  );
+    </Modal>);
 }
-
-function ReportRow({ item }: { item: LotteryReport }) {
-  const issues =
-    item.failed_payments +
-    item.disputed_payments +
-    item.compliance_warnings;
-
-  return (
-    <article className="rounded-2xl border border-white/10 bg-black/20 p-5">
+function ReportRow({ item }: {
+    item: LotteryReport;
+}) {
+    const issues = sumFields([item], ["failed_payments", "disputed_payments", "compliance_warnings"]);
+    return (<article className="rounded-2xl border border-white/10 bg-black/20 p-5">
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -1096,17 +921,13 @@ function ReportRow({ item }: { item: LotteryReport }) {
               <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-white/55">
                 {item.lottery_status.replaceAll("_", " ")}
               </span>
-              {issues > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-200">
-                  <AlertTriangle className="h-3 w-3" />
+              {issues !== null && issues > 0 ? (<span className="inline-flex items-center gap-1 rounded-full border border-amber-400/25 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-200">
+                  <AlertTriangle className="h-3 w-3"/>
                   {issues} issue{issues === 1 ? "" : "s"}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-200">
-                  <CheckCircle2 className="h-3 w-3" />
-                  No warnings
-                </span>
-              )}
+                </span>) : (<span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-white/60">
+                  <CheckCircle2 className="h-3 w-3"/>
+                  {issues === null ? "Warning data unavailable" : "No reported warnings · not approval"}
+                </span>)}
             </div>
 
             <p className="mt-2 text-xs text-white/40">
@@ -1124,57 +945,32 @@ function ReportRow({ item }: { item: LotteryReport }) {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-          <Info label="Paid orders" value={String(item.paid_orders)} />
-          <Info label="Tickets" value={String(item.tickets_sold)} />
-          <Info
-            label="Avg order"
-            value={formatMoney(item.average_order_value)}
-          />
-          <Info label="Refunds" value={formatMoney(item.refunds)} />
-          <Info label="Fees" value={formatMoney(item.payment_fees)} />
-          <Info label="Net funds" value={formatMoney(item.net_funds)} />
-          <Info label="Prize costs" value={formatMoney(item.prize_costs)} />
-          <Info
-            label="Good cause"
-            value={formatMoney(item.good_cause_amount)}
-          />
+          <Info label="Paid orders" value={formatCount(item.paid_orders)}/>
+          <Info label="Tickets" value={formatCount(item.tickets_sold)}/>
+          <Info label="Avg order" value={formatMoney(item.average_order_value)}/>
+          <Info label="Refunds" value={formatMoney(item.refunds)}/>
+          <Info label="Fees (unverified)" value={formatMoney(item.payment_fees)}/>
+          <Info label="Net funds (unverified)" value={formatMoney(item.net_funds)}/>
+          <Info label="Prize costs" value={formatMoney(item.prize_costs)}/>
+          <Info label="Good cause (unverified)" value={formatMoney(item.good_cause_amount)}/>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <Info label="Winners" value={String(item.winners)} />
-          <Info
-            label="Unclaimed prizes"
-            value={String(item.unclaimed_prizes)}
-          />
-          <Info
-            label="Failed payments"
-            value={String(item.failed_payments)}
-          />
-          <Info
-            label="Disputes"
-            value={String(item.disputed_payments)}
-          />
-          <Info
-            label="Compliance warnings"
-            value={String(item.compliance_warnings)}
-          />
+          <Info label="Winners" value={formatCount(item.winners)}/>
+          <Info label="Unclaimed prizes" value={formatCount(item.unclaimed_prizes)}/>
+          <Info label="Failed payments" value={formatCount(item.failed_payments)}/>
+          <Info label="Disputes" value={formatCount(item.disputed_payments)}/>
+          <Info label="Compliance warnings" value={formatCount(item.compliance_warnings)}/>
         </div>
       </div>
-    </article>
-  );
+    </article>);
 }
-
-function StatCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
+function StatCard({ icon, label, value, }: {
+    icon: React.ReactNode;
+    label: string;
+    value: string;
 }) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+    return (<div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
       <div className="flex items-center gap-3 text-white/55">
         {icon}
         <span className="text-xs font-bold uppercase tracking-wide">
@@ -1182,73 +978,47 @@ function StatCard({
         </span>
       </div>
       <div className="mt-3 text-2xl font-black text-white">{value}</div>
-    </div>
-  );
+    </div>);
 }
-
-function MetricCard({
-  label,
-  value,
-  warning = false,
-}: {
-  label: string;
-  value: string;
-  warning?: boolean;
+function MetricCard({ label, value, warning = false, }: {
+    label: string;
+    value: string;
+    warning?: boolean;
 }) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        warning
-          ? "border-amber-400/20 bg-amber-500/10"
-          : "border-white/10 bg-black/20"
-      }`}
-    >
+    return (<div className={`rounded-2xl border p-4 ${warning
+            ? "border-amber-400/20 bg-amber-500/10"
+            : "border-white/10 bg-black/20"}`}>
       <div className="text-xs font-bold uppercase tracking-wide text-white/40">
         {label}
       </div>
-      <div
-        className={`mt-2 text-xl font-black ${
-          warning ? "text-amber-100" : "text-white"
-        }`}
-      >
+      <div className={`mt-2 text-xl font-black ${warning ? "text-amber-100" : "text-white"}`}>
         {value}
       </div>
-    </div>
-  );
+    </div>);
 }
-
-function Select({
-  value,
-  onChange,
-  children,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  children: React.ReactNode;
+function Select({ label, value, onChange, children, }: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    children: React.ReactNode;
 }) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
-      >
+    return (<div className="relative">
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none">
         {children}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
-    </div>
-  );
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"/>
+    </div>);
 }
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+function Info({ label, value }: {
+    label: string;
+    value: string;
+}) {
+    return (<div className="rounded-xl border border-white/10 bg-white/5 p-3">
       <div className="text-[10px] font-bold uppercase tracking-wide text-white/35">
         {label}
       </div>
       <div className="mt-1 break-words text-xs font-bold text-white/75">
         {value}
       </div>
-    </div>
-  );
+    </div>);
 }
