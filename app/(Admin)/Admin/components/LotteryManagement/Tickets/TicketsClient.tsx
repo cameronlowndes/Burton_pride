@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   Barcode,
   CheckCircle2,
-  ChevronDown,
   Eye,
   Filter,
   Loader2,
@@ -17,21 +24,7 @@ import {
   UserRound,
   X,
   XCircle,
-  Beaker,
 } from "lucide-react";
-
-
-
-type OrderRecord = any;
-
-type OrderDetailsModalProps = {
-  order: OrderRecord;
-  onClose: () => void;
-  onMarkPaid?: () => void;
-  onIssueMissingTickets?: () => void;
-  onEdit?: () => void;
-};
-
 
 type TicketStatus = "reserved" | "issued" | "void" | "refunded" | "winner";
 
@@ -70,25 +63,120 @@ type TicketRecord = {
   updated_at: string;
   is_payment_valid: boolean;
   is_draw_eligible: boolean;
+  is_test?: boolean;
   events: TicketEvent[];
 };
 
-type ApiResponse = {
-  ok: boolean;
-  items?: TicketRecord[];
-  error?: string;
-  message?: string;
-};
-
-type OrdersApiResponse = {
-  ok: boolean;
-  items?: OrderRecord[];
-  error?: string;
-  message?: string;
-};
-
 const API_ROUTE = "/api/admin/lotterymanagement/tickets";
-const ORDERS_API_ROUTE = "/api/admin/lotterymanagement/orders";
+const REQUEST_TIMEOUT_MS = 20000;
+const PAGE_SIZE = 50;
+class TicketRequestError extends Error {}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function nullableText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+function parseTicket(value: unknown): TicketRecord {
+  if (
+    !isRecord(value) ||
+    ["id", "lottery_id", "lottery_title", "ticket_number"].some(
+      (key) => typeof value[key] !== "string" || !value[key],
+    ) ||
+    !["reserved", "issued", "void", "refunded", "winner"].includes(
+      String(value.status),
+    )
+  ) {
+    throw new TicketRequestError(
+      "Ticket data is incomplete. Refresh or report the issue.",
+    );
+  }
+  const events = Array.isArray(value.events)
+    ? value.events.map((event): TicketEvent => {
+        if (
+          !isRecord(event) ||
+          typeof event.id !== "string" ||
+          typeof event.event_type !== "string"
+        ) {
+          throw new TicketRequestError(
+            "Ticket history is incomplete. Refresh or report the issue.",
+          );
+        }
+        return {
+          id: event.id,
+          event_type: event.event_type,
+          previous_status: nullableText(event.previous_status),
+          new_status: nullableText(event.new_status),
+          reason: nullableText(event.reason),
+          created_at: nullableText(event.created_at) ?? "",
+        };
+      })
+    : [];
+  return {
+    id: value.id as string,
+    lottery_id: value.lottery_id as string,
+    lottery_title: value.lottery_title as string,
+    lottery_slug: nullableText(value.lottery_slug) ?? "",
+    ticket_number: value.ticket_number as string,
+    status: value.status as TicketStatus,
+    order_id: nullableText(value.order_id),
+    order_reference: nullableText(value.order_reference),
+    purchaser_name: nullableText(value.purchaser_name),
+    purchaser_email: nullableText(value.purchaser_email),
+    payment_status: nullableText(value.payment_status),
+    payment_reference: nullableText(value.payment_reference),
+    issued_at: nullableText(value.issued_at),
+    voided_at: nullableText(value.voided_at),
+    refunded_at: nullableText(value.refunded_at),
+    winner_at: nullableText(value.winner_at),
+    void_reason: nullableText(value.void_reason),
+    status_reason: nullableText(value.status_reason),
+    ticket_source:
+      value.ticket_source === "paper"
+        ? "paper"
+        : value.ticket_source === "online"
+          ? "online"
+          : null,
+    paper_registered_at: nullableText(value.paper_registered_at),
+    paper_registered_by: nullableText(value.paper_registered_by),
+    created_at: nullableText(value.created_at) ?? "",
+    updated_at: nullableText(value.updated_at) ?? "",
+    is_payment_valid: value.is_payment_valid === true,
+    is_draw_eligible: value.is_draw_eligible === true,
+    is_test: value.is_test === true,
+    events,
+  };
+}
+// This is a conservative display check. The frozen server snapshot determines the actual draw pool.
+function reportedEligible(ticket: TicketRecord): boolean {
+  return (
+    ticket.is_draw_eligible &&
+    ticket.status === "issued" &&
+    ticket.is_payment_valid &&
+    ticket.payment_status === "paid" &&
+    !!ticket.order_id &&
+    ticket.ticket_source !== "paper" &&
+    ticket.is_test !== true
+  );
+}
+function integrityWarning(ticket: TicketRecord): boolean {
+  return (
+    (["issued", "winner"].includes(ticket.status) &&
+      (!ticket.is_payment_valid ||
+        ticket.payment_status !== "paid" ||
+        !ticket.order_id)) ||
+    (ticket.is_draw_eligible && !reportedEligible(ticket))
+  );
+}
+function safeRequestError(status: number): string {
+  if (status === 401)
+    return "Your session has expired. Sign in again and refresh tickets.";
+  if (status === 403)
+    return "You do not have permission to view these ticket records.";
+  if (status === 429)
+    return "Too many requests. Wait a moment and refresh tickets.";
+  return "Tickets could not be loaded. Refresh or report the issue.";
+}
 
 const STATUS_OPTIONS: Array<{ value: TicketStatus | "all"; label: string }> = [
   { value: "all", label: "All ticket statuses" },
@@ -116,6 +204,7 @@ function statusClass(status: TicketStatus) {
 
 function formatDate(value: string | null) {
   if (!value) return "Not recorded";
+  if (!Number.isFinite(Date.parse(value))) return "Invalid date";
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -123,33 +212,16 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
-async function readJson(res: Response): Promise<ApiResponse> {
-  const text = await res.text();
-  try {
-    return text ? JSON.parse(text) : { ok: false };
-  } catch {
-    return { ok: false, error: "The API returned invalid JSON." };
-  }
-}
-
-async function readOrdersJson(res: Response): Promise<OrdersApiResponse> {
-  const text = await res.text();
-  try {
-    return text ? JSON.parse(text) : { ok: false };
-  } catch {
-    return { ok: false, error: "The Orders API returned invalid JSON." };
-  }
-}
-
 export default function TicketsClient() {
   const [items, setItems] = useState<TicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TicketRecord | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
-  const [orderLoading, setOrderLoading] = useState(false);
-  const [orderError, setOrderError] = useState<string | null>(null);
-  const [testMode, setTestMode] = useState(false);
+  const [page, setPage] = useState(1);
+  const mountedRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchId = useId();
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<TicketStatus | "all">("all");
@@ -157,341 +229,75 @@ export default function TicketsClient() {
   const [eligibility, setEligibility] = useState("all");
   const [sort, setSort] = useState("newest");
 
-  useEffect(() => {
-    loadTickets();
-  }, []);
-
-  function startFullFeatureTest() {
-    const now = Date.now();
-
-    const demoTickets: TicketRecord[] = [
-      {
-        id: "test-ticket-issued",
-        lottery_id: "test-lottery-1",
-        lottery_title: "Test Summer Raffle 2026",
-        lottery_slug: "test-summer-raffle-2026",
-        order_id: "test-order-1",
-        order_reference: "TEST-ORD-0001",
-        purchaser_name: "Test Supporter One",
-        purchaser_email: "test.one@example.test",
-        payment_status: "paid",
-        payment_reference: "TEST-PAY-001",
-        ticket_number: "BP-TEST-000001",
-        status: "issued",
-        issued_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-        voided_at: null,
-        refunded_at: null,
-        winner_at: null,
-        void_reason: null,
-        status_reason: null,
-        created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-        is_payment_valid: true,
-        is_draw_eligible: true,
-        events: [
-          {
-            id: "evt-issued-1",
-            event_type: "reserved",
-            previous_status: null,
-            new_status: "reserved",
-            reason: "Ticket reserved during test checkout.",
-            created_at: new Date(now - 130 * 60 * 1000).toISOString(),
-          },
-          {
-            id: "evt-issued-2",
-            event_type: "issued",
-            previous_status: "reserved",
-            new_status: "issued",
-            reason: "Test payment confirmed.",
-            created_at: new Date(now - 120 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-      {
-        id: "test-ticket-reserved",
-        lottery_id: "test-lottery-1",
-        lottery_title: "Test Summer Raffle 2026",
-        lottery_slug: "test-summer-raffle-2026",
-        order_id: "test-order-2",
-        order_reference: "TEST-ORD-0002",
-        purchaser_name: "Test Reserved User",
-        purchaser_email: "reserved@example.test",
-        payment_status: "pending",
-        payment_reference: "TEST-PAY-002",
-        ticket_number: "BP-TEST-000002",
-        status: "reserved",
-        issued_at: null,
-        voided_at: null,
-        refunded_at: null,
-        winner_at: null,
-        void_reason: null,
-        status_reason: "Waiting for payment confirmation.",
-        created_at: new Date(now - 90 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 90 * 60 * 1000).toISOString(),
-        is_payment_valid: false,
-        is_draw_eligible: false,
-        events: [
-          {
-            id: "evt-reserved-1",
-            event_type: "reserved",
-            previous_status: null,
-            new_status: "reserved",
-            reason: "Reserved pending payment.",
-            created_at: new Date(now - 90 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-      {
-        id: "test-ticket-winner",
-        lottery_id: "test-lottery-1",
-        lottery_title: "Test Summer Raffle 2026",
-        lottery_slug: "test-summer-raffle-2026",
-        order_id: "test-order-3",
-        order_reference: "TEST-ORD-0003",
-        purchaser_name: "Test Winner",
-        purchaser_email: "winner@example.test",
-        payment_status: "paid",
-        payment_reference: "TEST-PAY-003",
-        ticket_number: "BP-TEST-000104",
-        status: "winner",
-        issued_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
-        voided_at: null,
-        refunded_at: null,
-        winner_at: new Date(now - 30 * 60 * 1000).toISOString(),
-        void_reason: null,
-        status_reason: "Selected in test draw.",
-        created_at: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 30 * 60 * 1000).toISOString(),
-        is_payment_valid: true,
-        is_draw_eligible: true,
-        events: [
-          {
-            id: "evt-winner-1",
-            event_type: "issued",
-            previous_status: "reserved",
-            new_status: "issued",
-            reason: "Test payment confirmed.",
-            created_at: new Date(now - 23 * 60 * 60 * 1000).toISOString(),
-          },
-          {
-            id: "evt-winner-2",
-            event_type: "winner_selected",
-            previous_status: "issued",
-            new_status: "winner",
-            reason: "Selected by test secure draw.",
-            created_at: new Date(now - 30 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-      {
-        id: "test-ticket-refunded",
-        lottery_id: "test-lottery-2",
-        lottery_title: "Test Christmas Raffle 2026",
-        lottery_slug: "test-christmas-raffle-2026",
-        order_id: "test-order-4",
-        order_reference: "TEST-ORD-0004",
-        purchaser_name: "Test Refund",
-        purchaser_email: "refund@example.test",
-        payment_status: "partially_refunded",
-        payment_reference: "TEST-PAY-004",
-        ticket_number: "BP-TEST-000203",
-        status: "refunded",
-        issued_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
-        voided_at: null,
-        refunded_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        winner_at: null,
-        void_reason: null,
-        status_reason: "Ticket refunded in test order.",
-        created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        is_payment_valid: false,
-        is_draw_eligible: false,
-        events: [
-          {
-            id: "evt-refund-1",
-            event_type: "issued",
-            previous_status: "reserved",
-            new_status: "issued",
-            reason: "Test ticket issued.",
-            created_at: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString(),
-          },
-          {
-            id: "evt-refund-2",
-            event_type: "refunded",
-            previous_status: "issued",
-            new_status: "refunded",
-            reason: "Test refund completed.",
-            created_at: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-      {
-        id: "test-ticket-void",
-        lottery_id: "test-lottery-2",
-        lottery_title: "Test Christmas Raffle 2026",
-        lottery_slug: "test-christmas-raffle-2026",
-        order_id: "test-order-5",
-        order_reference: "TEST-ORD-0005",
-        purchaser_name: "Test Void",
-        purchaser_email: "void@example.test",
-        payment_status: "cancelled",
-        payment_reference: "TEST-PAY-005",
-        ticket_number: "BP-TEST-000250",
-        status: "void",
-        issued_at: null,
-        voided_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        refunded_at: null,
-        winner_at: null,
-        void_reason: "Test payment was cancelled.",
-        status_reason: "Voided after cancelled payment.",
-        created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        is_payment_valid: false,
-        is_draw_eligible: false,
-        events: [
-          {
-            id: "evt-void-1",
-            event_type: "reserved",
-            previous_status: null,
-            new_status: "reserved",
-            reason: "Test ticket reserved.",
-            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000 - 20 * 60 * 1000).toISOString(),
-          },
-          {
-            id: "evt-void-2",
-            event_type: "voided",
-            previous_status: "reserved",
-            new_status: "void",
-            reason: "Payment cancelled during test.",
-            created_at: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-      {
-        id: "test-ticket-warning",
-        lottery_id: "test-lottery-3",
-        lottery_title: "Test Community Fundraiser",
-        lottery_slug: "test-community-fundraiser",
-        order_id: "test-order-6",
-        order_reference: "TEST-ORD-0006",
-        purchaser_name: "Test Integrity Warning",
-        purchaser_email: "warning@example.test",
-        payment_status: "failed",
-        payment_reference: "TEST-PAY-006",
-        ticket_number: "BP-TEST-000301",
-        status: "issued",
-        issued_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
-        voided_at: null,
-        refunded_at: null,
-        winner_at: null,
-        void_reason: null,
-        status_reason: "Test integrity mismatch: issued ticket linked to failed payment.",
-        created_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date(now - 60 * 60 * 1000).toISOString(),
-        is_payment_valid: false,
-        is_draw_eligible: false,
-        events: [
-          {
-            id: "evt-warning-1",
-            event_type: "issued",
-            previous_status: "reserved",
-            new_status: "issued",
-            reason: "Intentional test integrity warning.",
-            created_at: new Date(now - 6 * 60 * 60 * 1000).toISOString(),
-          },
-        ],
-      },
-    ];
-
-    setTestMode(true);
-    setItems(demoTickets);
-    setSelected(null);
-    setSelectedOrder(null);
-    setOrderError(null);
-    setError(null);
-    setSearch("");
-    setStatus("all");
-    setLotteryId("all");
-    setEligibility("all");
-    setSort("newest");
-    setLoading(false);
-  }
-
-  async function loadTickets() {
-    setTestMode(false);
+  const loadTickets = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timer = window.setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT_MS,
+    );
     setLoading(true);
     setError(null);
-    setSelectedOrder(null);
-    setOrderError(null);
-
+    setItems([]);
+    setSelected(null);
+    setPage(1);
     try {
       const res = await fetch(API_ROUTE, {
-      cache: "no-store",
-      credentials: "include",
-    });
-    const data = await readJson(res);
-    if (!res.ok || !data.ok) {
-      throw new Error(data.error || data.message || "Failed to load tickets.");
-    }
-    setItems(data.items || []);
-  } catch (err: any) {
-      setError(err?.message || "Failed to load tickets.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function openLinkedOrder(ticket: TicketRecord) {
-    const orderId = ticket.order_id;
-    const orderReference = ticket.order_reference;
-
-    if (!orderId) {
-      setOrderError("This ticket is not linked to an order.");
-      return;
-    }
-
-    if (testMode) {
-      setOrderError(
-        "Demo tickets are not stored in the database, so their linked order cannot be opened.",
-      );
-      return;
-    }
-
-    setOrderLoading(true);
-    setOrderError(null);
-
-    try {
-      const res = await fetch(ORDERS_API_ROUTE, {
         cache: "no-store",
         credentials: "include",
+        signal: controller.signal,
       });
-      const data = await readOrdersJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Failed to load the linked order.",
+      if (!res.ok) throw new TicketRequestError(safeRequestError(res.status));
+      const data: unknown = await res.json();
+      if (!isRecord(data) || data.ok !== true || !Array.isArray(data.items)) {
+        throw new TicketRequestError(
+          "The service returned incomplete ticket records. Refresh or report the issue.",
         );
       }
-
-      const linkedOrder = (data.items || []).find(
-        (order) =>
-          order.id === orderId ||
-          (orderReference !== null &&
-            order.order_reference === orderReference),
-      );
-
-      if (!linkedOrder) {
-        throw new Error("The linked order could not be found.");
+      const records = data.items.map(parseTicket);
+      if (new Set(records.map((item) => item.id)).size !== records.length) {
+        throw new TicketRequestError(
+          "Duplicate ticket records were returned. Report the issue before relying on these records.",
+        );
       }
-
-      setSelected(null);
-      setSelectedOrder(linkedOrder);
-    } catch (err: any) {
-      setOrderError(err?.message || "Failed to load the linked order.");
+      if (
+        !mountedRef.current ||
+        controller.signal.aborted ||
+        requestRef.current !== controller
+      )
+        return;
+      // Paper-ticket operations remain outside this release's scope.
+      setItems(records.filter((item) => item.ticket_source !== "paper"));
+    } catch (err) {
+      if (mountedRef.current && requestRef.current === controller) {
+        setItems([]);
+        setError(
+          err instanceof TicketRequestError && !controller.signal.aborted
+            ? err.message
+            : "Tickets could not be loaded. Check your connection and refresh.",
+        );
+      }
     } finally {
-      setOrderLoading(false);
+      window.clearTimeout(timer);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        if (mountedRef.current) setLoading(false);
+      }
     }
-  }
+  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadTickets();
+    return () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [loadTickets]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, status, lotteryId, eligibility, sort]);
 
   const lotteries = useMemo(() => {
     const map = new Map<string, string>();
@@ -514,36 +320,53 @@ export default function TicketsClient() {
         item.lottery_title.toLowerCase().includes(q);
 
       const matchesStatus = status === "all" || item.status === status;
-      const matchesLottery = lotteryId === "all" || item.lottery_id === lotteryId;
+      const matchesLottery =
+        lotteryId === "all" || item.lottery_id === lotteryId;
       const matchesEligibility =
         eligibility === "all" ||
-        (eligibility === "eligible" && item.is_draw_eligible) ||
-        (eligibility === "ineligible" && !item.is_draw_eligible);
+        (eligibility === "eligible" && reportedEligible(item)) ||
+        (eligibility === "ineligible" && !reportedEligible(item));
 
-      return matchesSearch && matchesStatus && matchesLottery && matchesEligibility;
+      return (
+        matchesSearch && matchesStatus && matchesLottery && matchesEligibility
+      );
     });
 
     return result.sort((a, b) => {
       switch (sort) {
         case "oldest":
-          return +new Date(a.created_at) - +new Date(b.created_at);
+          return (
+            (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0)
+          );
         case "ticket_asc":
-          return a.ticket_number.localeCompare(b.ticket_number, undefined, { numeric: true });
+          return a.ticket_number.localeCompare(b.ticket_number, undefined, {
+            numeric: true,
+          });
         case "ticket_desc":
-          return b.ticket_number.localeCompare(a.ticket_number, undefined, { numeric: true });
+          return b.ticket_number.localeCompare(a.ticket_number, undefined, {
+            numeric: true,
+          });
         default:
-          return +new Date(b.created_at) - +new Date(a.created_at);
+          return (
+            (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+          );
       }
     });
   }, [items, search, status, lotteryId, eligibility, sort]);
 
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleItems = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
   const issued = items.filter((x) => x.status === "issued").length;
   const reserved = items.filter((x) => x.status === "reserved").length;
   const winners = items.filter((x) => x.status === "winner").length;
-  const invalid = items.filter((x) => ["void", "refunded"].includes(x.status)).length;
-  const integrityWarnings = items.filter(
-    (x) => ["issued", "winner"].includes(x.status) && !x.is_payment_valid,
+  const invalid = items.filter((x) =>
+    ["void", "refunded"].includes(x.status),
   ).length;
+  const integrityWarnings = items.filter(integrityWarning).length;
 
   return (
     <div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
@@ -557,8 +380,9 @@ export default function TicketsClient() {
             <div>
               <h1 className="text-2xl font-extrabold text-white">Tickets</h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-white/60">
-                View the immutable ticket register, linked orders, payment validity,
-                ticket states, winner records and ticket history.
+                View the loaded ticket register, linked order references,
+                payment status, ticket states, winner records and ticket
+                history.
               </p>
             </div>
           </div>
@@ -566,56 +390,65 @@ export default function TicketsClient() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={startFullFeatureTest}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
-            >
-              <Beaker className="h-4 w-4" />
-              Test full feature
-            </button>
-
-            <button
-              type="button"
-              onClick={loadTickets}
+              onClick={() => void loadTickets()}
               disabled={loading}
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+              />
               Refresh
             </button>
           </div>
         </div>
       </section>
 
-      <div className="rounded-2xl border border-purple-400/20 bg-purple-500/10 p-4 text-sm text-purple-100" role="status">
-        Paper ticket features are coming soon. The ticket register shows available online ticket records.
+      <div
+        className="rounded-2xl border border-purple-400/20 bg-purple-500/10 p-4 text-sm text-purple-100"
+        role="status"
+      >
+        This view shows loaded online ticket records. Eligibility is reported by
+        the API and checked for visible inconsistencies; the frozen server
+        snapshot determines the draw pool. Paper tickets are outside this
+        release.
       </div>
 
-      {testMode ? (
-        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          <div className="flex items-start gap-3">
-            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <div className="font-bold">Test mode is active</div>
-              <div className="mt-1 text-yellow-100/70">
-                These are fake ticket records. You can test issued, reserved, winner,
-                refunded, void and payment-warning states, plus filters and ticket history,
-                without changing the real API or Supabase.
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Issued" value={issued} icon={<CheckCircle2 className="h-5 w-5" />} />
-        <StatCard label="Reserved" value={reserved} icon={<Ticket className="h-5 w-5" />} />
-        <StatCard label="Winners" value={winners} icon={<Trophy className="h-5 w-5" />} />
-        <StatCard label="Void / refunded" value={invalid} icon={<XCircle className="h-5 w-5" />} />
-        <StatCard label="Integrity warnings" value={integrityWarnings} icon={<AlertTriangle className="h-5 w-5" />} />
+      <section
+        aria-label="Counts for loaded online ticket records"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"
+      >
+        <StatCard
+          label="Issued"
+          value={loading || error ? null : issued}
+          icon={<CheckCircle2 className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Reserved"
+          value={loading || error ? null : reserved}
+          icon={<Ticket className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Winners"
+          value={loading || error ? null : winners}
+          icon={<Trophy className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Void / refunded"
+          value={loading || error ? null : invalid}
+          icon={<XCircle className="h-5 w-5" />}
+        />
+        <StatCard
+          label="Integrity warnings"
+          value={loading || error ? null : integrityWarnings}
+          icon={<AlertTriangle className="h-5 w-5" />}
+        />
       </section>
 
       {error ? (
-        <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+        <div
+          role="alert"
+          className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200"
+        >
           {error}
         </div>
       ) : null}
@@ -629,15 +462,38 @@ export default function TicketsClient() {
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="relative xl:col-span-2">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            <label htmlFor={searchId} className="sr-only">
+              Search loaded tickets
+            </label>
             <input
+              id={searchId}
+              ref={searchRef}
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Ticket, purchaser, order or payment reference..."
-              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-12 text-sm text-white outline-none placeholder:text-white/35 focus-visible:ring-2 focus-visible:ring-purple-400"
             />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear ticket search"
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/70 focus-visible:ring-2 focus-visible:ring-purple-400"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
-          <Select value={status} onChange={(v) => setStatus(v as TicketStatus | "all")}>
+          <Select
+            label="Ticket status"
+            value={status}
+            onChange={(v) => setStatus(v as TicketStatus | "all")}
+          >
             {STATUS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -645,7 +501,7 @@ export default function TicketsClient() {
             ))}
           </Select>
 
-          <Select value={lotteryId} onChange={setLotteryId}>
+          <Select label="Lottery" value={lotteryId} onChange={setLotteryId}>
             <option value="all">All lotteries</option>
             {lotteries.map(([id, title]) => (
               <option key={id} value={id}>
@@ -654,17 +510,21 @@ export default function TicketsClient() {
             ))}
           </Select>
 
-          <Select value={eligibility} onChange={setEligibility}>
+          <Select
+            label="Reported eligibility"
+            value={eligibility}
+            onChange={setEligibility}
+          >
             <option value="all">All draw eligibility</option>
-            <option value="eligible">Draw eligible</option>
-            <option value="ineligible">Not draw eligible</option>
+            <option value="eligible">Reported eligible</option>
+            <option value="ineligible">Not reported eligible</option>
           </Select>
         </div>
 
         <div className="mt-3 max-w-sm">
-          <Select value={sort} onChange={setSort}>
-            <option value="newest">Newest issued</option>
-            <option value="oldest">Oldest issued</option>
+          <Select label="Sort tickets" value={sort} onChange={setSort}>
+            <option value="newest">Newest created</option>
+            <option value="oldest">Oldest created</option>
             <option value="ticket_asc">Ticket number A-Z</option>
             <option value="ticket_desc">Ticket number Z-A</option>
           </Select>
@@ -675,7 +535,8 @@ export default function TicketsClient() {
         <div className="mb-4">
           <h2 className="text-lg font-bold text-white">Ticket register</h2>
           <p className="mt-1 text-sm text-white/50">
-            Showing {filtered.length} of {items.length} ticket records
+            Showing {visibleItems.length} of {filtered.length} matching records
+            ({items.length} loaded)
           </p>
         </div>
 
@@ -684,6 +545,10 @@ export default function TicketsClient() {
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             Loading tickets...
           </div>
+        ) : error ? (
+          <p className="py-6 text-white/60">
+            Ticket records are unavailable. Use Refresh to try again.
+          </p>
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
             <Ticket className="mx-auto h-8 w-8 text-white/30" />
@@ -694,7 +559,7 @@ export default function TicketsClient() {
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((item) => (
+            {visibleItems.map((item) => (
               <TicketRow
                 key={item.id}
                 item={item}
@@ -705,29 +570,42 @@ export default function TicketsClient() {
         )}
       </section>
 
+      {filtered.length > PAGE_SIZE && !loading && !error && (
+        <nav
+          aria-label="Ticket pages"
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
+          <button
+            type="button"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+            className="rounded-xl border border-white/15 px-4 py-2 text-white disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-sm text-white/70"
+          >
+            Page {currentPage} of {pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage(currentPage + 1)}
+            className="rounded-xl border border-white/15 px-4 py-2 text-white disabled:opacity-40"
+          >
+            Next
+          </button>
+        </nav>
+      )}
       {selected ? (
         <TicketDetailsModal
           ticket={selected}
-          orderLoading={orderLoading}
-          orderError={orderError}
-          onViewOrder={openLinkedOrder}
-          onClose={() => {
-            setSelected(null);
-            setOrderError(null);
-          }}
+          onClose={() => setSelected(null)}
         />
       ) : null}
-
-      {selectedOrder ? (
-        <OrderDetailsModal
-          order={selectedOrder}
-          onClose={() => setSelectedOrder(null)}
-          onMarkPaid={() => {}}
-          onIssueMissingTickets={() => {}}
-          onEdit={() => {}}
-        />
-      ) : null}
-
     </div>
   );
 }
@@ -738,39 +616,48 @@ function StatCard({
   icon,
 }: {
   label: string;
-  value: number;
+  value: number | null;
   icon: React.ReactNode;
 }) {
   return (
     <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
       <div className="flex items-center gap-3 text-white/55">
         {icon}
-        <span className="text-xs font-bold uppercase tracking-wide">{label}</span>
+        <span className="text-xs font-bold uppercase tracking-wide">
+          {label}
+        </span>
       </div>
-      <div className="mt-3 text-2xl font-black text-white">{value}</div>
+      <div className="mt-3 text-2xl font-black text-white">{value ?? "—"}</div>
     </div>
   );
 }
 
 function Select({
+  label,
   value,
   onChange,
   children,
 }: {
+  label: string;
   value: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
 }) {
+  const id = useId();
+  // Preserve the existing native select; its popup is owned by the platform.
   return (
     <div className="relative">
+      <label htmlFor={id} className="sr-only">
+        {label}
+      </label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
+        className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
       >
         {children}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
     </div>
   );
 }
@@ -782,8 +669,7 @@ function TicketRow({
   item: TicketRecord;
   onView: () => void;
 }) {
-  const hasIntegrityWarning =
-    ["issued", "winner"].includes(item.status) && !item.is_payment_valid;
+  const hasIntegrityWarning = integrityWarning(item);
 
   return (
     <article className="rounded-2xl border border-white/10 bg-black/20 p-5">
@@ -794,24 +680,26 @@ function TicketRow({
               {item.ticket_number}
             </h3>
 
-            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClass(item.status)}`}>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusClass(item.status)}`}
+            >
               {statusLabel(item.status)}
             </span>
 
-            {item.is_draw_eligible ? (
+            {reportedEligible(item) ? (
               <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-200">
-                Draw eligible
+                Reported eligible
               </span>
             ) : (
               <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/50">
-                Not draw eligible
+                Not reported eligible
               </span>
             )}
 
             {hasIntegrityWarning ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-red-400/25 bg-red-500/10 px-2.5 py-1 text-[11px] font-bold text-red-200">
                 <AlertTriangle className="h-3 w-3" />
-                Payment warning
+                Integrity warning
               </span>
             ) : null}
 
@@ -823,10 +711,15 @@ function TicketRow({
             ) : null}
           </div>
 
-          <p className="mt-2 text-sm font-semibold text-white/75">{item.lottery_title}</p>
+          <p className="mt-2 text-sm font-semibold text-white/75">
+            {item.lottery_title}
+          </p>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <Info label="Purchaser" value={item.purchaser_name || "Not linked"} />
+            <Info
+              label="Purchaser"
+              value={item.purchaser_name || "Not linked"}
+            />
             <Info label="Order" value={item.order_reference || "Not linked"} />
             <Info label="Payment" value={item.payment_status || "Unknown"} />
             <Info label="Issued" value={formatDate(item.issued_at)} />
@@ -837,7 +730,7 @@ function TicketRow({
         <button
           type="button"
           onClick={onView}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/10"
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-purple-400"
         >
           <Eye className="h-4 w-4" />
           View ticket
@@ -850,62 +743,72 @@ function TicketRow({
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-      <div className="text-[10px] font-bold uppercase tracking-wide text-white/35">{label}</div>
-      <div className="mt-1 break-words text-xs font-bold text-white/75">{value}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-white/35">
+        {label}
+      </div>
+      <div className="mt-1 break-words text-xs font-bold text-white/75">
+        {value ?? "—"}
+      </div>
     </div>
   );
 }
 
 function TicketDetailsModal({
   ticket,
-  orderLoading,
-  orderError,
-  onViewOrder,
   onClose,
 }: {
   ticket: TicketRecord;
-  orderLoading: boolean;
-  orderError: string | null;
-  onViewOrder: (ticket: TicketRecord) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      dialog?.close();
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialogRef}
+      className="fixed inset-0 m-0 h-dvh w-screen max-h-none max-w-none items-center justify-center border-0 bg-black/75 p-3 text-white backdrop-blur-sm open:flex md:p-6"
       aria-labelledby="ticket-details-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
     >
-      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
           <div>
-            <h2 id="ticket-details-title" className="text-xl font-extrabold text-white">
+            <h2
+              id="ticket-details-title"
+              className="text-xl font-extrabold text-white"
+            >
               Ticket {ticket.ticket_number}
             </h2>
             <p className="mt-1 text-sm text-white/55">{ticket.lottery_title}</p>
           </div>
 
           <div className="flex items-center gap-2">
-            {ticket.order_id ? (
-              <button
-                type="button"
-                onClick={() => onViewOrder(ticket)}
-                disabled={orderLoading}
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-2 text-sm font-extrabold text-purple-100 transition hover:bg-purple-500/20 disabled:cursor-wait disabled:opacity-50"
+            {ticket.order_id && (
+              <Link
+                href="/Admin/LotteryManagement/Orders"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-2 text-sm font-extrabold text-purple-100 focus-visible:ring-2 focus-visible:ring-purple-400"
               >
-                {orderLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-                {orderLoading ? "Loading order..." : "View order"}
-              </button>
-            ) : null}
-
+                <Eye className="h-4 w-4" /> Open orders
+              </Link>
+            )}
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
+              className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-purple-400"
+              autoFocus
               aria-label="Close ticket details"
             >
               <X className="h-5 w-5" />
@@ -914,17 +817,27 @@ function TicketDetailsModal({
         </div>
 
         <div className="overflow-y-auto p-5 md:p-6">
-          {orderError ? (
-            <div className="mb-5 rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
-              {orderError}
-            </div>
-          ) : null}
-
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <DetailCard icon={<Ticket className="h-4 w-4" />} label="Status" value={statusLabel(ticket.status)} />
-            <DetailCard icon={<UserRound className="h-4 w-4" />} label="Purchaser" value={ticket.purchaser_name || "Not linked"} />
-            <DetailCard icon={<ShieldCheck className="h-4 w-4" />} label="Payment valid" value={ticket.is_payment_valid ? "Yes" : "No"} />
-            <DetailCard icon={<Trophy className="h-4 w-4" />} label="Draw eligible" value={ticket.is_draw_eligible ? "Yes" : "No"} />
+            <DetailCard
+              icon={<Ticket className="h-4 w-4" />}
+              label="Status"
+              value={statusLabel(ticket.status)}
+            />
+            <DetailCard
+              icon={<UserRound className="h-4 w-4" />}
+              label="Purchaser"
+              value={ticket.purchaser_name || "Not linked"}
+            />
+            <DetailCard
+              icon={<ShieldCheck className="h-4 w-4" />}
+              label="API payment check"
+              value={ticket.is_payment_valid ? "Yes" : "No"}
+            />
+            <DetailCard
+              icon={<Trophy className="h-4 w-4" />}
+              label="Reported eligibility"
+              value={reportedEligible(ticket) ? "Eligible" : "Not eligible"}
+            />
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -933,7 +846,12 @@ function TicketDetailsModal({
                 rows={[
                   ["Ticket number", ticket.ticket_number],
                   ["Ticket UUID", ticket.id],
-                  ["Ticket source", ticket.ticket_source === "paper" ? "Paper ticket" : "Online ticket"],
+                  [
+                    "Ticket source",
+                    ticket.ticket_source === "paper"
+                      ? "Paper ticket"
+                      : "Online ticket",
+                  ],
                   ["Lottery", ticket.lottery_title],
                   ["Issued at", formatDate(ticket.issued_at)],
                   ["Created at", formatDate(ticket.created_at)],
@@ -941,7 +859,12 @@ function TicketDetailsModal({
                   ["Voided at", formatDate(ticket.voided_at)],
                   ["Refunded at", formatDate(ticket.refunded_at)],
                   ["Winner at", formatDate(ticket.winner_at)],
-                  ["Status reason", ticket.status_reason || ticket.void_reason || "Not recorded"],
+                  [
+                    "Status reason",
+                    ticket.status_reason ||
+                      ticket.void_reason ||
+                      "Not recorded",
+                  ],
                 ]}
               />
             </Panel>
@@ -954,7 +877,10 @@ function TicketDetailsModal({
                   ["Purchaser", ticket.purchaser_name || "Not provided"],
                   ["Email", ticket.purchaser_email || "Not provided"],
                   ["Payment status", ticket.payment_status || "Unknown"],
-                  ["Payment reference", ticket.payment_reference || "Not recorded"],
+                  [
+                    "Payment reference",
+                    ticket.payment_reference || "Not recorded",
+                  ],
                 ]}
               />
             </Panel>
@@ -962,27 +888,18 @@ function TicketDetailsModal({
             <Panel title="Integrity checks">
               <div className="space-y-3">
                 <IntegrityRow
-                  ok={ticket.ticket_source === "paper" || ticket.status === "reserved" || ticket.is_payment_valid || ["void", "refunded"].includes(ticket.status)}
+                  ok={!integrityWarning(ticket)}
                   text={
-                    ticket.ticket_source === "paper"
-                      ? "Paper ticket was registered directly and does not require an online payment order."
-                      : ticket.is_payment_valid
-                      ? "Ticket is linked to a paid order."
-                      : ticket.status === "reserved"
-                        ? "Reserved ticket has not yet been issued as a valid paid ticket."
-                        : ["void", "refunded"].includes(ticket.status)
-                          ? "Ticket is intentionally excluded from the draw."
-                          : "Issued/winner ticket is not linked to a paid order and needs investigation."
+                    integrityWarning(ticket)
+                      ? "The visible payment, order or eligibility fields are inconsistent. Investigate before drawing."
+                      : "No inconsistency was found in these displayed fields. Server verification is still required."
                   }
                 />
-                <IntegrityRow
-                  ok={!["void", "refunded"].includes(ticket.status) || !ticket.is_draw_eligible}
-                  text={
-                    ["void", "refunded"].includes(ticket.status) && ticket.is_draw_eligible
-                      ? "Invalid ticket is incorrectly marked draw eligible."
-                      : "Void/refunded ticket exclusion is consistent."
-                  }
-                />
+                <p className="text-sm text-white/60">
+                  This register does not verify the payment provider,
+                  cross-lottery links, refunds or the frozen draw snapshot.
+                  Winner state is managed only by the controlled draw workflow.
+                </p>
               </div>
             </Panel>
 
@@ -990,16 +907,26 @@ function TicketDetailsModal({
               {ticket.events.length ? (
                 <div className="space-y-3">
                   {ticket.events.map((event) => (
-                    <div key={event.id} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div
+                      key={event.id}
+                      className="rounded-xl border border-white/10 bg-black/20 p-4"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-white">{event.event_type}</span>
-                        <span className="text-xs text-white/40">{formatDate(event.created_at)}</span>
+                        <span className="text-sm font-bold text-white">
+                          {event.event_type}
+                        </span>
+                        <span className="text-xs text-white/40">
+                          {formatDate(event.created_at)}
+                        </span>
                       </div>
                       <p className="mt-1 text-xs text-white/55">
-                        {event.previous_status || "none"} → {event.new_status || "none"}
+                        {event.previous_status || "none"} →{" "}
+                        {event.new_status || "none"}
                       </p>
                       {event.reason ? (
-                        <p className="mt-2 text-xs leading-5 text-white/65">{event.reason}</p>
+                        <p className="mt-2 text-xs leading-5 text-white/65">
+                          {event.reason}
+                        </p>
                       ) : null}
                     </div>
                   ))}
@@ -1013,109 +940,7 @@ function TicketDetailsModal({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function OrderDetailsModal({
-  order,
-  onClose,
-  onMarkPaid,
-  onIssueMissingTickets,
-  onEdit,
-}: OrderDetailsModalProps) {
-  const orderReference = order?.order_reference ?? "Unknown order";
-  const purchaserName = order?.purchaser_name ?? order?.customer_name ?? "Not provided";
-  const totalAmount = order?.total_amount ?? order?.amount ?? "—";
-  const paymentStatus = order?.payment_status ?? order?.status ?? "Unknown";
-
-  return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="order-details-title"
-    >
-      <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
-          <div>
-            <h2 id="order-details-title" className="text-xl font-extrabold text-white">
-              Order {orderReference}
-            </h2>
-            <p className="mt-1 text-sm text-white/55">
-              {order?.id ? `Order ID: ${order.id}` : "Linked order details"}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10"
-            aria-label="Close order details"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="overflow-y-auto p-5 md:p-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <DetailCard icon={<UserRound className="h-4 w-4" />} label="Purchaser" value={String(purchaserName)} />
-            <DetailCard icon={<ShieldCheck className="h-4 w-4" />} label="Payment status" value={String(paymentStatus)} />
-            <DetailCard icon={<Ticket className="h-4 w-4" />} label="Order total" value={String(totalAmount)} />
-            <DetailCard icon={<Trophy className="h-4 w-4" />} label="Items" value={String(order?.tickets_count ?? order?.items?.length ?? "—")} />
-          </div>
-
-          <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <Panel title="Order summary">
-              <DetailRows
-                rows={[
-                  ["Order reference", String(orderReference)],
-                  ["Order ID", String(order?.id ?? "Not recorded")],
-                  ["Purchaser", String(purchaserName)],
-                  ["Payment status", String(paymentStatus)],
-                  ["Total", String(totalAmount)],
-                  ["Created", formatDate(order?.created_at ?? null)],
-                ]}
-              />
-            </Panel>
-
-            <Panel title="Actions">
-              <div className="space-y-3">
-                {onMarkPaid ? (
-                  <button
-                    type="button"
-                    onClick={onMarkPaid}
-                    className="w-full rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm font-extrabold text-emerald-100 hover:bg-emerald-500/20"
-                  >
-                    Mark as paid
-                  </button>
-                ) : null}
-
-                {onIssueMissingTickets ? (
-                  <button
-                    type="button"
-                    onClick={onIssueMissingTickets}
-                    className="w-full rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm font-extrabold text-amber-100 hover:bg-amber-500/20"
-                  >
-                    Issue missing tickets
-                  </button>
-                ) : null}
-
-                {onEdit ? (
-                  <button
-                    type="button"
-                    onClick={onEdit}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-extrabold text-white hover:bg-white/10"
-                  >
-                    Edit order
-                  </button>
-                ) : null}
-              </div>
-            </Panel>
-          </div>
-        </div>
-      </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -1134,7 +959,9 @@ function DetailCard({
         {icon}
         {label}
       </div>
-      <div className="mt-2 break-words text-sm font-extrabold text-white">{value}</div>
+      <div className="mt-2 break-words text-sm font-extrabold text-white">
+        {value ?? "—"}
+      </div>
     </div>
   );
 }
@@ -1158,9 +985,14 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
   return (
     <div className="divide-y divide-white/10">
       {rows.map(([label, value]) => (
-        <div key={label} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:justify-between">
+        <div
+          key={label}
+          className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0 sm:flex-row sm:justify-between"
+        >
           <span className="text-sm text-white/45">{label}</span>
-          <span className="break-all text-sm font-semibold text-white/80">{value}</span>
+          <span className="break-all text-sm font-semibold text-white/80">
+            {value}
+          </span>
         </div>
       ))}
     </div>

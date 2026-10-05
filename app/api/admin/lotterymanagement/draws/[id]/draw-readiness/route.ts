@@ -1,240 +1,368 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getAuthenticatedAdmin,
-  getAuditServiceClient,
-  hasLotteryPermission,
-} from "@/lib/lottery/audit-server";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type RouteContext = { params: Promise<{ id: string }> };
-
-function json(body: unknown, status = 200) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      "X-Content-Type-Options": "nosniff",
+class RouteError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+function json(body: Record<string, unknown>, requestId: string, status = 200) {
+  return NextResponse.json(
+    { ...body, request_id: requestId },
+    {
+      status,
+      headers: {
+        "Cache-Control":
+          "private, no-store, no-cache, must-revalidate, max-age=0",
+        "X-Content-Type-Options": "nosniff",
+        "X-Request-ID": requestId,
+        Vary: "Cookie, Authorization",
+      },
     },
+  );
+}
+function withSignal<T>(
+  promise: PromiseLike<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () =>
+      reject(
+        new RouteError(503, "Draw authorization is temporarily unavailable."),
+      );
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(promise)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function failedResponse(error: unknown, requestId: string) {
-  console.error(`[${requestId}] Draw readiness API error:`, error);
-  return json(
-    {
-      ok: false,
-      error: "Unable to complete the draw readiness checks.",
-      request_id: requestId,
-      details: {
-        error_name: error instanceof Error ? error.name : "UnknownError",
-        error_message: error instanceof Error ? error.message : "Unknown error",
-      },
-    },
-    500,
-  );
-}
-
-/*
- * GET /api/admin/lottery/draws/[id]/draw-readiness
- *
- * Read-only pre-draw check. It does not freeze tickets, select winners,
- * write an audit row, or change lottery status. The draw POST route must
- * repeat these checks immediately before it freezes the ticket pool.
- */
 export async function GET(
-  _request: NextRequest,
-  context: RouteContext,
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
 ) {
-  const requestId = `DRAW-READY-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-
+  const requestId = `DRAW-READY-${randomUUID()}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  const cancel = () => controller.abort();
+  request.signal.addEventListener("abort", cancel, { once: true });
+  if (request.signal.aborted) controller.abort();
+  let stage = "session";
   try {
-    const admin = await getAuthenticatedAdmin();
-
-    if (!admin) {
-      return json(
-        { ok: false, error: "You must be signed in to view draw readiness.", request_id: requestId },
-        401,
+    const client = await withSignal(createClient(), controller.signal);
+    const { data, error } = await withSignal(
+      client.auth.getUser(),
+      controller.signal,
+    );
+    if (error || !data.user?.id || data.user.is_anonymous === true)
+      throw new RouteError(401, "Authentication required.");
+    const { supabaseAdmin: db } = await import("@/lib/supabase/supabaseAdmin");
+    stage = "authorization";
+    const adminResult = await withSignal(
+      db
+        .from("admin_users")
+        .select("id,supabase_user_id,role,is_active")
+        .eq("supabase_user_id", data.user.id)
+        .eq("is_active", true)
+        .abortSignal(controller.signal)
+        .maybeSingle(),
+      controller.signal,
+    );
+    if (adminResult.error)
+      throw new RouteError(
+        503,
+        "Draw authorization is temporarily unavailable.",
       );
-    }
-
-    if (!hasLotteryPermission(admin, "lottery:view")) {
-      return json(
-        { ok: false, error: "You do not have permission to view draw readiness.", request_id: requestId },
+    const admin = adminResult.data;
+    // Interim access restriction, not a substitute for lottery:view.
+    if (
+      !admin ||
+      admin.supabase_user_id !== data.user.id ||
+      admin.is_active !== true ||
+      admin.role !== "main_admin"
+    )
+      throw new RouteError(
         403,
+        "You do not have permission to view draw readiness.",
       );
-    }
 
-    const { id: rawId } = await context.params;
-    const lotteryId = decodeURIComponent(rawId).trim();
-
-    if (!isUuid(lotteryId)) {
-      return json(
-        { ok: false, error: "The lottery ID is invalid.", request_id: requestId },
-        400,
-      );
-    }
-
-    const db = getAuditServiceClient();
-    const { data: lottery, error: lotteryError } = await db
-      .from("lotteries")
-      .select("id,title,internal_reference,status,draw_at,sales_close_at")
-      .eq("id", lotteryId)
-      .maybeSingle();
-
-    if (lotteryError) {
-      return failedResponse(lotteryError, requestId);
-    }
-
-    if (!lottery) {
-      return json(
-        { ok: false, error: "Lottery not found.", request_id: requestId },
-        404,
-      );
-    }
-
-    const [ordersResult, ticketsResult, prizesResult, warningsResult, drawsResult] =
-      await Promise.all([
-        db
-          .from("lottery_orders")
-          .select("id,payment_status")
-          .eq("lottery_id", lotteryId),
-        db.from("lottery_tickets").select("id,status").eq("lottery_id", lotteryId),
-        db.from("lottery_prizes").select("id,status").eq("lottery_id", lotteryId),
-        db
-          .from("lottery_integrity_warnings")
-          // This table records active warnings only. Do not query a status
-          // field here: older Lottery Management schemas do not have one.
-          .select("id,severity")
-          .eq("lottery_id", lotteryId),
-        db
-          .from("lottery_draws")
-          .select("id,status,completed_at")
-          .eq("lottery_id", lotteryId),
-      ]);
-
-    const queryError = [ordersResult, ticketsResult, prizesResult, warningsResult, drawsResult]
-      .find((result) => result.error)?.error;
-
-    if (queryError) {
-      return failedResponse(queryError, requestId);
-    }
-
-    const paidOrders = (ordersResult.data ?? []).filter(
-      (order) => order.payment_status === "paid",
+    stage = "validation";
+    const { id } = await withSignal(context.params, controller.signal);
+    if (typeof id !== "string" || !UUID.test(id))
+      throw new RouteError(400, "Provide a valid lottery ID.");
+    const lotteryId = id.toLowerCase();
+    stage = "lottery";
+    const result = await withSignal(
+      db
+        .from("lotteries")
+        .select("id,title,internal_reference,status,draw_at,sales_close_at")
+        .eq("id", lotteryId)
+        .abortSignal(controller.signal)
+        .maybeSingle(),
+      controller.signal,
     );
-    const eligibleTickets = (ticketsResult.data ?? []).filter(
-      (ticket) => !["void", "cancelled", "invalid", "excluded"].includes(ticket.status ?? ""),
+    if (result.error)
+      throw new RouteError(503, "Unable to load lottery readiness.");
+    const lottery = result.data;
+    if (!lottery) throw new RouteError(404, "Lottery not found.");
+    if (lottery.id !== lotteryId || typeof lottery.status !== "string")
+      throw new RouteError(503, "The lottery record could not be verified.");
+    stage = "metrics";
+    // Only exact counts: fetching entire arrays can silently stop at the API row cap.
+    const [paid, issued, excluded, prizes, warnings, draws] = await Promise.all(
+      [
+        withSignal(
+          db
+            .from("lottery_orders")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .eq("payment_status", "paid")
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+        withSignal(
+          db
+            .from("lottery_tickets")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .eq("status", "issued")
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+        withSignal(
+          db
+            .from("lottery_tickets")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .in("status", [
+              "void",
+              "refunded",
+              "test",
+              "cancelled",
+              "invalid",
+              "excluded",
+            ])
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+        withSignal(
+          db
+            .from("lottery_prizes")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .eq("status", "available_for_draw")
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+        // Match the repaired draw list. Missing resolved column fails closed.
+        // Treat NULL as unresolved too; it cannot prove a warning was resolved.
+        withSignal(
+          db
+            .from("lottery_integrity_warnings")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .or("resolved.eq.false,resolved.is.null")
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+        // Conservatively block ANY existing draw until primary/redraw semantics and
+        // failed-draw recovery rules are supplied. Do not infer safety from one row.
+        withSignal(
+          db
+            .from("lottery_draws")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lotteryId)
+            .abortSignal(controller.signal),
+          controller.signal,
+        ),
+      ],
     );
-    const excludedTickets = (ticketsResult.data ?? []).length - eligibleTickets.length;
-    const availablePrizes = (prizesResult.data ?? []).filter(
-      (prize) => ["confirmed", "available_for_draw"].includes(prize.status ?? ""),
-    );
-    const unresolvedWarnings = warningsResult.data ?? [];
-    const completedDraw = (drawsResult.data ?? []).find(
-      (draw) => draw.status === "completed" || Boolean(draw.completed_at),
-    );
-
+    for (const metric of [paid, issued, excluded, prizes, warnings, draws]) {
+      if (
+        metric.error ||
+        metric.count === null ||
+        !Number.isSafeInteger(metric.count) ||
+        metric.count < 0
+      )
+        throw new RouteError(
+          503,
+          "Readiness metrics could not be fully loaded.",
+        );
+    }
     const now = Date.now();
-    const salesClosedAt = lottery.sales_close_at
-      ? new Date(lottery.sales_close_at).getTime()
-      : Number.NaN;
-    const salesAreClosed =
-      ["sales_closed", "draw_ready"].includes(lottery.status) ||
-      (Number.isFinite(salesClosedAt) && salesClosedAt <= now);
-    const drawStateAllowsRun = !["paused", "cancelled", "under_review", "archived", "completed"].includes(
-      lottery.status,
-    );
-    const drawTimeSet = Boolean(lottery.draw_at);
-
+    const timestamp = (value: unknown): number | null => {
+      if (
+        typeof value !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+      )
+        return null;
+      const time = Date.parse(value);
+      return Number.isFinite(time) ? time : null;
+    };
+    const closes = timestamp(lottery.sales_close_at);
+    const drawAt = timestamp(lottery.draw_at);
+    const closedState = ["sales_closed", "draw_ready"].includes(lottery.status);
+    const makeCheck = (
+      key: string,
+      label: string,
+      ok: boolean,
+      detail: string,
+      verified = true,
+    ) => ({ key, label, ok, detail, verified });
     const checks = [
-      {
-        key: "sales_closed",
-        label: "Ticket sales are closed",
-        ok: salesAreClosed,
-        detail: salesAreClosed
-          ? "The sales window is closed."
-          : "Sales must close before the draw can run.",
-      },
-      {
-        key: "lottery_state",
-        label: "Lottery is in a drawable state",
-        ok: drawStateAllowsRun,
-        detail: drawStateAllowsRun
-          ? `Current lottery status: ${lottery.status.replaceAll("_", " ")}.`
-          : `The lottery is ${lottery.status.replaceAll("_", " ")} and cannot be drawn.`,
-      },
-      {
-        key: "draw_time",
-        label: "A draw date and time is set",
-        ok: drawTimeSet,
-        detail: drawTimeSet ? "A draw date is recorded." : "Set the draw date before running the draw.",
-      },
-      {
-        key: "payments",
-        label: "At least one paid order exists",
-        ok: paidOrders.length > 0,
-        detail: paidOrders.length ? `${paidOrders.length} paid order(s) found.` : "No paid orders were found.",
-      },
-      {
-        key: "tickets",
-        label: "Eligible issued tickets are available",
-        ok: eligibleTickets.length > 0,
-        detail: eligibleTickets.length
-          ? `${eligibleTickets.length} eligible ticket(s) found.`
-          : "No eligible issued tickets were found.",
-      },
-      {
-        key: "prizes",
-        label: "Available prizes are ready for the draw",
-        ok: availablePrizes.length > 0,
-        detail: availablePrizes.length
-          ? `${availablePrizes.length} available prize(s) found.`
-          : "Add and confirm at least one prize before drawing.",
-      },
-      {
-        key: "integrity_warnings",
-        label: "No unresolved integrity warnings",
-        ok: unresolvedWarnings.length === 0,
-        detail: unresolvedWarnings.length
-          ? `${unresolvedWarnings.length} unresolved warning(s) must be reviewed.`
-          : "No unresolved integrity warnings were found.",
-      },
-      {
-        key: "previous_draw",
-        label: "No completed draw already exists",
-        ok: !completedDraw,
-        detail: completedDraw
-          ? "A completed draw already exists for this lottery. Use the redraw process if appropriate."
-          : "No completed draw exists.",
-      },
+      makeCheck(
+        "sales_closed",
+        "Ticket sales are closed",
+        closedState && closes !== null && closes <= now,
+        "Requires sales_closed or draw_ready status and an elapsed sales closing time; this does not prove checkout is locked.",
+      ),
+      makeCheck(
+        "lottery_state",
+        "Lottery is in a drawable state",
+        closedState,
+        "Only sales_closed and draw_ready states are accepted for preliminary checks.",
+      ),
+      makeCheck(
+        "draw_time",
+        "The scheduled draw time has arrived",
+        drawAt !== null && drawAt <= now && closes !== null && drawAt >= closes,
+        "Requires a valid draw timestamp at or after sales close and no later than now.",
+      ),
+      makeCheck(
+        "payments",
+        "Paid orders are recorded",
+        paid.count! > 0,
+        "Recorded paid status only; refunds, disputes and payment reconciliation are not verified.",
+      ),
+      makeCheck(
+        "tickets",
+        "Frozen eligible ticket pool is verified",
+        false,
+        "Issued tickets are not proof of eligibility. A same-lottery paid/non-refunded order join and frozen pool/hash are required.",
+        false,
+      ),
+      makeCheck(
+        "prizes",
+        "Prizes are marked available for draw",
+        prizes.count! > 0,
+        "Counts available_for_draw only; confirmed status alone does not prove availability.",
+      ),
+      makeCheck(
+        "integrity_warnings",
+        "No unresolved integrity warnings",
+        warnings.count === 0,
+        "Counts both unresolved and unknown-resolution warnings.",
+      ),
+      makeCheck(
+        "previous_draw",
+        "No previous draw record exists",
+        draws.count === 0,
+        "Any previous draw requires the verified recovery or redraw workflow.",
+      ),
+      makeCheck(
+        "compliance",
+        "Compliance approval is verified",
+        false,
+        "Approval records and permitted sales channel must be checked by the secure draw service.",
+        false,
+      ),
+      makeCheck(
+        "payment_reconciliation",
+        "Payment reconciliation is verified",
+        false,
+        "Paid order counts cannot prove reconciliation or exclude refunds and disputes.",
+        false,
+      ),
+      makeCheck(
+        "recent_mfa",
+        "Draw permission and recent MFA are verified",
+        false,
+        "The execution service must enforce lottery:draw and recent server-verified MFA.",
+        false,
+      ),
+      makeCheck(
+        "execution_safeguards",
+        "Atomic draw and audit safeguards are verified",
+        false,
+        "Database locking, single execution, immutable snapshot and transactional audit remain unverified.",
+        false,
+      ),
     ];
-
-    return json({
-      ok: true,
-      request_id: requestId,
-      lottery: {
-        id: lottery.id,
-        title: lottery.title,
-        internal_reference: lottery.internal_reference,
-        draw_at: lottery.draw_at,
-        sales_close_at: lottery.sales_close_at,
+    return json(
+      {
+        ok: true,
+        lottery: {
+          id: lottery.id,
+          title: lottery.title,
+          internal_reference: lottery.internal_reference,
+          status: lottery.status,
+          draw_at: lottery.draw_at,
+          sales_close_at: lottery.sales_close_at,
+        },
+        metrics: {
+          paid_orders: paid.count,
+          issued_tickets: issued.count,
+          eligible_tickets: null,
+          excluded_tickets: excluded.count,
+          prizes_available: prizes.count,
+          unresolved_warnings: warnings.count,
+          previous_draws: draws.count,
+        },
+        ready: false,
+        readiness_verified: false,
+        execution_enabled: false,
+        counts_snapshot_atomic: false,
+        generated_at: new Date().toISOString(),
+        checks,
       },
-      metrics: {
-        paid_orders: paidOrders.length,
-        eligible_tickets: eligibleTickets.length,
-        excluded_tickets: excludedTickets,
-        prizes_available: availablePrizes.length,
-      },
-      ready: checks.every((check) => check.ok),
-      checks,
-    });
+      requestId,
+    );
   } catch (error) {
-    return failedResponse(error, requestId);
+    controller.abort();
+    const status = error instanceof RouteError ? error.status : 500;
+    if (status >= 500)
+      console.error("Draw readiness request failed", {
+        request_id: requestId,
+        stage,
+        status,
+      });
+    return json(
+      {
+        ok: false,
+        error:
+          error instanceof RouteError
+            ? error.message
+            : "Unable to complete the draw readiness checks.",
+        code:
+          status === 401
+            ? "AUTHENTICATION_REQUIRED"
+            : status === 403
+              ? "READINESS_ACCESS_DENIED"
+              : status < 500
+                ? "READINESS_REQUEST_INVALID"
+                : "READINESS_REQUEST_FAILED",
+        execution_enabled: false,
+        retryable: false,
+      },
+      requestId,
+      status,
+    );
+  } finally {
+    clearTimeout(timeout);
+    request.signal.removeEventListener("abort", cancel);
   }
 }

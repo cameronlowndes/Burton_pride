@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
-  Beaker,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   Eye,
   Filter,
   Gift,
   Loader2,
   Mail,
-  MapPin,
   PackageCheck,
   Phone,
   RefreshCw,
@@ -20,9 +26,7 @@ import {
   ShieldCheck,
   Ticket,
   Trophy,
-  UserRound,
   X,
-  XCircle,
 } from "lucide-react";
 
 type WinnerStatus =
@@ -75,11 +79,7 @@ type WinnerRecord = {
   fulfilment_method: string | null;
   fulfilment_notes: string | null;
   internal_notes: string | null;
-  public_display_mode:
-    | "full_name"
-    | "first_name"
-    | "ticket_number"
-    | "none";
+  public_display_mode: "full_name" | "first_name" | "ticket_number" | "none";
   public_display_consent: boolean;
   public_results_published_at: string | null;
   replacement_winner_id: string | null;
@@ -89,30 +89,19 @@ type WinnerRecord = {
   updated_at: string;
 };
 
-type ApiResponse = {
-  ok: boolean;
-  items?: WinnerRecord[];
-  item?: WinnerRecord;
-  error?: string;
-  message?: string;
-  code?: string;
-  details?: string;
-  hint?: string;
+type RequestError = { title: string; message: string };
+type WinnerForm = {
+  status: WinnerStatus;
+  contact_method: ContactAttempt["method"];
+  contact_outcome: string;
+  contact_notes: string;
+  fulfilment_method: string;
+  collection_delivery_date: string;
+  fulfilment_notes: string;
+  internal_notes: string;
+  reason: string;
+  confirmTransition: boolean;
 };
-
-type RequestError = {
-  title: string;
-  method: "GET" | "PATCH";
-  endpoint: string;
-  status?: number;
-  statusText?: string;
-  code?: string;
-  message: string;
-  details?: string;
-  hint?: string;
-  troubleshooting: string[];
-};
-
 type WinnerFilter =
   | "all"
   | "needs_contact"
@@ -123,81 +112,349 @@ type WinnerFilter =
 
 const API_ROUTE = "/api/admin/lotterymanagement/winners";
 
-function getApiMessage(data: ApiResponse) {
-  return data.error || data.message || "The server did not provide an error message.";
+const TIMEOUT_MS = 20000;
+const PAGE_SIZE = 25;
+const MAX_RECORDS = 2000;
+const MAX_BYTES = 5 * 1024 * 1024;
+class WinnersError extends Error {
+  constructor(
+    message: string,
+    public status?: number,
+  ) {
+    super(message);
+  }
 }
-
-function getApiDetails(data: ApiResponse) {
-  return data.details || data.hint || undefined;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-
-function makeRequestError({
-  title,
-  method,
-  endpoint,
-  response,
-  data,
-}: {
-  title: string;
-  method: "GET" | "PATCH";
-  endpoint: string;
-  response: Response;
-  data: ApiResponse;
-}): RequestError {
-  const isAuthError = response.status === 401 || response.status === 403;
-  const isServerError = response.status >= 500;
-
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+const NEXT_STATUS: Partial<Record<WinnerStatus, WinnerStatus>> = {
+  selected: "contact_pending",
+  contact_pending: "contacted",
+  contacted: "eligibility_confirmed",
+  eligibility_confirmed: "claimed",
+  claimed: "fulfilled",
+};
+function allowedStatuses(status: WinnerStatus): WinnerStatus[] {
+  const next = NEXT_STATUS[status];
+  return next ? [status, next] : [status];
+}
+function requestMessage(status: number): string {
+  if (status === 401)
+    return "Your session has expired. Sign in again and refresh winner records.";
+  if (status === 403)
+    return "You do not have permission, or recent verification is required. Verify your session and refresh.";
+  if (status === 409)
+    return "The winner record changed or the action is not permitted. Refresh before continuing.";
+  if (status === 429) return "Too many requests. Wait a moment and refresh.";
+  if (status === 400 || status === 422)
+    return "The request was rejected. Check the values and required approvals, then refresh.";
+  return "The winners service could not complete this request. Refresh and check the saved record.";
+}
+function parseWinner(value: unknown): WinnerRecord {
+  if (
+    !isRecord(value) ||
+    ["id", "lottery_id", "lottery_title", "ticket_number", "prize_name"].some(
+      (key) => typeof value[key] !== "string" || !value[key],
+    ) ||
+    !STATUS_OPTIONS.some(
+      (option) => option.value !== "all" && option.value === value.status,
+    )
+  ) {
+    throw new WinnersError(
+      "Incomplete winner records were returned. Refresh or report the issue.",
+    );
+  }
+  const strings = [
+    "lottery_slug",
+    "draw_id",
+    "prize_id",
+    "ticket_id",
+    "selected_at",
+    "created_at",
+    "updated_at",
+  ] as const;
+  const nullable = [
+    "draw_reference",
+    "order_id",
+    "order_reference",
+    "entrant_name",
+    "entrant_email",
+    "entrant_phone",
+    "contacted_at",
+    "eligibility_confirmed_at",
+    "claimed_at",
+    "fulfilled_at",
+    "unclaimed_at",
+    "disqualified_at",
+    "replaced_at",
+    "collection_delivery_date",
+    "fulfilment_method",
+    "fulfilment_notes",
+    "internal_notes",
+    "public_results_published_at",
+    "replacement_winner_id",
+    "original_winner_id",
+  ] as const;
+  const fields: Record<string, string | null> = {};
+  for (const key of strings) fields[key] = textOrNull(value[key]) ?? "";
+  for (const key of nullable) fields[key] = textOrNull(value[key]);
+  if (
+    value.contact_attempts != null &&
+    (!Array.isArray(value.contact_attempts) ||
+      value.contact_attempts.length > 1000)
+  )
+    throw new WinnersError("Invalid contact history was returned.");
+  const attempts: ContactAttempt[] = Array.isArray(value.contact_attempts)
+    ? value.contact_attempts.map((attempt) => {
+        if (
+          !isRecord(attempt) ||
+          typeof attempt.id !== "string" ||
+          typeof attempt.outcome !== "string" ||
+          !["email", "phone", "other"].includes(String(attempt.method))
+        )
+          throw new WinnersError("Invalid contact history was returned.");
+        return {
+          id: attempt.id,
+          method: attempt.method as ContactAttempt["method"],
+          outcome: attempt.outcome,
+          notes: textOrNull(attempt.notes),
+          attempted_at: textOrNull(attempt.attempted_at) ?? "",
+          admin_name: textOrNull(attempt.admin_name),
+        };
+      })
+    : [];
+  if (new Set(attempts.map((attempt) => attempt.id)).size !== attempts.length)
+    throw new WinnersError("Duplicate contact history was returned.");
+  if (
+    !["full_name", "first_name", "ticket_number", "none"].includes(
+      String(value.public_display_mode),
+    ) ||
+    typeof value.public_display_consent !== "boolean"
+  )
+    throw new WinnersError(
+      "Winner privacy settings are incomplete. Refresh or report the issue.",
+    );
   return {
-    title,
-    method,
-    endpoint,
-    status: response.status,
-    statusText: response.statusText,
-    code: data.code,
-    message: getApiMessage(data),
-    details: getApiDetails(data),
-    hint: data.hint,
-    troubleshooting: isAuthError
-      ? [
-          "Your admin session may have expired. Refresh the page and sign in again.",
-          "Check that your account has permission to view or manage lottery winners.",
-        ]
-      : isServerError
-        ? [
-            "This is a server-side error. Check the Next.js terminal logs for this request.",
-            "Check that the winners API route, Supabase connection and lottery tables are available.",
-          ]
-        : [
-            "Check the request data and the API validation rules.",
-            "Use the request details below to find the matching server log entry.",
-          ],
-  };
+    ...fields,
+    id: value.id,
+    lottery_id: value.lottery_id,
+    lottery_title: value.lottery_title,
+    ticket_number: value.ticket_number,
+    prize_name: value.prize_name,
+    status: value.status,
+    prize_value:
+      typeof value.prize_value === "number" &&
+      Number.isFinite(value.prize_value)
+        ? value.prize_value
+        : null,
+    public_display_mode: value.public_display_mode,
+    public_display_consent: value.public_display_consent,
+    contact_attempts: attempts,
+  } as WinnerRecord;
 }
-
-function makeNetworkError({
-  title,
-  method,
-  endpoint,
-  cause,
-}: {
-  title: string;
-  method: "GET" | "PATCH";
-  endpoint: string;
-  cause: unknown;
-}): RequestError {
-  const message = cause instanceof Error ? cause.message : "Unknown network error";
-
-  return {
-    title,
-    method,
-    endpoint,
-    message,
-    troubleshooting: [
-      "The browser could not complete the request. Check your internet connection and refresh the page.",
-      "Make sure the Next.js development server is running and the API route exists.",
-      "If this continues, check the browser Network tab and the Next.js terminal logs.",
-    ],
-  };
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  const reader = response.body?.getReader();
+  if (!reader)
+    throw new WinnersError("The service returned an unreadable response.");
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BYTES)
+        throw new WinnersError(
+          "The response is too large. Ask the administrator to enable server pagination.",
+        );
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new WinnersError("The service returned an unreadable response.");
+    }
+    if (!isRecord(data))
+      throw new WinnersError("The service returned an unexpected response.");
+    return data;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+async function requestApi(
+  url: string,
+  signal: AbortSignal,
+  body?: Record<string, unknown>,
+) {
+  const response = await fetch(url, {
+    method: body ? "PATCH" : "GET",
+    cache: "no-store",
+    credentials: "include",
+    signal,
+    headers: {
+      Accept: "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new WinnersError(requestMessage(response.status), response.status);
+  }
+  const data = await readJson(response);
+  if (data.ok !== true)
+    throw new WinnersError(
+      "The request could not be confirmed. Refresh and check the saved record.",
+    );
+  return data;
+}
+async function fetchRecords(signal: AbortSignal): Promise<WinnerRecord[]> {
+  const data = await requestApi(API_ROUTE, signal);
+  if (!Array.isArray(data.items) || data.items.length > MAX_RECORDS)
+    throw new WinnersError(
+      "The winner response is incomplete or too large. Refresh or ask the administrator to enable server pagination.",
+    );
+  const items = data.items.map(parseWinner);
+  if (new Set(items.map((item) => item.id)).size !== items.length)
+    throw new WinnersError(
+      "Duplicate winner records were returned. Report the issue.",
+    );
+  return items;
+}
+// Native datetime-local inputs contain London wall time. Reject ambiguous or missing DST times.
+function toLocalInput(value: string | null) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
+}
+function londonDateToIso(value: string): string | null {
+  if (!value) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))
+    throw new WinnersError("Enter a valid collection/delivery date and time.");
+  const raw = Date.parse(`${value}:00Z`);
+  if (!Number.isFinite(raw))
+    throw new WinnersError("Enter a valid collection/delivery date and time.");
+  const candidates = [raw, raw - 3600000].filter(
+    (timestamp) => toLocalInput(new Date(timestamp).toISOString()) === value,
+  );
+  if (candidates.length !== 1)
+    throw new WinnersError(
+      "This London time is invalid or occurs twice during a clock change. Choose an unambiguous time.",
+    );
+  return new Date(candidates[0]).toISOString();
+}
+function verifySaved(
+  before: WinnerRecord,
+  after: WinnerRecord,
+  form: WinnerForm,
+  date: string | null,
+) {
+  const unchanged = [
+    "id",
+    "lottery_id",
+    "draw_id",
+    "prize_id",
+    "ticket_id",
+    "ticket_number",
+    "order_id",
+    "entrant_name",
+    "entrant_email",
+    "entrant_phone",
+    "public_display_mode",
+    "public_display_consent",
+    "public_results_published_at",
+    "selected_at",
+    "created_at",
+    "replacement_winner_id",
+    "original_winner_id",
+  ] as const;
+  if (unchanged.some((key) => before[key] !== after[key])) return false;
+  const historical = [
+    "contacted_at",
+    "eligibility_confirmed_at",
+    "claimed_at",
+    "fulfilled_at",
+    "unclaimed_at",
+    "disqualified_at",
+    "replaced_at",
+  ] as const;
+  const timestampForStatus: Partial<Record<WinnerStatus, keyof WinnerRecord>> =
+    {
+      contacted: "contacted_at",
+      eligibility_confirmed: "eligibility_confirmed_at",
+      claimed: "claimed_at",
+      fulfilled: "fulfilled_at",
+    };
+  const expectedNewTimestamp =
+    form.status !== before.status ? timestampForStatus[form.status] : undefined;
+  if (
+    historical.some(
+      (key) =>
+        before[key] !== after[key] &&
+        !(key === expectedNewTimestamp && before[key] === null),
+    )
+  )
+    return false;
+  const key = timestampForStatus[form.status];
+  if (
+    form.status !== before.status &&
+    key &&
+    (typeof after[key] !== "string" ||
+      !Number.isFinite(Date.parse(after[key] as string)))
+  )
+    return false;
+  if (
+    after.status !== form.status ||
+    after.fulfilment_method !== (form.fulfilment_method.trim() || null) ||
+    after.collection_delivery_date !== date ||
+    after.fulfilment_notes !== (form.fulfilment_notes.trim() || null) ||
+    after.internal_notes !== (form.internal_notes.trim() || null)
+  )
+    return false;
+  if (
+    before.contact_attempts.some(
+      (old) =>
+        !after.contact_attempts.some(
+          (saved) =>
+            saved.id === old.id &&
+            saved.method === old.method &&
+            saved.outcome === old.outcome &&
+            saved.notes === old.notes &&
+            saved.attempted_at === old.attempted_at &&
+            saved.admin_name === old.admin_name,
+        ),
+    )
+  )
+    return false;
+  if (
+    form.contact_outcome.trim() &&
+    !after.contact_attempts.some(
+      (saved) =>
+        !before.contact_attempts.some((old) => old.id === saved.id) &&
+        saved.method === form.contact_method &&
+        saved.outcome === form.contact_outcome.trim() &&
+        saved.notes === (form.contact_notes.trim() || null),
+    )
+  )
+    return false;
+  return true;
 }
 
 const STATUS_OPTIONS: Array<{
@@ -239,6 +496,7 @@ function statusClass(status: WinnerStatus) {
 
 function formatDate(value: string | null) {
   if (!value) return "Not recorded";
+  if (!Number.isFinite(Date.parse(value))) return "Invalid date";
 
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
@@ -248,7 +506,8 @@ function formatDate(value: string | null) {
 }
 
 function formatMoney(value: number | null) {
-  if (value === null || value === undefined) return "Not set";
+  if (value === null || value === undefined || !Number.isFinite(value))
+    return "Not set";
 
   return new Intl.NumberFormat("en-GB", {
     style: "currency",
@@ -257,6 +516,12 @@ function formatMoney(value: number | null) {
 }
 
 function publicWinnerDisplay(item: WinnerRecord) {
+  if (!item.public_results_published_at) return "Not published";
+  if (
+    ["first_name", "full_name"].includes(item.public_display_mode) &&
+    !item.public_display_consent
+  )
+    return "Publication needs review";
   if (item.public_display_mode === "none") return "Hidden from public results";
   if (item.public_display_mode === "ticket_number") {
     return `Ticket ${item.ticket_number}`;
@@ -271,23 +536,6 @@ function publicWinnerDisplay(item: WinnerRecord) {
   return name;
 }
 
-async function readJson(res: Response): Promise<ApiResponse> {
-  const text = await res.text();
-
-  try {
-    return text ? JSON.parse(text) : { ok: false };
-  } catch {
-    return {
-      ok: false,
-      error: "The API returned invalid JSON.",
-      code: "INVALID_JSON_RESPONSE",
-      details: text
-        ? `Response preview: ${text.slice(0, 500)}`
-        : "The response body was empty.",
-    };
-  }
-}
-
 export default function WinnersClient() {
   const [items, setItems] = useState<WinnerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -295,7 +543,14 @@ export default function WinnersClient() {
   const [error, setError] = useState<RequestError | null>(null);
   const [selected, setSelected] = useState<WinnerRecord | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [testMode, setTestMode] = useState(false);
+  const [mustReload, setMustReload] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const alive = useRef(false);
+  const operation = useRef<AbortController | null>(null);
+  const savingRef = useRef(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchId = useId();
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<WinnerStatus | "all">("all");
@@ -303,208 +558,74 @@ export default function WinnersClient() {
   const [workflow, setWorkflow] = useState<WinnerFilter>("all");
   const [sort, setSort] = useState("newest");
 
-  const [form, setForm] = useState({
-    status: "contact_pending" as WinnerStatus,
+  const [form, setForm] = useState<WinnerForm>({
+    status: "contact_pending",
     contact_method: "email",
     contact_outcome: "",
     contact_notes: "",
-    public_display_mode: "first_name",
-    public_display_consent: false,
-    publish_to_live_draw: false,
     fulfilment_method: "",
     collection_delivery_date: "",
     fulfilment_notes: "",
     internal_notes: "",
-    replacement_reason: "",
+    reason: "",
+    confirmTransition: false,
   });
-
-  useEffect(() => {
-    loadWinners();
-  }, []);
-
-  async function loadWinners() {
-    setTestMode(false);
+  const loadWinners = useCallback(async () => {
+    if (savingRef.current) return;
+    operation.current?.abort();
+    const controller = new AbortController();
+    operation.current = controller;
+    const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
     setLoading(true);
     setError(null);
-
-    try {
-      const res = await fetch(API_ROUTE, {
-        cache: "no-store",
-        credentials: "include",
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        setError(
-          makeRequestError({
-            title: "Could not load winner records",
-            method: "GET",
-            endpoint: API_ROUTE,
-            response: res,
-            data,
-          }),
-        );
-        return;
-      }
-
-      setItems(data.items || []);
-    } catch (err: unknown) {
-      setError(
-        makeNetworkError({
-          title: "Could not load winner records",
-          method: "GET",
-          endpoint: API_ROUTE,
-          cause: err,
-        }),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function startFullFeatureTest() {
-    const now = Date.now();
-
-    const demo: WinnerRecord[] = [
-      makeTestWinner({
-        id: "test-winner-contact",
-        lotteryId: "test-lottery-1",
-        lotteryTitle: "Test Summer Raffle 2026",
-        prizeName: "Test Main Prize",
-        prizeValue: 250,
-        ticket: "BP-TEST-000104",
-        entrantName: "Test Winner One",
-        entrantEmail: "winner.one@example.test",
-        status: "contact_pending",
-        selectedAt: now - 45 * 60 * 1000,
-        publicMode: "first_name",
-      }),
-      makeTestWinner({
-        id: "test-winner-contacted",
-        lotteryId: "test-lottery-1",
-        lotteryTitle: "Test Summer Raffle 2026",
-        prizeName: "Test Second Prize",
-        prizeValue: 100,
-        ticket: "BP-TEST-000057",
-        entrantName: "Test Winner Two",
-        entrantEmail: "winner.two@example.test",
-        status: "contacted",
-        selectedAt: now - 4 * 60 * 60 * 1000,
-        contactedAt: now - 2 * 60 * 60 * 1000,
-        publicMode: "ticket_number",
-        attempts: [
-          {
-            id: "test-contact-1",
-            method: "email",
-            outcome: "Winner email sent",
-            notes: "Waiting for reply.",
-            attempted_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
-            admin_name: "Test Admin",
-          },
-        ],
-      }),
-      makeTestWinner({
-        id: "test-winner-confirmed",
-        lotteryId: "test-lottery-2",
-        lotteryTitle: "Test Christmas Raffle 2026",
-        prizeName: "Test Gift Voucher",
-        prizeValue: 75,
-        ticket: "BP-TEST-000210",
-        entrantName: "Test Confirmed Winner",
-        entrantEmail: "confirmed@example.test",
-        status: "eligibility_confirmed",
-        selectedAt: now - 3 * 24 * 60 * 60 * 1000,
-        contactedAt: now - 2.5 * 24 * 60 * 60 * 1000,
-        eligibilityAt: now - 2 * 24 * 60 * 60 * 1000,
-        publicMode: "full_name",
-      }),
-      makeTestWinner({
-        id: "test-winner-claimed",
-        lotteryId: "test-lottery-2",
-        lotteryTitle: "Test Christmas Raffle 2026",
-        prizeName: "Test Hamper",
-        prizeValue: 50,
-        ticket: "BP-TEST-000211",
-        entrantName: "Test Claimed Winner",
-        entrantEmail: "claimed@example.test",
-        status: "claimed",
-        selectedAt: now - 7 * 24 * 60 * 60 * 1000,
-        contactedAt: now - 6 * 24 * 60 * 60 * 1000,
-        eligibilityAt: now - 5 * 24 * 60 * 60 * 1000,
-        claimedAt: now - 4 * 24 * 60 * 60 * 1000,
-        publicMode: "first_name",
-      }),
-      makeTestWinner({
-        id: "test-winner-fulfilled",
-        lotteryId: "test-lottery-3",
-        lotteryTitle: "Test Community Fundraiser",
-        prizeName: "Test Experience Prize",
-        prizeValue: 150,
-        ticket: "BP-TEST-000305",
-        entrantName: "Test Fulfilled Winner",
-        entrantEmail: "fulfilled@example.test",
-        status: "fulfilled",
-        selectedAt: now - 15 * 24 * 60 * 60 * 1000,
-        contactedAt: now - 14 * 24 * 60 * 60 * 1000,
-        eligibilityAt: now - 13 * 24 * 60 * 60 * 1000,
-        claimedAt: now - 12 * 24 * 60 * 60 * 1000,
-        fulfilledAt: now - 10 * 24 * 60 * 60 * 1000,
-        collectionDate: now - 10 * 24 * 60 * 60 * 1000,
-        fulfilmentMethod: "Collection",
-        publicMode: "first_name",
-      }),
-      makeTestWinner({
-        id: "test-winner-unclaimed",
-        lotteryId: "test-lottery-3",
-        lotteryTitle: "Test Community Fundraiser",
-        prizeName: "Test Unclaimed Prize",
-        prizeValue: 40,
-        ticket: "BP-TEST-000306",
-        entrantName: "Test Unclaimed Winner",
-        entrantEmail: "unclaimed@example.test",
-        status: "unclaimed",
-        selectedAt: now - 30 * 24 * 60 * 60 * 1000,
-        contactedAt: now - 29 * 24 * 60 * 60 * 1000,
-        unclaimedAt: now - 2 * 24 * 60 * 60 * 1000,
-        publicMode: "none",
-      }),
-      makeTestWinner({
-        id: "test-winner-disqualified",
-        lotteryId: "test-lottery-4",
-        lotteryTitle: "Test Archived Draw",
-        prizeName: "Test Replacement Prize",
-        prizeValue: 60,
-        ticket: "BP-TEST-000401",
-        entrantName: "Test Disqualified Winner",
-        entrantEmail: "disqualified@example.test",
-        status: "disqualified",
-        selectedAt: now - 20 * 24 * 60 * 60 * 1000,
-        contactedAt: now - 19 * 24 * 60 * 60 * 1000,
-        disqualifiedAt: now - 18 * 24 * 60 * 60 * 1000,
-        publicMode: "none",
-      }),
-    ];
-
-    setTestMode(true);
-    setItems(demo);
+    setItems([]);
     setSelected(null);
     setManageOpen(false);
-    setError(null);
-    setSearch("");
-    setStatus("all");
-    setLotteryId("all");
-    setWorkflow("all");
-    setSort("newest");
-    setLoading(false);
-  }
-
+    setPage(1);
+    try {
+      const records = await fetchRecords(controller.signal);
+      if (
+        !alive.current ||
+        controller.signal.aborted ||
+        operation.current !== controller
+      )
+        return;
+      setItems(records);
+      setMustReload(false);
+    } catch (err) {
+      if (alive.current && operation.current === controller)
+        setError({
+          title: "Could not load winners",
+          message:
+            err instanceof WinnersError && !controller.signal.aborted
+              ? err.message
+              : "Check your connection and refresh winner records.",
+        });
+    } finally {
+      window.clearTimeout(timer);
+      if (operation.current === controller) {
+        operation.current = null;
+        if (alive.current) setLoading(false);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    alive.current = true;
+    void loadWinners();
+    return () => {
+      alive.current = false;
+      operation.current?.abort();
+      operation.current = null;
+      savingRef.current = false;
+    };
+  }, [loadWinners]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, status, lotteryId, workflow, sort]);
   const lotteries = useMemo(() => {
     const map = new Map<string, string>();
     items.forEach((item) => map.set(item.lottery_id, item.lottery_title));
-    return Array.from(map.entries()).sort((a, b) =>
-      a[1].localeCompare(b[1]),
-    );
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
   const filtered = useMemo(() => {
@@ -536,19 +657,25 @@ export default function WinnersClient() {
         (workflow === "issues" &&
           ["unclaimed", "disqualified", "replaced"].includes(item.status));
 
-      return matchesSearch && matchesStatus && matchesLottery && matchesWorkflow;
+      return (
+        matchesSearch && matchesStatus && matchesLottery && matchesWorkflow
+      );
     });
 
     return result.sort((a, b) => {
       switch (sort) {
         case "oldest":
-          return +new Date(a.selected_at) - +new Date(b.selected_at);
+          return (
+            (Date.parse(a.selected_at) || 0) - (Date.parse(b.selected_at) || 0)
+          );
         case "prize_value":
           return Number(b.prize_value || 0) - Number(a.prize_value || 0);
         case "name":
           return (a.entrant_name || "").localeCompare(b.entrant_name || "");
         default:
-          return +new Date(b.selected_at) - +new Date(a.selected_at);
+          return (
+            (Date.parse(b.selected_at) || 0) - (Date.parse(a.selected_at) || 0)
+          );
       }
     });
   }, [items, search, status, lotteryId, workflow, sort]);
@@ -564,196 +691,195 @@ export default function WinnersClient() {
     ["unclaimed", "disqualified", "replaced"].includes(x.status),
   ).length;
 
+  useEffect(() => {
+    if (!manageOpen || saving) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [manageOpen, saving]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleItems = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
   function openManage(item: WinnerRecord) {
+    if (savingRef.current || mustReload || loading) return;
+    if (item.public_results_published_at) {
+      setError({
+        title: "Published winner needs the protected workflow",
+        message:
+          "This endpoint combines editing with publication. Published winners cannot be edited here until those operations are separated on the server.",
+      });
+      return;
+    }
     setSelected(item);
     setForm({
       status: item.status,
       contact_method: "email",
       contact_outcome: "",
       contact_notes: "",
-      public_display_mode: item.public_display_mode,
-      public_display_consent: item.public_display_consent,
-      publish_to_live_draw: Boolean(item.public_results_published_at),
       fulfilment_method: item.fulfilment_method || "",
       collection_delivery_date: toLocalInput(item.collection_delivery_date),
       fulfilment_notes: item.fulfilment_notes || "",
       internal_notes: item.internal_notes || "",
-      replacement_reason: "",
+      reason: "",
+      confirmTransition: false,
     });
     setManageOpen(true);
     setError(null);
+    setNotice(null);
   }
-
   async function saveWinner() {
-    if (!selected) return;
-
+    if (!selected || savingRef.current || saving || mustReload || loading)
+      return;
+    const before = selected;
+    let date: string | null;
+    try {
+      if (before.public_results_published_at)
+        throw new WinnersError(
+          "Published winners require the separate protected workflow.",
+        );
+      if (!allowedStatuses(before.status).includes(form.status))
+        throw new WinnersError(
+          "Choose the current status or its next workflow step. Exceptional decisions and replacements require a separate controlled workflow.",
+        );
+      if (form.status !== before.status && !form.confirmTransition)
+        throw new WinnersError(
+          "Confirm that the selected workflow step and its evidence have been checked.",
+        );
+      if (form.reason.trim().length < 5 || form.reason.trim().length > 1000)
+        throw new WinnersError(
+          "Enter a reason or evidence reference of 5 to 1000 characters.",
+        );
+      if (!["email", "phone", "other"].includes(form.contact_method))
+        throw new WinnersError("Choose a supported contact method.");
+      if (form.contact_notes.trim() && !form.contact_outcome.trim())
+        throw new WinnersError(
+          "Enter an outcome for the contact notes, or clear the notes.",
+        );
+      if (
+        form.status === "contacted" &&
+        before.status !== "contacted" &&
+        !form.contact_outcome.trim() &&
+        !before.contact_attempts.length
+      )
+        throw new WinnersError(
+          "Record a contact attempt before marking this winner contacted.",
+        );
+      if (
+        [form.contact_outcome, form.fulfilment_method].some(
+          (value) => value.length > 500,
+        ) ||
+        [form.contact_notes, form.fulfilment_notes, form.internal_notes].some(
+          (value) => value.length > 5000,
+        )
+      )
+        throw new WinnersError("Shorten the entered notes or contact outcome.");
+      date =
+        form.collection_delivery_date ===
+        toLocalInput(before.collection_delivery_date)
+          ? before.collection_delivery_date
+          : londonDateToIso(form.collection_delivery_date);
+      if (
+        form.status === "fulfilled" &&
+        (!date || !form.fulfilment_method.trim())
+      )
+        throw new WinnersError(
+          "Enter a fulfilment method and collection/delivery date before marking the prize fulfilled.",
+        );
+    } catch (err) {
+      setError({
+        title: "Check winner changes",
+        message:
+          err instanceof WinnersError
+            ? err.message
+            : "Check the entered values.",
+      });
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     setError(null);
-
-    const nameDisplaySelected = ["full_name", "first_name"].includes(
-      form.public_display_mode,
-    );
-
-    if (nameDisplaySelected && !form.public_display_consent) {
-      setError({
-        title: "Public permission is required",
-        method: "PATCH",
-        endpoint: `${API_ROUTE}/${selected.id}`,
-        message:
-          "You cannot publish a winner's name until you have recorded their permission.",
-        troubleshooting: [
-          "Ask the winner whether they agree to their full name or first name being published.",
-          "Tick the permission box, or choose Ticket number only / Do not show winner identity.",
-        ],
-      });
-      setSaving(false);
-      return;
-    }
-
-    const now = new Date().toISOString();
-
-    if (testMode) {
-      const newAttempt =
-        form.contact_outcome.trim().length > 0
-          ? {
-              id: `test-contact-${Date.now()}`,
-              method: form.contact_method as "email" | "phone" | "other",
-              outcome: form.contact_outcome.trim(),
-              notes: form.contact_notes.trim() || null,
-              attempted_at: now,
-              admin_name: "Test Admin",
-            }
-          : null;
-
-      setItems((current) =>
-        current.map((item) => {
-          if (item.id !== selected.id) return item;
-
-          const nextStatus = form.status;
-
-          return {
-            ...item,
-            status: nextStatus,
-            public_display_mode: form.public_display_mode as
-              | "full_name"
-              | "first_name"
-              | "ticket_number"
-              | "none",
-            public_display_consent: form.public_display_consent,
-            public_results_published_at:
-              form.publish_to_live_draw && form.public_display_mode !== "none"
-                ? item.public_results_published_at || now
-                : null,
-            fulfilment_method: form.fulfilment_method.trim() || null,
-            collection_delivery_date: form.collection_delivery_date
-              ? new Date(form.collection_delivery_date).toISOString()
-              : null,
-            fulfilment_notes: form.fulfilment_notes.trim() || null,
-            internal_notes: form.internal_notes.trim() || null,
-            contacted_at:
-              ["contacted", "eligibility_confirmed", "claimed", "fulfilled"].includes(
-                nextStatus,
-              ) && !item.contacted_at
-                ? now
-                : item.contacted_at,
-            eligibility_confirmed_at:
-              ["eligibility_confirmed", "claimed", "fulfilled"].includes(
-                nextStatus,
-              ) && !item.eligibility_confirmed_at
-                ? now
-                : item.eligibility_confirmed_at,
-            claimed_at:
-              ["claimed", "fulfilled"].includes(nextStatus) && !item.claimed_at
-                ? now
-                : item.claimed_at,
-            fulfilled_at:
-              nextStatus === "fulfilled" && !item.fulfilled_at
-                ? now
-                : item.fulfilled_at,
-            unclaimed_at:
-              nextStatus === "unclaimed" && !item.unclaimed_at
-                ? now
-                : item.unclaimed_at,
-            disqualified_at:
-              nextStatus === "disqualified" && !item.disqualified_at
-                ? now
-                : item.disqualified_at,
-            contact_attempts: newAttempt
-              ? [newAttempt, ...item.contact_attempts]
-              : item.contact_attempts,
-            updated_at: now,
-          };
-        }),
-      );
-
-      setManageOpen(false);
-      setSelected(null);
-      setSaving(false);
-      return;
-    }
-
+    setNotice(null);
+    operation.current?.abort();
+    const controller = new AbortController();
+    operation.current = controller;
+    const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const payload = {
-        id: selected.id,
-        status: form.status,
-        public_display_mode: form.public_display_mode,
-        public_display_consent: form.public_display_consent,
-        publish_to_live_draw: form.publish_to_live_draw,
-        fulfilment_method: form.fulfilment_method.trim() || null,
-        collection_delivery_date: form.collection_delivery_date
-          ? new Date(form.collection_delivery_date).toISOString()
-          : null,
-        fulfilment_notes: form.fulfilment_notes.trim() || null,
-        internal_notes: form.internal_notes.trim() || null,
-        contact_attempt:
-          form.contact_outcome.trim().length > 0
+      await requestApi(
+        `${API_ROUTE}/${encodeURIComponent(before.id)}`,
+        controller.signal,
+        {
+          id: before.id,
+          status: form.status,
+          reason: form.reason.trim(),
+          expected_updated_at: before.updated_at,
+          // Preserve saved privacy choices. This ordinary edit never requests publication.
+          public_display_mode: before.public_display_mode,
+          public_display_consent: before.public_display_consent,
+          publish_to_live_draw: false,
+          fulfilment_method: form.fulfilment_method.trim() || null,
+          collection_delivery_date: date,
+          fulfilment_notes: form.fulfilment_notes.trim() || null,
+          internal_notes: form.internal_notes.trim() || null,
+          contact_attempt: form.contact_outcome.trim()
             ? {
                 method: form.contact_method,
                 outcome: form.contact_outcome.trim(),
                 notes: form.contact_notes.trim() || null,
               }
             : null,
-      };
-
-      const res = await fetch(`${API_ROUTE}/${selected.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        setError(
-          makeRequestError({
-            title: "Could not save winner changes",
-            method: "PATCH",
-            endpoint: `${API_ROUTE}/${selected.id}`,
-            response: res,
-            data,
-          }),
-        );
-        return;
-      }
-
-      setManageOpen(false);
-      setSelected(null);
-      await loadWinners();
-    } catch (err: unknown) {
-      setError(
-        makeNetworkError({
-          title: "Could not save winner changes",
-          method: "PATCH",
-          endpoint: `${API_ROUTE}/${selected.id}`,
-          cause: err,
-        }),
+        },
       );
+      const records = await fetchRecords(controller.signal);
+      if (
+        !alive.current ||
+        controller.signal.aborted ||
+        operation.current !== controller
+      )
+        return;
+      const saved = records.find((item) => item.id === before.id);
+      if (!saved || !verifySaved(before, saved, form, date))
+        throw new WinnersError(
+          "The saved changes or preserved history could not be verified. Report the issue and review the stored winner record.",
+        );
+      setItems(records);
+      setSelected(null);
+      setManageOpen(false);
+      setNotice("Winner changes saved and verified.");
+    } catch (err) {
+      if (alive.current && operation.current === controller) {
+        setMustReload(true);
+        const message =
+          err instanceof WinnersError && !controller.signal.aborted
+            ? err.message
+            : "The save outcome could not be confirmed.";
+        setError({
+          title: "Review the save outcome",
+          message: `${message} The request may have changed the record. Close this dialog, refresh and check it before retrying.`,
+        });
+        if (
+          err instanceof WinnersError &&
+          [401, 403].includes(err.status ?? 0)
+        ) {
+          setItems([]);
+          setSelected(null);
+          setManageOpen(false);
+        }
+      }
     } finally {
-      setSaving(false);
+      window.clearTimeout(timer);
+      if (operation.current === controller) {
+        operation.current = null;
+        savingRef.current = false;
+        if (alive.current) setSaving(false);
+      }
     }
   }
-
   return (
     <div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
       <section className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
@@ -764,9 +890,7 @@ export default function WinnersClient() {
             </div>
 
             <div>
-              <h1 className="text-2xl font-extrabold text-white">
-                Winners
-              </h1>
+              <h1 className="text-2xl font-extrabold text-white">Winners</h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-white/60">
                 Manage selected winners, contact attempts, eligibility
                 confirmation, prize claims, fulfilment and exceptional cases.
@@ -777,17 +901,8 @@ export default function WinnersClient() {
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={startFullFeatureTest}
-              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
-            >
-              <Beaker className="h-4 w-4" />
-              Test full feature
-            </button>
-
-            <button
-              type="button"
-              onClick={loadWinners}
-              disabled={loading}
+              onClick={() => void loadWinners()}
+              disabled={loading || saving}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
             >
               <RefreshCw
@@ -799,69 +914,99 @@ export default function WinnersClient() {
         </div>
       </section>
 
-      {testMode ? (
-        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          <div className="flex items-start gap-3">
-            <Beaker className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
-              <div className="font-bold">Test mode is active</div>
-              <div className="mt-1 text-yellow-100/70">
-                These are fake winner records. You can test contact,
-                eligibility, claim, fulfilment and issue workflows without
-                writing to the real API or Supabase.
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+      <p className="text-sm text-white/65">
+        Counts describe loaded records. This screen does not verify lottery
+        completion or public-result timing. Publication, consent changes,
+        disqualification and replacement require separate protected server
+        workflows.
+      </p>
+      {notice && (
+        <p role="status" className="text-sm text-emerald-200">
+          {notice}
+        </p>
+      )}
+      {mustReload && (
+        <p role="alert" className="text-sm text-amber-100">
+          Refresh and review the saved record before making another change.
+        </p>
+      )}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Needs contact"
-          value={String(needsContact)}
+          value={
+            loading || (error && !items.length)
+              ? "Unavailable"
+              : String(needsContact)
+          }
           icon={<Mail className="h-5 w-5" />}
         />
         <StatCard
           label="In progress"
-          value={String(inProgress)}
+          value={
+            loading || (error && !items.length)
+              ? "Unavailable"
+              : String(inProgress)
+          }
           icon={<Clock3 className="h-5 w-5" />}
         />
         <StatCard
           label="Fulfilled"
-          value={String(fulfilled)}
+          value={
+            loading || (error && !items.length)
+              ? "Unavailable"
+              : String(fulfilled)
+          }
           icon={<PackageCheck className="h-5 w-5" />}
         />
         <StatCard
           label="Issues / replacements"
-          value={String(issues)}
+          value={
+            loading || (error && !items.length) ? "Unavailable" : String(issues)
+          }
           icon={<AlertTriangle className="h-5 w-5" />}
         />
       </section>
 
-      {error ? (
-        <RequestErrorAlert error={error} onRetry={loadWinners} />
-      ) : null}
+      {error ? <RequestErrorAlert error={error} /> : null}
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
         <div className="mb-5 flex items-center gap-2">
           <Filter className="h-4 w-4 text-white/65" />
-          <h2 className="text-lg font-bold text-white">
-            Search &amp; filters
-          </h2>
+          <h2 className="text-lg font-bold text-white">Search &amp; filters</h2>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="relative xl:col-span-2">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            <label htmlFor={searchId} className="sr-only">
+              Search loaded winners
+            </label>
             <input
+              id={searchId}
+              ref={searchRef}
+              type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Winner, email, ticket, prize, order or lottery..."
-              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-12 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-purple-300 placeholder:text-white/35"
             />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear winner search"
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/70"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           <Select
+            label="Winner status"
             value={status}
             onChange={(v) => setStatus(v as WinnerStatus | "all")}
           >
@@ -872,7 +1017,7 @@ export default function WinnersClient() {
             ))}
           </Select>
 
-          <Select value={lotteryId} onChange={setLotteryId}>
+          <Select label="Lottery" value={lotteryId} onChange={setLotteryId}>
             <option value="all">All lotteries</option>
             {lotteries.map(([id, title]) => (
               <option key={id} value={id}>
@@ -882,6 +1027,7 @@ export default function WinnersClient() {
           </Select>
 
           <Select
+            label="Workflow"
             value={workflow}
             onChange={(v) => setWorkflow(v as WinnerFilter)}
           >
@@ -895,7 +1041,7 @@ export default function WinnersClient() {
         </div>
 
         <div className="mt-3 max-w-sm">
-          <Select value={sort} onChange={setSort}>
+          <Select label="Sort winners" value={sort} onChange={setSort}>
             <option value="newest">Newest selected</option>
             <option value="oldest">Oldest selected</option>
             <option value="prize_value">Highest prize value</option>
@@ -906,11 +1052,10 @@ export default function WinnersClient() {
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
         <div className="mb-4">
-          <h2 className="text-lg font-bold text-white">
-            Winner register
-          </h2>
+          <h2 className="text-lg font-bold text-white">Winner register</h2>
           <p className="mt-1 text-sm text-white/50">
-            Showing {filtered.length} of {items.length} winner records
+            Showing {visibleItems.length} of {filtered.length} matching winners
+            ({items.length} loaded)
           </p>
         </div>
 
@@ -919,23 +1064,32 @@ export default function WinnersClient() {
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             Loading winners...
           </div>
+        ) : error && !items.length ? (
+          <p className="py-6 text-white/65">
+            Winner records are unavailable. Use Refresh to try again.
+          </p>
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
             <Trophy className="mx-auto h-8 w-8 text-white/30" />
-            <h3 className="mt-3 font-bold text-white">
-              No winners found
-            </h3>
+            <h3 className="mt-3 font-bold text-white">No winners found</h3>
             <p className="mt-1 text-sm text-white/50">
-              Winners will appear here after a completed draw.
+              {items.length
+                ? "Change the filters or clear the search."
+                : "No winner records were returned by the server."}
             </p>
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((item) => (
+            {visibleItems.map((item) => (
               <WinnerRow
                 key={item.id}
                 item={item}
                 onView={() => setSelected(item)}
+                manageDisabled={
+                  saving ||
+                  mustReload ||
+                  Boolean(item.public_results_published_at)
+                }
                 onManage={() => openManage(item)}
               />
             ))}
@@ -943,10 +1097,39 @@ export default function WinnersClient() {
         )}
       </section>
 
+      {filtered.length > PAGE_SIZE && (
+        <nav
+          aria-label="Winner pages"
+          className="flex items-center justify-between gap-3 text-white"
+        >
+          <button
+            type="button"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Previous winners
+          </button>
+          <span aria-live="polite">
+            Page {currentPage} of {pageCount}
+          </span>
+          <button
+            type="button"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Next winners
+          </button>
+        </nav>
+      )}
       {selected && !manageOpen ? (
         <WinnerDetailsModal
           winner={selected}
           onClose={() => setSelected(null)}
+          manageDisabled={
+            saving ||
+            mustReload ||
+            Boolean(selected.public_results_published_at)
+          }
           onManage={() => openManage(selected)}
         />
       ) : null}
@@ -957,7 +1140,7 @@ export default function WinnersClient() {
           form={form}
           setForm={setForm}
           saving={saving}
-          testMode={testMode}
+          mustReload={mustReload}
           error={error}
           onClose={() => {
             if (!saving) {
@@ -972,103 +1155,26 @@ export default function WinnersClient() {
   );
 }
 
-function RequestErrorAlert({
-  error,
-  onRetry,
-  retryLabel = "Try loading winners again",
-}: {
-  error: RequestError;
-  onRetry: () => void;
-  retryLabel?: string;
-}) {
+function RequestErrorAlert({ error }: { error: RequestError }) {
   return (
     <section
-      className="rounded-2xl border border-red-400/40 bg-red-500/10 p-5 text-red-100"
       role="alert"
-      aria-live="assertive"
+      className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-red-100"
     >
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
-
-        <div className="min-w-0 flex-1">
-          <h2 className="font-extrabold">{error.title}</h2>
-          <p className="mt-1 text-sm leading-6 text-red-100/90">
-            {error.message}
-          </p>
-
-          <dl className="mt-4 grid gap-3 rounded-xl border border-red-300/20 bg-black/20 p-4 text-xs sm:grid-cols-2">
-            <div>
-              <dt className="font-bold uppercase tracking-wide text-red-100/60">
-                Request
-              </dt>
-              <dd className="mt-1 break-all font-mono text-red-50">
-                {error.method} {error.endpoint}
-              </dd>
-            </div>
-
-            <div>
-              <dt className="font-bold uppercase tracking-wide text-red-100/60">
-                HTTP status
-              </dt>
-              <dd className="mt-1 font-mono text-red-50">
-                {error.status
-                  ? `${error.status}${error.statusText ? ` ${error.statusText}` : ""}`
-                  : "No HTTP response received"}
-              </dd>
-            </div>
-
-            {error.code ? (
-              <div>
-                <dt className="font-bold uppercase tracking-wide text-red-100/60">
-                  Error code
-                </dt>
-                <dd className="mt-1 break-all font-mono text-red-50">
-                  {error.code}
-                </dd>
-              </div>
-            ) : null}
-
-            {error.details ? (
-              <div className="sm:col-span-2">
-                <dt className="font-bold uppercase tracking-wide text-red-100/60">
-                  Server detail
-                </dt>
-                <dd className="mt-1 whitespace-pre-wrap break-words font-mono text-red-50">
-                  {error.details}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-
-          <div className="mt-4">
-            <h3 className="text-sm font-bold">What to check</h3>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-red-100/85">
-              {error.troubleshooting.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ul>
-          </div>
-
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-red-200/30 bg-red-950/20 px-4 py-2 text-sm font-bold text-red-50 hover:bg-red-950/40"
-          >
-            <RefreshCw className="h-4 w-4" />
-            {retryLabel}
-          </button>
-        </div>
-      </div>
+      <h2 className="font-bold">{error.title}</h2>
+      <p className="mt-1 text-sm">{error.message}</p>
     </section>
   );
 }
 
 function WinnerRow({
   item,
+  manageDisabled,
   onView,
   onManage,
 }: {
   item: WinnerRecord;
+  manageDisabled: boolean;
   onView: () => void;
   onManage: () => void;
 }) {
@@ -1108,14 +1214,14 @@ function WinnerRow({
               value={String(item.contact_attempts.length)}
             />
             <Info
-              label="Public result"
+              label="Stored public display"
               value={publicWinnerDisplay(item)}
             />
             <Info
               label="Live Draw page"
               value={
                 item.public_results_published_at
-                  ? "Published"
+                  ? "Publication recorded (unverified)"
                   : "Not published"
               }
             />
@@ -1130,7 +1236,7 @@ function WinnerRow({
           <button
             type="button"
             onClick={onView}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-purple-300"
           >
             <Eye className="h-3.5 w-3.5" />
             View
@@ -1139,6 +1245,7 @@ function WinnerRow({
           <button
             type="button"
             onClick={onManage}
+            disabled={manageDisabled}
             className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-extrabold text-black hover:opacity-90"
           >
             <ShieldCheck className="h-3.5 w-3.5" />
@@ -1152,10 +1259,12 @@ function WinnerRow({
 
 function WinnerDetailsModal({
   winner,
+  manageDisabled,
   onClose,
   onManage,
 }: {
   winner: WinnerRecord;
+  manageDisabled: boolean;
   onClose: () => void;
   onManage: () => void;
 }) {
@@ -1183,7 +1292,7 @@ function WinnerDetailsModal({
         />
         <DetailCard
           icon={<ShieldCheck className="h-4 w-4" />}
-          label="Public result"
+          label="Stored public display"
           value={publicWinnerDisplay(winner)}
         />
       </div>
@@ -1229,13 +1338,19 @@ function WinnerDetailsModal({
         <Panel title="Privacy & public display">
           <DetailRows
             rows={[
-              ["Display setting", winner.public_display_mode.replaceAll("_", " ")],
+              [
+                "Display setting",
+                winner.public_display_mode.replaceAll("_", " "),
+              ],
               ["Public result", publicWinnerDisplay(winner)],
               [
                 "Replacement winner",
                 winner.replacement_winner_id || "Not linked",
               ],
-              ["Original winner", winner.original_winner_id || "Not applicable"],
+              [
+                "Original winner",
+                winner.original_winner_id || "Not applicable",
+              ],
             ]}
           />
         </Panel>
@@ -1249,10 +1364,17 @@ function WinnerDetailsModal({
         </Panel>
       </div>
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <Link
+          href={`/Lottery/${encodeURIComponent(winner.lottery_slug)}/LiveDraw`}
+          className="text-sm text-purple-200 underline"
+        >
+          Public Live Draw page
+        </Link>
         <button
           type="button"
           onClick={onManage}
+          disabled={manageDisabled}
           className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
         >
           <ShieldCheck className="h-4 w-4" />
@@ -1268,16 +1390,16 @@ function ManageWinnerModal({
   form,
   setForm,
   saving,
-  testMode,
+  mustReload,
   error,
   onClose,
   onSave,
 }: {
   winner: WinnerRecord;
-  form: any;
-  setForm: React.Dispatch<React.SetStateAction<any>>;
+  form: WinnerForm;
+  setForm: React.Dispatch<React.SetStateAction<WinnerForm>>;
   saving: boolean;
-  testMode: boolean;
+  mustReload: boolean;
   error: RequestError | null;
   onClose: () => void;
   onSave: () => void;
@@ -1289,243 +1411,249 @@ function ManageWinnerModal({
       onClose={onClose}
       closeDisabled={saving}
     >
-      {testMode ? (
-        <div className="mb-5 rounded-2xl border border-yellow-400/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
-          Test mode — these changes only update the fake records on this page.
-        </div>
-      ) : null}
-
-      {error ? (
+      {error && (
         <div className="mb-5">
-          <RequestErrorAlert
-            error={error}
-            onRetry={onSave}
-            retryLabel="Try saving winner again"
-          />
+          <RequestErrorAlert error={error} />
         </div>
-      ) : null}
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Panel title="Winner status">
-          <Field label="Workflow status">
-            <select
-              value={form.status}
-              onChange={(e) =>
-                setForm((p: any) => ({ ...p, status: e.target.value }))
-              }
-              className={inputClass}
-            >
-              {STATUS_OPTIONS.filter((x) => x.value !== "all").map(
-                (option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ),
-              )}
-            </select>
-          </Field>
-
-          <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100/80">
-            A replacement winner must only come from the controlled redraw or
-            reserve-winner process. Changing the status here must not silently
-            select another ticket.
-          </div>
-        </Panel>
-
-        <Panel title="Contact attempt">
-          <div className="space-y-4">
-            <Field label="Contact method">
-              <select
-                value={form.contact_method}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    contact_method: e.target.value,
-                  }))
-                }
-                className={inputClass}
-              >
-                <option value="email">Email</option>
-                <option value="phone">Phone</option>
-                <option value="other">Other</option>
-              </select>
-            </Field>
-
-            <Field label="Outcome">
-              <input
-                value={form.contact_outcome}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    contact_outcome: e.target.value,
-                  }))
-                }
-                className={inputClass}
-                placeholder="e.g. Winner contacted successfully"
-              />
-            </Field>
-
-            <Field label="Contact notes">
-              <textarea
-                value={form.contact_notes}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    contact_notes: e.target.value,
-                  }))
-                }
-                className={`${inputClass} min-h-24`}
-              />
-            </Field>
-          </div>
-        </Panel>
-
-        <Panel title="Prize fulfilment">
-          <div className="space-y-4">
-            <Field label="Fulfilment method">
-              <input
-                value={form.fulfilment_method}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    fulfilment_method: e.target.value,
-                  }))
-                }
-                className={inputClass}
-                placeholder="Collection, delivery, post..."
-              />
-            </Field>
-
-            <Field label="Collection / delivery date">
-              <input
-                type="datetime-local"
-                value={form.collection_delivery_date}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    collection_delivery_date: e.target.value,
-                  }))
-                }
-                className={inputClass}
-              />
-            </Field>
-
-            <Field label="Fulfilment notes">
-              <textarea
-                value={form.fulfilment_notes}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    fulfilment_notes: e.target.value,
-                  }))
-                }
-                className={`${inputClass} min-h-24`}
-              />
-            </Field>
-          </div>
-        </Panel>
-
-        <Panel title="Privacy & internal notes">
-          <div className="space-y-4">
-            <Field label="Public winner display">
-              <select
-                value={form.public_display_mode}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    public_display_mode: e.target.value,
-                  }))
-                }
-                className={inputClass}
-              >
-                <option value="full_name">Full name</option>
-                <option value="first_name">First name only</option>
-                <option value="ticket_number">Ticket number only</option>
-                <option value="none">Do not show winner identity</option>
-              </select>
-            </Field>
-
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/80">
-              <input
-                type="checkbox"
-                checked={form.public_display_consent}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    public_display_consent: e.target.checked,
-                    public_display_mode: e.target.checked
-                      ? p.public_display_mode
-                      : "none",
-                    publish_to_live_draw: e.target.checked
-                      ? p.publish_to_live_draw
-                      : false,
-                  }))
-                }
-                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-black/30 text-fuchsia-500"
-              />
-              <span>
-                <strong className="block text-white">Winner gave permission to be named publicly</strong>
-                Only tick this when the winner has agreed to the selected name display.
-              </span>
-            </label>
-
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 p-3 text-sm text-white/80">
-              <input
-                type="checkbox"
-                checked={form.publish_to_live_draw}
-                disabled={!form.public_display_consent || form.public_display_mode === "none"}
-                onChange={(e) =>
-                  setForm((p: any) => ({ ...p, publish_to_live_draw: e.target.checked }))
-                }
-                className="mt-0.5 h-4 w-4 rounded border-white/20 bg-black/30 text-fuchsia-500 disabled:opacity-40"
-              />
-              <span>
-                <strong className="block text-white">Publish on the Live Draw page</strong>
-                This publishes only the approved name or ticket number. It never publishes email or phone details.
-              </span>
-            </label>
-
-            <Field label="Internal notes">
-              <textarea
-                value={form.internal_notes}
-                onChange={(e) =>
-                  setForm((p: any) => ({
-                    ...p,
-                    internal_notes: e.target.value,
-                  }))
-                }
-                className={`${inputClass} min-h-28`}
-                placeholder="Only record necessary operational information."
-              />
-            </Field>
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={saving}
-          className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
+      )}
+      <form
+        noValidate
+        onSubmit={(event: FormEvent) => {
+          event.preventDefault();
+          if (!saving && !mustReload) onSave();
+        }}
+      >
+        <fieldset
+          disabled={saving || mustReload}
+          className="min-w-0 border-0 p-0"
         >
-          Cancel
-        </button>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Panel title="Winner status">
+              <Field label="Workflow status">
+                <select
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm((p) => ({
+                      ...p,
+                      status: e.target.value as WinnerStatus,
+                      confirmTransition: false,
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  {STATUS_OPTIONS.filter(
+                    (x) =>
+                      x.value !== "all" &&
+                      allowedStatuses(winner.status).includes(x.value),
+                  ).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-60"
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4" />
-          )}
-          {saving ? "Saving..." : "Save winner"}
-        </button>
-      </div>
+              <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100/80">
+                A replacement winner must only come from the controlled redraw
+                or reserve-winner process. Changing the status here must not
+                silently select another ticket.
+              </div>
+            </Panel>
+
+            <Panel title="Contact attempt">
+              <div className="space-y-4">
+                <Field label="Contact method">
+                  <select
+                    value={form.contact_method}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        contact_method: e.target
+                          .value as ContactAttempt["method"],
+                      }))
+                    }
+                    className={inputClass}
+                  >
+                    <option value="email">Email</option>
+                    <option value="phone">Phone</option>
+                    <option value="other">Other</option>
+                  </select>
+                </Field>
+
+                <Field label="Outcome">
+                  <input
+                    value={form.contact_outcome}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        contact_outcome: e.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    placeholder="e.g. Winner contacted successfully"
+                  />
+                </Field>
+
+                <Field label="Contact notes">
+                  <textarea
+                    value={form.contact_notes}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        contact_notes: e.target.value,
+                      }))
+                    }
+                    className={`${inputClass} min-h-24 resize-none`}
+                  />
+                </Field>
+              </div>
+            </Panel>
+
+            <Panel title="Prize fulfilment">
+              <div className="space-y-4">
+                <Field label="Fulfilment method">
+                  <input
+                    value={form.fulfilment_method}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        fulfilment_method: e.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    placeholder="Collection, delivery, post..."
+                  />
+                </Field>
+
+                <Field label="Collection / delivery time (Europe/London)">
+                  <input
+                    type="datetime-local"
+                    value={form.collection_delivery_date}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        collection_delivery_date: e.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="Fulfilment notes">
+                  <textarea
+                    value={form.fulfilment_notes}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        fulfilment_notes: e.target.value,
+                      }))
+                    }
+                    className={`${inputClass} min-h-24 resize-none`}
+                  />
+                </Field>
+              </div>
+            </Panel>
+
+            <Panel title="Privacy & internal notes">
+              <div className="space-y-4">
+                <DetailRows
+                  rows={[
+                    [
+                      "Saved display setting",
+                      winner.public_display_mode.replaceAll("_", " "),
+                    ],
+                    [
+                      "Saved consent",
+                      winner.public_display_consent
+                        ? "Recorded"
+                        : "Not recorded",
+                    ],
+                    [
+                      "Publication timestamp",
+                      formatDate(winner.public_results_published_at),
+                    ],
+                  ]}
+                />
+                <p className="text-sm text-white/65">
+                  Publication and consent are read-only here. They must be
+                  changed through a separate protected workflow that checks
+                  lottery completion, publication time and consent evidence.
+                </p>
+                <Field label="Internal notes">
+                  <textarea
+                    value={form.internal_notes}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        internal_notes: e.target.value,
+                      }))
+                    }
+                    className={`${inputClass} min-h-28 resize-none`}
+                    placeholder="Only record necessary operational information."
+                  />
+                </Field>
+              </div>
+            </Panel>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <Field label="Reason or evidence reference">
+              <input
+                value={form.reason}
+                maxLength={1000}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    reason: event.target.value,
+                  }))
+                }
+                className={inputClass}
+              />
+            </Field>
+            {form.status !== winner.status && (
+              <label className="flex items-start gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  checked={form.confirmTransition}
+                  onChange={(event) =>
+                    setForm((previous) => ({
+                      ...previous,
+                      confirmTransition: event.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  I have checked the evidence for changing{" "}
+                  {statusLabel(winner.status)} to {statusLabel(form.status)}.
+                </span>
+              </label>
+            )}
+          </div>
+        </fieldset>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="submit"
+            disabled={saving || mustReload}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-60"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            {saving ? "Saving..." : "Save winner"}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }
@@ -1550,9 +1678,7 @@ function Timeline({ winner }: { winner: WinnerRecord }) {
           className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-black/20 p-3"
         >
           <span className="text-sm font-semibold text-white/65">{label}</span>
-          <span className="text-xs text-white/45">
-            {formatDate(value)}
-          </span>
+          <span className="text-xs text-white/45">{formatDate(value)}</span>
         </div>
       ))}
     </div>
@@ -1560,6 +1686,10 @@ function Timeline({ winner }: { winner: WinnerRecord }) {
 }
 
 function ContactAttempts({ items }: { items: ContactAttempt[] }) {
+  const [limit, setLimit] = useState(25);
+  useEffect(() => {
+    setLimit(25);
+  }, [items]);
   if (!items.length) {
     return (
       <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/45">
@@ -1570,7 +1700,7 @@ function ContactAttempts({ items }: { items: ContactAttempt[] }) {
 
   return (
     <div className="space-y-3">
-      {items.map((item) => (
+      {items.slice(0, limit).map((item) => (
         <div
           key={item.id}
           className="rounded-xl border border-white/10 bg-black/20 p-4"
@@ -1589,12 +1719,19 @@ function ContactAttempts({ items }: { items: ContactAttempt[] }) {
             </span>
           </div>
           {item.notes ? (
-            <p className="mt-2 text-xs leading-5 text-white/55">
-              {item.notes}
-            </p>
+            <p className="mt-2 text-xs leading-5 text-white/55">{item.notes}</p>
           ) : null}
         </div>
       ))}
+      {items.length > limit && (
+        <button
+          type="button"
+          onClick={() => setLimit((previous) => previous + 25)}
+          className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white"
+        >
+          Show more contact attempts
+        </button>
+      )}
     </div>
   );
 }
@@ -1612,16 +1749,37 @@ function Modal({
   closeDisabled?: boolean;
   children: React.ReactNode;
 }) {
+  const ref = useRef<HTMLDialogElement | null>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const dialog = ref.current;
+    const previous = document.activeElement;
+    const overflow = document.body.style.overflow;
+    if (dialog && !dialog.open) dialog.showModal();
+    document.body.style.overflow = "hidden";
+    return () => {
+      dialog?.close();
+      document.body.style.overflow = overflow;
+      if (previous instanceof HTMLElement && previous.isConnected)
+        previous.focus();
+    };
+  }, []);
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm md:p-6"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={ref}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!closeDisabled) onClose();
+      }}
+      className="fixed inset-0 m-0 h-dvh w-screen max-h-none max-w-none items-center justify-center border-0 bg-black/75 p-3 text-white backdrop-blur-sm open:flex md:p-6"
+      aria-labelledby={titleId}
     >
-      <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
           <div>
-            <h2 className="text-xl font-extrabold text-white">{title}</h2>
+            <h2 id={titleId} className="text-xl font-extrabold text-white">
+              {title}
+            </h2>
             <p className="mt-1 text-sm text-white/55">{subtitle}</p>
           </div>
 
@@ -1630,7 +1788,8 @@ function Modal({
             onClick={onClose}
             disabled={closeDisabled}
             className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10 disabled:opacity-50"
-            aria-label="Close"
+            autoFocus
+            aria-label="Close winner dialog"
           >
             <X className="h-5 w-5" />
           </button>
@@ -1638,7 +1797,7 @@ function Modal({
 
         <div className="overflow-y-auto p-5 md:p-6">{children}</div>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -1665,24 +1824,31 @@ function StatCard({
 }
 
 function Select({
+  label,
   value,
   onChange,
   children,
 }: {
+  label: string;
   value: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
 }) {
+  const id = useId();
+  // Preserve the existing native select and platform-owned popup.
   return (
     <div className="relative">
+      <label htmlFor={id} className="sr-only">
+        {label}
+      </label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
+        className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
       >
         {children}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
     </div>
   );
 }
@@ -1756,7 +1922,7 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
 }
 
 const inputClass =
-  "w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-white/25";
+  "w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-purple-300 placeholder:text-white/35 focus:border-white/25";
 
 function Field({
   label,
@@ -1773,107 +1939,4 @@ function Field({
       {children}
     </label>
   );
-}
-
-function toLocalInput(value: string | null) {
-  if (!value) return "";
-
-  const date = new Date(value);
-  const pad = (n: number) => String(n).padStart(2, "0");
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-    date.getDate(),
-  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function makeTestWinner({
-  id,
-  lotteryId,
-  lotteryTitle,
-  prizeName,
-  prizeValue,
-  ticket,
-  entrantName,
-  entrantEmail,
-  status,
-  selectedAt,
-  contactedAt,
-  eligibilityAt,
-  claimedAt,
-  fulfilledAt,
-  unclaimedAt,
-  disqualifiedAt,
-  collectionDate,
-  fulfilmentMethod,
-  publicMode,
-  attempts = [],
-}: {
-  id: string;
-  lotteryId: string;
-  lotteryTitle: string;
-  prizeName: string;
-  prizeValue: number;
-  ticket: string;
-  entrantName: string;
-  entrantEmail: string;
-  status: WinnerStatus;
-  selectedAt: number;
-  contactedAt?: number;
-  eligibilityAt?: number;
-  claimedAt?: number;
-  fulfilledAt?: number;
-  unclaimedAt?: number;
-  disqualifiedAt?: number;
-  collectionDate?: number;
-  fulfilmentMethod?: string;
-  publicMode: WinnerRecord["public_display_mode"];
-  attempts?: ContactAttempt[];
-}): WinnerRecord {
-  return {
-    id,
-    lottery_id: lotteryId,
-    lottery_title: lotteryTitle,
-    lottery_slug: lotteryTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-    draw_id: `test-draw-${lotteryId}`,
-    draw_reference: `TEST-DRAW-${lotteryId.slice(-1)}`,
-    prize_id: `test-prize-${id}`,
-    prize_name: prizeName,
-    prize_value: prizeValue,
-    ticket_id: `test-ticket-${ticket}`,
-    ticket_number: ticket,
-    order_id: `test-order-${id}`,
-    order_reference: `TEST-ORDER-${id.slice(-4).toUpperCase()}`,
-    entrant_name: entrantName,
-    entrant_email: entrantEmail,
-    entrant_phone: "07123 000000",
-    status,
-    selected_at: new Date(selectedAt).toISOString(),
-    contacted_at: contactedAt ? new Date(contactedAt).toISOString() : null,
-    eligibility_confirmed_at: eligibilityAt
-      ? new Date(eligibilityAt).toISOString()
-      : null,
-    claimed_at: claimedAt ? new Date(claimedAt).toISOString() : null,
-    fulfilled_at: fulfilledAt ? new Date(fulfilledAt).toISOString() : null,
-    unclaimed_at: unclaimedAt ? new Date(unclaimedAt).toISOString() : null,
-    disqualified_at: disqualifiedAt
-      ? new Date(disqualifiedAt).toISOString()
-      : null,
-    replaced_at: null,
-    collection_delivery_date: collectionDate
-      ? new Date(collectionDate).toISOString()
-      : null,
-    fulfilment_method: fulfilmentMethod || null,
-    fulfilment_notes: fulfilmentMethod
-      ? "Test fulfilment record."
-      : null,
-    internal_notes: null,
-    public_display_mode: publicMode,
-    public_display_consent: publicMode !== "none",
-    public_results_published_at: null,
-    replacement_winner_id: null,
-    original_winner_id: null,
-    contact_attempts: attempts,
-    created_at: new Date(selectedAt).toISOString(),
-    updated_at: new Date().toISOString(),
-  };
 }

@@ -3,7 +3,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Eye, EyeOff, Filter, Loader2, LockKeyhole, Pencil, PoundSterling, ReceiptText, RefreshCw, Save, Search, Ticket, Trophy, X, } from "lucide-react";
-
+// This screen owns its display model and modal. It no longer imports types or
+// an order component from the unrelated TicketsDetailsModal lottery edit page.
 export type PaymentStatus = "pending" | "processing" | "paid" | "failed" | "cancelled" | "refunded" | "partially_refunded" | "disputed";
 export type TicketRecord = {
     id: string;
@@ -47,7 +48,7 @@ export type OrderRecord = {
     refunds?: TimelineRecord[] | null;
     notifications?: TimelineRecord[] | null;
 };
-type MutationAction = "edit_order" | "mark_paid" | "issue_missing_tickets";
+export type MutationAction = "edit_order" | "mark_paid" | "issue_missing_tickets";
 type Draft = {
     purchaser_name: string;
     purchaser_email: string;
@@ -357,15 +358,23 @@ function HistoryList({ title, records }: {
     {records.length > limit && <button type="button" onClick={() => setLimit(current => current + 25)} className={`${BUTTON} mt-3`}>Show more {title.toLowerCase()}</button>}
   </>}</section>;
 }
-function OrderDetailsModal({ order, onClose, onAction, actionsDisabled }: {
+export type OrderDetailsModalProps = {
     order: OrderRecord;
     onClose: () => void;
-    onAction: (action: MutationAction, order: OrderRecord) => void;
-    actionsDisabled: boolean;
-}) {
+    onAction?: (action: MutationAction, order: OrderRecord) => void;
+    actionsDisabled?: boolean;
+    availableActions?: readonly MutationAction[];
+};
+// Shared by the Orders screen and the legacy TicketsDetailsModal import path.
+export function OrderDetailsModal({ order, onClose, onAction, actionsDisabled = false,
+    availableActions = ["edit_order", "mark_paid", "issue_missing_tickets"],
+}: OrderDetailsModalProps) {
+    const canShowAction = (action: MutationAction) => !!onAction && availableActions.includes(action);
     const [ticketPage, setTicketPage] = useState(1);
     const tickets = order.tickets;
     const ticketPages = Math.max(1, Math.ceil((tickets?.length ?? 0) / 25));
+    const visibleTicketPage = Math.min(ticketPage, ticketPages);
+    useEffect(() => { setTicketPage(1); }, [order.id]);
     return <Modal title={`Order ${order.order_reference || order.id}`} onClose={onClose}>
     <p className="mb-4 font-bold text-purple-200">{order.lottery_title || "Lottery title unavailable"}</p>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -376,16 +385,16 @@ function OrderDetailsModal({ order, onClose, onAction, actionsDisabled }: {
       <Info label="Eligibility declaration" value={declaration(order.eligibility_accepted)}/><Info label="Terms version" value={order.terms_version}/><Info label="Privacy version" value={order.privacy_notice_version}/>
       <Info label="Marketing choice" value={declaration(order.marketing_opt_in)}/>
     </div>
-    <div className="mt-5 flex flex-wrap gap-3">
-      <button type="button" disabled={actionsDisabled} onClick={() => onAction("edit_order", order)} className={BUTTON}><Pencil className="h-4 w-4"/>Edit purchaser details</button>
-      <button type="button" disabled={actionsDisabled || !canMarkPaid(order)} onClick={() => onAction("mark_paid", order)} className={BUTTON}><LockKeyhole className="h-4 w-4"/>Mark paid manually</button>
-      <button type="button" disabled={actionsDisabled || !canIssue(order)} onClick={() => onAction("issue_missing_tickets", order)} className={BUTTON}><Ticket className="h-4 w-4"/>Issue missing tickets</button>
-    </div>
+    {onAction && availableActions.length > 0 && <div className="mt-5 flex flex-wrap gap-3">
+      {canShowAction("edit_order") && <button type="button" disabled={actionsDisabled} onClick={() => { if (!actionsDisabled) onAction("edit_order", order); }} className={BUTTON}><Pencil className="h-4 w-4"/>Edit purchaser details</button>}
+      {canShowAction("mark_paid") && <button type="button" disabled={actionsDisabled || !canMarkPaid(order)} onClick={() => { if (!actionsDisabled && canMarkPaid(order)) onAction("mark_paid", order); }} className={BUTTON}><LockKeyhole className="h-4 w-4"/>Mark paid manually</button>}
+      {canShowAction("issue_missing_tickets") && <button type="button" disabled={actionsDisabled || !canIssue(order)} onClick={() => { if (!actionsDisabled && canIssue(order)) onAction("issue_missing_tickets", order); }} className={BUTTON}><Ticket className="h-4 w-4"/>Issue missing tickets</button>}
+    </div>}
     <p className="mt-3 text-sm text-white/65">Payment corrections require confirmed payment evidence. Ticket recovery requires a complete ticket list and no recorded refund. Use the dedicated winner and refund workflows for those actions.</p>
     <div className="mt-3 flex flex-wrap gap-3"><Link href={`/Admin/LotteryManagement/Winners?lottery=${encodeURIComponent(order.lottery_id)}`} className={BUTTON}>Winner records</Link><Link href={`/Admin/LotteryManagement/AuditLogs?lottery=${encodeURIComponent(order.lottery_id)}`} className={BUTTON}>Audit records</Link></div>
     <section className="mt-6"><h3 className="text-lg font-bold">Tickets</h3>{!tickets ? <p className="mt-2 text-white/65">Unavailable</p> : !tickets.length ? <p className="mt-2 text-white/65">No tickets returned.</p> : <>
-      <div className="mt-3 overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-left text-sm"><caption className="sr-only">Tickets for this order</caption><thead><tr className="bg-white/5"><th scope="col" className="p-3">Number</th><th scope="col" className="p-3">Status</th><th scope="col" className="p-3">Issued (London time)</th></tr></thead><tbody>{tickets.slice((ticketPage - 1) * 25, ticketPage * 25).map(ticket => <tr key={ticket.id} className="border-t border-white/10"><td className="p-3 font-mono">{ticket.ticket_number}</td><td className="p-3">{ticket.status}</td><td className="p-3">{formatDate(ticket.issued_at)}</td></tr>)}</tbody></table></div>
-      {ticketPages > 1 && <div className="mt-3 flex items-center gap-3"><button type="button" disabled={ticketPage === 1} onClick={() => setTicketPage(page => page - 1)} className={BUTTON}>Previous tickets</button><span>Page {ticketPage} of {ticketPages}</span><button type="button" disabled={ticketPage === ticketPages} onClick={() => setTicketPage(page => page + 1)} className={BUTTON}>Next tickets</button></div>}
+      <div className="mt-3 overflow-x-auto rounded-xl border border-white/10"><table className="w-full text-left text-sm"><caption className="sr-only">Tickets for this order</caption><thead><tr className="bg-white/5"><th scope="col" className="p-3">Number</th><th scope="col" className="p-3">Status</th><th scope="col" className="p-3">Issued (London time)</th></tr></thead><tbody>{tickets.slice((visibleTicketPage - 1) * 25, visibleTicketPage * 25).map(ticket => <tr key={ticket.id} className="border-t border-white/10"><td className="p-3 font-mono">{ticket.ticket_number}</td><td className="p-3">{ticket.status}</td><td className="p-3">{formatDate(ticket.issued_at)}</td></tr>)}</tbody></table></div>
+      {ticketPages > 1 && <div className="mt-3 flex items-center gap-3"><button type="button" disabled={visibleTicketPage === 1} onClick={() => setTicketPage(visibleTicketPage - 1)} className={BUTTON}>Previous tickets</button><span>Page {visibleTicketPage} of {ticketPages}</span><button type="button" disabled={visibleTicketPage === ticketPages} onClick={() => setTicketPage(visibleTicketPage + 1)} className={BUTTON}>Next tickets</button></div>}
     </>}</section>
     <HistoryList title="Declarations" records={order.acceptances}/><HistoryList title="Refunds" records={order.refunds}/><HistoryList title="Notifications" records={order.notifications}/>
   </Modal>;

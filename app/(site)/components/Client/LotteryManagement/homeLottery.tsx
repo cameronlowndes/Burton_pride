@@ -42,6 +42,9 @@ type PublicLottery = {
   draw_at: string | null;
   show_in_public_directory: boolean | null;
   is_featured?: boolean | null;
+  allow_page_before_sales: boolean;
+  allow_online_sales: boolean;
+  results_publish_at: string | null;
 };
 
 function getStatusLabel(status: LotteryStatus) {
@@ -96,41 +99,175 @@ function getStatusClasses(status: LotteryStatus) {
   }
 }
 
-function getButtonText(status: LotteryStatus) {
-  switch (status) {
-    case "live":
-      return "Enter lottery";
-    case "scheduled":
-      return "View lottery";
-    case "paused":
-      return "View details";
-    case "sales_closed":
-    case "draw_ready":
-      return "View draw details";
-    case "completed":
-      return "View results";
-    case "cancelled":
-      return "View update";
-    default:
-      return "View lottery";
+// Defence in depth only: the public API must enforce this policy before returning data.
+const PUBLIC_STATUSES = new Set<LotteryStatus>([
+  "scheduled",
+  "live",
+  "paused",
+  "sales_closed",
+  "draw_ready",
+  "completed",
+]);
+const PAGE_SIZE = 12;
+function timestamp(value: string | null): number | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value))
+    return null;
+  const result = Date.parse(value);
+  return Number.isFinite(result) ? result : null;
+}
+function isVisible(lottery: PublicLottery, now: number) {
+  if (
+    lottery.show_in_public_directory !== true ||
+    !PUBLIC_STATUSES.has(lottery.status)
+  )
+    return false;
+  if (lottery.status === "scheduled" || lottery.status === "live") {
+    const opens = timestamp(lottery.sales_open_at);
+    if (opens === null) return lottery.allow_page_before_sales === true;
+    if (opens > now && lottery.allow_page_before_sales !== true) return false;
+  }
+  return true;
+}
+function canEnter(lottery: PublicLottery, now: number) {
+  const opens = timestamp(lottery.sales_open_at),
+    closes = timestamp(lottery.sales_close_at);
+  return (
+    lottery.status === "live" &&
+    lottery.allow_online_sales === true &&
+    opens !== null &&
+    closes !== null &&
+    opens < closes &&
+    opens <= now &&
+    now < closes
+  );
+}
+function resultsAvailable(lottery: PublicLottery, now: number) {
+  const publishes = timestamp(lottery.results_publish_at);
+  return (
+    lottery.status === "completed" && publishes !== null && publishes <= now
+  );
+}
+function safeImage(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 2048) return null;
+  if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"))
+    return value;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+function parseLotteries(value: unknown): PublicLottery[] {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("lotteries" in value) ||
+    !Array.isArray(value.lotteries) ||
+    value.lotteries.length > 1000
+  )
+    throw new Error("Invalid directory");
+  const ids = new Set<string>(),
+    slugs = new Set<string>();
+  const nullableText = (v: unknown, max: number): string | null =>
+    typeof v === "string" && v.trim() && v.length <= max ? v.trim() : null;
+  return value.lotteries.flatMap((raw: unknown) => {
+    if (!raw || typeof raw !== "object") throw new Error("Invalid record");
+    const r = raw as Record<string, unknown>;
+    // Never fall back to the legacy show_in_directory field.
+    if (
+      r.show_in_public_directory !== true ||
+      !PUBLIC_STATUSES.has(r.status as LotteryStatus)
+    )
+      return [];
+    if (
+      typeof r.id !== "string" ||
+      !r.id ||
+      r.id.length > 200 ||
+      typeof r.title !== "string" ||
+      !r.title.trim() ||
+      r.title.length > 300 ||
+      typeof r.slug !== "string" ||
+      !/^[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$/.test(r.slug) ||
+      r.slug.length > 200 ||
+      ids.has(r.id) ||
+      slugs.has(r.slug)
+    )
+      throw new Error("Invalid record");
+    ids.add(r.id);
+    slugs.add(r.slug);
+    const date = (v: unknown) =>
+      typeof v === "string" && timestamp(v) !== null ? v : null;
+    return [
+      {
+        id: r.id,
+        title: r.title.trim(),
+        slug: r.slug,
+        status: r.status as LotteryStatus,
+        short_summary: nullableText(r.short_summary, 2000),
+        hero_image_url: safeImage(r.hero_image_url),
+        ticket_price_pence:
+          typeof r.ticket_price_pence === "number" &&
+          Number.isSafeInteger(r.ticket_price_pence) &&
+          r.ticket_price_pence >= 0
+            ? r.ticket_price_pence
+            : null,
+        currency:
+          typeof r.currency === "string" && /^[A-Z]{3}$/.test(r.currency)
+            ? r.currency
+            : null,
+        sales_open_at: date(r.sales_open_at),
+        sales_close_at: date(r.sales_close_at),
+        draw_at: date(r.draw_at),
+        results_publish_at: date(r.results_publish_at),
+        show_in_public_directory: true,
+        is_featured: r.is_featured === true,
+        allow_page_before_sales: r.allow_page_before_sales === true,
+        allow_online_sales: r.allow_online_sales === true,
+      },
+    ];
+  });
+}
+async function readDirectory(response: Response): Promise<PublicLottery[]> {
+  if (!response.ok) throw new Error("Directory unavailable");
+  if (!response.body) throw new Error("Missing response");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0,
+    body = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > 2 * 1024 * 1024) {
+        await reader.cancel();
+        throw new Error("Directory too large");
+      }
+      body += decoder.decode(chunk.value, { stream: true });
+    }
+    body += decoder.decode();
+    return parseLotteries(JSON.parse(body));
+  } finally {
+    reader.releaseLock();
   }
 }
 
-function formatMoney(
-  pence: number | null,
-  currency = "GBP",
-) {
-  if (
-    typeof pence !== "number" ||
-    !Number.isFinite(pence)
-  ) {
+function formatMoney(pence: number | null, currency = "GBP") {
+  if (typeof pence !== "number" || !Number.isFinite(pence)) {
     return null;
   }
 
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: currency || "GBP",
-  }).format(pence / 100);
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency,
+    }).format(pence / 100);
+  } catch {
+    return null;
+  }
 }
 
 function formatDate(dateValue: string | null) {
@@ -154,117 +291,79 @@ function formatDate(dateValue: string | null) {
 }
 
 export default function LotteryHomePage() {
-  const [lotteries, setLotteries] =
-    useState<PublicLottery[]>([]);
+  const [lotteries, setLotteries] = useState<PublicLottery[]>([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const [retry, setRetry] = useState(0);
+  const [page, setPage] = useState(1);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadLotteries() {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    setLoading(true);
+    setError(null);
+    setLotteries([]);
+    setPage(1);
+    async function load() {
       try {
-        setLoading(true);
-        setError(null);
-
-        const response = await fetch(
-          "/api/lottery",
-          {
-            method: "GET",
-            cache: "no-store",
-          },
-        );
-
-        const json = await response
-          .json()
-          .catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(
-            json?.error ||
-              "Failed to load lotteries.",
-          );
+        const response = await fetch("/api/lottery", {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const records = await readDirectory(response);
+        if (active) {
+          setLotteries(records);
+          setNow(Date.now());
         }
-
-        if (!cancelled) {
-          setLotteries(
-            Array.isArray(json?.lotteries)
-              ? json.lotteries
-              : [],
-          );
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setError(
-            error instanceof Error
-              ? error.message
-              : "Failed to load lotteries.",
-          );
-        }
+      } catch {
+        if (active)
+          setError("The lottery directory is unavailable. Please try again.");
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        clearTimeout(timeout);
+        if (active) setLoading(false);
       }
     }
-
-    loadLotteries();
-
+    void load();
     return () => {
-      cancelled = true;
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
     };
-  }, []);
-
-  const visibleLotteries = useMemo(() => {
-    return lotteries
-      .filter(
-        (lottery) =>
-          lottery.show_in_public_directory !== false,
-      )
-      .filter(
-        (lottery) =>
-          lottery.status !== "draft" &&
-          lottery.status !==
-            "compliance_review",
-      )
-      .sort((a, b) => {
-        if (
-          a.is_featured &&
-          !b.is_featured
-        ) {
-          return -1;
-        }
-
-        if (
-          !a.is_featured &&
-          b.is_featured
-        ) {
-          return 1;
-        }
-
-        const aDate =
-          new Date(
-            a.draw_at ||
-              a.sales_close_at ||
-              a.sales_open_at ||
-              0,
-          ).getTime();
-
-        const bDate =
-          new Date(
-            b.draw_at ||
-              b.sales_close_at ||
-              b.sales_open_at ||
-              0,
-          ).getTime();
-
-        return aDate - bDate;
-      });
-  }, [lotteries]);
+  }, [retry]);
+  const visibleLotteries = useMemo(
+    () =>
+      lotteries
+        .filter((lottery) => isVisible(lottery, now))
+        .sort((a, b) => {
+          if (a.is_featured !== b.is_featured) return a.is_featured ? -1 : 1;
+          const date = (r: PublicLottery) =>
+            timestamp(r.draw_at) ??
+            timestamp(r.sales_close_at) ??
+            timestamp(r.sales_open_at) ??
+            Number.MAX_SAFE_INTEGER;
+          return (
+            date(a) - date(b) ||
+            a.title.localeCompare(b.title, "en-GB") ||
+            a.slug.localeCompare(b.slug)
+          );
+        }),
+    [lotteries, now],
+  );
+  const pageCount = Math.max(1, Math.ceil(visibleLotteries.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const displayedLotteries = visibleLotteries.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   return (
     <main
@@ -323,7 +422,7 @@ export default function LotteryHomePage() {
               dark:text-yellow-200
             "
           >
-            <Sparkles className="h-4 w-4" />
+            <Sparkles aria-hidden="true" className="h-4 w-4" />
             Burton Pride Fundraising
           </div>
 
@@ -342,7 +441,6 @@ export default function LotteryHomePage() {
             "
           >
             Burton Pride
-
             <span
               className="
                 mt-1
@@ -375,10 +473,9 @@ export default function LotteryHomePage() {
               dark:text-white/75
             "
           >
-            Take part in Burton Pride fundraising
-            lotteries and raffles while helping us
-            continue supporting our community, events
-            and future projects.
+            Take part in Burton Pride fundraising lotteries and raffles while
+            helping us continue supporting our community, events and future
+            projects.
           </p>
 
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
@@ -399,12 +496,12 @@ export default function LotteryHomePage() {
                 text-purple-950
                 shadow-xl
                 transition
-                hover:scale-[1.03]
+                motion-safe:hover:scale-[1.03]
                 hover:bg-yellow-200
                 dark:hover:bg-white
               "
             >
-              <Ticket className="h-4 w-4" />
+              <Ticket aria-hidden="true" className="h-4 w-4" />
               View lotteries
             </a>
 
@@ -436,7 +533,7 @@ export default function LotteryHomePage() {
                 dark:hover:text-purple-700
               "
             >
-              <Heart className="h-4 w-4" />
+              <Heart aria-hidden="true" className="h-4 w-4" />
               How it helps
             </a>
 
@@ -468,7 +565,7 @@ export default function LotteryHomePage() {
                 dark:hover:text-purple-700
               "
             >
-              <ShieldCheck className="h-4 w-4" />
+              <ShieldCheck aria-hidden="true" className="h-4 w-4" />
               Lottery Terms
             </Link>
           </div>
@@ -479,19 +576,19 @@ export default function LotteryHomePage() {
       <section className="mx-auto w-full max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid gap-4 md:grid-cols-3">
           <InfoCard
-            icon={<Heart className="h-6 w-6" />}
+            icon={<Heart aria-hidden="true" className="h-6 w-6" />}
             title="Support our work"
             text="Money raised helps Burton Pride continue delivering community projects, activities and events."
           />
 
           <InfoCard
-            icon={<Gift className="h-6 w-6" />}
+            icon={<Gift aria-hidden="true" className="h-6 w-6" />}
             title="Win prizes"
             text="Each lottery has its own prizes, ticket information, closing date and draw details."
           />
 
           <InfoCard
-            icon={<ShieldCheck className="h-6 w-6" />}
+            icon={<ShieldCheck aria-hidden="true" className="h-6 w-6" />}
             title="Clear & responsible"
             text="Each lottery page clearly explains eligibility, ticket pricing, draw information and important terms."
           />
@@ -530,7 +627,7 @@ export default function LotteryHomePage() {
                 dark:text-purple-200
               "
             >
-              <ShieldCheck className="h-6 w-6" />
+              <ShieldCheck aria-hidden="true" className="h-6 w-6" />
             </div>
 
             <div>
@@ -543,7 +640,8 @@ export default function LotteryHomePage() {
               </h2>
 
               <p className="mt-3 max-w-3xl font-semibold leading-7 text-slate-700 dark:text-white/70">
-                This lottery number was issued by East Staffordshire Borough Council.
+                This lottery number was issued by East Staffordshire Borough
+                Council.
               </p>
             </div>
           </div>
@@ -599,9 +697,8 @@ export default function LotteryHomePage() {
               </h2>
 
               <p className="mt-3 max-w-2xl font-semibold leading-7 text-slate-700 dark:text-white/65">
-                This list is updated automatically from
-                the Burton Pride Lottery Management
-                System.
+                Browse the currently listed fundraising lotteries. Check each
+                lottery page for entry information and terms.
               </p>
             </div>
 
@@ -624,16 +721,15 @@ export default function LotteryHomePage() {
                 "
               >
                 {visibleLotteries.length}{" "}
-                {visibleLotteries.length === 1
-                  ? "lottery"
-                  : "lotteries"}{" "}
-                listed
+                {visibleLotteries.length === 1 ? "lottery" : "lotteries"} loaded
               </div>
             )}
           </div>
 
           {loading && (
             <div
+              role="status"
+              aria-live="polite"
               className="
                 mt-8
                 flex
@@ -650,7 +746,10 @@ export default function LotteryHomePage() {
               "
             >
               <div>
-                <Loader2 className="mx-auto h-9 w-9 animate-spin text-purple-700 dark:text-purple-300" />
+                <Loader2
+                  aria-hidden="true"
+                  className="mx-auto h-9 w-9 animate-spin text-purple-700 dark:text-purple-300"
+                />
 
                 <p className="mt-4 font-black text-slate-900 dark:text-white">
                   Loading lotteries...
@@ -679,32 +778,59 @@ export default function LotteryHomePage() {
                 We couldn&apos;t load the lottery list
               </p>
 
-              <p className="mt-2 text-sm">
-                {error}
-              </p>
+              <p className="mt-2 text-sm">{error}</p>
+              <button
+                type="button"
+                onClick={() => setRetry((value) => value + 1)}
+                className="mt-4 rounded-full border border-current px-5 py-3 font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4"
+              >
+                Try again
+              </button>
             </div>
           )}
 
-          {!loading &&
-            !error &&
-            visibleLotteries.length > 0 && (
-              <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-                {visibleLotteries.map(
-                  (lottery) => (
-                    <LotteryCardComponent
-                      key={lottery.id}
-                      lottery={lottery}
-                    />
-                  ),
-                )}
-              </div>
-            )}
+          {!loading && !error && visibleLotteries.length > 0 && (
+            <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {displayedLotteries.map((lottery) => (
+                <LotteryCardComponent
+                  key={lottery.id}
+                  lottery={lottery}
+                  now={now}
+                />
+              ))}
+            </div>
+          )}
 
-          {!loading &&
-            !error &&
-            visibleLotteries.length === 0 && (
-              <div
-                className="
+          {!loading && !error && pageCount > 1 && (
+            <nav
+              aria-label="Lottery directory pages"
+              className="mt-6 flex flex-wrap items-center justify-center gap-4"
+            >
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() => setPage(currentPage - 1)}
+                className="rounded-full border px-5 py-3 font-bold disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4"
+              >
+                Previous lotteries
+              </button>
+              <p role="status">
+                Page {currentPage} of {pageCount}
+              </p>
+              <button
+                type="button"
+                disabled={currentPage === pageCount}
+                onClick={() => setPage(currentPage + 1)}
+                className="rounded-full border px-5 py-3 font-bold disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4"
+              >
+                Next lotteries
+              </button>
+            </nav>
+          )}
+
+          {!loading && !error && visibleLotteries.length === 0 && (
+            <div
+              className="
                   mt-8
                   rounded-3xl
                   border
@@ -716,20 +842,22 @@ export default function LotteryHomePage() {
                   dark:border-white/10
                   dark:bg-white/[0.04]
                 "
-              >
-                <Trophy className="mx-auto h-10 w-10 text-purple-700 dark:text-yellow-300" />
+            >
+              <Trophy
+                aria-hidden="true"
+                className="mx-auto h-10 w-10 text-purple-700 dark:text-yellow-300"
+              />
 
-                <h3 className="mt-4 text-2xl font-black text-slate-950 dark:text-white">
-                  No public lotteries right now
-                </h3>
+              <h3 className="mt-4 text-2xl font-black text-slate-950 dark:text-white">
+                No public lotteries right now
+              </h3>
 
-                <p className="mx-auto mt-3 max-w-xl leading-7 text-slate-600 dark:text-white/60">
-                  There are currently no lotteries
-                  published in the public directory.
-                  Please check back soon.
-                </p>
-              </div>
-            )}
+              <p className="mx-auto mt-3 max-w-xl leading-7 text-slate-600 dark:text-white/60">
+                There are currently no lotteries published in the public
+                directory. Please check back soon.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -778,7 +906,7 @@ export default function LotteryHomePage() {
                   dark:text-pink-200
                 "
               >
-                <Heart className="h-6 w-6" />
+                <Heart aria-hidden="true" className="h-6 w-6" />
               </div>
 
               <h2 className="mt-5 text-3xl font-black text-slate-950 sm:text-4xl dark:text-white">
@@ -786,35 +914,25 @@ export default function LotteryHomePage() {
               </h2>
 
               <p className="mt-4 max-w-3xl text-base font-semibold leading-8 text-slate-700 sm:text-lg dark:text-white/70">
-                Burton Pride fundraising helps support
-                our work throughout the year, including
-                community activities, events and
-                projects that bring people together.
+                Burton Pride fundraising helps support our work throughout the
+                year, including community activities, events and projects that
+                bring people together.
               </p>
 
               <p className="mt-4 max-w-3xl font-medium leading-7 text-slate-600 dark:text-white/60">
-                Each individual lottery page explains
-                the specific fundraising purpose for
-                that campaign.
+                Each individual lottery page explains the specific fundraising
+                purpose for that campaign.
               </p>
             </div>
 
             <div className="grid gap-3">
-              <SupportItem>
-                Community activities
-              </SupportItem>
+              <SupportItem>Community activities</SupportItem>
 
-              <SupportItem>
-                Burton Pride events
-              </SupportItem>
+              <SupportItem>Burton Pride events</SupportItem>
 
-              <SupportItem>
-                Future community projects
-              </SupportItem>
+              <SupportItem>Future community projects</SupportItem>
 
-              <SupportItem>
-                Supporting Burton Pride&apos;s work
-              </SupportItem>
+              <SupportItem>Supporting Burton Pride&apos;s work</SupportItem>
             </div>
           </div>
         </div>
@@ -825,17 +943,17 @@ export default function LotteryHomePage() {
 
 function LotteryCardComponent({
   lottery,
+  now,
 }: {
   lottery: PublicLottery;
+  now: number;
 }) {
-  const ticketPrice =
-    formatMoney(
-      lottery.ticket_price_pence,
-      lottery.currency || "GBP",
-    );
+  const ticketPrice = formatMoney(
+    lottery.ticket_price_pence,
+    lottery.currency || "",
+  );
 
-  const drawDate =
-    formatDate(lottery.draw_at);
+  const drawDate = formatDate(lottery.draw_at);
 
   return (
     <article
@@ -852,7 +970,7 @@ function LotteryCardComponent({
         shadow-[0_20px_60px_rgba(15,23,42,0.16)]
         transition
         duration-300
-        hover:-translate-y-1
+        motion-safe:hover:-translate-y-1
         hover:border-purple-400/50
         hover:shadow-[0_30px_80px_rgba(91,33,182,0.22)]
         dark:bg-[#111827]/95
@@ -882,7 +1000,7 @@ function LotteryCardComponent({
             text-purple-950
           "
         >
-          <Sparkles className="h-4 w-4" />
+          <Sparkles aria-hidden="true" className="h-4 w-4" />
           Featured Lottery
         </div>
       )}
@@ -903,6 +1021,9 @@ function LotteryCardComponent({
         <div className="relative h-56 overflow-hidden">
           <img
             src={lottery.hero_image_url}
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
             alt={`${lottery.title} lottery`}
             className="
               h-full
@@ -910,7 +1031,7 @@ function LotteryCardComponent({
               object-cover
               transition
               duration-500
-              group-hover:scale-105
+              motion-safe:group-hover:scale-105
             "
           />
 
@@ -941,7 +1062,10 @@ function LotteryCardComponent({
           "
         >
           <div className="relative text-center">
-            <Trophy className="mx-auto h-12 w-12 text-yellow-300" />
+            <Trophy
+              aria-hidden="true"
+              className="mx-auto h-12 w-12 text-yellow-300"
+            />
 
             <p className="mt-4 text-xs font-black uppercase tracking-[0.2em] text-white">
               Burton Pride Lottery
@@ -963,14 +1087,12 @@ function LotteryCardComponent({
               font-black
               uppercase
               tracking-wide
-              ${getStatusClasses(
-                lottery.status,
-              )}
+              ${getStatusClasses(lottery.status)}
             `}
           >
-            {getStatusLabel(
-              lottery.status,
-            )}
+            {lottery.status === "live" && !canEnter(lottery, now)
+              ? "Entry unavailable"
+              : getStatusLabel(lottery.status)}
           </span>
 
           {ticketPrice && (
@@ -1021,7 +1143,10 @@ function LotteryCardComponent({
               dark:bg-white/[0.05]
             "
           >
-            <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-pink-600 dark:text-pink-300" />
+            <CalendarDays
+              aria-hidden="true"
+              className="mt-0.5 h-5 w-5 shrink-0 text-pink-600 dark:text-pink-300"
+            />
 
             <div>
               <p className="text-xs font-black uppercase tracking-wide text-slate-500 dark:text-white/40">
@@ -1037,7 +1162,7 @@ function LotteryCardComponent({
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <Link
-            href={`/Lottery/${lottery.slug}`}
+            href={`/Lottery/${encodeURIComponent(lottery.slug)}`}
             className="
               inline-flex
               min-h-12
@@ -1053,7 +1178,7 @@ function LotteryCardComponent({
               text-purple-950
               shadow-lg
               transition
-              hover:scale-[1.02]
+              motion-safe:hover:scale-[1.02]
               hover:bg-yellow-200
               focus-visible:outline-none
               focus-visible:ring-2
@@ -1062,16 +1187,15 @@ function LotteryCardComponent({
               dark:hover:bg-white
             "
           >
-            {getButtonText(
-              lottery.status,
-            )}
+            {canEnter(lottery, now) ? "Enter lottery" : "View lottery"}
 
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
           </Link>
 
-          <Link
-            href={`/Lottery/${lottery.slug}/LiveDraw`}
-            className="
+          {resultsAvailable(lottery, now) && (
+            <Link
+              href={`/Lottery/${encodeURIComponent(lottery.slug)}/LiveDraw`}
+              className="
               inline-flex
               min-h-12
               items-center
@@ -1098,10 +1222,11 @@ function LotteryCardComponent({
               dark:text-purple-100
               dark:hover:bg-purple-400/20
             "
-          >
-            <Radio className="h-4 w-4" />
-            Open Live Draw
-          </Link>
+            >
+              <Radio aria-hidden="true" className="h-4 w-4" />
+              View published results
+            </Link>
+          )}
         </div>
       </div>
     </article>
@@ -1159,11 +1284,7 @@ function InfoCard({
   );
 }
 
-function SupportItem({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function SupportItem({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="
@@ -1194,7 +1315,7 @@ function SupportItem({
           text-purple-950
         "
       >
-        <Heart className="h-4 w-4" />
+        <Heart aria-hidden="true" className="h-4 w-4" />
       </div>
 
       <span className="font-black text-slate-900 dark:text-white">
