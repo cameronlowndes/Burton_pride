@@ -56,6 +56,9 @@ function safeTicketCount(value: string | number | null | undefined) {
  *
  * The webhook is the server-to-server source of truth for payment.
  * A paid order is reconciled and any missing tickets are issued here.
+ * Remaining: durable event deduplication, capacity reservations and a single
+ * locked transaction for payment/tickets/entries/audit/outbox. The existing
+ * shared allocator has not been supplied or verified in this update.
  */
 
 const LOTTERY_FROM_EMAIL =
@@ -145,7 +148,7 @@ async function lotteryNotificationAlreadySent(
 
   if (error) {
     console.error("Lottery notification history lookup failed:", error);
-    return false;
+    throw new Error("Lottery notification history unavailable.");
   }
 
   return Boolean(data?.length);
@@ -484,48 +487,26 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
     return;
   }
 
-  if (
-    order.payment_reference &&
-    order.payment_reference !== session.id
-  ) {
-    throw new Error(
-      "Stripe session does not match the lottery order payment reference."
-    );
+  if (session.mode !== "payment" || session.status !== "complete" ||
+      session.livemode !== Boolean(process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_"))) {
+    throw new Error("Lottery payment mode or completion state is invalid.");
   }
-
-  const metadataLotteryId = String(session.metadata?.lottery_id || "").trim();
-
-  if (metadataLotteryId && metadataLotteryId !== order.lottery_id) {
-    throw new Error("Stripe lottery ID does not match the order lottery ID.");
+  if (!order.payment_reference || order.payment_reference !== session.id) {
+    throw new Error("Stripe session must match the saved lottery payment reference.");
   }
-
-  const metadataQuantity = Number(session.metadata?.quantity || order.quantity);
-
-  if (
-    Number.isFinite(metadataQuantity) &&
-    Math.floor(metadataQuantity) !== Math.floor(Number(order.quantity))
-  ) {
-    throw new Error("Stripe ticket quantity does not match the lottery order.");
+  if (session.metadata?.lottery_id !== order.lottery_id || session.metadata?.order_reference !== order.order_reference ||
+      !/^[1-9]\d*$/.test(session.metadata?.quantity || "") ||
+      !Number.isSafeInteger(order.quantity) || order.quantity < 1 || order.quantity > 100 ||
+      Number(session.metadata?.quantity) !== order.quantity) {
+    throw new Error("Stripe lottery order metadata does not match the saved order.");
   }
-
-  const expectedAmountPence = Math.round(Number(order.total_amount || 0) * 100);
-
-  if (
-    typeof session.amount_total === "number" &&
-    session.amount_total !== expectedAmountPence
-  ) {
-    throw new Error(
-      `Stripe payment amount mismatch for ${order.order_reference}: expected ${expectedAmountPence}p, received ${session.amount_total}p.`
-    );
-  }
-
-  const sessionCurrency = String(session.currency || "").toUpperCase();
-  const orderCurrency = String(order.currency || "GBP").toUpperCase();
-
-  if (sessionCurrency && sessionCurrency !== orderCurrency) {
-    throw new Error(
-      `Stripe currency mismatch for ${order.order_reference}: expected ${orderCurrency}, received ${sessionCurrency}.`
-    );
+  const amountMatch = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(order.total_amount));
+  const expectedAmountPence = amountMatch
+    ? Number(amountMatch[1]) * 100 + Number((amountMatch[2] ?? "").padEnd(2, "0")) : null;
+  if (expectedAmountPence === null || !Number.isSafeInteger(expectedAmountPence) || expectedAmountPence <= 0 ||
+      !Number.isSafeInteger(session.amount_total) || session.amount_total !== expectedAmountPence ||
+      session.currency !== "gbp" || order.currency !== "GBP") {
+    throw new Error("Stripe lottery amount or currency does not match the saved order.");
   }
 
   const { data: lotteryData, error: lotteryError } = await supabaseAdmin
@@ -545,24 +526,28 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
   const lottery = lotteryData as LotteryForWebhook;
   const metadataSlug = String(session.metadata?.lottery_slug || "").trim();
 
-  if (metadataSlug && metadataSlug !== lottery.slug) {
+  if (!metadataSlug || metadataSlug !== lottery.slug) {
     throw new Error("Stripe lottery slug does not match the saved lottery.");
   }
 
   const paidAt = order.paid_at || new Date().toISOString();
 
-  const { error: paymentUpdateError } = await supabaseAdmin
+  const { data: paymentUpdated, error: paymentUpdateError } = await supabaseAdmin
     .from("lottery_orders")
     .update({
       payment_status: "paid",
       payment_reference: session.id,
       paid_at: paidAt,
     })
-    .eq("id", order.id);
+    .eq("id", order.id)
+    .eq("payment_status", order.payment_status)
+    .eq("payment_reference", session.id)
+    .select("id")
+    .maybeSingle();
 
-  if (paymentUpdateError) {
+  if (paymentUpdateError || !paymentUpdated) {
     throw new Error(
-      `Unable to mark lottery order as paid: ${paymentUpdateError.message}`
+      `Unable to mark lottery order as paid: ${paymentUpdateError?.message || "Order state changed"}`
     );
   }
 
@@ -592,7 +577,10 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
     issuedNumbers: tickets.map((ticket) => ticket.ticket_number),
   });
 
-  if (tickets.length !== Number(order.quantity)) {
+  if (tickets.length !== Number(order.quantity) ||
+      new Set(tickets.map(ticket => ticket.id)).size !== order.quantity ||
+      new Set(tickets.map(ticket => ticket.ticket_number)).size !== order.quantity ||
+      tickets.some(ticket => !ticket.ticket_number || !["issued", "winner"].includes(ticket.status))) {
     throw new Error(
       `Lottery reconciliation failed: expected ${order.quantity} tickets but found ${tickets.length}.`
     );

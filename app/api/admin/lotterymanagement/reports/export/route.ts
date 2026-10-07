@@ -1,658 +1,238 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  lotteryAdminDb,
-  requireLotteryPermission,
-} from "@/lib/lottery/adminAuth";
-import {
-  buildReportFilename,
-  buildStyledXlsx,
-  ReportSheet,
-  xlsxDownloadResponse,
-} from "@/lib/lottery/reports/xlsx";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedAdmin, getAuditServiceClient, hasLotteryPermission, type LotteryPermission } from "@/lib/lottery/audit-server";
+import { buildReportFilename, buildStyledXlsx, xlsxDownloadResponse } from "@/lib/lottery/reports/xlsx";
+import type { ReportSheet } from "@/lib/lottery/reports/xlsx";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const ALLOWED_EXPORTS = new Set([
-  "entrants",
-  "tickets",
-  "orders",
-  "prizes",
-  "winners",
-  "audit",
-  "regulatory",
-  "archive",
-]);
+/**
+ * Bounded single-lottery source-record XLSX exports. Not a streaming exporter or
+ * a verified regulatory return. Missing/invalid numeric data stays unavailable.
+ * Archive is a defined multi-sheet record export, not a database backup.
+ * No IP addresses, raw audit metadata, secrets or provider payloads are selected.
+ * Export permissions must be provisioned in the server permission catalogue.
+ * A prepared-export audit must persist before any workbook is returned.
+ * Immutable audit DDL, persistent rate limiting, consistent snapshots and the
+ * actual XLSX helper's typing/layout require separate project verification.
+ */
 
-function yearMatches(value: string | null, year: string | null) {
-  if (!year || !value) return true;
-  return new Date(value).getFullYear().toString() === year;
+type ExportType = "entrants" | "tickets" | "orders" | "prizes" | "winners" | "audit" | "regulatory" | "archive";
+type DatasetType = Exclude<ExportType, "archive">;
+type Row = Record<string, unknown>;
+type Dataset = { table: string; name: string; title: string; fields: string[]; permissions: string[] };
+const DATASETS: Record<DatasetType, Dataset> = {
+  entrants: { table: "lottery_entries", name: "Entrants", title: "Recorded entrants",
+    fields: ["id", "lottery_id", "order_id", "entrant_name", "entrant_email", "entry_number", "created_at"],
+    permissions: ["lottery:orders:view"] },
+  tickets: { table: "lottery_tickets", name: "Tickets", title: "Ticket records (all statuses)",
+    fields: ["id", "lottery_id", "order_id", "ticket_number", "status", "issued_at", "created_at"],
+    permissions: ["lottery:view"] },
+  orders: { table: "lottery_orders", name: "Orders", title: "Order and payment records",
+    fields: ["id", "lottery_id", "order_reference", "purchaser_name", "purchaser_email", "purchaser_phone", "quantity", "total_amount", "currency", "payment_status", "eligibility_accepted", "terms_version", "privacy_notice_version", "marketing_opt_in", "paid_at", "created_at"],
+    permissions: ["lottery:orders:view", "lottery:finance:view"] },
+  prizes: { table: "lottery_prizes", name: "Prizes", title: "Prize records (declared values are not purchase costs)",
+    fields: ["id", "lottery_id", "name", "description", "quantity", "declared_value", "is_donated", "donor_name", "sponsor_name", "status", "allocated_winner_id", "allocated_at", "claimed_at", "fulfilled_at", "unclaimed_at", "withdrawn_at", "created_at"],
+    permissions: ["lottery:view"] },
+  winners: { table: "lottery_winners", name: "Winners", title: "Winner workflow records",
+    fields: ["id", "lottery_id", "draw_id", "prize_id", "ticket_id", "order_id", "winner_name", "winner_email", "prize_name", "prize_value", "status", "selected_at", "contacted_at", "eligibility_confirmed_at", "claimed_at", "fulfilled_at", "unclaimed_at", "disqualified_at", "replaced_at", "created_at"],
+    permissions: ["lottery:winners:manage"] },
+  audit: { table: "lottery_audit_logs", name: "Audit Log", title: "Audit record summary (sensitive metadata omitted)",
+    fields: ["id", "lottery_id", "entity_type", "entity_id", "admin_name", "action_group", "risk_level", "action_code", "action_label", "created_at"],
+    permissions: ["lottery:audit:view"] },
+  regulatory: { table: "lotteries", name: "Regulatory Records", title: "Regulatory source records (not a completed return)",
+    fields: ["id", "title", "slug", "status", "lottery_type", "promoting_society_legal_name", "registration_licence_type", "registration_licence_number", "licensing_authority", "responsible_promoter_name", "responsible_promoter_address", "minimum_age", "geographic_eligibility", "terms_version", "privacy_notice_version", "maximum_proceeds", "maximum_prize_value", "sales_open_at", "sales_close_at", "draw_at", "created_at"],
+    permissions: ["lottery:finance:view"] },
+};
+const ARCHIVE_DATASETS: DatasetType[] = ["entrants", "tickets", "orders", "prizes", "winners", "audit"];
+const MONEY_FIELDS = new Set(["total_amount", "declared_value", "prize_value", "maximum_proceeds", "maximum_prize_value"]);
+const NUMBER_FIELDS = new Set(["quantity", "minimum_age"]);
+const BOOLEAN_FIELDS = new Set(["is_donated", "eligibility_accepted", "marketing_opt_in"]);
+const MAX_ROWS = 20_000;
+const MAX_DATA_BYTES = 8 * 1024 * 1024;
+const MAX_XLSX_BYTES = 20 * 1024 * 1024;
+const PAGE_SIZE = 250;
+
+class ExportError extends Error {
+  status: number;
+  constructor(message: string, status = 503) { super(message); this.status = status; }
 }
-
-async function writeExportAudit({
-  supabase,
-  lotteryId,
-  type,
-  admin,
-}: {
-  supabase: any;
-  lotteryId: string | null;
-  type: string;
-  admin: any;
-}) {
-  const { error } = await supabase.from("lottery_audit_logs").insert({
-    lottery_id: lotteryId,
-    entity_type: "report",
-    entity_id: null,
-    admin_id: admin?.id ?? null,
-    admin_email: admin?.email ?? null,
-    admin_name: admin?.name ?? null,
-    action_code: "report.exported",
-    action_label: `Lottery ${type} Excel report exported`,
-    reason: null,
-    metadata: {
-      export_type: type,
-      format: "xlsx",
-    },
-    created_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    console.warn("Lottery report export audit warning:", error);
+function response(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: {
+    "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+    "X-Content-Type-Options": "nosniff", "Vary": "Cookie, Authorization",
+  } });
+}
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+function safeText(value: string) {
+  if (value.length > 2_000) throw new ExportError("A text field is too long for this bounded export. Use a dedicated large-export service.", 413);
+  // Defend copied text as well as XLSX cells against formula injection. No
+  // formulas, hyperlinks or object-valued cells are accepted from database rows.
+  const text = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  return /^[\s\uFEFF]*[=+\-@]/u.test(text) || /^[\t\r\n]/.test(text) ? `'${text}` : text;
+}
+function decimal(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value));
+  if (!match) return null;
+  const pence = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(pence) ? pence / 100 : null;
+}
+function exportCell(field: string, value: unknown): string | number | boolean {
+  // Explicit text prevents missing/invalid numbers from becoming zero. Numeric
+  // styles are intentionally omitted so the helper must not coerce these cells.
+  if (value === null || value === undefined) return "Unavailable";
+  if (MONEY_FIELDS.has(field)) return decimal(value) ?? "Unavailable";
+  if (NUMBER_FIELDS.has(field)) {
+    const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+    return Number.isSafeInteger(n) && n >= 0 ? n : "Unavailable";
   }
+  if (BOOLEAN_FIELDS.has(field)) return typeof value === "boolean" ? value : "Unavailable";
+  if (typeof value === "string") return safeText(value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : "Unavailable";
+  if (typeof value === "boolean") return value;
+  throw new ExportError("An export field has an unsupported data type.");
 }
-
-async function getLotteryTitle(
-  supabase: any,
-  lotteryId: string | null,
-) {
-  if (!lotteryId) return null;
-
-  const { data } = await supabase
-    .from("lotteries")
-    .select("title,name")
-    .eq("id", lotteryId)
-    .maybeSingle();
-
-  return data?.title || data?.name || null;
-}
-
-function testSheets(type: string): ReportSheet[] {
-  const now = new Date().toISOString();
-
-  const baseRows = [
-    {
-      lottery: "Test Summer Raffle 2026",
-      reference: "TEST-001",
-      status: "Paid",
-      amount: 25,
-      date: now,
-      notes: "Safe test export generated by Test full feature mode.",
-    },
-    {
-      lottery: "Test Christmas Raffle 2026",
-      reference: "TEST-002",
-      status: "Pending",
-      amount: 10,
-      date: now,
-      notes: "No real Supabase records are included.",
-    },
-  ];
-
-  return [
-    {
-      name: "Test Report",
-      title: `Test ${type.replaceAll("_", " ")} report`,
-      subtitle:
-        "Test mode export — fake data only. No real Supabase records were read.",
-      columns: [
-        { header: "Lottery", key: "lottery", width: 28 },
-        { header: "Reference", key: "reference", width: 18 },
-        { header: "Status", key: "status", width: 18 },
-        { header: "Amount", key: "amount", width: 16, style: "money" },
-        { header: "Date", key: "date", width: 20, style: "datetime" },
-        { header: "Notes", key: "notes", width: 38 },
-      ],
-      rows: baseRows,
-    },
-  ];
-}
-
-function archiveOverviewSheet(lotteries: any[]): ReportSheet {
+function makeSheet(dataset: Dataset, rows: Row[]): ReportSheet {
   return {
-    name: "Archive Overview",
-    title: "Full Lottery Archive — Overview",
-    columns: [
-      { header: "Lottery ID", key: "id", width: 38 },
-      { header: "Title", key: "title", width: 30 },
-      { header: "Slug", key: "slug", width: 28 },
-      { header: "Status", key: "status", width: 18 },
-      { header: "Type", key: "lottery_type", width: 20 },
-      { header: "Internal Reference", key: "internal_reference", width: 20 },
-      { header: "Sales Open", key: "sales_open_at", width: 20, style: "datetime" },
-      { header: "Sales Close", key: "sales_close_at", width: 20, style: "datetime" },
-      { header: "Draw At", key: "draw_at", width: 20, style: "datetime" },
-      { header: "Terms Version", key: "terms_version", width: 18 },
-      { header: "Privacy Version", key: "privacy_notice_version", width: 18 },
-      { header: "Created", key: "created_at", width: 20, style: "datetime" },
-      { header: "Archived", key: "archived_at", width: 20, style: "datetime" },
-    ],
-    rows: lotteries.map((item) => ({
-      ...item,
-      title: item.title || item.name || "Untitled lottery",
+    name: dataset.name, title: dataset.title,
+    subtitle: "Source records. Unavailable values are not zero. Dates are ISO timestamps.",
+    columns: dataset.fields.map(key => ({
+      header: key.replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()),
+      key, width: key.endsWith("_id") || key === "id" ? 38 : key.includes("email") ? 30 : 24,
     })),
+    rows: rows.map(row => Object.fromEntries(dataset.fields.map(field => [field, exportCell(field, row[field])]))),
   };
+}
+async function authorize(permissions: string[], signal: AbortSignal) {
+  const client = await createClient();
+  const { data: { user }, error } = await client.auth.getUser();
+  if (error || !user) throw new ExportError("Unauthorized.", 401);
+  const db = getAuditServiceClient();
+  const result = await db.from("admin_users")
+    .select("id,supabase_user_id,email,full_name,role,is_active,is_main_admin")
+    .eq("supabase_user_id", user.id).eq("is_active", true).abortSignal(signal).maybeSingle();
+  if (result.error) throw new ExportError("Administrator verification is unavailable.");
+  const verified = result.data;
+  if (!verified || verified.supabase_user_id !== user.id || verified.is_active !== true ||
+      (verified.role !== "main_admin" && verified.is_main_admin !== true)) {
+    throw new ExportError("An active main administrator account is required.", 403);
+  }
+  const admin = await getAuthenticatedAdmin();
+  if (!admin || admin.id !== verified.id || permissions.some(permission => !hasLotteryPermission(admin, permission as LotteryPermission))) {
+    throw new ExportError("You do not have permission to export this dataset.", 403);
+  }
+  return { db, verified };
+}
+type Db = ReturnType<typeof getAuditServiceClient>;
+type Budget = { rows: number; bytes: number };
+async function readDataset(db: Db, dataset: Dataset, lotteryId: string, year: string | null, signal: AbortSignal, budget: Budget) {
+  const rows: Row[] = [];
+  const ids = new Set<string>();
+  let total: number | null = null;
+  while (total === null || rows.length < total) {
+    let query = db.from(dataset.table).select(dataset.fields.join(","), { count: "exact" })
+      .eq(dataset.table === "lotteries" ? "id" : "lottery_id", lotteryId);
+    if (year) {
+      // Calendar-year creation cohort in Europe/London. January boundaries are
+      // UTC/GMT, unlike summer dates. Null dates are excluded by these filters.
+      query = query.gte("created_at", `${year}-01-01T00:00:00.000Z`)
+        .lt("created_at", `${Number(year) + 1}-01-01T00:00:00.000Z`);
+    }
+    const result = await query.order("id", { ascending: true })
+      .range(rows.length, rows.length + PAGE_SIZE - 1).abortSignal(signal);
+    if (result.error || !result.data || result.count === null || !Number.isSafeInteger(result.count) || result.count < 0 ||
+        (total !== null && result.count !== total)) throw new ExportError("Complete export data is unavailable or changed while loading.");
+    if (total === null && budget.rows + result.count > MAX_ROWS) throw new ExportError("Export exceeds the row limit. Narrow the year or use a large-export service.", 413);
+    total = result.count;
+    const batch = result.data as unknown as Row[];
+    if (!batch.length && rows.length < total) throw new ExportError("Export data was truncated.");
+    for (const row of batch) {
+      if (typeof row.id !== "string" || ids.has(row.id) ||
+          (dataset.table === "lotteries" ? row.id !== lotteryId : row.lottery_id !== lotteryId)) {
+        throw new ExportError("Export record scope or uniqueness could not be verified.");
+      }
+      ids.add(row.id);
+    }
+    budget.bytes += Buffer.byteLength(JSON.stringify(batch), "utf8");
+    if (budget.bytes > MAX_DATA_BYTES) throw new ExportError("Export exceeds the data-size limit. Narrow the scope.", 413);
+    rows.push(...batch);
+    if (rows.length > total) throw new ExportError("Export data changed while loading.");
+  }
+  budget.rows += rows.length;
+  return rows;
 }
 
 export async function GET(request: NextRequest) {
+  const requestId = randomUUID();
   try {
-    const url = new URL(request.url);
-    const type = url.searchParams.get("type");
-    const lotteryId = url.searchParams.get("lottery_id");
-    const year = url.searchParams.get("year");
-    const testMode = url.searchParams.get("test") === "1";
-
-    if (!type || !ALLOWED_EXPORTS.has(type)) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid report export type." },
-        { status: 400 },
-      );
+    const params = request.nextUrl.searchParams;
+    if (["type", "lottery_id", "year", "test"].some(key => params.getAll(key).length > 1)) throw new ExportError("Duplicate export parameters are not allowed.", 400);
+    const rawType = params.get("type");
+    if (!rawType || (!Object.hasOwn(DATASETS, rawType) && rawType !== "archive")) throw new ExportError("Invalid export type.", 400);
+    const type = rawType as ExportType;
+    const types: DatasetType[] = type === "archive" ? ARCHIVE_DATASETS : [type];
+    const permissions = [...new Set(["lottery:export", ...types.flatMap(key => DATASETS[key].permissions), ...(type === "archive" ? ["lottery:view"] : [])])];
+    const signal = AbortSignal.timeout(25_000);
+    const { db, verified } = await authorize(permissions, signal);
+    const origin = request.headers.get("origin");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if ((origin && origin !== request.nextUrl.origin) || fetchSite === "cross-site") throw new ExportError("A same-origin export request is required.", 403);
+    if (params.has("test")) throw new ExportError("Test exports are not available in this production route.", 400);
+    const lotteryId = params.get("lottery_id");
+    const year = params.get("year");
+    if (!lotteryId || !isUuid(lotteryId)) throw new ExportError("An explicit valid lottery ID is required.", 400);
+    if (year !== null && (!/^\d{4}$/.test(year) || Number(year) < 2000 || Number(year) > 9998)) throw new ExportError("Enter a calendar year between 2000 and 9998, or omit year.", 400);
+    const lookup = await db.from("lotteries").select("id,title,slug,status,lottery_type,created_at")
+      .eq("id", lotteryId).abortSignal(signal).maybeSingle();
+    if (lookup.error) throw new ExportError("Lottery verification is unavailable.");
+    if (!lookup.data) throw new ExportError("Lottery not found.", 404);
+    const lottery = lookup.data as unknown as Row;
+    if (lottery.id !== lotteryId || typeof lottery.title !== "string") throw new ExportError("Lottery export scope could not be verified.");
+    const budget: Budget = { rows: 0, bytes: 0 };
+    const sheets: ReportSheet[] = [];
+    if (type === "archive") sheets.push(makeSheet({ table: "lotteries", name: "Overview", title: "Lottery context (independent of creation-year filter)", fields: ["id", "title", "slug", "status", "lottery_type", "created_at"], permissions: [] }, [lottery]));
+    const counts: Record<string, number> = {};
+    for (const key of types) {
+      const rows = await readDataset(db, DATASETS[key], lotteryId, year, signal, budget);
+      counts[key] = rows.length;
+      sheets.push(makeSheet(DATASETS[key], rows));
     }
-
-    const permission =
-      type === "audit" ? "lottery:audit:view" : "lottery:finance:view";
-
-    const admin = await requireLotteryPermission(permission);
-
-    if (testMode) {
-      const buffer = await buildStyledXlsx({
-        title: "Burton Pride Lottery Management",
-        subtitle: "Test full feature report",
-        generatedBy: admin?.name || admin?.email || "Test Admin",
-        lotteryTitle: "Test data",
-        periodLabel: year || "Test period",
-        sheets: testSheets(type),
-      });
-
-      return xlsxDownloadResponse(
-        buffer,
-        buildReportFilename(`test-${type}`, "test-data"),
-      );
-    }
-
-    const supabase = lotteryAdminDb();
-    const lotteryTitle = await getLotteryTitle(supabase, lotteryId);
-    const periodLabel = year ? `Calendar year ${year}` : "All available data";
-
-    let sheets: ReportSheet[] = [];
-
-    if (type === "entrants") {
-      let query = supabase
-        .from("lottery_entries")
-        .select(
-          "id,lottery_id,order_id,entrant_user_id,entrant_name,entrant_email,entry_number,created_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Entrants",
-          title: "Entrants Report",
-          columns: [
-            { header: "Entry ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Order ID", key: "order_id", width: 38 },
-            { header: "Entrant User ID", key: "entrant_user_id", width: 38 },
-            { header: "Entrant Name", key: "entrant_name", width: 24 },
-            { header: "Entrant Email", key: "entrant_email", width: 30 },
-            { header: "Entry Number", key: "entry_number", width: 16, style: "number" },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "tickets") {
-      let query = supabase
-        .from("lottery_tickets")
-        .select(
-          "id,lottery_id,order_id,ticket_number,status,issued_at,voided_at,refunded_at,winner_at,status_reason,created_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Tickets",
-          title: "Issued Ticket Register",
-          columns: [
-            { header: "Ticket ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Order ID", key: "order_id", width: 38 },
-            { header: "Ticket Number", key: "ticket_number", width: 20 },
-            { header: "Status", key: "status", width: 16 },
-            { header: "Issued At", key: "issued_at", width: 20, style: "datetime" },
-            { header: "Voided At", key: "voided_at", width: 20, style: "datetime" },
-            { header: "Refunded At", key: "refunded_at", width: 20, style: "datetime" },
-            { header: "Winner At", key: "winner_at", width: 20, style: "datetime" },
-            { header: "Status Reason", key: "status_reason", width: 32 },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "orders") {
-      let query = supabase
-        .from("lottery_orders")
-        .select(
-          "id,lottery_id,order_reference,purchaser_name,purchaser_email,purchaser_phone,quantity,total_amount,currency,payment_status,payment_reference,eligibility_accepted,terms_version,privacy_notice_version,marketing_opt_in,paid_at,failed_at,cancelled_at,refunded_at,created_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Orders",
-          title: "Orders & Payments Report",
-          columns: [
-            { header: "Order Reference", key: "order_reference", width: 20 },
-            { header: "Purchaser", key: "purchaser_name", width: 24 },
-            { header: "Email", key: "purchaser_email", width: 30 },
-            { header: "Phone", key: "purchaser_phone", width: 18 },
-            { header: "Quantity", key: "quantity", width: 12, style: "number" },
-            { header: "Total", key: "total_amount", width: 16, style: "money" },
-            { header: "Currency", key: "currency", width: 10 },
-            { header: "Payment Status", key: "payment_status", width: 18 },
-            { header: "Payment Reference", key: "payment_reference", width: 24 },
-            { header: "Eligibility Accepted", key: "eligibility_accepted", width: 18, style: "boolean" },
-            { header: "Terms Version", key: "terms_version", width: 16 },
-            { header: "Privacy Version", key: "privacy_notice_version", width: 16 },
-            { header: "Marketing Opt In", key: "marketing_opt_in", width: 16, style: "boolean" },
-            { header: "Paid At", key: "paid_at", width: 20, style: "datetime" },
-            { header: "Failed At", key: "failed_at", width: 20, style: "datetime" },
-            { header: "Cancelled At", key: "cancelled_at", width: 20, style: "datetime" },
-            { header: "Refunded At", key: "refunded_at", width: 20, style: "datetime" },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-            { header: "Order ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "prizes") {
-      let query = supabase
-        .from("lottery_prizes")
-        .select(
-          "id,lottery_id,name,description,quantity,declared_value,is_donated,donor_name,sponsor_name,status,allocated_winner_id,allocated_at,claimed_at,fulfilled_at,unclaimed_at,withdrawn_at,fulfilment_notes,created_at",
-        )
-        .order("display_order", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Prizes",
-          title: "Prize Register",
-          columns: [
-            { header: "Prize Name", key: "name", width: 28 },
-            { header: "Description", key: "description", width: 38 },
-            { header: "Quantity", key: "quantity", width: 12, style: "number" },
-            { header: "Declared Value", key: "declared_value", width: 16, style: "money" },
-            { header: "Donated", key: "is_donated", width: 12, style: "boolean" },
-            { header: "Donor", key: "donor_name", width: 24 },
-            { header: "Sponsor", key: "sponsor_name", width: 24 },
-            { header: "Status", key: "status", width: 18 },
-            { header: "Allocated Winner ID", key: "allocated_winner_id", width: 38 },
-            { header: "Allocated At", key: "allocated_at", width: 20, style: "datetime" },
-            { header: "Claimed At", key: "claimed_at", width: 20, style: "datetime" },
-            { header: "Fulfilled At", key: "fulfilled_at", width: 20, style: "datetime" },
-            { header: "Unclaimed At", key: "unclaimed_at", width: 20, style: "datetime" },
-            { header: "Withdrawn At", key: "withdrawn_at", width: 20, style: "datetime" },
-            { header: "Fulfilment Notes", key: "fulfilment_notes", width: 38 },
-            { header: "Prize ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "winners") {
-      let query = supabase
-        .from("lottery_winners")
-        .select(
-          "id,lottery_id,draw_id,prize_id,ticket_id,order_id,winner_name,winner_email,prize_name,prize_value,status,selected_at,contacted_at,eligibility_confirmed_at,claimed_at,fulfilled_at,unclaimed_at,disqualified_at,replaced_at,collection_delivery_date,fulfilment_method,public_display_mode,created_at",
-        )
-        .order("selected_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Winners",
-          title: "Winner Report",
-          columns: [
-            { header: "Winner Name", key: "winner_name", width: 24 },
-            { header: "Winner Email", key: "winner_email", width: 30 },
-            { header: "Prize Name", key: "prize_name", width: 28 },
-            { header: "Prize Value", key: "prize_value", width: 16, style: "money" },
-            { header: "Status", key: "status", width: 20 },
-            { header: "Selected At", key: "selected_at", width: 20, style: "datetime" },
-            { header: "Contacted At", key: "contacted_at", width: 20, style: "datetime" },
-            { header: "Eligibility Confirmed", key: "eligibility_confirmed_at", width: 22, style: "datetime" },
-            { header: "Claimed At", key: "claimed_at", width: 20, style: "datetime" },
-            { header: "Fulfilled At", key: "fulfilled_at", width: 20, style: "datetime" },
-            { header: "Unclaimed At", key: "unclaimed_at", width: 20, style: "datetime" },
-            { header: "Disqualified At", key: "disqualified_at", width: 20, style: "datetime" },
-            { header: "Replaced At", key: "replaced_at", width: 20, style: "datetime" },
-            { header: "Collection / Delivery", key: "collection_delivery_date", width: 22, style: "datetime" },
-            { header: "Fulfilment Method", key: "fulfilment_method", width: 22 },
-            { header: "Public Display", key: "public_display_mode", width: 18 },
-            { header: "Winner ID", key: "id", width: 38 },
-            { header: "Draw ID", key: "draw_id", width: 38 },
-            { header: "Prize ID", key: "prize_id", width: 38 },
-            { header: "Ticket ID", key: "ticket_id", width: 38 },
-            { header: "Order ID", key: "order_id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "audit") {
-      let query = supabase
-        .from("lottery_audit_logs")
-        .select(
-          "id,lottery_id,entity_type,entity_id,admin_id,admin_email,admin_name,action_code,action_label,reason,metadata,created_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("lottery_id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Audit Log",
-          title: "Lottery Audit Log",
-          columns: [
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-            { header: "Action", key: "action_label", width: 30 },
-            { header: "Action Code", key: "action_code", width: 24 },
-            { header: "Entity Type", key: "entity_type", width: 18 },
-            { header: "Entity ID", key: "entity_id", width: 38 },
-            { header: "Admin Name", key: "admin_name", width: 22 },
-            { header: "Admin Email", key: "admin_email", width: 30 },
-            { header: "Reason", key: "reason", width: 32 },
-            { header: "Metadata", key: "metadata", width: 38 },
-            { header: "Audit ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Admin ID", key: "admin_id", width: 38 },
-          ],
-          rows: (data ?? []).filter((x: any) => yearMatches(x.created_at, year)),
-        },
-      ];
-    } else if (type === "regulatory") {
-      let query = supabase
-        .from("lotteries")
-        .select(
-          "id,title,name,slug,status,lottery_type,internal_reference,promoting_society_legal_name,registration_licence_type,registration_licence_number,licensing_authority,responsible_promoter_name,responsible_promoter_address,minimum_age,geographic_eligibility,terms_version,privacy_notice_version,maximum_proceeds,maximum_prize_value,sales_open_at,sales_close_at,draw_at,created_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) query = query.eq("id", lotteryId);
-      const { data, error } = await query;
-      if (error) throw error;
-
-      sheets = [
-        {
-          name: "Regulatory Return",
-          title: "Regulatory / Local Authority Return Data",
-          columns: [
-            { header: "Lottery ID", key: "id", width: 38 },
-            { header: "Title", key: "display_title", width: 30 },
-            { header: "Slug", key: "slug", width: 28 },
-            { header: "Status", key: "status", width: 18 },
-            { header: "Lottery Type", key: "lottery_type", width: 20 },
-            { header: "Internal Reference", key: "internal_reference", width: 20 },
-            { header: "Promoting Society", key: "promoting_society_legal_name", width: 30 },
-            { header: "Licence Type", key: "registration_licence_type", width: 22 },
-            { header: "Licence Number", key: "registration_licence_number", width: 22 },
-            { header: "Licensing Authority", key: "licensing_authority", width: 30 },
-            { header: "Responsible Promoter", key: "responsible_promoter_name", width: 24 },
-            { header: "Promoter Address", key: "responsible_promoter_address", width: 38 },
-            { header: "Minimum Age", key: "minimum_age", width: 12, style: "number" },
-            { header: "Geographic Eligibility", key: "geographic_eligibility", width: 26 },
-            { header: "Terms Version", key: "terms_version", width: 18 },
-            { header: "Privacy Version", key: "privacy_notice_version", width: 18 },
-            { header: "Maximum Proceeds", key: "maximum_proceeds", width: 18, style: "money" },
-            { header: "Maximum Prize Value", key: "maximum_prize_value", width: 18, style: "money" },
-            { header: "Sales Open", key: "sales_open_at", width: 20, style: "datetime" },
-            { header: "Sales Close", key: "sales_close_at", width: 20, style: "datetime" },
-            { header: "Draw At", key: "draw_at", width: 20, style: "datetime" },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: (data ?? [])
-            .filter((x: any) => yearMatches(x.created_at, year))
-            .map((x: any) => ({
-              ...x,
-              display_title: x.title || x.name || "Untitled lottery",
-            })),
-        },
-      ];
-    } else {
-      // Full archive workbook: multiple styled sheets in one XLSX file.
-      let lotteryQuery = supabase
-        .from("lotteries")
-        .select(
-          "id,title,name,slug,status,lottery_type,internal_reference,sales_open_at,sales_close_at,draw_at,terms_version,privacy_notice_version,created_at,archived_at",
-        )
-        .order("created_at", { ascending: true });
-
-      if (lotteryId) lotteryQuery = lotteryQuery.eq("id", lotteryId);
-
-      const [
-        lotteriesResult,
-        entriesResult,
-        ticketsResult,
-        ordersResult,
-        prizesResult,
-        winnersResult,
-        auditResult,
-      ] = await Promise.all([
-        lotteryQuery,
-        (() => {
-          let q = supabase.from("lottery_entries").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase.from("lottery_tickets").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase.from("lottery_orders").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase.from("lottery_prizes").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase.from("lottery_winners").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase.from("lottery_audit_logs").select("*");
-          if (lotteryId) q = q.eq("lottery_id", lotteryId);
-          return q;
-        })(),
-      ]);
-
-      const firstError =
-        lotteriesResult.error ||
-        entriesResult.error ||
-        ticketsResult.error ||
-        ordersResult.error ||
-        prizesResult.error ||
-        winnersResult.error ||
-        auditResult.error;
-
-      if (firstError) throw firstError;
-
-      const filterRows = (rows: any[]) =>
-        (rows ?? []).filter((x: any) =>
-          yearMatches(x.created_at || x.selected_at || null, year),
-        );
-
-      sheets = [
-        archiveOverviewSheet(filterRows(lotteriesResult.data ?? [])),
-        {
-          name: "Entrants",
-          title: "Archive — Entrants",
-          columns: [
-            { header: "Entry ID", key: "id", width: 38 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Order ID", key: "order_id", width: 38 },
-            { header: "Entrant Name", key: "entrant_name", width: 24 },
-            { header: "Entrant Email", key: "entrant_email", width: 30 },
-            { header: "Entry Number", key: "entry_number", width: 16, style: "number" },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: filterRows(entriesResult.data ?? []),
-        },
-        {
-          name: "Tickets",
-          title: "Archive — Tickets",
-          columns: [
-            { header: "Ticket Number", key: "ticket_number", width: 20 },
-            { header: "Status", key: "status", width: 16 },
-            { header: "Lottery ID", key: "lottery_id", width: 38 },
-            { header: "Order ID", key: "order_id", width: 38 },
-            { header: "Issued At", key: "issued_at", width: 20, style: "datetime" },
-            { header: "Refunded At", key: "refunded_at", width: 20, style: "datetime" },
-            { header: "Winner At", key: "winner_at", width: 20, style: "datetime" },
-          ],
-          rows: filterRows(ticketsResult.data ?? []),
-        },
-        {
-          name: "Orders",
-          title: "Archive — Orders & Payments",
-          columns: [
-            { header: "Order Reference", key: "order_reference", width: 20 },
-            { header: "Purchaser", key: "purchaser_name", width: 24 },
-            { header: "Email", key: "purchaser_email", width: 30 },
-            { header: "Quantity", key: "quantity", width: 12, style: "number" },
-            { header: "Total", key: "total_amount", width: 16, style: "money" },
-            { header: "Payment Status", key: "payment_status", width: 18 },
-            { header: "Payment Reference", key: "payment_reference", width: 24 },
-            { header: "Paid At", key: "paid_at", width: 20, style: "datetime" },
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-          ],
-          rows: filterRows(ordersResult.data ?? []),
-        },
-        {
-          name: "Prizes",
-          title: "Archive — Prizes",
-          columns: [
-            { header: "Prize", key: "name", width: 28 },
-            { header: "Quantity", key: "quantity", width: 12, style: "number" },
-            { header: "Declared Value", key: "declared_value", width: 16, style: "money" },
-            { header: "Donated", key: "is_donated", width: 12, style: "boolean" },
-            { header: "Donor", key: "donor_name", width: 24 },
-            { header: "Sponsor", key: "sponsor_name", width: 24 },
-            { header: "Status", key: "status", width: 18 },
-            { header: "Fulfilled At", key: "fulfilled_at", width: 20, style: "datetime" },
-          ],
-          rows: filterRows(prizesResult.data ?? []),
-        },
-        {
-          name: "Winners",
-          title: "Archive — Winners",
-          columns: [
-            { header: "Winner", key: "winner_name", width: 24 },
-            { header: "Email", key: "winner_email", width: 30 },
-            { header: "Prize", key: "prize_name", width: 28 },
-            { header: "Prize Value", key: "prize_value", width: 16, style: "money" },
-            { header: "Status", key: "status", width: 18 },
-            { header: "Selected At", key: "selected_at", width: 20, style: "datetime" },
-            { header: "Fulfilled At", key: "fulfilled_at", width: 20, style: "datetime" },
-          ],
-          rows: filterRows(winnersResult.data ?? []),
-        },
-        {
-          name: "Audit Log",
-          title: "Archive — Audit Log",
-          columns: [
-            { header: "Created At", key: "created_at", width: 20, style: "datetime" },
-            { header: "Action", key: "action_label", width: 30 },
-            { header: "Action Code", key: "action_code", width: 24 },
-            { header: "Entity Type", key: "entity_type", width: 18 },
-            { header: "Admin", key: "admin_name", width: 22 },
-            { header: "Admin Email", key: "admin_email", width: 30 },
-            { header: "Reason", key: "reason", width: 32 },
-            { header: "Metadata", key: "metadata", width: 38 },
-          ],
-          rows: filterRows(auditResult.data ?? []),
-        },
-      ];
-    }
-
     const buffer = await buildStyledXlsx({
       title: "Burton Pride Lottery Management",
-      subtitle: `${type.replaceAll("_", " ")} Excel report`,
-      generatedBy: admin?.name || admin?.email || "Admin",
-      lotteryTitle,
-      periodLabel,
+      subtitle: `${type} source records. Separate reads do not establish a consistent accounting snapshot.`,
+      generatedBy: safeText(String(verified.full_name || "Main administrator")),
+      lotteryTitle: safeText(lottery.title),
+      periodLabel: year ? `Records created in calendar year ${year} (Europe/London)` : "All recorded dates for the selected lottery",
       sheets,
     });
-
-    await writeExportAudit({ supabase, lotteryId, type, admin });
-
-    return xlsxDownloadResponse(
-      buffer,
-      buildReportFilename(type, lotteryTitle),
-    );
-  } catch (error: any) {
-    const message =
-      typeof error?.message === "string" ? error.message : "";
-
-    if (
-      message.toLowerCase().includes("unauthor") ||
-      message.toLowerCase().includes("permission")
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You do not have permission to export this lottery report.",
-        },
-        { status: 403 },
-      );
-    }
-
-    console.error("Lottery XLSX export error:", error);
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Could not generate the Excel report.",
-      },
-      { status: 500 },
-    );
+    if (!buffer || buffer.byteLength > MAX_XLSX_BYTES) throw new ExportError("Workbook exceeds the download-size limit.", 413);
+    // Record preparation, not receipt by the user. No file can be released when
+    // this fails. This is the only write and there is no best-effort fallback.
+    const audit = await db.from("lottery_audit_logs").insert({
+      lottery_id: lotteryId, entity_type: "report", entity_id: requestId,
+      admin_id: verified.id, admin_email: verified.email,
+      admin_name: verified.full_name || "Main administrator",
+      action_group: "export", risk_level: "medium",
+      action_code: "report.export_prepared", action_label: "Lottery source-record Excel export prepared",
+      reason: "An authorized export was prepared for download.",
+      metadata: { request_id: requestId, export_type: type, lottery_id: lotteryId, year, format: "xlsx", row_counts: counts, bytes: buffer.byteLength, snapshot_consistent: false },
+      created_at: new Date().toISOString(),
+    }).select("id").abortSignal(signal).single();
+    if (audit.error || !audit.data?.id) throw new ExportError("The export audit could not be saved. No workbook was released.");
+    const filenameScope = `${lotteryId}${year ? `-${year}` : ""}`;
+    const download = xlsxDownloadResponse(buffer, buildReportFilename(type, filenameScope));
+    download.headers.set("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0");
+    download.headers.set("X-Content-Type-Options", "nosniff");
+    download.headers.set("Vary", "Cookie, Authorization");
+    download.headers.set("X-Export-Request-ID", requestId);
+    return download;
+  } catch (error) {
+    console.error(`[${requestId}] Lottery XLSX export failed:`, error);
+    return response({ ok: false, error: error instanceof ExportError ? error.message : "Could not generate the Excel report.", request_id: requestId }, error instanceof ExportError ? error.status : 503);
   }
 }

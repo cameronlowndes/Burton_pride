@@ -1,226 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  lotteryAdminDb,
-  requireLotteryPermission,
-} from "@/lib/lottery/adminAuth";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedAdmin, getAuditServiceClient, hasLotteryPermission } from "@/lib/lottery/audit-server";
+import type { LotteryPermission } from "@/lib/lottery/audit-server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const PUBLIC_MODES = ["full_name", "first_name", "ticket_number", "none"] as const;
-const WINNER_STATUSES = [
-  "selected",
-  "contact_pending",
-  "contacted",
-  "eligibility_confirmed",
-  "claimed",
-  "fulfilled",
-  "unclaimed",
-  "disqualified",
-  "replaced",
-] as const;
-
-type PublicMode = (typeof PUBLIC_MODES)[number];
-type WinnerStatus = (typeof WINNER_STATUSES)[number];
-
-function isPublicMode(value: unknown): value is PublicMode {
-  return typeof value === "string" && PUBLIC_MODES.includes(value as PublicMode);
+function response(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: {
+    "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+    "X-Content-Type-Options": "nosniff", "Vary": "Cookie, Authorization",
+  } });
 }
-
-function isWinnerStatus(value: unknown): value is WinnerStatus {
-  return typeof value === "string" && WINNER_STATUSES.includes(value as WinnerStatus);
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+function boundedRead<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("Winner read timed out."));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(operation).then(
+      value => { signal.removeEventListener("abort", abort); resolve(value); },
+      error => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
+}
+async function authorize(permission: LotteryPermission, signal: AbortSignal) {
+  const client = await createClient();
+  const { data: { user }, error } = await boundedRead(client.auth.getUser(), signal);
+  if (error || !user) return { ok: false as const, status: 401, error: "Unauthorized." };
+  const db = getAuditServiceClient();
+  const lookup = await db.from("admin_users").select("id,supabase_user_id,role,is_active,is_main_admin")
+    .eq("supabase_user_id", user.id).eq("is_active", true).abortSignal(signal).maybeSingle();
+  if (lookup.error) throw new Error("Administrator verification unavailable.");
+  const verified = lookup.data;
+  if (!verified || verified.supabase_user_id !== user.id || verified.is_active !== true ||
+      (verified.role !== "main_admin" && verified.is_main_admin !== true)) {
+    return { ok: false as const, status: 403, error: "An active main administrator account is required." };
+  }
+  const admin = await boundedRead(getAuthenticatedAdmin(), signal);
+  if (!admin || admin.id !== verified.id || !hasLotteryPermission(admin, permission)) {
+    return { ok: false as const, status: 403, error: "You do not have permission to perform this winner action." };
+  }
+  return { ok: true as const, db };
 }
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ winnerId?: string; id?: string }> },
 ) {
+  const requestId = randomUUID();
   try {
-    await requireLotteryPermission("lottery:winners:manage");
-    const routeParams = await params;
-    // Supports either app/.../winners/[winnerId]/route.ts or [id]/route.ts.
-    const winnerId = routeParams.winnerId || routeParams.id;
+    const signal = AbortSignal.timeout(10_000);
+    const auth = await authorize("lottery:winners:manage", signal);
+    if (!auth.ok) return response({ ok: false, error: auth.error, request_id: requestId }, auth.status);
 
-    if (!winnerId) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No winner ID was supplied in the route.",
-          code: "MISSING_WINNER_ROUTE_ID",
-          hint: "Use a dynamic route folder named [winnerId] or [id].",
-        },
-        { status: 400 },
-      );
+    const origin = request.headers.get("origin");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if (!origin || origin !== request.nextUrl.origin || (fetchSite && fetchSite !== "same-origin")) {
+      return response({ ok: false, error: "A same-origin request is required.", request_id: requestId }, 403);
     }
 
-    const body = await request.json();
-
-    if (!isWinnerStatus(body.status)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A valid winner status is required.",
-          code: "INVALID_WINNER_STATUS",
-        },
-        { status: 400 },
-      );
+    const routeParams = await boundedRead(params, signal);
+    const winnerId = routeParams.winnerId ?? routeParams.id;
+    if (typeof winnerId !== "string" || !isUuid(winnerId) ||
+        (routeParams.winnerId !== undefined && routeParams.id !== undefined && routeParams.winnerId !== routeParams.id)) {
+      return response({ ok: false, error: "A valid, unambiguous winner UUID is required.", request_id: requestId }, 400);
     }
 
-    if (!isPublicMode(body.public_display_mode)) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A valid public display setting is required.",
-          code: "INVALID_PUBLIC_DISPLAY_MODE",
-        },
-        { status: 400 },
-      );
-    }
-
-    const publicDisplayConsent = body.public_display_consent === true;
-    const publishToLiveDraw = body.publish_to_live_draw === true;
-    const nameDisplaySelected = ["full_name", "first_name"].includes(
-      body.public_display_mode,
-    );
-
-    if (nameDisplaySelected && !publicDisplayConsent) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Permission must be recorded before publishing a winner's name.",
-          code: "PUBLIC_NAME_PERMISSION_REQUIRED",
-          hint: "Record the winner's permission, or choose Ticket number only / Do not show winner identity.",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (publishToLiveDraw && (!publicDisplayConsent || body.public_display_mode === "none")) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "A consented public display setting is required before publishing to Live Draw.",
-          code: "LIVE_DRAW_PUBLICATION_NOT_ALLOWED",
-        },
-        { status: 400 },
-      );
-    }
-
-    const supabase = lotteryAdminDb();
-    const { data: currentWinner, error: currentError } = await supabase
-      .from("lottery_winners")
-      .select("id,public_results_published_at")
-      .eq("id", winnerId)
-      .maybeSingle();
-
-    if (currentError || !currentWinner) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Winner record not found.",
-          code: currentError?.code || "WINNER_NOT_FOUND",
-          details: currentError?.message,
-        },
-        { status: 404 },
-      );
-    }
-
-    const now = new Date().toISOString();
-    const update: Record<string, unknown> = {
-      status: body.status,
-      public_display_mode: body.public_display_mode,
-      public_display_consent: publicDisplayConsent,
-      public_results_published_at: publishToLiveDraw
-        ? currentWinner.public_results_published_at || now
-        : null,
-      fulfilment_method: body.fulfilment_method || null,
-      collection_delivery_date: body.collection_delivery_date || null,
-      fulfilment_notes: body.fulfilment_notes || null,
-      internal_notes: body.internal_notes || null,
-      updated_at: now,
-    };
-
-    if (["contacted", "eligibility_confirmed", "claimed", "fulfilled"].includes(body.status)) {
-      update.contacted_at = now;
-    }
-    if (["eligibility_confirmed", "claimed", "fulfilled"].includes(body.status)) {
-      update.eligibility_confirmed_at = now;
-    }
-    if (["claimed", "fulfilled"].includes(body.status)) update.claimed_at = now;
-    if (body.status === "fulfilled") update.fulfilled_at = now;
-    if (body.status === "unclaimed") update.unclaimed_at = now;
-    if (body.status === "disqualified") update.disqualified_at = now;
-
-    const { data: winner, error: updateError } = await supabase
-      .from("lottery_winners")
-      .update(update)
-      .eq("id", winnerId)
-      .select("id")
-      .single();
-
-    if (updateError) {
-      console.error("Lottery winner PATCH update failed:", updateError);
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Could not save winner changes.",
-          code: updateError.code || "WINNER_UPDATE_FAILED",
-          details: updateError.message,
-          hint: updateError.hint || updateError.details || null,
-        },
-        { status: 500 },
-      );
-    }
-
-    const attempt = body.contact_attempt;
-    if (attempt?.outcome?.trim()) {
-      const { error: contactError } = await supabase
-        .from("lottery_winner_contact_attempts")
-        .insert({
-          winner_id: winnerId,
-          method: attempt.method || "other",
-          outcome: attempt.outcome.trim(),
-          notes: attempt.notes?.trim() || null,
-          attempted_at: now,
-        });
-
-      if (contactError) {
-        console.error("Lottery winner contact attempt insert failed:", contactError);
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Winner changes were saved, but the contact attempt could not be recorded.",
-            code: contactError.code || "CONTACT_ATTEMPT_SAVE_FAILED",
-            details: contactError.message,
-          },
-          { status: 500 },
-        );
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      item: winner,
-      publication: {
-        published: publishToLiveDraw,
-        public_display_mode: body.public_display_mode,
-      },
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const isPermissionError = /unauthor|permission/i.test(message);
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: isPermissionError
-          ? "You do not have permission to manage winner records."
-          : "Could not save winner changes.",
-        code: isPermissionError
-          ? "LOTTERY_PERMISSION_DENIED"
-          : "UNEXPECTED_WINNER_PATCH_ERROR",
-        details: message,
-      },
-      { status: isPermissionError ? 403 : 500 },
-    );
+    return response({
+      ok: false,
+      code: "WINNER_WORKFLOW_TRANSACTION_UNAVAILABLE",
+      error: "Winner changes and publication are unavailable until the audited, atomic winner workflow is configured. No changes were saved by this request.",
+      request_id: requestId,
+    }, 503);
+  } catch (error) {
+    console.error(`[${requestId}] Winner mutation rejected:`, error);
+    return response({ ok: false, error: "Could not process the winner request. No changes were saved by this request.", request_id: requestId }, 503);
   }
 }

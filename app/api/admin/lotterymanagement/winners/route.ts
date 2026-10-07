@@ -1,11 +1,17 @@
-import { NextResponse } from "next/server";
-import {
-  lotteryAdminDb,
-  requireLotteryPermission,
-} from "@/lib/lottery/adminAuth";
+import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedAdmin, getAuditServiceClient, hasLotteryPermission } from "@/lib/lottery/audit-server";
+import type { LotteryPermission } from "@/lib/lottery/audit-server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
+const PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 50;
+const RELATED_PAGE_SIZE = 250;
+const MAX_RELATED_ROWS = 20_000;
+const WINNER_COLUMNS = "id,lottery_id,draw_id,prize_id,ticket_id,order_id,status,selected_at,contacted_at,eligibility_confirmed_at,claimed_at,fulfilled_at,unclaimed_at,disqualified_at,replaced_at,collection_delivery_date,fulfilment_method,fulfilment_notes,internal_notes,public_display_mode,public_display_consent,public_results_published_at,replacement_winner_id,original_winner_id,created_at,updated_at";
 type WinnerRow = {
   id: string;
   lottery_id: string;
@@ -35,240 +41,175 @@ type WinnerRow = {
   updated_at: string;
 };
 
-type DatabaseError = {
-  code?: string;
-  message?: string;
-  details?: string | null;
-  hint?: string | null;
-};
-
-function databaseErrorResponse(
-  error: DatabaseError,
-  userMessage: string,
-  context: string,
-) {
-  console.error(context, error);
-
-  return NextResponse.json(
-    {
-      ok: false,
-      error: userMessage,
-      code: error.code || "DATABASE_ERROR",
-      // These fields are for the authenticated Lottery Management admin page.
-      // They allow the TSX error panel to show the exact Supabase failure.
-      details: error.message || error.details || "No database detail was returned.",
-      hint: error.hint || error.details || null,
-    },
-    { status: 500 },
-  );
+function response(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: {
+    "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+    "X-Content-Type-Options": "nosniff", "Vary": "Cookie, Authorization",
+  } });
+}
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+function integer(value: string | null, fallback: number, max: number) {
+  if (value === null) return fallback;
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n <= max ? n : null;
+}
+function boundedRead<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("Winner read timed out."));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(operation).then(
+      value => { signal.removeEventListener("abort", abort); resolve(value); },
+      error => { signal.removeEventListener("abort", abort); reject(error); },
+    );
+  });
+}
+async function authorize(permission: LotteryPermission, signal: AbortSignal) {
+  const client = await createClient();
+  const { data: { user }, error } = await boundedRead(client.auth.getUser(), signal);
+  if (error || !user) return { ok: false as const, status: 401, error: "Unauthorized." };
+  const db = getAuditServiceClient();
+  const lookup = await db.from("admin_users").select("id,supabase_user_id,role,is_active,is_main_admin")
+    .eq("supabase_user_id", user.id).eq("is_active", true).abortSignal(signal).maybeSingle();
+  if (lookup.error) throw new Error("Administrator verification unavailable.");
+  const verified = lookup.data;
+  if (!verified || verified.supabase_user_id !== user.id || verified.is_active !== true ||
+      (verified.role !== "main_admin" && verified.is_main_admin !== true)) {
+    return { ok: false as const, status: 403, error: "An active main administrator account is required." };
+  }
+  const admin = await boundedRead(getAuthenticatedAdmin(), signal);
+  if (!admin || admin.id !== verified.id || !hasLotteryPermission(admin, permission)) {
+    return { ok: false as const, status: 403, error: "You do not have permission to perform this winner action." };
+  }
+  return { ok: true as const, db };
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
+type Db = ReturnType<typeof getAuditServiceClient>;
+async function relatedRows<T>(db: Db, table: string, columns: string, filter: string, ids: string[], signal: AbortSignal): Promise<T[]> {
+  if (!ids.length) return [];
+  const rows: T[] = [];
+  const seen = new Set<string>();
+  let total: number | null = null;
+  while (total === null || rows.length < total) {
+    const result = await db.from(table).select(columns, { count: "exact" }).in(filter, ids)
+      .order("id", { ascending: true }).range(rows.length, rows.length + RELATED_PAGE_SIZE - 1).abortSignal(signal);
+    if (result.error || !result.data || result.count === null || !Number.isSafeInteger(result.count) ||
+        result.count < 0 || result.count > MAX_RELATED_ROWS || (total !== null && total !== result.count)) {
+      throw new Error("Complete winner supporting data unavailable or changed.");
+    }
+    total = result.count;
+    if (!result.data.length && rows.length < total) throw new Error("Winner supporting data was truncated.");
+    for (const row of result.data as unknown as Array<{ id: string }>) {
+      if (!row.id || seen.has(row.id)) throw new Error("Winner supporting data contains duplicate rows.");
+      seen.add(row.id);
+    }
+    rows.push(...result.data as unknown as T[]);
+    if (rows.length > total) throw new Error("Winner supporting data changed while loading.");
+  }
+  return rows;
 }
 
-export async function GET() {
+type Lottery = { id: string; title: string; slug: string };
+type Prize = { id: string; lottery_id: string; name: string; declared_value: string | number | null };
+type Ticket = { id: string; lottery_id: string; order_id: string | null; ticket_number: string };
+type Order = { id: string; lottery_id: string; order_reference: string; purchaser_name: string | null; purchaser_email: string | null; purchaser_phone: string | null };
+type Attempt = { id: string; winner_id: string; method: string; outcome: string; notes: string | null; attempted_at: string; admin_name: string | null };
+
+function money(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value));
+  if (!match) return null;
+  const pennies = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  return Number.isSafeInteger(pennies) ? pennies / 100 : null;
+}
+
+export async function GET(request: NextRequest) {
+  const requestId = randomUUID();
   try {
-    await requireLotteryPermission("lottery:winners:manage");
-    const supabase = lotteryAdminDb();
-
-    const { data: winners, error: winnersError } = await supabase
-      .from("lottery_winners")
-      .select(`
-        id, lottery_id, draw_id, prize_id, ticket_id, order_id, status,
-        selected_at, contacted_at, eligibility_confirmed_at, claimed_at,
-        fulfilled_at, unclaimed_at, disqualified_at, replaced_at,
-        collection_delivery_date, fulfilment_method, fulfilment_notes,
-        internal_notes, public_display_mode, public_display_consent,
-        public_results_published_at, replacement_winner_id,
-        original_winner_id, created_at, updated_at
-      `)
-      .order("selected_at", { ascending: false });
-
-    if (winnersError) {
-      return databaseErrorResponse(
-        winnersError,
-        "Could not load winners.",
-        "Lottery winners GET error:",
-      );
+    const signal = AbortSignal.timeout(20_000);
+    const auth = await authorize("lottery:winners:manage", signal);
+    if (!auth.ok) return response({ ok: false, error: auth.error, request_id: requestId }, auth.status);
+    const { db } = auth;
+    const params = request.nextUrl.searchParams;
+    const page = integer(params.get("page"), 1, 10_000);
+    const pageSize = integer(params.get("pageSize") ?? params.get("limit"), PAGE_SIZE, MAX_PAGE_SIZE);
+    const lotteryId = params.get("lottery_id"), winnerId = params.get("winner_id");
+    if (page === null || pageSize === null || [lotteryId, winnerId].some(id => id !== null && !isUuid(id))) {
+      return response({ ok: false, error: "Invalid pagination or lottery/winner ID.", request_id: requestId }, 400);
     }
-
-    const rows = (winners ?? []) as WinnerRow[];
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { ok: true, items: [] },
-        { status: 200, headers: { "Cache-Control": "no-store" } },
-      );
+    let query = db.from("lottery_winners").select(WINNER_COLUMNS, { count: "exact" });
+    if (lotteryId !== null) query = query.eq("lottery_id", lotteryId);
+    if (winnerId !== null) query = query.eq("id", winnerId);
+    const result = await query.order("selected_at", { ascending: false }).order("id", { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1).abortSignal(signal);
+    if (result.error || !result.data || result.count === null || !Number.isSafeInteger(result.count) || result.count < 0 ||
+        result.data.length !== Math.min(pageSize, Math.max(0, result.count - (page - 1) * pageSize))) {
+      throw new Error("Winner listing unavailable or truncated.");
     }
-
-    const lotteryIds = [...new Set(rows.map((x) => x.lottery_id).filter(Boolean))];
-    const prizeIds = [...new Set(rows.map((x) => x.prize_id).filter(Boolean))];
-    const ticketIds = [...new Set(rows.map((x) => x.ticket_id).filter(Boolean))];
-    const orderIds = [
-      ...new Set(rows.map((x) => x.order_id).filter((x): x is string => Boolean(x))),
-    ];
-    const winnerIds = rows.map((x) => x.id);
-
-    const [
-      lotteriesResult,
-      prizesResult,
-      ticketsResult,
-      ordersResult,
-      contactAttemptsResult,
-    ] = await Promise.all([
-      lotteryIds.length
-        ? supabase.from("lotteries").select("id,title,slug").in("id", lotteryIds)
-        : Promise.resolve({ data: [], error: null }),
-
-      prizeIds.length
-        ? supabase
-            .from("lottery_prizes")
-            .select("id,name,declared_value")
-            .in("id", prizeIds)
-        : Promise.resolve({ data: [], error: null }),
-
-      ticketIds.length
-        ? supabase
-            .from("lottery_tickets")
-            .select("id,ticket_number")
-            .in("id", ticketIds)
-        : Promise.resolve({ data: [], error: null }),
-
-      orderIds.length
-        ? supabase
-            .from("lottery_orders")
-            .select("id,order_reference,purchaser_name,purchaser_email,purchaser_phone")
-            .in("id", orderIds)
-        : Promise.resolve({ data: [], error: null }),
-
-      winnerIds.length
-        ? supabase
-            .from("lottery_winner_contact_attempts")
-            .select("id,winner_id,method,outcome,notes,attempted_at,admin_name")
-            .in("winner_id", winnerIds)
-            .order("attempted_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null }),
+    const rows = result.data as unknown as WinnerRow[];
+    const lotteryIds = [...new Set(rows.map(row => row.lottery_id))];
+    const prizeIds = [...new Set(rows.map(row => row.prize_id))];
+    const ticketIds = [...new Set(rows.map(row => row.ticket_id))];
+    const orderIds = [...new Set(rows.map(row => row.order_id).filter((id): id is string => id !== null))];
+    const winnerIds = rows.map(row => row.id);
+    const [lotteryRows, prizeRows, ticketRows, orderRows, attempts] = await Promise.all([
+      relatedRows<Lottery>(db, "lotteries", "id,title,slug", "id", lotteryIds, signal),
+      relatedRows<Prize>(db, "lottery_prizes", "id,lottery_id,name,declared_value", "id", prizeIds, signal),
+      relatedRows<Ticket>(db, "lottery_tickets", "id,lottery_id,order_id,ticket_number", "id", ticketIds, signal),
+      relatedRows<Order>(db, "lottery_orders", "id,lottery_id,order_reference,purchaser_name,purchaser_email,purchaser_phone", "id", orderIds, signal),
+      relatedRows<Attempt>(db, "lottery_winner_contact_attempts", "id,winner_id,method,outcome,notes,attempted_at,admin_name", "winner_id", winnerIds, signal),
     ]);
-
-    const relationError =
-      lotteriesResult.error ||
-      prizesResult.error ||
-      ticketsResult.error ||
-      ordersResult.error;
-
-    if (relationError) {
-      return databaseErrorResponse(
-        relationError,
-        "Could not load complete winner records.",
-        "Lottery winners relation load error:",
-      );
+    const lotteries = new Map(lotteryRows.map(row => [row.id, row]));
+    const prizes = new Map(prizeRows.map(row => [row.id, row]));
+    const tickets = new Map(ticketRows.map(row => [row.id, row]));
+    const orders = new Map(orderRows.map(row => [row.id, row]));
+    const attemptsByWinner = new Map<string, Attempt[]>();
+    const selectedIds = new Set(winnerIds);
+    for (const attempt of attempts) {
+      if (!selectedIds.has(attempt.winner_id)) throw new Error("Winner contact history linkage is invalid.");
+      const list = attemptsByWinner.get(attempt.winner_id) ?? [];
+      list.push(attempt); attemptsByWinner.set(attempt.winner_id, list);
     }
-
-    // This table may not exist in an older database. Keep the register usable.
-    if (contactAttemptsResult.error) {
-      console.warn(
-        "Lottery winner contact attempts unavailable:",
-        contactAttemptsResult.error,
-      );
-    }
-
-    const lotteries = new Map((lotteriesResult.data ?? []).map((x: any) => [x.id, x]));
-    const prizes = new Map((prizesResult.data ?? []).map((x: any) => [x.id, x]));
-    const tickets = new Map((ticketsResult.data ?? []).map((x: any) => [x.id, x]));
-    const orders = new Map((ordersResult.data ?? []).map((x: any) => [x.id, x]));
-    const attemptsByWinner = new Map<string, any[]>();
-
-    for (const attempt of contactAttemptsResult.data ?? []) {
-      const winnerId = (attempt as any).winner_id as string;
-      const attempts = attemptsByWinner.get(winnerId) ?? [];
-      attempts.push(attempt);
-      attemptsByWinner.set(winnerId, attempts);
-    }
-
-    const items = rows.map((winner) => {
+    const items = rows.map(winner => {
       const lottery = lotteries.get(winner.lottery_id);
       const prize = prizes.get(winner.prize_id);
       const ticket = tickets.get(winner.ticket_id);
       const order = winner.order_id ? orders.get(winner.order_id) : null;
-
+      if (!lottery || !prize || !ticket || prize.lottery_id !== winner.lottery_id || ticket.lottery_id !== winner.lottery_id ||
+          (winner.order_id && (!order || order.lottery_id !== winner.lottery_id || ticket.order_id !== winner.order_id))) {
+        throw new Error("Winner lottery/prize/ticket/order linkage is invalid.");
+      }
       return {
-        id: winner.id,
-        lottery_id: winner.lottery_id,
-        lottery_title: lottery?.title ?? "Unknown lottery",
-        lottery_slug: lottery?.slug ?? "",
-        draw_id: winner.draw_id,
-        // The schema has no draw_reference column; the TSX falls back to draw_id.
+        ...winner,
+        lottery_title: lottery.title, lottery_slug: lottery.slug,
         draw_reference: null,
-        prize_id: winner.prize_id,
-        prize_name: prize?.name ?? "Unknown prize",
-        prize_value:
-          prize?.declared_value === null || prize?.declared_value === undefined
-            ? null
-            : Number(prize.declared_value),
-        ticket_id: winner.ticket_id,
-        ticket_number: ticket?.ticket_number ?? "Unknown ticket",
-        order_id: winner.order_id,
+        prize_name: prize.name, prize_value: money(prize.declared_value),
+        prize_value_basis: "recorded_declared_value_not_verified_award_value",
+        ticket_number: ticket.ticket_number,
         order_reference: order?.order_reference ?? null,
         entrant_name: order?.purchaser_name ?? null,
         entrant_email: order?.purchaser_email ?? null,
         entrant_phone: order?.purchaser_phone ?? null,
-        status: winner.status,
-        selected_at: winner.selected_at,
-        contacted_at: winner.contacted_at,
-        eligibility_confirmed_at: winner.eligibility_confirmed_at,
-        claimed_at: winner.claimed_at,
-        fulfilled_at: winner.fulfilled_at,
-        unclaimed_at: winner.unclaimed_at,
-        disqualified_at: winner.disqualified_at,
-        replaced_at: winner.replaced_at,
-        collection_delivery_date: winner.collection_delivery_date,
-        fulfilment_method: winner.fulfilment_method,
-        fulfilment_notes: winner.fulfilment_notes,
-        internal_notes: winner.internal_notes,
-        public_display_mode: winner.public_display_mode ?? "first_name",
-        public_display_consent: winner.public_display_consent ?? false,
+        public_display_mode: winner.public_display_mode ?? null,
+        public_display_consent: winner.public_display_consent === true,
         public_results_published_at: winner.public_results_published_at ?? null,
-        replacement_winner_id: winner.replacement_winner_id,
-        original_winner_id: winner.original_winner_id,
-        contact_attempts: attemptsByWinner.get(winner.id) ?? [],
-        created_at: winner.created_at,
-        updated_at: winner.updated_at,
+        publication_verified: false, draw_provenance_verified: false,
+        order_link_present: winner.order_id !== null,
+        contact_attempts: [...(attemptsByWinner.get(winner.id) ?? [])]
+          .sort((a, b) => b.attempted_at.localeCompare(a.attempted_at)),
+        contact_history_available: true,
       };
     });
-
-    return NextResponse.json(
-      { ok: true, items },
-      { status: 200, headers: { "Cache-Control": "no-store" } },
-    );
-  } catch (error: unknown) {
-    const message = errorMessage(error);
-    const lowerMessage = message.toLowerCase();
-
-    if (lowerMessage.includes("unauthor") || lowerMessage.includes("permission")) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "You do not have permission to view winner records.",
-          code: "LOTTERY_PERMISSION_DENIED",
-          details: message,
-          hint: "Sign in again and confirm the account has lottery:winners:manage.",
-        },
-        { status: 403 },
-      );
-    }
-
-    console.error("Lottery winners GET unexpected error:", error);
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Could not load winners.",
-        code: "UNEXPECTED_WINNERS_GET_ERROR",
-        details: message,
-        hint: "Check the Next.js server logs for the full stack trace.",
-      },
-      { status: 500 },
-    );
+    return response({
+      ok: true, items, page, pageSize, total: result.count,
+      total_pages: Math.ceil(result.count / pageSize), has_more: page * pageSize < result.count,
+      snapshot_consistent: false,
+    });
+  } catch (error) {
+    console.error(`[${requestId}] Lottery winners read failed:`, error);
+    return response({ ok: false, error: "Could not load complete winner records and contact history. Refresh and try again.", request_id: requestId }, 503);
   }
 }

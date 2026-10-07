@@ -1,375 +1,146 @@
-import {
-  NextRequest,
-  NextResponse,
-} from "next/server";
-
-import type {
-  LotterySettingsGroup,
-  LotterySettingsStatus,
-  UpdateLotterySettingsRequest,
-} from "@/lib/lottery/settings-types";
-
-import {
-  getAuthenticatedAdmin,
-  hasLotteryPermission,
-  writeLotteryAudit,
-  writeLotteryAuditSafe,
-} from "@/lib/lottery/audit-server";
-
-import {
-  isHighRiskSettingsGroup,
-  loadLotterySettings,
-  permissionForSettingsGroup,
-  saveLotterySettingsGroup,
-  validateLotterySettingsUpdate,
-} from "@/lib/lottery/settings-server";
+import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@/lib/supabase/server";
+import { getAuthenticatedAdmin, getAuditServiceClient, hasLotteryPermission } from "@/lib/lottery/audit-server";
+import { loadLotterySettings } from "@/lib/lottery/settings-server";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-function noStoreJson(
-  body: unknown,
-  status = 200,
-) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control":
-        "no-store, no-cache, must-revalidate, max-age=0",
-      "X-Content-Type-Options": "nosniff",
-    },
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: {
+    "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+    "X-Content-Type-Options": "nosniff",
+    "Vary": "Cookie, Authorization",
+  } });
+}
+function boundedRead<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("Settings read timed out."));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(operation).then(
+      value => { signal.removeEventListener("abort", abort); resolve(value); },
+      error => { signal.removeEventListener("abort", abort); reject(error); },
+    );
   });
 }
 
+async function authorize(permission: string, signal: AbortSignal) {
+  const client = await createClient();
+  const { data: { user }, error } = await boundedRead(client.auth.getUser(), signal);
+  if (error || !user) return { ok: false as const, status: 401, error: "You must be signed in to access Lottery Settings." };
+  const db = getAuditServiceClient();
+  const result = await db.from("admin_users")
+    .select("id,supabase_user_id,role,is_active,is_main_admin")
+    .eq("supabase_user_id", user.id).eq("is_active", true).abortSignal(signal).maybeSingle();
+  if (result.error) throw new Error("Administrator verification unavailable.");
+  const verified = result.data;
+  if (!verified || verified.supabase_user_id !== user.id || verified.is_active !== true ||
+      (verified.role !== "main_admin" && verified.is_main_admin !== true)) {
+    return { ok: false as const, status: 403, error: "An active main administrator account is required." };
+  }
+  const admin = await boundedRead(getAuthenticatedAdmin(), signal);
+  if (!admin || admin.id !== verified.id || !hasLotteryPermission(admin, permission as Parameters<typeof hasLotteryPermission>[1])) {
+    return { ok: false as const, status: 403, error: "You do not have permission to perform this settings action." };
+  }
+  return { ok: true as const };
+}
+
+const GROUPS = ["payments", "notifications", "compliance"] as const;
+
+function validateSettingsResponse(value: unknown): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Settings are unavailable.");
+  const settings = value as Record<string, unknown>;
+  for (const group of GROUPS) {
+    if (!settings[group] || typeof settings[group] !== "object" || Array.isArray(settings[group])) {
+      throw new Error("Settings group is incomplete.");
+    }
+  }
+  // Reject an unexpected secret-bearing response instead of returning partially
+  // redacted settings that a client might accidentally save back as defaults.
+  const inspect = (node: unknown, depth: number): void => {
+    if (depth > 10) throw new Error("Settings nesting exceeds the response limit.");
+    if (node === null || typeof node === "boolean" || typeof node === "string") return;
+    if (typeof node === "number") {
+      if (!Number.isFinite(node)) throw new Error("Invalid numeric settings.");
+      return;
+    }
+    if (!node || typeof node !== "object") throw new Error("Invalid settings response.");
+    if (Array.isArray(node)) { for (const item of node) inspect(item, depth + 1); return; }
+    for (const [key, child] of Object.entries(node)) {
+      if (/password|secret|token|api[_-]?key|private[_-]?key|credential|authorization|cookie/i.test(key) &&
+          child !== null && typeof child !== "boolean" && typeof child !== "number") {
+        throw new Error("Settings response unexpectedly contains a sensitive field.");
+      }
+      inspect(child, depth + 1);
+    }
+  };
+  inspect(settings, 0);
+  if (Buffer.byteLength(JSON.stringify(settings), "utf8") > 128 * 1024) throw new Error("Settings response exceeds its size limit.");
+}
+
 export async function GET() {
+  const requestId = randomUUID();
   try {
-    const admin =
-      await getAuthenticatedAdmin();
-
-    if (!admin) {
-      return noStoreJson(
-        {
-          error:
-            "You must be signed in to view Lottery Settings.",
-        },
-        401,
-      );
-    }
-
-    if (
-      !hasLotteryPermission(
-        admin,
-        "lottery:view",
-      )
-    ) {
-      await writeLotteryAuditSafe({
-        admin,
-        actionCode:
-          "security.lottery_settings.permission_denied",
-        actionLabel:
-          "Lottery Settings access denied",
-        actionGroup: "security",
-        riskLevel: "high",
-        entityType: "lottery_settings",
-        reason:
-          "Administrator attempted to view Lottery Settings without the required permission.",
-        metadata: {
-          requiredPermission:
-            "lottery:view",
-        },
-      });
-
-      return noStoreJson(
-        {
-          error:
-            "You do not have permission to view Lottery Settings.",
-        },
-        403,
-      );
-    }
-
-    const {
-      settings,
-      lastUpdatedAt,
-      lastUpdatedBy,
-    } = await loadLotterySettings();
-
-    const status: LotterySettingsStatus = {
-      paymentProvider:
-        settings.payments.providerLabel &&
-        settings.payments.webhookConfigured
-          ? "configured"
-          : "not_configured",
-
-      compliance:
-        settings.compliance
-          .promotingSocietyLegalName &&
-        settings.compliance.minimumAge >= 16
-          ? "configured"
-          : "needs_attention",
-
-      notifications:
-        Object.values(
-          settings.notifications,
-        ).some(Boolean)
-          ? "enabled"
-          : "disabled",
-
-      security: "protected",
-      lastUpdatedAt,
-      lastUpdatedBy,
-    };
-
-    return noStoreJson({
+    const signal = AbortSignal.timeout(15_000);
+    const auth = await authorize("lottery:view", signal);
+    if (!auth.ok) return json({ success: false, error: auth.error, request_id: requestId }, auth.status);
+    const loaded = await boundedRead(loadLotterySettings(), signal);
+    validateSettingsResponse(loaded.settings);
+    // Defaults returned by the helper do not prove that persisted rows exist.
+    const candidate = loaded.lastUpdatedAt;
+    const lastUpdatedAt = typeof candidate === "string" && Number.isFinite(Date.parse(candidate)) ? candidate : null;
+    return json({
       success: true,
-      settings,
-      status,
-      permissions: {
-        canView: true,
-
-        canEditGeneral:
-          hasLotteryPermission(
-            admin,
-            "lottery:edit",
-          ),
-
-        canEditFinance:
-          hasLotteryPermission(
-            admin,
-            "lottery:finance:view",
-          ),
-
-        canEditCompliance:
-          hasLotteryPermission(
-            admin,
-            "lottery:compliance",
-          ),
-
-        canEditSecurity:
-          admin.role === "main_admin" ||
-          hasLotteryPermission(
-            admin,
-            "lottery:compliance",
-          ),
+      settings: loaded.settings,
+      status: {
+        paymentProvider: "not_verified", compliance: "not_verified",
+        notifications: "not_verified", security: "not_verified",
+        lastUpdatedAt, lastUpdatedBy: null,
       },
+      permissions: {
+        canView: true, canEditSettings: false, canEditGeneral: false,
+        canEditFinance: false, canEditCompliance: false, canEditSecurity: false,
+        canEditTickets: false, canEditDraws: false, canEditWinners: false,
+        canEditNotifications: false,
+      },
+      mutations_available: false,
+      verification: {
+        persisted_settings_verified: false,
+        payment_provider_verified: false,
+        compliance_approval_verified: false,
+        notification_delivery_verified: false,
+        security_enforcement_verified: false,
+      },
+      message: "Settings are read-only until the audited settings transaction service is configured. Configuration flags do not establish operational readiness.",
     });
   } catch (error) {
-    console.error(
-      "Lottery settings GET error:",
-      error,
-    );
-
-    return noStoreJson(
-      {
-        error:
-          "Unable to load Lottery Settings.",
-      },
-      500,
-    );
+    console.error(`[${requestId}] Lottery settings read failed:`, error);
+    return json({ success: false, error: "Unable to load complete Lottery Settings. Refresh and try again.", request_id: requestId }, 503);
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-) {
+export async function PATCH(request: NextRequest) {
+  const requestId = randomUUID();
   try {
-    const admin =
-      await getAuthenticatedAdmin();
-
-    if (!admin) {
-      return noStoreJson(
-        {
-          error:
-            "You must be signed in to update Lottery Settings.",
-        },
-        401,
-      );
+    // No finance-view/compliance role can substitute for this write permission.
+    const auth = await authorize("lottery:settings:manage", AbortSignal.timeout(10_000));
+    if (!auth.ok) return json({ success: false, error: auth.error, request_id: requestId }, auth.status);
+    const origin = request.headers.get("origin");
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if (!origin || origin !== request.nextUrl.origin || (fetchSite && fetchSite !== "same-origin")) {
+      return json({ success: false, error: "A same-origin request is required.", request_id: requestId }, 403);
     }
-
-    let body: UpdateLotterySettingsRequest;
-
-    try {
-      body = await request.json();
-    } catch {
-      return noStoreJson(
-        {
-          error:
-            "The settings request was not valid JSON.",
-        },
-        400,
-      );
-    }
-
-    let input: UpdateLotterySettingsRequest;
-
-    try {
-      input =
-        validateLotterySettingsUpdate(
-          body,
-        );
-    } catch (error) {
-      return noStoreJson(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : "Invalid Lottery Settings.",
-        },
-        400,
-      );
-    }
-
-    const requiredPermission =
-      permissionForSettingsGroup(
-        input.group,
-      );
-
-    const canEditSecurity =
-      input.group !== "security" ||
-      admin.role === "main_admin" ||
-      hasLotteryPermission(
-        admin,
-        "lottery:compliance",
-      );
-
-    if (
-      !hasLotteryPermission(
-        admin,
-        requiredPermission,
-      ) ||
-      !canEditSecurity
-    ) {
-      await writeLotteryAuditSafe({
-        admin,
-        actionCode:
-          "security.lottery_settings_update.permission_denied",
-        actionLabel:
-          "Lottery Settings update denied",
-        actionGroup: "security",
-        riskLevel: "high",
-        entityType: "lottery_settings",
-        entityId: input.group,
-        reason:
-          "Administrator attempted to update a Lottery Settings group without the required permission.",
-        metadata: {
-          group: input.group,
-          requiredPermission,
-        },
-      });
-
-      return noStoreJson(
-        {
-          error:
-            "You do not have permission to update this settings section.",
-        },
-        403,
-      );
-    }
-
-    if (
-      isHighRiskSettingsGroup(
-        input.group,
-      ) &&
-      (!input.reason ||
-        input.reason.trim().length < 5)
-    ) {
-      return noStoreJson(
-        {
-          error:
-            "A reason is required for changes to Payments, Draws, Compliance or Security settings.",
-        },
-        400,
-      );
-    }
-
-    const before =
-      await loadLotterySettings();
-
-    const beforeValue =
-      before.settings[
-        input.group as LotterySettingsGroup
-      ];
-
-    await saveLotterySettingsGroup(
-      admin,
-      input,
-    );
-
-    /*
-     * High-risk settings updates should not be considered
-     * complete unless the corresponding audit entry succeeds.
-     */
-    await writeLotteryAudit({
-      admin,
-      actionCode:
-        `lottery.settings.${input.group}.updated`,
-      actionLabel:
-        `${input.group.replaceAll("_", " ")} settings updated`,
-      actionGroup:
-        input.group === "payments"
-          ? "payment"
-          : input.group === "draws"
-            ? "draw"
-            : input.group ===
-                "compliance"
-              ? "compliance"
-              : input.group ===
-                  "security"
-                ? "security"
-                : "lottery",
-      riskLevel:
-        isHighRiskSettingsGroup(
-          input.group,
-        )
-          ? "high"
-          : "medium",
-      entityType:
-        "lottery_settings",
-      entityId:
-        input.group,
-      reason:
-        input.reason ?? null,
-      beforeData:
-        beforeValue as unknown as Record<
-          string,
-          unknown
-        >,
-      afterData:
-        input.value as unknown as Record<
-          string,
-          unknown
-        >,
-      metadata: {
-        settingsGroup:
-          input.group,
-      },
-    });
-
-    const updated =
-      await loadLotterySettings();
-
-    return noStoreJson({
-      success: true,
-      group: input.group,
-      settings: updated.settings,
-      status: {
-        lastUpdatedAt:
-          updated.lastUpdatedAt,
-        lastUpdatedBy:
-          updated.lastUpdatedBy,
-      },
-    });
+    // Do not parse/save settings or mutate audit history while the transactional
+    // write service is absent. No request-body values appear in errors or logs.
+    return json({
+      success: false, code: "SETTINGS_TRANSACTION_SERVICE_UNAVAILABLE",
+      error: "Saving Lottery Settings is unavailable until the audited database transaction service is configured.",
+      request_id: requestId,
+    }, 503);
   } catch (error) {
-    console.error(
-      "Lottery settings PATCH error:",
-      error,
-    );
-
-    return noStoreJson(
-      {
-        error:
-          "Unable to update Lottery Settings.",
-      },
-      500,
-    );
+    console.error(`[${requestId}] Lottery settings action rejected:`, error);
+    return json({ success: false, error: "The settings action is unavailable.", request_id: requestId }, 503);
   }
 }
