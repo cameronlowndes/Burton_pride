@@ -15,8 +15,13 @@ export type LotteryType =
   | "small_society"
   | "incidental_event"
   | "large_society"
-  | "free_draw"
-  | string;
+  | "free_draw";
+
+export type LotteryWinnerDisplayMode =
+  | "full_name"
+  | "first_name"
+  | "ticket_number"
+  | "none";
 
 export interface LotteryDetail {
   id: string;
@@ -36,6 +41,8 @@ export interface LotteryDetail {
   sales_close_at: string | null;
   draw_at: string | null;
   results_publish_at: string | null;
+  // A timestamp alone is not proof that the approval/profile remains valid.
+  compliance_approved_at?: string | null;
   timezone: string | null;
 
   ticket_price: number;
@@ -57,13 +64,14 @@ export interface LotteryDetail {
   maximum_proceeds: number | null;
   maximum_prize_value: number | null;
 
-  show_in_directory: boolean;
+  // Canonical field. Retired show_in_directory must not override this value.
+  show_in_public_directory: boolean;
   allow_page_before_sales: boolean;
   show_ticket_count: boolean;
   show_amount_raised: boolean;
   show_remaining_tickets: boolean;
   show_prize_values: boolean;
-  winner_display_mode: string | null;
+  winner_display_mode: LotteryWinnerDisplayMode | null;
   countdown_enabled: boolean;
 
   is_active: boolean;
@@ -74,8 +82,9 @@ export interface LotteryDetail {
   order_count?: number;
   paid_order_count?: number;
   ticket_count?: number;
-  revenue?: number;
-  refund_total?: number;
+  // Missing or unverified financial totals are unknown, not zero.
+  revenue?: number | null;
+  refund_total?: number | null;
   prize_count?: number;
   winner_count?: number;
 }

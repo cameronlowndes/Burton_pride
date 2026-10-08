@@ -1,13 +1,20 @@
 import "server-only";
 
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
+import { isIP } from "node:net";
+import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
-import type {
-  CreateLotteryAuditLogInput,
-  LotteryAuditActionGroup,
-  LotteryAuditDeviceContext,
-  LotteryAuditRiskLevel,
-} from "@/lib/lottery/audit-types";
+// Local structural types keep this server helper independent of audit-types.
+// Shared display types belong in audit-types.ts and must not import this module.
+type LotteryAuditRiskLevel = "low" | "medium" | "high" | "critical";
+type LotteryAuditDeviceContext = {
+  userAgent: string | null;
+  platform: string | null;
+  deviceType: "mobile" | "desktop" | null;
+};
+// Action groups are checked for non-empty bounded text before insertion.
+// The database must enforce its canonical group constraint.
+type LotteryAuditActionGroup = string;
 
 export type LotteryPermission =
   | "lottery:view"
@@ -22,7 +29,15 @@ export type LotteryPermission =
   | "lottery:winners:manage"
   | "lottery:export"
   | "lottery:compliance"
-  | "lottery:audit:view";
+  | "lottery:audit:view"
+  | "lottery:audit:export"
+  | "lottery:orders:view"
+  | "lottery:orders:manage"
+  | "lottery:close-sales"
+  | "lottery:prizes:manage"
+  | "lottery:tickets:manage"
+  | "lottery:tickets:issue_random"
+  | "lottery:settings:manage";
 
 export interface AuthenticatedLotteryAdmin {
   id: string;
@@ -63,7 +78,7 @@ function getSupabaseUrl(): string {
 
   if (!url) {
     throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL is not configured.",
+      "Lottery service is unavailable.",
     );
   }
 
@@ -77,14 +92,16 @@ function getSupabaseServiceKey(): string {
 
   if (!key) {
     throw new Error(
-      "Supabase server secret/service role key is not configured.",
+      "Lottery service is unavailable.",
     );
   }
 
   return key;
 }
 
+// Privileged database factory; callers still need their own authorization guard.
 export function getAuditServiceClient() {
+  try {
   return createClient(
     getSupabaseUrl(),
     getSupabaseServiceKey(),
@@ -96,175 +113,56 @@ export function getAuditServiceClient() {
       },
     },
   );
+  } catch {
+    throw Object.assign(new Error("Lottery service is unavailable."), { status: 503 });
+  }
 }
 
-function normalizePermissions(value: unknown): string[] {
-  if (!value) {
-    return [];
-  }
+// No identity or permission authority comes from custom cookies/user metadata.
+const AUTH_TIMEOUT_MS = 10_000;
 
-  if (Array.isArray(value)) {
-    return value.filter(
-      (permission): permission is string =>
-        typeof permission === "string",
+function boundedRead<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("Administrator verification is unavailable."));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(operation).then(
+      value => { signal.removeEventListener("abort", abort); resolve(value); },
+      () => { signal.removeEventListener("abort", abort); reject(new Error("Administrator verification is unavailable.")); },
     );
-  }
-
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-
-      if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (permission): permission is string =>
-            typeof permission === "string",
-        );
-      }
-    } catch {
-      return value
-        .split(",")
-        .map((permission) => permission.trim())
-        .filter(Boolean);
-    }
-  }
-
-  if (typeof value === "object") {
-    return Object.entries(
-      value as Record<string, unknown>,
-    )
-      .filter(([, enabled]) => enabled === true)
-      .map(([permission]) => permission);
-  }
-
-  return [];
+  });
 }
 
-function readPossibleCookie(
-  cookieStore: Awaited<ReturnType<typeof cookies>>,
-  names: string[],
-): string | null {
-  for (const name of names) {
-    const value = cookieStore.get(name)?.value;
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-export async function getAuthenticatedAdmin():
-  Promise<AuthenticatedLotteryAdmin | null> {
+export async function getAuthenticatedAdmin(): Promise<AuthenticatedLotteryAdmin | null> {
   try {
-    const cookieStore = await cookies();
-
-    /*
-     * Your Admin Portal already uses these custom cookies.
-     *
-     * burton_admin_session
-     * burton_admin_id
-     * burton_admin_email
-     */
-    const adminId = readPossibleCookie(cookieStore, [
-      "burton_admin_id",
-      "admin_id",
-    ]);
-
-    const adminEmail = readPossibleCookie(cookieStore, [
-      "burton_admin_email",
-      "admin_email",
-    ]);
-
-    const session = readPossibleCookie(cookieStore, [
-      "burton_admin_session",
-      "admin_session",
-    ]);
-
-    /*
-     * Require the Admin Portal session marker as well as an
-     * admin identifier. A browser-provided admin ID alone must
-     * never be enough to authorise access.
-     */
-    if (!session || (!adminId && !adminEmail)) {
-      return null;
-    }
-
-    const supabase = getAuditServiceClient();
-
-    let query = supabase
-      .from("admin_users")
-      .select("*")
-      .limit(1);
-
-    if (adminId) {
-      query = query.eq("id", adminId);
-    } else if (adminEmail) {
-      query = query.eq("email", adminEmail);
-    }
-
-    const {
-      data,
-      error,
-    } = await query.maybeSingle();
-
-    if (error) {
-      console.error(
-        "Lottery admin authentication query failed:",
-        error,
-      );
-
-      return null;
-    }
-
-    if (!data) {
-      return null;
-    }
-
-    /*
-     * Support the common active-state column names without
-     * forcing your existing Admin Portal schema to change.
-     */
-    if (
-      data.is_active === false ||
-      data.active === false ||
-      data.disabled === true
-    ) {
-      return null;
-    }
-
-    const permissions = normalizePermissions(
-      data.permissions ??
-        data.permission ??
-        data.permission_list,
+    const signal = AbortSignal.timeout(AUTH_TIMEOUT_MS);
+    const client = await boundedRead(createSessionClient(), signal);
+    const { data: userData, error: authError } = await boundedRead(client.auth.getUser(), signal);
+    if (authError || !userData?.user?.id) return null;
+    const userId = userData.user.id;
+    const { data, error } = await boundedRead(
+      getAuditServiceClient()
+        .from("admin_users")
+        .select("id,supabase_user_id,email,name,role,permissions,is_active,is_main_admin")
+        .eq("supabase_user_id", userId)
+        .eq("is_active", true)
+        .maybeSingle(),
+      signal,
     );
-
+    // Duplicate/missing mappings and null activity flags fail closed.
+    if (error || !data || data.supabase_user_id !== userId || data.is_active !== true ||
+        typeof data.id !== "string" || !data.id) return null;
     return {
-      id: String(data.id),
-      email:
-        typeof data.email === "string"
-          ? data.email
-          : adminEmail,
-      name:
-        typeof data.name === "string"
-          ? data.name
-          : typeof data.full_name === "string"
-            ? data.full_name
-            : typeof data.display_name === "string"
-              ? data.display_name
-              : null,
-      role:
-        typeof data.role === "string"
-          ? data.role
-          : null,
-      permissions,
+      id: data.id,
+      email: typeof data.email === "string" ? data.email : null,
+      name: typeof data.name === "string" ? data.name : null,
+      role: data.is_main_admin === true ? "main_admin" : typeof data.role === "string" ? data.role : null,
+      permissions: Array.isArray(data.permissions)
+        ? [...new Set(data.permissions.filter((value: unknown): value is string => typeof value === "string"))] as string[]
+        : [],
     };
-  } catch (error) {
-    console.error(
-      "Lottery admin authentication error:",
-      error,
-    );
-
+  } catch {
+    console.error("Lottery administrator verification failed.");
     return null;
   }
 }
@@ -273,7 +171,7 @@ export function hasLotteryPermission(
   admin: AuthenticatedLotteryAdmin | null,
   permission: LotteryPermission,
 ): boolean {
-  if (!admin) {
+  if (!admin || !permission || !/^lottery:[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)*$/.test(permission)) {
     return false;
   }
 
@@ -292,9 +190,7 @@ export function requireLotteryPermission(
   permission: LotteryPermission,
 ): void {
   if (!hasLotteryPermission(admin, permission)) {
-    throw new Error(
-      `Missing required lottery permission: ${permission}`,
-    );
+    throw Object.assign(new Error("You do not have permission to perform this action."), { status: admin ? 403 : 401 });
   }
 }
 
@@ -351,7 +247,7 @@ function normaliseIpAddress(
     ip = match[1];
   }
 
-  return ip || null;
+  return isIP(ip) ? ip : null;
 }
 
 export async function getLotteryRequestContext(): Promise<{
@@ -371,11 +267,12 @@ export async function getLotteryRequestContext(): Promise<{
       headerStore.get("cf-connecting-ip"),
   );
 
+  // Request headers are untrusted context hints, never authentication evidence.
   const userAgent =
-    headerStore.get("user-agent");
+    headerStore.get("user-agent")?.slice(0, 2048) ?? null;
 
   const platform =
-    headerStore.get("sec-ch-ua-platform");
+    headerStore.get("sec-ch-ua-platform")?.slice(0, 256) ?? null;
 
   const mobile =
     headerStore.get("sec-ch-ua-mobile");
@@ -406,6 +303,9 @@ function sanitiseAuditObject(
     return null;
   }
 
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid audit object.");
+  }
   const blockedKeys = new Set([
     "password",
     "password_hash",
@@ -423,10 +323,12 @@ function sanitiseAuditObject(
     "cookie",
   ]);
 
+  let visited = 0;
   function clean(
     input: unknown,
     depth = 0,
   ): unknown {
+    if (++visited > 5000) throw new Error("Audit payload exceeds its size limit.");
     if (depth > 6) {
       return "[depth-limit]";
     }
@@ -441,7 +343,7 @@ function sanitiseAuditObject(
       input &&
       typeof input === "object"
     ) {
-      const result: Record<string, unknown> = {};
+      const result: Record<string, unknown> = Object.create(null);
 
       for (const [
         key,
@@ -450,9 +352,8 @@ function sanitiseAuditObject(
         input as Record<string, unknown>,
       )) {
         if (
-          blockedKeys.has(
-            key.toLowerCase(),
-          )
+          blockedKeys.has(key.toLowerCase()) ||
+          /password|secret|token|apikey|privatekey|credential|authorization|cookie|cardnumber|cvv|cvc/.test(key.toLowerCase().replace(/[^a-z0-9]/g, ""))
         ) {
           result[key] = "[REDACTED]";
           continue;
@@ -486,6 +387,23 @@ function sanitiseAuditObject(
 export async function writeLotteryAudit(
   options: WriteLotteryAuditOptions,
 ): Promise<string> {
+  // Never accept actor identity from a supplied object without verifying it.
+  const verifiedAdmin = await getAuthenticatedAdmin();
+  if (!verifiedAdmin || (options.admin && options.admin.id !== verifiedAdmin.id)) {
+    throw Object.assign(new Error("An authenticated administrator is required to record this activity."), { status: verifiedAdmin ? 403 : 401 });
+  }
+  const requiredText = (value: unknown, max: number): value is string =>
+    typeof value === "string" && !!value.trim() && value.length <= max;
+  if (!requiredText(options.actionGroup, 80) || !requiredText(options.actionCode, 160) ||
+      !requiredText(options.actionLabel, 500) ||
+      (options.riskLevel !== undefined && !["low", "medium", "high", "critical"].includes(options.riskLevel))) {
+    throw new Error("Invalid lottery audit classification.");
+  }
+  for (const value of [options.lotteryId, options.lotteryTitle, options.entityType, options.entityId, options.reason]) {
+    if (value != null && (typeof value !== "string" || value.length > 4000)) {
+      throw new Error("Invalid lottery audit field.");
+    }
+  }
   const {
     ipAddress: requestIp,
     deviceContext: requestDevice,
@@ -505,7 +423,7 @@ export async function writeLotteryAudit(
     options.metadata,
   );
 
-  const payload: CreateLotteryAuditLogInput = {
+  const payload = {
     lotteryId:
       options.lotteryId ?? null,
 
@@ -519,13 +437,13 @@ export async function writeLotteryAudit(
       options.entityId ?? null,
 
     adminId:
-      options.admin?.id ?? null,
+      verifiedAdmin.id,
 
     adminEmail:
-      options.admin?.email ?? null,
+      verifiedAdmin.email,
 
     adminName:
-      options.admin?.name ?? null,
+      verifiedAdmin.name,
 
     actionGroup:
       options.actionGroup,
@@ -546,8 +464,7 @@ export async function writeLotteryAudit(
     afterData,
 
     ipAddress:
-      options.ipAddress ??
-      requestIp,
+      normaliseIpAddress(options.ipAddress ?? requestIp),
 
     deviceContext:
       options.deviceContext ??
@@ -556,8 +473,13 @@ export async function writeLotteryAudit(
     metadata,
   };
 
-  const { data, error } =
-    await supabase
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 128 * 1024) {
+    throw new Error("Audit payload exceeds its size limit.");
+  }
+
+  let insertResult;
+  try {
+    insertResult = await supabase
       .from("lottery_audit_logs")
       .insert({
         lottery_id:
@@ -614,11 +536,20 @@ export async function writeLotteryAudit(
       .select("id")
       .single();
 
-  if (error) {
-    console.error(
-      "Failed to write Lottery Audit Log:",
-      error,
+    // Enforce a 10s timeout for the insert operation.
+    const insertPromise = insertResult;
+    const timeoutPromise = new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error("Lottery audit insert timed out.")), 10_000),
     );
+
+    insertResult = await Promise.race([insertPromise, timeoutPromise]);
+  } catch {
+    throw new Error("Unable to record lottery audit activity.");
+  }
+  const { data, error } = insertResult;
+
+  if (error || !data || typeof data.id !== "string" || !data.id) {
+    console.error("Lottery audit insert failed.");
 
     throw new Error(
       "Unable to record lottery audit activity.",
@@ -628,15 +559,11 @@ export async function writeLotteryAudit(
   return data.id;
 }
 
-export async function writeLotteryAuditSafe(
-  options: WriteLotteryAuditOptions,
-): Promise<void> {
-  try {
-    await writeLotteryAudit(options);
-  } catch (error) {
-    console.error(
-      "Non-blocking Lottery Audit write failed:",
-      error,
-    );
-  }
+/** Compatibility export. Audit failures now propagate; they are not suppressed.
+ * This standalone insert is NOT atomic with a preceding business mutation.
+ * Critical writes still need a database transaction/RPC containing both writes.
+ * Do not blindly retry timed-out inserts: commit status may be uncertain.
+ */
+export async function writeLotteryAuditSafe(options: WriteLotteryAuditOptions): Promise<void> {
+  await writeLotteryAudit(options);
 }

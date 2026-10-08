@@ -3,8 +3,9 @@ import "server-only";
 import { isIP } from "node:net";
 
 import {
-  supabaseAdmin,
-} from "@/lib/supabase/supabaseAdmin";
+  getAuthenticatedAdmin,
+  getAuditServiceClient,
+} from "@/lib/lottery/audit-server";
 
 export const LOTTERY_AUDIT_GROUPS = [
   "lottery",
@@ -73,117 +74,57 @@ const riskLevelSet = new Set<string>(
 );
 
 const secretKeyPattern =
-  /(?:^|_)(?:password|passcode|secret|token|authorization|cookie|api[_-]?key|service[_-]?role|stripe[_-]?signature|session[_-]?id|client[_-]?secret|access[_-]?token|refresh[_-]?token)(?:$|_)/i;
-
-const maxDepth = 8;
-const maxStringLength = 5_000;
+  /password|passcode|secret|token|authorization|cookie|apikey|servicerole|stripesignature|sessionid|privatekey|credential|cardnumber|cvv|cvc/;
 
 function cleanOptionalText(
   value: string | null | undefined,
   maxLength: number,
 ): string | null {
-  if (typeof value !== "string") {
-    return null;
+  if (value == null) return null;
+  if (typeof value !== "string" || value.length > maxLength) {
+    throw new Error("Invalid lottery audit field.");
   }
-
-  const cleaned = value.trim();
-
-  if (!cleaned) {
-    return null;
-  }
-
-  return cleaned.slice(0, maxLength);
+  return value.trim() || null;
 }
 
-function cleanRequiredText(
-  value: string,
-  fieldName: string,
-  maxLength: number,
-): string {
-  const cleaned = cleanOptionalText(
-    value,
-    maxLength,
-  );
-
-  if (!cleaned) {
-    throw new Error(
-      `${fieldName} is required for the lottery audit log.`,
-    );
-  }
-
+function cleanRequiredText(value: string, fieldName: string, maxLength: number): string {
+  const cleaned = cleanOptionalText(value, maxLength);
+  if (!cleaned) throw new Error(`${fieldName} is required for the lottery audit log.`);
   return cleaned;
 }
 
-function sanitiseForAudit(
-  value: unknown,
-  depth = 0,
-  seen = new WeakSet<object>(),
-): unknown {
-  if (value === null || value === undefined) {
-    return value ?? null;
+/** Secret-field redaction is not a general detector for secrets in free text.
+ * Callers must not send credentials, card details or unnecessary personal data.
+ */
+function sanitiseForAudit(value: unknown): unknown {
+  const seen = new WeakSet<object>();
+  let visited = 0;
+  function clean(input: unknown, depth: number): unknown {
+    if (++visited > 5000) throw new Error("Audit payload exceeds its size limit.");
+    if (input == null) return null;
+    if (typeof input === "string") return input.length > 5000 ? `${input.slice(0, 5000)}…` : input;
+    if (typeof input === "boolean") return input;
+    if (typeof input === "number") return Number.isFinite(input) ? input : "[non-finite number]";
+    if (typeof input === "bigint") return input.toString();
+    if (typeof input === "function" || typeof input === "symbol") return "[unsupported]";
+    if (depth >= 8) return "[maximum depth reached]";
+    if (input instanceof Date) return Number.isFinite(input.getTime()) ? input.toISOString() : "[invalid date]";
+    if (typeof input !== "object") return "[unsupported]";
+    if (seen.has(input)) return "[circular]";
+    seen.add(input);
+    if (Array.isArray(input)) return input.map(item => clean(item, depth + 1));
+    const output: Record<string, unknown> = Object.create(null);
+    for (const [key, item] of Object.entries(input)) {
+      output[key] = secretKeyPattern.test(key.toLowerCase().replace(/[^a-z0-9]/g, ""))
+        ? "[redacted]" : clean(item, depth + 1);
+    }
+    return output;
   }
-
-  if (typeof value === "string") {
-    return value.length > maxStringLength
-      ? `${value.slice(0, maxStringLength)}…`
-      : value;
+  const result = clean(value, 0);
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > 32 * 1024) {
+    throw new Error("Audit payload exceeds its size limit.");
   }
-
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (typeof value === "bigint") {
-    return value.toString();
-  }
-
-  if (
-    typeof value === "function" ||
-    typeof value === "symbol"
-  ) {
-    return "[unsupported]";
-  }
-
-  if (depth >= maxDepth) {
-    return "[maximum depth reached]";
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (typeof value !== "object") {
-    return String(value);
-  }
-
-  if (seen.has(value)) {
-    return "[circular]";
-  }
-
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      sanitiseForAudit(item, depth + 1, seen),
-    );
-  }
-
-  const output: Record<string, unknown> = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    output[key] = secretKeyPattern.test(key)
-      ? "[redacted]"
-      : sanitiseForAudit(
-          item,
-          depth + 1,
-          seen,
-        );
-  }
-
-  return output;
+  return result;
 }
 
 function normaliseIp(value: string): string | null {
@@ -192,6 +133,8 @@ function normaliseIp(value: string): string | null {
   if (!candidate) {
     return null;
   }
+
+  if (candidate.startsWith("::ffff:")) candidate = candidate.slice(7);
 
   if (
     candidate.startsWith("[") &&
@@ -202,8 +145,7 @@ function normaliseIp(value: string): string | null {
       candidate.indexOf("]"),
     );
   } else if (
-    candidate.includes(".") &&
-    candidate.includes(":")
+    /^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(candidate)
   ) {
     candidate = candidate.split(":", 1)[0];
   }
@@ -256,6 +198,7 @@ function getDeviceContext(
     return null;
   }
 
+  // Headers are untrusted context hints, never identity or permission evidence.
   return {
     method: request.method,
     pathname: safePathname(request.url),
@@ -270,17 +213,29 @@ function getDeviceContext(
   };
 }
 
-/**
- * Writes one server-side Lottery Management event to lottery_audit_logs.
- * Call this after a successful mutation. Use tryWriteLotteryAuditLog inside
- * an error handler so the original business error is not hidden.
+/** Writes an authenticated administrator event to lottery_audit_logs.
+ * Caller must authorize the specific action. This insert does not authorize it.
+ * Critical mutations and audit must commit inside ONE database transaction;
+ * calling this after a mutation cannot roll that mutation back on audit failure.
+ * Server/webhook events need a separate verified system-actor transaction.
+ * A timeout may have committed: do not blindly retry without idempotency.
  */
 export async function writeLotteryAuditLog(
   input: WriteLotteryAuditLogInput,
 ): Promise<LotteryAuditLogResult> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Invalid lottery audit input.");
+  }
+  const verifiedAdmin = await getAuthenticatedAdmin();
+  if (!verifiedAdmin) {
+    throw Object.assign(new Error("Authentication required to record lottery activity."), { status: 401 });
+  }
+  if (input.actor?.id != null && input.actor.id !== verifiedAdmin.id) {
+    throw Object.assign(new Error("Lottery audit actor does not match the authenticated administrator."), { status: 403 });
+  }
   if (!groupSet.has(input.actionGroup)) {
     throw new Error(
-      `Unsupported lottery audit action group: ${input.actionGroup}`,
+      "Unsupported lottery audit action group.",
     );
   }
 
@@ -288,7 +243,7 @@ export async function writeLotteryAuditLog(
 
   if (!riskLevelSet.has(riskLevel)) {
     throw new Error(
-      `Unsupported lottery audit risk level: ${riskLevel}`,
+      "Unsupported lottery audit risk level.",
     );
   }
 
@@ -303,68 +258,103 @@ export async function writeLotteryAuditLog(
     240,
   );
 
-  const { data, error } = await supabaseAdmin
-    .from("lottery_audit_logs")
-    .insert({
-      lottery_id: cleanOptionalText(
-        input.lotteryId,
-        100,
-      ),
-      lottery_title: cleanOptionalText(
-        input.lotteryTitle,
-        300,
-      ),
-      entity_type: cleanOptionalText(
-        input.entityType,
-        100,
-      ),
-      entity_id: cleanOptionalText(
-        input.entityId,
-        200,
-      ),
-      admin_id: cleanOptionalText(
-        input.actor?.id,
-        100,
-      ),
-      admin_email: cleanOptionalText(
-        input.actor?.email,
-        320,
-      ),
-      admin_name: cleanOptionalText(
-        input.actor?.name,
-        200,
-      ),
-      action_code: actionCode,
-      action_label: actionLabel,
-      action_group: input.actionGroup,
-      risk_level: riskLevel,
-      reason: cleanOptionalText(
-        input.reason,
-        2_000,
-      ),
-      metadata: sanitiseForAudit(
-        input.metadata,
-      ),
-      before_data: sanitiseForAudit(
-        input.beforeData,
-      ),
-      after_data: sanitiseForAudit(
-        input.afterData,
-      ),
-      ip_address: getRequestIp(input.request),
-      device_context: sanitiseForAudit(
-        getDeviceContext(input.request),
-      ),
-    })
-    .select("id, created_at")
-    .single();
+  const payload = {
+    lottery_id: cleanOptionalText(
+      input.lotteryId,
+      100,
+    ),
+    lottery_title: cleanOptionalText(
+      input.lotteryTitle,
+      300,
+    ),
+    entity_type: cleanOptionalText(
+      input.entityType,
+      100,
+    ),
+    entity_id: cleanOptionalText(
+      input.entityId,
+      200,
+    ),
+    admin_id: cleanOptionalText(
+      verifiedAdmin.id,
+      100,
+    ),
+    admin_email: cleanOptionalText(
+      verifiedAdmin.email,
+      320,
+    ),
+    admin_name: cleanOptionalText(
+      verifiedAdmin.name,
+      200,
+    ),
+    action_code: actionCode,
+    action_label: actionLabel,
+    action_group: input.actionGroup,
+    risk_level: riskLevel,
+    reason: cleanOptionalText(
+      input.reason,
+      2_000,
+    ),
+    metadata: sanitiseForAudit(
+      input.metadata,
+    ),
+    before_data: sanitiseForAudit(
+      input.beforeData,
+    ),
+    after_data: sanitiseForAudit(
+      input.afterData,
+    ),
+    ip_address: getRequestIp(input.request),
+    device_context: sanitiseForAudit(
+      getDeviceContext(input.request),
+    ),
+  };
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 128 * 1024) {
+    throw new Error("Audit payload exceeds its size limit.");
+  }
+  let result:
+    | {
+        data?: { id?: string; created_at?: string } | null;
+        error?: unknown;
+      }
+    | undefined;
 
-  if (error || !data) {
-    throw new Error(
-      `Lottery audit log insert failed: ${
-        error?.message ?? "No row was returned."
-      }`,
-    );
+  try {
+    result = await new Promise<{
+      data?: { id?: string; created_at?: string } | null;
+      error?: unknown;
+    }>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(Object.assign(new Error("Lottery audit request timed out."), { status: 504 }));
+      }, 10_000);
+
+      getAuditServiceClient()
+        .from("lottery_audit_logs")
+        .insert(payload)
+        .select("id, created_at")
+        .single()
+        .then(
+          (value) => {
+            clearTimeout(timeoutId);
+            resolve(value as {
+              data?: { id?: string; created_at?: string } | null;
+              error?: unknown;
+            });
+          },
+          (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          },
+        );
+    });
+  } catch {
+    throw Object.assign(new Error("Unable to record lottery audit activity."), { status: 503 });
+  }
+
+  const { data, error } = result ?? {};
+  if (error || !data || typeof data.id !== "string" || !data.id ||
+      typeof data.created_at !== "string" || !Number.isFinite(Date.parse(data.created_at))) {
+    throw Object.assign(new Error("Unable to confirm lottery audit activity was recorded."), { status: 503 });
   }
 
   return {
@@ -373,9 +363,6 @@ export async function writeLotteryAuditLog(
   };
 }
 
-/**
- * Best-effort variant for catch blocks and failure reporting.
- */
 export async function tryWriteLotteryAuditLog(
   input: WriteLotteryAuditLogInput,
 ): Promise<
@@ -393,34 +380,20 @@ export async function tryWriteLotteryAuditLog(
       ok: true,
       result: await writeLotteryAuditLog(input),
     };
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unknown lottery audit log error.";
-
-    console.error(
-      "Lottery audit log write failed:",
-      message,
-    );
-
-    return {
-      ok: false,
-      error: message,
-    };
+  } catch {
+    const message = "Unable to record lottery audit activity.";
+    console.error(message);
+    return { ok: false, error: message };
   }
 }
 
-/**
- * Produces a short, safe reason value for a failed API action.
- */
 export function getLotteryAuditErrorReason(
   error: unknown,
 ): string {
-  const message =
-    error instanceof Error
-      ? error.message
-      : "Unknown error";
-
-  return message.slice(0, 2_000);
+  const status = error && typeof error === "object"
+    ? (error as { status?: unknown }).status : undefined;
+  if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) {
+    return `Lottery action failed (HTTP ${status}).`;
+  }
+  return "Lottery action failed.";
 }

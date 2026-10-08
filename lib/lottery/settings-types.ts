@@ -1,3 +1,6 @@
+/** Shared data contracts only: settings flags do not prove runtime enforcement.
+ * Validate untrusted requests on the server before using these types.
+ */
 export type LotterySettingsGroup =
   | "general"
   | "tickets"
@@ -15,6 +18,19 @@ export type LotteryWinnerPublicDisplay =
   | "first_name"
   | "ticket_number"
   | "hidden";
+
+/** Settings use "hidden"; published-result records use "none". */
+export function winnerDisplayForPublicResult(
+  display: LotteryWinnerPublicDisplay,
+): "full_name" | "first_name" | "ticket_number" | "none" {
+  switch (display) {
+    case "hidden": return "none";
+    case "full_name": return "full_name";
+    case "first_name": return "first_name";
+    case "ticket_number": return "ticket_number";
+    default: throw new Error("Invalid winner display setting.");
+  }
+}
 
 export type LotteryDefaultType =
   | "small_society"
@@ -45,6 +61,7 @@ export interface LotteryPaymentSettings {
   providerLabel: string;
   mode: LotteryPaymentMode;
   currency: "GBP";
+  /** Configuration hint; verify provider credentials and signed webhook delivery separately. */
   webhookConfigured: boolean;
   requireServerConfirmedPayment: true;
   enableRefundWorkflow: boolean;
@@ -100,9 +117,9 @@ export interface LotteryComplianceSettings {
 export interface LotterySecuritySettings {
   requireAuthenticatedAdmin: true;
   requireServerPermissionChecks: true;
-  requireRecent2FAForHighRiskActions: boolean;
+  requireRecent2FAForHighRiskActions: true;
   auditDeniedPermissionAttempts: boolean;
-  separateTestAndProductionLotteries: boolean;
+  separateTestAndProductionLotteries: true;
   noIndexAdminPages: true;
   requireReasonForHighRiskSettingsChanges: true;
 }
@@ -122,7 +139,8 @@ export interface LotterySettingsStatus {
   paymentProvider: "configured" | "not_configured";
   compliance: "configured" | "needs_attention";
   notifications: "enabled" | "disabled";
-  security: "protected";
+  /** "protected" requires verified runtime controls; settings flags alone are insufficient. */
+  security: "protected" | "unverified";
   lastUpdatedAt: string | null;
   lastUpdatedBy: string | null;
 }
@@ -134,25 +152,23 @@ export interface LotterySettingsResponse {
   permissions: {
     canView: boolean;
     canEditGeneral: boolean;
+    /** Legacy UI flag; never authorizes payment/settings writes. */
     canEditFinance: boolean;
     canEditCompliance: boolean;
     canEditSecurity: boolean;
+    /** Derived from verified lottery:settings:manage permission by the server. */
+    canManageSettings?: boolean;
   };
 }
 
-export interface UpdateLotterySettingsRequest {
-  group: LotterySettingsGroup;
-  value:
-    | LotteryGeneralSettings
-    | LotteryTicketSettings
-    | LotteryPaymentSettings
-    | LotteryDrawSettings
-    | LotteryWinnerPrivacySettings
-    | LotteryNotificationSettings
-    | LotteryComplianceSettings
-    | LotterySecuritySettings;
-  reason?: string | null;
-}
+/** A discriminated union binds each group to its exact settings value. */
+export type UpdateLotterySettingsRequest = {
+  [Group in LotterySettingsGroup]: {
+    group: Group;
+    value: LotterySettings[Group];
+    reason?: string | null;
+  };
+}[LotterySettingsGroup];
 
 export const LOTTERY_SETTINGS_GROUPS: {
   value: LotterySettingsGroup;
@@ -201,14 +217,18 @@ export const LOTTERY_SETTINGS_GROUPS: {
   },
 ];
 
+/** Defaults are a starting configuration, not approval to publish or take payments.
+ * Existing persisted settings are not migrated by changing these defaults.
+ * Compliance numbers require review for the selected lottery classification.
+ */
 export const DEFAULT_LOTTERY_SETTINGS: LotterySettings = {
   general: {
     organisationName: "Burton Pride",
     currency: "GBP",
     timezone: "Europe/London",
     defaultLotteryType: "small_society",
-    showInPublicDirectoryByDefault: true,
-    allowPreSalesPublicPageByDefault: true,
+    showInPublicDirectoryByDefault: false,
+    allowPreSalesPublicPageByDefault: false,
     countdownEnabledByDefault: true,
   },
   tickets: {
@@ -238,7 +258,7 @@ export const DEFAULT_LOTTERY_SETTINGS: LotterySettings = {
     requireElevatedPermissionForRedraw: true,
   },
   winners_privacy: {
-    defaultPublicDisplay: "first_name",
+    defaultPublicDisplay: "hidden",
     allowPerLotteryOverride: true,
     storeContactAttemptHistory: true,
     requireFulfilmentDate: true,
