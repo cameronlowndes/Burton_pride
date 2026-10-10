@@ -1,3 +1,4 @@
+import { isPublicLottery } from "@/lib/lottery/public-visibility";
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -59,7 +60,7 @@ export async function GET(
 
     const { data: lottery, error: lotteryError } = await supabaseAdmin
       .from("lotteries")
-      .select("id,title,slug,status,draw_at,show_in_public_directory,allow_page_before_sales,results_publish_at")
+      .select("id,title,slug,status,show_in_public_directory,allow_page_before_sales,results_publish_at,is_active,publication_at,sales_open_at,sales_close_at,draw_at")
       .eq("slug", slug)
       .eq("show_in_public_directory", true)
       .in("status", [...PUBLIC_STATUSES])
@@ -67,7 +68,7 @@ export async function GET(
 
     if (lotteryError) throw new Error("Lottery lookup failed.");
     if (
-      !lottery || lottery.show_in_public_directory !== true ||
+      !lottery || !isPublicLottery(lottery) || lottery.show_in_public_directory !== true ||
       !PUBLIC_STATUSES.has(lottery.status) ||
       (lottery.status === "scheduled" && lottery.allow_page_before_sales !== true)
     ) {

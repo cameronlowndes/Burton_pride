@@ -6,16 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const READ_ONLY_ACTION_CODES = [
-  "security.audit_logs.viewed",
-  "security.audit_logs.permission_denied",
-  "security.audit_logs.invalid_filter",
-  "security.audit_logs.load_failed",
-  "export.audit_logs.csv",
-  "report.exported",
-  "export.exported",
-];
-const READ_ONLY_ACTION_CODES_FILTER = `(${READ_ONLY_ACTION_CODES.join(",")})`;
+
 class RouteError extends Error {
   constructor(
     public status: number,
@@ -160,13 +151,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
           "id,created_at,admin_id,admin_name,action_code,action_label,action_group,risk_level,lottery_id,lottery_title,entity_type,entity_id",
         )
         .eq("id", id)
-        .neq("action_group", "export")
-        .not("action_code", "in", READ_ONLY_ACTION_CODES_FILTER)
-        .not("action_code", "ilike", "%.viewed")
-        .not("action_code", "ilike", "%.permission_denied")
-        .not("action_code", "ilike", "%.invalid_filter")
-        .not("action_code", "ilike", "%.load_failed")
-        .not("action_code", "ilike", "%.exported")
         .abortSignal(controller.signal)
         .maybeSingle(),
       controller.signal,
@@ -175,16 +159,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
       throw new RouteError(503, "Unable to load the audit record.");
     if (!result.data) throw new RouteError(404, "Audit record not found.");
     const row = result.data;
-    // Retain the same policy at projection time, so this endpoint cannot be used
-    // to bypass the list's exclusions by guessing a historical record ID.
-    if (
-      row.action_group === "export" ||
-      READ_ONLY_ACTION_CODES.includes(row.action_code) ||
-      /\.(viewed|permission_denied|invalid_filter|load_failed|exported)$/i.test(
-        row.action_code,
-      )
-    )
-      throw new RouteError(404, "Audit record not found.");
     if (typeof row.id !== "string" || row.id.toLowerCase() !== id)
       throw new RouteError(503, "Unable to load the audit record.");
     return json(

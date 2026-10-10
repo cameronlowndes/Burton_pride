@@ -97,7 +97,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const access = await authenticate();
     if (!access) return fail("LOTTERY_AUTH_REQUIRED", "A verified administrator session is required.", 401);
-    if (!hasLotteryPermission(access.admin, "lottery:close_sales" as Parameters<typeof hasLotteryPermission>[1])) {
+    if (!hasLotteryPermission(access.admin, "lottery:close-sales")) {
       return fail("LOTTERY_PERMISSION_DENIED", "You do not have permission to close lottery sales.", 403);
     }
     if (!originAllowed(request)) return fail("LOTTERY_ORIGIN_DENIED", "The request origin is not allowed.", 403);

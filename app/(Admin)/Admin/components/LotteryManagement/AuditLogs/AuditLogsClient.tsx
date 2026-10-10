@@ -2,10 +2,38 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type {
-  LotteryAuditLog,
-  LotteryAuditResponse,
-} from "@/lib/lottery/audit-types";
+
+type LotteryAuditLog = {
+  id: string;
+  created_at: string;
+  action_code: string;
+  action_label: string;
+  action_group?: string | null;
+  risk_level?: string | null;
+  admin_name?: string | null;
+  admin_email?: string | null;
+  admin_id?: string | null;
+  lottery_title?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  reason?: string | null;
+  device_context?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  before_data?: Record<string, unknown> | null;
+  after_data?: Record<string, unknown> | null;
+};
+
+type LotteryAuditResponse = {
+  logs: LotteryAuditLog[];
+  total: number;
+  summary: {
+    total: number;
+    highRisk: number;
+    denied: number;
+    exports: number;
+    draws: number;
+  };
+};
 
 type Filters = {
   search: string;

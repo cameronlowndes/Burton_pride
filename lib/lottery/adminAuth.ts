@@ -1,3 +1,4 @@
+import { normaliseLotteryPermissions } from "./permissions";
 import "server-only";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
@@ -109,11 +110,7 @@ export async function requireLotteryPermission(permission: string): Promise<Lott
     typeof admin.id !== "string" || !admin.id
   ) throw authError(403, "An active administrator account is required.");
 
-  const permissions: string[] = Array.isArray(admin.permissions)
-    ? [...new Set(admin.permissions.filter((value: unknown): value is string =>
-        typeof value === "string",
-      ))] as string[]
-    : [];
+  const permissions = normaliseLotteryPermissions(admin.permissions);
   const mainAdmin = admin.role === "main_admin" || admin.is_main_admin === true;
   if (!mainAdmin && !permissions.includes(permission)) {
     throw authError(403, "You do not have permission to perform this action.");

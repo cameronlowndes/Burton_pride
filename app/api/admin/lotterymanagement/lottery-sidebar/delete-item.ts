@@ -1,10 +1,6 @@
+import { getAuthenticatedAdmin } from "@/lib/lottery/audit-server";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-
-type AdminProfile = {
-  role?: unknown;
-  email?: unknown;
-};
 
 function json(body: Record<string, unknown>, status: number) {
   return NextResponse.json(body, {
@@ -13,30 +9,10 @@ function json(body: Record<string, unknown>, status: number) {
   });
 }
 
-function getAdminProfile(value: unknown): AdminProfile | null {
-  if (!value || typeof value !== "object") return null;
-  const result = value as Record<string, unknown>;
-  if (result.ok === false) return null;
-  const admin = result.admin ?? result.user ?? result.profile ?? result;
-  return admin && typeof admin === "object" ? (admin as AdminProfile) : null;
-}
-
 async function authenticatedMainAdmin(request: NextRequest) {
-  // Reuse the Admin Portal's established cookie/session validation.
-  const profileUrl = new URL("/api/admin/me", request.nextUrl.origin);
-  const response = await fetch(profileUrl, {
-    method: "GET",
-    headers: { cookie: request.headers.get("cookie") ?? "" },
-    cache: "no-store",
-    redirect: "error",
-  });
-  if (!response.ok) return null;
-
-  const profile = getAdminProfile(await response.json().catch(() => null));
-  if (profile?.role !== "main_admin" || typeof profile.email !== "string") {
-    return null;
-  }
-  return { email: profile.email };
+  const admin = await getAuthenticatedAdmin();
+  if (!admin || admin.role !== "main_admin" || !admin.email) return null;
+  return { ...admin, email: admin.email };
 }
 
 export async function deleteSidebarItem(
@@ -44,7 +20,7 @@ export async function deleteSidebarItem(
   id: string,
   body: unknown,
 ) {
-  if (!id || id.length > 128) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     return json({ ok: false, error: "A valid sidebar item ID is required." }, 400);
   }
 

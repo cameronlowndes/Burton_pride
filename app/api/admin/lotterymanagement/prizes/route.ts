@@ -13,10 +13,6 @@ const ALLOWED_STATUSES = new Set([
   "draft",
   "confirmed",
   "available_for_draw",
-  "allocated",
-  "claimed",
-  "fulfilled",
-  "unclaimed",
   "withdrawn",
 ]);
 
@@ -201,7 +197,7 @@ export async function POST(request: NextRequest) {
       return response({ ok: false, error: "Unauthorized." }, 401);
     }
 
-    if (!hasLotteryPermission(admin, "lottery:view")) {
+    if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
       return response(
         { ok: false, error: "You do not have permission to create prizes." },
         403,
@@ -318,7 +314,7 @@ export async function PATCH(request: NextRequest) {
       return response({ ok: false, error: "Unauthorized." }, 401);
     }
 
-    if (!hasLotteryPermission(admin, "lottery:view")) {
+    if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
       return response(
         { ok: false, error: "You do not have permission to update prizes." },
         403,
@@ -354,23 +350,11 @@ export async function PATCH(request: NextRequest) {
 
     const proposed: Record<string, unknown> = {};
 
-    if ("lottery_id" in body) {
-      const lotteryId = String(body.lottery_id || "").trim();
-      if (!isValidUuid(lotteryId)) {
-        return response({ ok: false, error: "A valid lottery is required." }, 400);
-      }
-
-      const { data: targetLottery, error: targetLotteryError } = await db
-        .from("lotteries")
-        .select("id")
-        .eq("id", lotteryId)
-        .maybeSingle();
-
-      if (targetLotteryError || !targetLottery) {
-        return response({ ok: false, error: "Lottery not found." }, 404);
-      }
-
-      proposed.lottery_id = lotteryId;
+    if ("lottery_id" in body && body.lottery_id !== existing.lottery_id) {
+      return response({ ok: false, error: "Prizes cannot be moved between lotteries." }, 409);
+    }
+    if (existing.allocated_winner_id || ["allocated", "claimed", "fulfilled", "unclaimed"].includes(existing.status)) {
+      return response({ ok: false, error: "Allocated prizes must use the controlled winner workflow." }, 409);
     }
 
     if ("name" in body) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAuthenticatedAdmin,
+  getAuditServiceClient,
   hasLotteryPermission,
   writeLotteryAuditSafe,
 } from "@/lib/lottery/audit-server";
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!hasLotteryPermission(admin, "lottery:view")) {
+    if (!hasLotteryPermission(admin, "lottery:create")) {
       return NextResponse.json(
         {
           ok: false,
@@ -291,7 +292,10 @@ export async function POST(req: NextRequest) {
     // Creating the draft enables paper ticketing only. The protected batch
     // generator creates random ticket identities and updates the count later.
     // Never reserve a sequential range or trust a browser-supplied stock count.
-    const paperTicketsEnabled = body.paper_tickets_enabled === true;
+    if (body.paper_tickets_enabled === true) {
+      return NextResponse.json({ ok: false, error: "Paper tickets are coming soon." }, { status: 409 });
+    }
+    const paperTicketsEnabled = false;
 
     const maximumProceeds =
       body.maximum_proceeds === null ||
@@ -434,10 +438,7 @@ export async function POST(req: NextRequest) {
 
       maximum_prize_value: maximumPrizeValue,
 
-      show_in_directory:
-        body.show_in_directory !== undefined
-          ? Boolean(body.show_in_directory)
-          : true,
+      show_in_public_directory: false,
 
       allow_page_before_sales:
         Boolean(body.allow_page_before_sales),

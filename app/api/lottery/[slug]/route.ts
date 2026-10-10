@@ -1,3 +1,4 @@
+import { isPublicLottery } from "@/lib/lottery/public-visibility";
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -73,20 +74,7 @@ function timestamp(value: unknown): number | null {
 }
 
 function publicDirectoryVisible(row: DirectoryRow, now: number) {
-  if (row.is_active !== true || row.show_in_public_directory !== true ||
-      !PUBLIC_STATUSES.some(status => status === row.status)) return false;
-  const publication = timestamp(row.publication_at);
-  if (publication === null || publication > now) return false;
-  if (row.status === "completed") {
-    const results = timestamp(row.results_publish_at);
-    if (results === null || results > now) return false;
-  }
-  const open = timestamp(row.sales_open_at), close = timestamp(row.sales_close_at), draw = timestamp(row.draw_at);
-  if (open === null || close === null || draw === null || close <= open || draw < close) return false;
-  if (row.status === "scheduled" && now >= close) return false;
-  if (row.status === "completed" && now < draw) return false;
-  if (now < open && (row.status !== "scheduled" || row.allow_page_before_sales !== true)) return false;
-  return true;
+  return isPublicLottery(row, now);
 }
 
 function pricePence(row: DirectoryRow): number | null {
@@ -187,7 +175,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       ticketCount = result.count;
     }
     const openAt = timestamp(lottery.sales_open_at), closeAt = timestamp(lottery.sales_close_at);
-    const canPurchase = lottery.status === "live" && openAt !== null && closeAt !== null && now >= openAt && now < closeAt &&
+    const canPurchase = process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") === true && lottery.status === "live" && openAt !== null && closeAt !== null && now >= openAt && now < closeAt &&
       ticketPrice > 0 && maxTickets !== null && wholePositive(lottery.minimum_age) !== null &&
       Boolean(lottery.terms_version) && Boolean(lottery.privacy_notice_version) &&
       (ticketCount === null || ticketCount < maxTickets);

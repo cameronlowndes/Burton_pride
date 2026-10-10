@@ -3,7 +3,6 @@
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
@@ -191,6 +190,8 @@ type Lottery = {
 };
 
 type EditForm = {
+  paperTicketsEnabled: boolean;
+
   title: string;
 
   shortSummary: string;
@@ -278,13 +279,7 @@ type ApiResponse = {
   details?: unknown;
 };
 
-// Lifecycle and age are server-owned; this form never mutates them.
-const LOTTERY_STATUSES = new Set<LotteryStatus>([
-  "draft", "compliance_review", "scheduled", "live", "paused", "sales_closed",
-  "draw_ready", "completed", "archived", "cancelled", "under_review",
-]);
-const REQUEST_TIMEOUT_MS = 20_000;
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const REQUIRED_MINIMUM_AGE = 18;
 
 type PageProps = {
   params: Promise<{
@@ -365,375 +360,1042 @@ function localDateToIso(
   return date.toISOString();
 }
 
-function isSafeImageUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password;
-  } catch { return false; }
-}
+async function readJson(
+  response: Response,
+): Promise<ApiResponse> {
+  const text =
+    await response.text();
 
-function isLottery(value: unknown): value is Lottery {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Record<string, unknown>;
-  const strings = ["short_summary", "description", "fundraising_purpose", "hero_image_url", "currency",
-    "publication_at", "sales_open_at", "sales_close_at", "draw_at", "results_publish_at",
-    "geographic_eligibility", "terms_version", "privacy_notice_version", "responsible_gambling_info",
-    "created_at", "updated_at"];
-  const numbers = ["ticket_price", "ticket_price_pence", "minimum_age", "max_tickets", "order_count",
-    "paid_order_count", "ticket_count", "prize_count", "winner_count", "revenue", "refund_total"];
-  const booleans = ["is_active", "show_in_public_directory", "allow_page_before_sales", "show_ticket_count",
-    "show_amount_raised", "show_remaining_tickets", "show_prize_values", "countdown_enabled", "is_featured"];
-  return typeof item.id === "string" && item.id.length > 0 &&
-    typeof item.title === "string" && typeof item.slug === "string" &&
-    typeof item.status === "string" && LOTTERY_STATUSES.has(item.status as LotteryStatus) &&
-    strings.every(key => item[key] == null || typeof item[key] === "string") &&
-    numbers.every(key => item[key] == null || (typeof item[key] === "number" && Number.isFinite(item[key]))) &&
-    booleans.every(key => item[key] == null || typeof item[key] === "boolean") &&
-    (item.winner_display_mode == null || ["full_name", "first_name", "ticket_number", "none"].includes(String(item.winner_display_mode)));
-}
-
-async function readJson(response: Response): Promise<ApiResponse> {
-  // Never display raw HTML, database diagnostics, or unexpected exception text.
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Invalid response");
-  const decoder = new TextDecoder();
-  let result = "";
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_RESPONSE_BYTES) throw new Error("Response too large");
-      result += decoder.decode(value, { stream: true });
-    }
-    result += decoder.decode();
-    const data: unknown = JSON.parse(result);
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid response");
-    const raw = data as Record<string, unknown>;
+  if (!text) {
     return {
-      ok: raw.ok === true,
-      item: isLottery(raw.item) ? raw.item : undefined,
-      request_id: typeof raw.request_id === "string" && /^[a-zA-Z0-9_-]{1,100}$/.test(raw.request_id)
-        ? raw.request_id : undefined,
+      ok: false,
+
+      code:
+        "API_EMPTY_RESPONSE",
+
+      error:
+        "The API returned an empty response.",
     };
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
   }
-}
 
-async function requestLottery(route: string, init: RequestInit, signal: AbortSignal) {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal.addEventListener("abort", abort, { once: true });
-  if (signal.aborted) abort();
-  const timer = setTimeout(abort, REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(route, {
-      ...init, credentials: "include", cache: "no-store", signal: controller.signal,
-    });
-    const data = await readJson(response);
-    return { response, data };
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener("abort", abort);
+    return JSON.parse(
+      text,
+    );
+  } catch {
+    return {
+      ok: false,
+
+      code:
+        "API_INVALID_JSON",
+
+      error:
+        "The API returned an invalid response.",
+
+      details: {
+        preview:
+          text.slice(
+            0,
+            500,
+          ),
+      },
+    };
   }
 }
 
-function responseError(status: number, request_id?: string): ApiResponse {
-  const error = status === 401 ? "Your session has expired. Sign in again before continuing." :
-    status === 403 ? "You do not have permission to make this change." :
-    status === 409 ? "This change conflicts with the current lottery or requires a separate approval workflow. Reload and review it." :
-    status === 400 || status === 422 ? "The server rejected these changes. Check the fields and the lottery's compliance requirements." :
-    "The request could not be completed. Reload the lottery and check its current values.";
-  return { ok: false, code: `LOTTERY_EDIT_HTTP_${status}`, error, request_id };
-}
+export default function EditLotteryPage({
+  params,
+}: PageProps) {
+  const [
+    id,
+    setId,
+  ] =
+    useState("");
 
-const EDIT_COLUMNS: Record<keyof EditForm, string[]> = {
-  title: ["title"], shortSummary: ["short_summary"],
-  description: ["description"], fundraisingPurpose: ["fundraising_purpose"],
-  heroImageUrl: ["hero_image_url"], status: [],
-  ticketPrice: ["ticket_price"], currency: ["currency"],
-  minimumAge: [], maxTickets: ["max_tickets"],
-  publicationAt: ["publication_at"], salesOpenAt: ["sales_open_at"],
-  salesCloseAt: ["sales_close_at"], drawAt: ["draw_at"],
-  resultsPublishAt: ["results_publish_at"],
-  geographicEligibility: ["geographic_eligibility"],
-  termsVersion: ["terms_version"], privacyNoticeVersion: ["privacy_notice_version"],
-  responsibleGamblingInfo: ["responsible_gambling_info"],
-  showInDirectory: ["show_in_public_directory"],
-  allowPageBeforeSales: ["allow_page_before_sales"],
-  showTicketCount: ["show_ticket_count"], showAmountRaised: ["show_amount_raised"],
-  showRemainingTickets: ["show_remaining_tickets"], showPrizeValues: ["show_prize_values"],
-  countdownEnabled: ["countdown_enabled"],
-  winnerDisplayMode: ["winner_display_mode"], isFeatured: ["is_featured"],
-};
+  const [
+    lottery,
+    setLottery,
+  ] =
+    useState<Lottery | null>(
+      null,
+    );
 
-function lotteryToEditForm(item: Lottery): EditForm {
-  return {
-      title: item.title || "",
-      shortSummary: item.short_summary || "",
-      description: item.description || "",
-      fundraisingPurpose: item.fundraising_purpose || "",
-      heroImageUrl: item.hero_image_url || "",
-      status: item.status,
-      ticketPrice: Number(item.ticket_price ?? (item.ticket_price_pence ?? 0) / 100).toFixed(2),
-      currency: item.currency || "GBP",
-      minimumAge: item.minimum_age != null ? String(item.minimum_age) : "",
-      maxTickets: item.max_tickets != null ? String(item.max_tickets) : "",
-      publicationAt: toDateTimeLocal(item.publication_at),
-      salesOpenAt: toDateTimeLocal(item.sales_open_at),
-      salesCloseAt: toDateTimeLocal(item.sales_close_at),
-      drawAt: toDateTimeLocal(item.draw_at),
-      resultsPublishAt: toDateTimeLocal(item.results_publish_at),
-      geographicEligibility: item.geographic_eligibility || "",
-      termsVersion: item.terms_version || "",
-      privacyNoticeVersion: item.privacy_notice_version || "",
-      responsibleGamblingInfo: item.responsible_gambling_info || "",
-      showInDirectory: item.show_in_public_directory === true,
-      allowPageBeforeSales: item.allow_page_before_sales === true,
-      showTicketCount: item.show_ticket_count === true,
-      showAmountRaised: item.show_amount_raised === true,
-      showRemainingTickets: item.show_remaining_tickets === true,
-      showPrizeValues: item.show_prize_values === true,
-      countdownEnabled: item.countdown_enabled === true,
-      winnerDisplayMode: item.winner_display_mode || "ticket_number",
-      isFeatured: item.is_featured === true,
-  };
-}
+  const [
+    form,
+    setForm,
+  ] =
+    useState<EditForm | null>(
+      null,
+    );
 
+  const [
+    loading,
+    setLoading,
+  ] =
+    useState(true);
 
-export default function EditLotteryPage({ params }: PageProps) {
-  const [id, setId] = useState("");
-  const [lottery, setLottery] = useState<Lottery | null>(null);
-  const [form, setForm] = useState<EditForm | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<ApiResponse | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [confirmSave, setConfirmSave] = useState(false);
-  const [saveUncertain, setSaveUncertain] = useState(false);
-  const editVersion = useRef(0);
-  const savingRef = useRef(false);
-  const lifecycle = useRef<AbortController | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [
+    saving,
+    setSaving,
+  ] =
+    useState(false);
 
+  const [
+    error,
+    setError,
+  ] =
+    useState<
+      ApiResponse | null
+    >(null);
+
+  const [
+    success,
+    setSuccess,
+  ] =
+    useState<
+      string | null
+    >(null);
+
+  const [
+    confirmSave,
+    setConfirmSave,
+  ] =
+    useState(false);
+
+  /*
+   * =====================================================
+   * RESOLVE ID
+   * =====================================================
+   */
   useEffect(() => {
     let active = true;
-    params.then(result => {
-      if (!active) return;
-      if (!result.id) throw new Error("Missing lottery ID");
-      setId(result.id);
-    }).catch(() => {
-      if (active) {
-        setLoading(false);
-        setError({ error: "Unable to resolve the lottery. Return to the lottery list and open it again." });
-      }
-    });
-    return () => { active = false; };
+
+    params.then(
+      (result) => {
+        if (active) {
+          setId(
+            result.id,
+          );
+        }
+      },
+    );
+
+    return () => {
+      active = false;
+    };
   }, [params]);
 
+  /*
+   * =====================================================
+   * LOAD LOTTERY
+   * =====================================================
+   */
   useEffect(() => {
-    if (!id) return;
-    const controller = new AbortController();
-    lifecycle.current = controller;
-    setLoading(true);
-    setLottery(null);
-    setForm(null);
-    setError(null);
-    setSuccess(null);
-    setConfirmSave(false);
-    setSaveUncertain(false);
-    setSaving(false);
-    savingRef.current = false;
-    editVersion.current += 1;
-    async function load() {
+    if (!id) {
+      return;
+    }
+
+    let cancelled =
+      false;
+
+    async function loadLottery() {
       try {
-        const { response, data } = await requestLottery(
-          `/api/admin/lotterymanagement/lottery/${encodeURIComponent(id)}`,
-          { method: "GET" }, controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        if (!response.ok || !data.ok || !data.item || data.item.id !== id) {
-          setError(responseError(response.status, data.request_id));
+        setLoading(true);
+
+        setError(null);
+
+        const route =
+          `/api/admin/lotterymanagement/lottery/${encodeURIComponent(
+            id,
+          )}`;
+
+        const response =
+          await fetch(
+            route,
+            {
+              method:
+                "GET",
+
+              credentials:
+                "include",
+
+              cache:
+                "no-store",
+            },
+          );
+
+        const data =
+          await readJson(
+            response,
+          );
+
+        if (
+          !response.ok ||
+          !data.ok ||
+          !data.item
+        ) {
+          throw {
+            ...data,
+
+            error:
+              data.error ||
+              "Unable to load this lottery.",
+
+            code:
+              data.code ||
+              "LOTTERY_EDIT_LOAD_FAILED",
+          };
+        }
+
+        if (cancelled) {
           return;
         }
-        setLottery(data.item);
-        setForm(lotteryToEditForm(data.item));
-      } catch {
-        if (!controller.signal.aborted) setError({ error: "Unable to load the lottery. Reload the page to try again." });
+
+        const item =
+          data.item;
+
+        setLottery(
+          item,
+        );
+
+        setForm({
+          paperTicketsEnabled: item.paper_tickets_enabled === true,
+          title:
+            item.title ||
+            "",
+
+          shortSummary:
+            item.short_summary ||
+            "",
+
+          description:
+            item.description ||
+            "",
+
+          fundraisingPurpose:
+            item.fundraising_purpose ||
+            "",
+
+          heroImageUrl:
+            item.hero_image_url ||
+            "",
+
+          status:
+            item.status,
+
+          ticketPrice:
+            typeof item.ticket_price ===
+            "number"
+              ? item.ticket_price.toFixed(
+                  2,
+                )
+              : typeof item.ticket_price_pence ===
+                    "number"
+                ? (
+                    item.ticket_price_pence /
+                    100
+                  ).toFixed(
+                    2,
+                  )
+                : "",
+
+          currency:
+            item.currency ||
+            "GBP",
+
+          minimumAge:
+            String(
+              REQUIRED_MINIMUM_AGE,
+            ),
+
+          maxTickets:
+            item.max_tickets !==
+            null
+              ? String(
+                  item.max_tickets,
+                )
+              : "",
+
+          publicationAt:
+            toDateTimeLocal(
+              item.publication_at,
+            ),
+
+          salesOpenAt:
+            toDateTimeLocal(
+              item.sales_open_at,
+            ),
+
+          salesCloseAt:
+            toDateTimeLocal(
+              item.sales_close_at,
+            ),
+
+          drawAt:
+            toDateTimeLocal(
+              item.draw_at,
+            ),
+
+          resultsPublishAt:
+            toDateTimeLocal(
+              item.results_publish_at,
+            ),
+
+          geographicEligibility:
+            item.geographic_eligibility ||
+            "",
+
+          termsVersion:
+            item.terms_version ||
+            "",
+
+          privacyNoticeVersion:
+            item.privacy_notice_version ||
+            "",
+
+          responsibleGamblingInfo:
+            item.responsible_gambling_info ||
+            "",
+
+          showInDirectory:
+            item.show_in_public_directory ===
+              true ||
+            item.show_in_directory ===
+              true,
+
+          allowPageBeforeSales:
+            item.allow_page_before_sales ===
+            true,
+
+          showTicketCount:
+            item.show_ticket_count ===
+            true,
+
+          showAmountRaised:
+            item.show_amount_raised ===
+            true,
+
+          showRemainingTickets:
+            item.show_remaining_tickets ===
+            true,
+
+          showPrizeValues:
+            item.show_prize_values ===
+            true,
+
+          countdownEnabled:
+            item.countdown_enabled ===
+            true,
+
+          winnerDisplayMode:
+            item.winner_display_mode ||
+            "ticket_number",
+
+          isFeatured:
+            item.is_featured ===
+            true,
+        });
+      } catch (
+        problem: any
+      ) {
+        if (
+          !cancelled
+        ) {
+          setError({
+            ok:
+              false,
+
+            code:
+              problem?.code ||
+              "LOTTERY_EDIT_LOAD_FAILED",
+
+            error:
+              problem?.error ||
+              problem?.message ||
+              "Unable to load this lottery.",
+
+            request_id:
+              problem?.request_id,
+
+            details:
+              problem?.details,
+          });
+        }
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (
+          !cancelled
+        ) {
+          setLoading(
+            false,
+          );
+        }
       }
     }
-    void load();
-    return () => { controller.abort(); };
+
+    loadLottery();
+
+    return () => {
+      cancelled =
+        true;
+    };
   }, [id]);
 
-  useEffect(() => {
-    if (!confirmSave) return;
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const previousFocus = document.activeElement;
-    dialog.showModal();
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      dialog.close();
-      document.body.style.overflow = previousOverflow;
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
-    };
-  }, [confirmSave]);
+  function updateField<
+    K extends keyof EditForm,
+  >(
+    key: K,
+    value: EditForm[K],
+  ) {
+    setForm(
+      (current) =>
+        current
+          ? {
+              ...current,
 
-  function updateField<K extends keyof EditForm>(key: K, value: EditForm[K]) {
-    if (savingRef.current || key === "status" || key === "minimumAge") return;
-    editVersion.current += 1;
-    setForm(current => current ? { ...current, [key]: value } : current);
+              [key]:
+                value,
+            }
+          : current,
+    );
+
     setSuccess(null);
   }
 
-  const hasChanges = useMemo(() => {
-    if (!form || !lottery) return false;
-    const initial = lotteryToEditForm(lottery);
-    return (Object.keys(initial) as (keyof EditForm)[]).some(key => form[key] !== initial[key]);
-  }, [form, lottery]);
+  /*
+   * =====================================================
+   * DIRTY CHECK
+   * =====================================================
+   */
+  const hasChanges =
+    useMemo(() => {
+      if (
+        !form ||
+        !lottery
+      ) {
+        return false;
+      }
 
+      const price =
+        Number(
+          form.ticketPrice,
+        );
+
+      return (
+        form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) ||
+        form.maxTickets !== (lottery.max_tickets != null ? String(lottery.max_tickets) : "") ||
+        form.title !==
+          lottery.title ||
+        form.shortSummary !==
+          (
+            lottery.short_summary ||
+            ""
+          ) ||
+        form.description !==
+          (
+            lottery.description ||
+            ""
+          ) ||
+        form.fundraisingPurpose !==
+          (
+            lottery.fundraising_purpose ||
+            ""
+          ) ||
+        form.heroImageUrl !==
+          (
+            lottery.hero_image_url ||
+            ""
+          ) ||
+        form.status !==
+          lottery.status ||
+        (
+          Number.isFinite(
+            price,
+          )
+            ? price
+            : 0
+        ) !==
+          Number(
+            lottery.ticket_price ??
+              (
+                lottery.ticket_price_pence ??
+                0
+              ) /
+                100,
+          ) ||
+        form.showInDirectory !==
+          (
+            lottery.show_in_public_directory ===
+              true ||
+            lottery.show_in_directory ===
+              true
+          ) ||
+        form.isFeatured !==
+          (
+            lottery.is_featured ===
+            true
+          )
+      );
+    }, [
+      form,
+      lottery,
+    ]);
+
+  /*
+   * =====================================================
+   * VALIDATE BEFORE SAVE
+   * =====================================================
+   */
   function validate() {
-    if (!form || !lottery) return "The edit form is not available.";
-    if (!form.title.trim()) return "Lottery title is required.";
-    if (form.status !== lottery.status || form.minimumAge !== lotteryToEditForm(lottery).minimumAge)
-      return "Status and minimum age must be managed through their approved workflows.";
-    if (!/^\d+(?:\.\d{1,2})?$/.test(form.ticketPrice.trim()) ||
-        !Number.isSafeInteger(Math.round(Number(form.ticketPrice) * 100)) || Number(form.ticketPrice) <= 0)
-      return "Ticket price must be positive and have no more than two decimal places.";
-    if (form.currency !== "GBP") return "This form supports GBP. Review other currencies separately.";
-    if (form.maxTickets && (!/^\d+$/.test(form.maxTickets) ||
-        !Number.isSafeInteger(Number(form.maxTickets)) || Number(form.maxTickets) <= 0))
-      return "Maximum tickets must be a positive whole number.";
-    if (form.heroImageUrl.trim()) {
-      try {
-        const url = new URL(form.heroImageUrl.trim());
-        if (url.protocol !== "https:" || url.username || url.password) throw new Error();
-      } catch { return "Use an HTTPS image URL without a username or password."; }
+    if (!form) {
+      return "The edit form is not available.";
     }
-    const dates = [form.publicationAt, form.salesOpenAt, form.salesCloseAt, form.drawAt, form.resultsPublishAt];
-    for (const value of dates) {
-      if (value && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ||
-          !localDateToIso(value) || toDateTimeLocal(localDateToIso(value)) !== value))
-        return "Enter valid dates and times. A clock-change gap is not a valid local time.";
+
+    if (
+      !form.title.trim()
+    ) {
+      return "Lottery title is required.";
     }
-    if (form.salesOpenAt && form.salesCloseAt && form.salesCloseAt <= form.salesOpenAt)
-      return "Ticket sales must close after they open.";
-    if (form.salesCloseAt && form.drawAt && form.drawAt < form.salesCloseAt)
-      return "The draw date must be on or after ticket sales close.";
-    if (form.resultsPublishAt && (!form.drawAt || form.resultsPublishAt < form.drawAt))
-      return "Results publication requires a draw date and cannot be earlier than the draw.";
-    if (form.publicationAt && form.salesOpenAt && form.publicationAt > form.salesOpenAt)
-      return "Publication cannot be later than ticket sales open.";
+
+    const price =
+      Number(
+        form.ticketPrice,
+      );
+
+    if (
+      !Number.isFinite(
+        price,
+      ) ||
+      price <= 0
+    ) {
+      return "Ticket price must be greater than £0.";
+    }
+
+    const age =
+      Number(
+        form.minimumAge,
+      );
+
+    if (
+      age !==
+      REQUIRED_MINIMUM_AGE
+    ) {
+      return "All Burton Pride lotteries must be 18+.";
+    }
+
+    if (
+      form.maxTickets
+    ) {
+      const max =
+        Number(
+          form.maxTickets,
+        );
+
+      if (
+        !Number.isInteger(
+          max,
+        ) ||
+        max <= 0
+      ) {
+        return "Maximum tickets must be a positive whole number.";
+      }
+    }
+
+    if (
+      form.salesOpenAt &&
+      form.salesCloseAt
+    ) {
+      if (
+        new Date(
+          form.salesCloseAt,
+        ).getTime() <=
+        new Date(
+          form.salesOpenAt,
+        ).getTime()
+      ) {
+        return "Ticket sales must close after they open.";
+      }
+    }
+
+    if (
+      form.salesCloseAt &&
+      form.drawAt
+    ) {
+      if (
+        new Date(
+          form.drawAt,
+        ).getTime() <
+        new Date(
+          form.salesCloseAt,
+        ).getTime()
+      ) {
+        return "The draw date must be on or after ticket sales close.";
+      }
+    }
+
     return null;
   }
 
   function requestSave() {
-    if (savingRef.current || !hasChanges || saveUncertain) return;
-    const problem = validate();
+    const problem =
+      validate();
+
     if (problem) {
-      setError({ ok: false, code: "LOTTERY_EDIT_VALIDATION_FAILED", error: problem });
+      setError({
+        ok:
+          false,
+
+        code:
+          "LOTTERY_EDIT_VALIDATION_FAILED",
+
+        error:
+          problem,
+      });
+
       return;
     }
+
     setError(null);
-    setConfirmSave(true);
+
+    setConfirmSave(
+      true,
+    );
   }
 
+  /*
+   * =====================================================
+   * SAVE
+   * =====================================================
+   */
   async function saveChanges() {
-    if (savingRef.current || saveUncertain || !form || !lottery || !hasChanges) return;
-    const problem = validate();
-    if (problem) {
-      setConfirmSave(false);
-      setError({ error: problem, code: "LOTTERY_EDIT_VALIDATION_FAILED" });
+    if (
+      !form ||
+      !lottery
+    ) {
       return;
     }
-    const controller = lifecycle.current;
-    if (!controller || controller.signal.aborted) return;
-    savingRef.current = true;
-    const submittedVersion = editVersion.current;
-    setConfirmSave(false);
+
+    setConfirmSave(
+      false,
+    );
+
     setSaving(true);
+
     setError(null);
+
     setSuccess(null);
-    let mutationSent = false;
+
+    const route =
+      `/api/admin/lotterymanagement/lottery/${encodeURIComponent(
+        lottery.id,
+      )}`;
+
     try {
-      const fullBody = {
-        title: form.title.trim(), short_summary: form.shortSummary.trim() || null,
-        description: form.description.trim() || null,
-        fundraising_purpose: form.fundraisingPurpose.trim() || null,
-        hero_image_url: form.heroImageUrl.trim() || null,
-        ticket_price: Number(form.ticketPrice), currency: form.currency,
-        max_tickets: form.maxTickets ? Number(form.maxTickets) : null,
-        publication_at: localDateToIso(form.publicationAt), sales_open_at: localDateToIso(form.salesOpenAt),
-        sales_close_at: localDateToIso(form.salesCloseAt), draw_at: localDateToIso(form.drawAt),
-        results_publish_at: localDateToIso(form.resultsPublishAt),
-        geographic_eligibility: form.geographicEligibility.trim() || null,
-        terms_version: form.termsVersion.trim() || null,
-        privacy_notice_version: form.privacyNoticeVersion.trim() || null,
-        responsible_gambling_info: form.responsibleGamblingInfo.trim() || null,
-        show_in_public_directory: form.showInDirectory, allow_page_before_sales: form.allowPageBeforeSales,
-        show_ticket_count: form.showTicketCount, show_amount_raised: form.showAmountRaised,
-        show_remaining_tickets: form.showRemainingTickets, show_prize_values: form.showPrizeValues,
-        countdown_enabled: form.countdownEnabled, winner_display_mode: form.winnerDisplayMode,
-        is_featured: form.isFeatured,
+      const body = {
+        title:
+          form.title.trim(),
+
+        short_summary:
+          form.shortSummary.trim() ||
+          null,
+
+        description:
+          form.description.trim() ||
+          null,
+
+        fundraising_purpose:
+          form.fundraisingPurpose.trim() ||
+          null,
+
+        hero_image_url:
+          form.heroImageUrl.trim() ||
+          null,
+
+        status:
+          form.status,
+
+        ticket_price:
+          Number(
+            form.ticketPrice,
+          ),
+
+        currency:
+          form.currency
+            .trim()
+            .toUpperCase(),
+
+        minimum_age:
+          REQUIRED_MINIMUM_AGE,
+
+        paper_tickets_enabled: form.paperTicketsEnabled,
+
+        max_tickets:
+          form.maxTickets
+            ? Number(
+                form.maxTickets,
+              )
+            : null,
+
+        publication_at:
+          localDateToIso(
+            form.publicationAt,
+          ),
+
+        sales_open_at:
+          localDateToIso(
+            form.salesOpenAt,
+          ),
+
+        sales_close_at:
+          localDateToIso(
+            form.salesCloseAt,
+          ),
+
+        draw_at:
+          localDateToIso(
+            form.drawAt,
+          ),
+
+        results_publish_at:
+          localDateToIso(
+            form.resultsPublishAt,
+          ),
+
+        geographic_eligibility:
+          form.geographicEligibility.trim() ||
+          null,
+
+        terms_version:
+          form.termsVersion.trim() ||
+          null,
+
+        privacy_notice_version:
+          form.privacyNoticeVersion.trim() ||
+          null,
+
+        responsible_gambling_info:
+          form.responsibleGamblingInfo.trim() ||
+          null,
+
+        /*
+         * Keep old and new names synced.
+         */
+        show_in_directory:
+          form.showInDirectory,
+
+        show_in_public_directory:
+          form.showInDirectory,
+
+        allow_page_before_sales:
+          form.allowPageBeforeSales,
+
+        show_ticket_count:
+          form.showTicketCount,
+
+        show_amount_raised:
+          form.showAmountRaised,
+
+        show_remaining_tickets:
+          form.showRemainingTickets,
+
+        show_prize_values:
+          form.showPrizeValues,
+
+        countdown_enabled:
+          form.countdownEnabled,
+
+        winner_display_mode:
+          form.winnerDisplayMode,
+
+        is_featured:
+          form.isFeatured,
       };
-      const baseline = lotteryToEditForm(lottery);
-      const changedColumns = new Set((Object.keys(baseline) as (keyof EditForm)[])
-        .filter(key => form[key] !== baseline[key]).flatMap(key => EDIT_COLUMNS[key]));
-      const body = Object.fromEntries(Object.entries(fullBody).filter(([key]) => changedColumns.has(key)));
-      if (!Object.keys(body).length) return;
-      const route = `/api/admin/lotterymanagement/lottery/${encodeURIComponent(lottery.id)}`;
-      mutationSent = true;
-      const { response, data } = await requestLottery(route, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      }, controller.signal);
-      if (controller.signal.aborted) return;
-      if (!response.ok || !data.ok) {
-        setError(responseError(response.status, data.request_id));
-        // Even an error response can follow a partial server write. Require a reload.
-        setSaveUncertain(true);
+
+      const response =
+        await fetch(
+          route,
+          {
+            method:
+              "PATCH",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify(
+                body,
+              ),
+          },
+        );
+
+      const data =
+        await readJson(
+          response,
+        );
+
+      if (
+        !response.ok ||
+        !data.ok
+      ) {
+        setError({
+          ...data,
+
+          code:
+            data.code ||
+            `LOTTERY_EDIT_HTTP_${response.status}`,
+
+          error:
+            data.error ||
+            data.message ||
+            "Unable to save the lottery.",
+
+          details:
+            data.details || {
+              http_status:
+                response.status,
+
+              http_status_text:
+                response.statusText,
+
+              method:
+                "PATCH",
+
+              route,
+            },
+        });
+
         return;
       }
-      const { response: refreshedResponse, data: refreshed } = await requestLottery(
-        route, { method: "GET" }, controller.signal,
+
+      if (
+        data.item
+      ) {
+        setLottery(
+          data.item,
+        );
+      }
+
+      setSuccess(
+        data.message ||
+          "Lottery updated successfully.",
       );
-      if (controller.signal.aborted) return;
-      if (!refreshedResponse.ok || !refreshed.ok || !refreshed.item || refreshed.item.id !== lottery.id)
-        throw new Error("Verification failed");
-      const item = refreshed.item;
-      const actual: Record<string, unknown> = { ...item };
-      actual.ticket_price = item.ticket_price ?? (item.ticket_price_pence ?? 0) / 100;
-      const mismatches = Object.entries(body).filter(([key, expected]) => {
-        const received = actual[key];
-        if (key.endsWith("_at")) return expected === null ? received != null :
-          !received || new Date(String(expected)).getTime() !== new Date(String(received)).getTime();
-        if (key === "ticket_price" || key === "max_tickets") return expected === null ? received != null :
-          received == null || Number(expected) !== Number(received);
-        return expected !== received;
+
+      /*
+       * Reload to ensure all values shown on screen match
+       * what Supabase actually stored.
+       */
+      const refresh =
+        await fetch(
+          route,
+          {
+            method:
+              "GET",
+
+            credentials:
+              "include",
+
+            cache:
+              "no-store",
+          },
+        );
+
+      const refreshed =
+        await readJson(
+          refresh,
+        );
+
+      if (
+        refresh.ok &&
+        refreshed.ok &&
+        refreshed.item
+      ) {
+        const item =
+          refreshed.item;
+
+        if (
+          form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) &&
+          item.paper_tickets_enabled !== form.paperTicketsEnabled
+        ) {
+          setSuccess(null);
+          throw new Error(
+            "The lottery API did not confirm the paper-ticket setting. Ensure GET returns paper_tickets_enabled and PATCH saves this boolean. Other lottery changes may already have been saved.",
+          );
+        }
+
+        setLottery(
+          item,
+        );
+
+        setForm({
+          paperTicketsEnabled: item.paper_tickets_enabled === true,
+          title:
+            item.title ||
+            "",
+
+          shortSummary:
+            item.short_summary ||
+            "",
+
+          description:
+            item.description ||
+            "",
+
+          fundraisingPurpose:
+            item.fundraising_purpose ||
+            "",
+
+          heroImageUrl:
+            item.hero_image_url ||
+            "",
+
+          status:
+            item.status,
+
+          ticketPrice:
+            Number(
+              item.ticket_price ??
+                (
+                  item.ticket_price_pence ??
+                  0
+                ) /
+                  100,
+            ).toFixed(
+              2,
+            ),
+
+          currency:
+            item.currency ||
+            "GBP",
+
+          minimumAge:
+            String(
+              REQUIRED_MINIMUM_AGE,
+            ),
+
+          maxTickets:
+            item.max_tickets !==
+            null
+              ? String(
+                  item.max_tickets,
+                )
+              : "",
+
+          publicationAt:
+            toDateTimeLocal(
+              item.publication_at,
+            ),
+
+          salesOpenAt:
+            toDateTimeLocal(
+              item.sales_open_at,
+            ),
+
+          salesCloseAt:
+            toDateTimeLocal(
+              item.sales_close_at,
+            ),
+
+          drawAt:
+            toDateTimeLocal(
+              item.draw_at,
+            ),
+
+          resultsPublishAt:
+            toDateTimeLocal(
+              item.results_publish_at,
+            ),
+
+          geographicEligibility:
+            item.geographic_eligibility ||
+            "",
+
+          termsVersion:
+            item.terms_version ||
+            "",
+
+          privacyNoticeVersion:
+            item.privacy_notice_version ||
+            "",
+
+          responsibleGamblingInfo:
+            item.responsible_gambling_info ||
+            "",
+
+          showInDirectory:
+            item.show_in_public_directory ===
+              true ||
+            item.show_in_directory ===
+              true,
+
+          allowPageBeforeSales:
+            item.allow_page_before_sales ===
+            true,
+
+          showTicketCount:
+            item.show_ticket_count ===
+            true,
+
+          showAmountRaised:
+            item.show_amount_raised ===
+            true,
+
+          showRemainingTickets:
+            item.show_remaining_tickets ===
+            true,
+
+          showPrizeValues:
+            item.show_prize_values ===
+            true,
+
+          countdownEnabled:
+            item.countdown_enabled ===
+            true,
+
+          winnerDisplayMode:
+            item.winner_display_mode ||
+            "ticket_number",
+
+          isFeatured:
+            item.is_featured ===
+            true,
+        });
+      }
+    } catch (
+      problem: any
+    ) {
+      setError({
+        ok:
+          false,
+
+        code:
+          "LOTTERY_EDIT_NETWORK_ERROR",
+
+        error:
+          problem?.message ||
+          "An unexpected error occurred while saving the lottery.",
+
+        details: {
+          method:
+            "PATCH",
+
+          route,
+
+          lottery_id:
+            lottery.id,
+
+          error_name:
+            problem?.name ||
+            "Error",
+        },
       });
-      if (mismatches.length) throw new Error("Verification failed");
-      setLottery(item);
-      setForm(current => editVersion.current === submittedVersion ? lotteryToEditForm(item) : current);
-      setSuccess(editVersion.current === submittedVersion ? "Lottery changes saved and verified." :
-        "Earlier changes saved. You have newer unsaved edits.");
-    } catch {
-      if (!controller.signal.aborted) {
-        setSaveUncertain(mutationSent);
-        setError({ code: "LOTTERY_EDIT_SAVE_UNVERIFIED", error: mutationSent ?
-          "The save outcome could not be verified. Reload the page and check the stored values before trying again. Your edits remain visible." :
-          "Unable to prepare these changes. Check the form and try again." });
-      }
     } finally {
-      if (!controller.signal.aborted) {
-        savingRef.current = false;
-        setSaving(false);
-      }
+      setSaving(
+        false,
+      );
     }
   }
 
@@ -794,8 +1456,7 @@ export default function EditLotteryPage({ params }: PageProps) {
             text-red-100
           "
         >
-          {error?.error || "Unable to load the lottery edit form."}
-          <Link className="mt-4 block underline" href="/Admin/LotteryManagement/Lotteries">Return to lottery list</Link>
+          Unable to load the lottery edit form.
         </div>
       </main>
     );
@@ -814,10 +1475,6 @@ export default function EditLotteryPage({ params }: PageProps) {
         lg:px-8
       "
     >
-      {saveUncertain && <p role="alert" className="mb-4 rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4 text-amber-100">
-        Reload this page and check the stored values before saving again. Copy any edits you want to keep first.
-      </p>}
-      <fieldset disabled={saving} className="min-w-0 border-0 p-0">
       {/* =====================================================
           HEADER
           ===================================================== */}
@@ -1018,7 +1675,7 @@ export default function EditLotteryPage({ params }: PageProps) {
             }
             disabled={
               saving ||
-              !hasChanges || saveUncertain
+              !hasChanges
             }
             className="
               inline-flex
@@ -1233,7 +1890,7 @@ export default function EditLotteryPage({ params }: PageProps) {
               placeholder="https://..."
             />
 
-            {isSafeImageUrl(form.heroImageUrl) && (
+            {form.heroImageUrl && (
               <div
                 className="
                   mt-5
@@ -1328,7 +1985,7 @@ export default function EditLotteryPage({ params }: PageProps) {
                     value,
                   )
                 }
-                placeholder="Use the approved profile limit"
+                placeholder="No maximum"
               />
             </div>
           </FormCard>
@@ -1337,16 +1994,52 @@ export default function EditLotteryPage({ params }: PageProps) {
           <FormCard
             icon={<Ticket />}
             title="Paper tickets"
-            description="Paper ticket features will come soon."
+            description="Enable paper ticketing and manage printed ticket batches."
           >
-            <div className="rounded-2xl border border-white/15 bg-white/5 p-5" role="status">
-              <span className="rounded-full border border-purple-300/25 bg-purple-500/15 px-3 py-1 text-xs font-bold text-purple-100">
-                Coming soon
-              </span>
-              <p className="mt-3 text-sm leading-6 text-white/65">
-                Paper ticket setup and printing are temporarily unavailable.
-              </p>
+            <Toggle
+              label="This lottery will use paper tickets"
+              description="Save this setting before generating a paper ticket batch."
+              checked={form.paperTicketsEnabled}
+              onChange={(value) => updateField("paperTicketsEnabled", value)}
+            />
+
+            <div className="mt-5 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
+              Ticket numbers, UUIDs and barcode tokens are generated by the server
+              when you create a batch. You do not need to enter a first or last
+              ticket number here. Maximum tickets is the combined capacity for
+              online and paper tickets.
             </div>
+
+            {form.paperTicketsEnabled !== (lottery.paper_tickets_enabled === true) && (
+              <p className="mt-4 text-sm text-amber-200">
+                You have an unsaved paper-ticket setting. Use Save changes above.
+              </p>
+            )}
+
+            {lottery.paper_tickets_enabled === true && (
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  href="/Admin/LotteryManagement/PaperTickets"
+                  className="inline-flex items-center gap-2 rounded-xl border border-purple-400/30 bg-purple-500/15 px-4 py-3 text-sm font-bold text-purple-100 hover:bg-purple-500/25"
+                >
+                  <Ticket className="h-4 w-4" />
+                  Open paper ticket generator
+                </Link>
+                <Link
+                  href="/Admin/LotteryManagement/PaperTickets/ReadyToPrint"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-bold text-white hover:bg-white/5"
+                >
+                  <FileText className="h-4 w-4" />
+                  Ready to Print
+                </Link>
+              </div>
+            )}
+            <p className="mt-4 text-xs leading-5 text-white/50">
+              Select this lottery in the paper ticket generator, create a batch,
+              then generate its PDF in Ready to Print. Confirming printing leaves
+              tickets reserved until the sale and registration workflow is completed.
+              Changing this setting does not cancel existing batches.
+            </p>
           </FormCard>
 
           {/* DATES */}
@@ -1355,7 +2048,7 @@ export default function EditLotteryPage({ params }: PageProps) {
               <CalendarDays />
             }
             title="Lottery dates"
-            description="Control publication, ticket sales, draw and result dates. Times use your device timezone."
+            description="Control publication, ticket sales, draw and result dates."
           >
             <div
               className="
@@ -1448,7 +2141,7 @@ export default function EditLotteryPage({ params }: PageProps) {
               <ShieldCheck />
             }
             title="Eligibility & compliance information"
-            description="Review eligibility against the approved compliance profile before publication."
+            description="Entry is strictly 18+ for every Burton Pride lottery. Other eligibility information is shown to entrants before purchase."
           >
             <div
               className="
@@ -1481,11 +2174,11 @@ export default function EditLotteryPage({ params }: PageProps) {
                 >
                   <div>
                     <div className="text-base font-extrabold">
-                      {form.minimumAge ? `${form.minimumAge}+ (configured)` : "Minimum age unavailable"}
+                      18+ only
                     </div>
 
                     <div className="mt-1 text-xs font-medium text-emerald-100/65">
-                      Managed through compliance approval. This form does not change the age requirement.
+                      Fixed for every Burton Pride lottery and cannot be changed.
                     </div>
                   </div>
 
@@ -1652,13 +2345,101 @@ export default function EditLotteryPage({ params }: PageProps) {
               <Trophy />
             }
             title="Lottery status"
-            description="Current lifecycle status."
+            description="Control the lifecycle status of this lottery."
           >
-            <StatusBadge status={lottery.status} />
-            <p className="mt-4 text-sm leading-6 text-white/65">
-              Status changes use the compliance, sales closure and draw workflows.
-              Saving this form does not change lottery status.
-            </p>
+            <SelectField
+              label="Status"
+              value={
+                form.status
+              }
+              onChange={(
+                value,
+              ) =>
+                updateField(
+                  "status",
+                  value as LotteryStatus,
+                )
+              }
+              options={[
+                {
+                  value:
+                    "draft",
+                  label:
+                    "Draft",
+                },
+
+                {
+                  value:
+                    "compliance_review",
+                  label:
+                    "Compliance review",
+                },
+
+                {
+                  value:
+                    "scheduled",
+                  label:
+                    "Scheduled",
+                },
+
+                {
+                  value:
+                    "live",
+                  label:
+                    "Live",
+                },
+
+                {
+                  value:
+                    "paused",
+                  label:
+                    "Paused",
+                },
+
+                {
+                  value:
+                    "sales_closed",
+                  label:
+                    "Sales closed",
+                },
+
+                {
+                  value:
+                    "draw_ready",
+                  label:
+                    "Draw ready",
+                },
+
+                {
+                  value:
+                    "completed",
+                  label:
+                    "Completed",
+                },
+
+                {
+                  value:
+                    "under_review",
+                  label:
+                    "Under review",
+                },
+
+                {
+                  value:
+                    "cancelled",
+                  label:
+                    "Cancelled",
+                },
+
+                {
+                  value:
+                    "archived",
+                  label:
+                    "Archived",
+                },
+              ]}
+            />
+
             {form.status ===
               "live" && (
               <div
@@ -1879,7 +2660,7 @@ export default function EditLotteryPage({ params }: PageProps) {
                 label="Orders"
                 value={
                   lottery.order_count ??
-                  "Unavailable"
+                  0
                 }
               />
 
@@ -1887,7 +2668,7 @@ export default function EditLotteryPage({ params }: PageProps) {
                 label="Paid orders"
                 value={
                   lottery.paid_order_count ??
-                  "Unavailable"
+                  0
                 }
               />
 
@@ -1895,7 +2676,7 @@ export default function EditLotteryPage({ params }: PageProps) {
                 label="Tickets"
                 value={
                   lottery.ticket_count ??
-                  "Unavailable"
+                  0
                 }
               />
 
@@ -1903,7 +2684,7 @@ export default function EditLotteryPage({ params }: PageProps) {
                 label="Prizes"
                 value={
                   lottery.prize_count ??
-                  "Unavailable"
+                  0
                 }
               />
 
@@ -1911,13 +2692,18 @@ export default function EditLotteryPage({ params }: PageProps) {
                 label="Winners"
                 value={
                   lottery.winner_count ??
-                  "Unavailable"
+                  0
                 }
               />
 
               <SummaryItem
                 label="Revenue"
-                value={lottery.revenue == null ? "Unavailable" : `£${lottery.revenue.toFixed(2)}`}
+                value={`£${Number(
+                  lottery.revenue ??
+                    0,
+                ).toFixed(
+                  2,
+                )}`}
               />
             </div>
           </FormCard>
@@ -1929,7 +2715,7 @@ export default function EditLotteryPage({ params }: PageProps) {
             }
             disabled={
               saving ||
-              !hasChanges || saveUncertain
+              !hasChanges
             }
             className="
               inline-flex
@@ -1964,18 +2750,37 @@ export default function EditLotteryPage({ params }: PageProps) {
         </aside>
       </div>
 
-      </fieldset>
       {/* =====================================================
           CONFIRM SAVE MODAL
           ===================================================== */}
       {confirmSave && (
-        <dialog
-          ref={dialogRef}
+        <div
+          className="
+            fixed
+            inset-0
+            z-[99999]
+            flex
+            items-center
+            justify-center
+            bg-black/80
+            p-4
+            backdrop-blur-sm
+          "
+          role="dialog"
+          aria-modal="true"
           aria-labelledby="confirm-save-title"
-          aria-describedby="confirm-save-description"
-          onCancel={() => setConfirmSave(false)}
-          onClick={event => { if (event.target === event.currentTarget) setConfirmSave(false); }}
-          className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg overflow-y-auto border-0 bg-transparent p-0 text-white backdrop:bg-black/80 backdrop:backdrop-blur-sm"
+          onMouseDown={(
+            event,
+          ) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              setConfirmSave(
+                false,
+              );
+            }
+          }}
         >
           <div
             className="
@@ -2038,8 +2843,6 @@ export default function EditLotteryPage({ params }: PageProps) {
                     false,
                   )
                 }
-                aria-label="Cancel save"
-                autoFocus
                 className="rounded-xl p-2 text-white/50 hover:bg-white/10 hover:text-white"
               >
                 <X className="h-5 w-5" />
@@ -2047,7 +2850,7 @@ export default function EditLotteryPage({ params }: PageProps) {
             </div>
 
             <div className="p-6">
-              <p id="confirm-save-description" className="text-sm leading-7 text-white/70">
+              <p className="text-sm leading-7 text-white/70">
                 These changes can affect the public lottery
                 page, ticket availability, pricing and
                 lottery terms.
@@ -2144,7 +2947,7 @@ export default function EditLotteryPage({ params }: PageProps) {
               </button>
             </div>
           </div>
-        </dialog>
+        </div>
       )}
     </main>
   );
@@ -2377,7 +3180,7 @@ function TextArea({
         className="
           mt-2
           w-full
-          resize-none
+          resize-y
           rounded-2xl
           border
           border-white/15
@@ -2559,9 +3362,6 @@ function Toggle({
           !checked,
         )
       }
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
       className="
         flex
         w-full
@@ -2767,7 +3567,7 @@ function DetailedErrorPanel({
             </p>
 
             <h2 className="mt-1 text-lg font-black text-red-100">
-              Lottery request needs attention
+              Unable to save lottery
             </h2>
 
             <p className="mt-2 max-w-4xl text-sm leading-6 text-red-100/75">
@@ -2780,7 +3580,6 @@ function DetailedErrorPanel({
 
         <button
           type="button"
-          aria-label="Dismiss error"
           onClick={
             onDismiss
           }
@@ -2834,7 +3633,40 @@ function DetailedErrorPanel({
         />
       </div>
 
+      {error.details !==
+        undefined && (
+        <div
+          className="
+            border-t
+            border-red-400/20
+            p-5
+          "
+        >
+          <p className="text-xs font-black uppercase tracking-wide text-red-200/50">
+            Technical details
+          </p>
 
+          <pre
+            className="
+              mt-3
+              max-h-80
+              overflow-auto
+              rounded-2xl
+              bg-black/30
+              p-4
+              text-xs
+              leading-6
+              text-red-50
+            "
+          >
+            {JSON.stringify(
+              error.details,
+              null,
+              2,
+            )}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }

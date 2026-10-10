@@ -1,3 +1,4 @@
+import { normaliseLotteryPermissions } from "./permissions";
 import "server-only";
 
 import { headers } from "next/headers";
@@ -159,9 +160,7 @@ export async function getAuthenticatedAdmin(): Promise<AuthenticatedLotteryAdmin
       email: typeof data.email === "string" ? data.email : null,
       name: typeof data.name === "string" ? data.name : null,
       role: data.is_main_admin === true ? "main_admin" : typeof data.role === "string" ? data.role : null,
-      permissions: Array.isArray(data.permissions)
-        ? [...new Set(data.permissions.filter((value: unknown): value is string => typeof value === "string"))] as string[]
-        : [],
+      permissions: normaliseLotteryPermissions(data.permissions),
     };
   } catch {
     console.error("Lottery administrator verification failed.");
@@ -518,6 +517,7 @@ export async function writeLotteryAudit(
           payload.metadata,
       })
       .select("id")
+      .abortSignal(AbortSignal.timeout(10_000))
       .single();
   } catch {
     throw new Error("Unable to record lottery audit activity.");

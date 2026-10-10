@@ -100,6 +100,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     slug = await slugFrom(context);
     const cfg = config(); secure = cfg.secure;
+    // The supplied allocator deliberately cannot fulfill any purchase. Never
+    // collect real money until fulfillment, reservation and recovery are tested.
+    if (cfg.key.startsWith("sk_live_")) {
+      throw new CheckoutError("Paid lottery sales are unavailable while secure ticket fulfillment is being completed.", 503);
+    }
     if (request.headers.get("origin") !== cfg.origin ||
         (request.headers.get("sec-fetch-site") && request.headers.get("sec-fetch-site") !== "same-origin")) throw new CheckoutError("A same-origin checkout request is required.", 403);
     const body = await bodyFrom(request);

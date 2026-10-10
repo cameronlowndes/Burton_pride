@@ -14,18 +14,10 @@ const ALLOWED_GROUPS = new Set([
   "winner",
   "compliance",
   "security",
+  "export",
 ]);
 const ALLOWED_RISK_LEVELS = new Set(["low", "medium", "high", "critical"]);
-const READ_ONLY_ACTION_CODES = [
-  "security.audit_logs.viewed",
-  "security.audit_logs.permission_denied",
-  "security.audit_logs.invalid_filter",
-  "security.audit_logs.load_failed",
-  "export.audit_logs.csv",
-  "report.exported",
-  "export.exported",
-];
-const READ_ONLY_ACTION_CODES_FILTER = `(${READ_ONLY_ACTION_CODES.join(",")})`;
+
 const EXPORT_LIMIT = 10000;
 const EXPORT_BYTES = 8 * 1024 * 1024;
 const BATCH_SIZE = 200;
@@ -287,13 +279,6 @@ export async function GET(request: NextRequest) {
       let query = db
         .from("lottery_audit_logs")
         .select(columns, { count: "exact", head })
-        .neq("action_group", "export")
-        .not("action_code", "in", READ_ONLY_ACTION_CODES_FILTER)
-        .not("action_code", "ilike", "%.viewed")
-        .not("action_code", "ilike", "%.permission_denied")
-        .not("action_code", "ilike", "%.invalid_filter")
-        .not("action_code", "ilike", "%.load_failed")
-        .not("action_code", "ilike", "%.exported")
         .lte("created_at", snapshot)
         .abortSignal(controller.signal);
       if (group) query = query.eq("action_group", group);

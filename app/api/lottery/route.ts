@@ -1,3 +1,4 @@
+import { isPublicLottery } from "@/lib/lottery/public-visibility";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -6,9 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PUBLIC_STATUSES = ["scheduled", "live", "sales_closed", "draw_ready"] as const;
+const PUBLIC_STATUSES = ["scheduled", "live", "sales_closed", "draw_ready", "completed"] as const;
 const MAX_DIRECTORY_ROWS = 500;
-const COLUMNS = "title,slug,short_summary,hero_image_url,status,ticket_price,ticket_price_pence,currency,sales_open_at,sales_close_at,draw_at,show_in_public_directory,allow_page_before_sales,is_featured,is_active";
+const COLUMNS = "title,slug,short_summary,hero_image_url,status,ticket_price,ticket_price_pence,currency,publication_at,results_publish_at,sales_open_at,sales_close_at,draw_at,show_in_public_directory,allow_page_before_sales,is_featured,is_active";
 
 type DirectoryRow = {
   title: string | null;
@@ -19,6 +20,8 @@ type DirectoryRow = {
   ticket_price: unknown;
   ticket_price_pence: unknown;
   currency: string | null;
+  publication_at: string | null;
+  results_publish_at: string | null;
   sales_open_at: string | null;
   sales_close_at: string | null;
   draw_at: string | null;
@@ -43,12 +46,7 @@ function timestamp(value: unknown): number | null {
 }
 
 function publicDirectoryVisible(row: DirectoryRow, now: number) {
-  if (row.is_active !== true || row.show_in_public_directory !== true ||
-      !PUBLIC_STATUSES.some(status => status === row.status)) return false;
-  const open = timestamp(row.sales_open_at), close = timestamp(row.sales_close_at), draw = timestamp(row.draw_at);
-  if (open === null || close === null || draw === null || close <= open || draw < close) return false;
-  if (now < open && (row.status !== "scheduled" || row.allow_page_before_sales !== true)) return false;
-  return true;
+  return isPublicLottery(row, now);
 }
 
 function pricePence(row: DirectoryRow): number | null {

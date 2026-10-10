@@ -1,3 +1,5 @@
+import { requireLotteryPermission } from "@/lib/lottery/adminAuth";
+import { deleteSidebarItem } from "./delete-item";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -23,26 +25,15 @@ function getSupabaseAdmin() {
   });
 }
 
-function details(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "Unknown Lottery sidebar API error";
-  }
-}
-
 function errorResponse(message: string, error: unknown, status = 500) {
   return NextResponse.json(
     {
       ok: false,
       error: message,
-      details: details(error),
+
     },
     {
-      status,
+      status: error && typeof error === "object" && "status" in error && [401,403,503].includes(Number(error.status)) ? Number(error.status) : status,
       headers: {
         "Cache-Control": "no-store",
       },
@@ -86,6 +77,7 @@ async function loadItems() {
 
 export async function GET() {
   try {
+    await requireLotteryPermission("lottery:view");
     const items = await loadItems();
 
     return NextResponse.json(
@@ -111,6 +103,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    await requireLotteryPermission("lottery:settings:manage");
     const body = await request.json();
 
     const label = cleanText(body?.label);
@@ -186,6 +179,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    await requireLotteryPermission("lottery:settings:manage");
     const body = await request.json();
     const id = cleanText(body?.id);
 
@@ -310,49 +304,6 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  try {
-    const body = await request.json().catch(() => ({}));
-    const id = cleanText(body?.id);
-
-    if (!id) {
-      return errorResponse(
-        "Sidebar item ID is required.",
-        "DELETE body did not include id",
-        400,
-      );
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    const remove = await supabase
-      .from("lottery_sidebar_items")
-      .delete()
-      .eq("id", id);
-
-    if (remove.error) {
-      return errorResponse(
-        "Unable to delete Lottery sidebar item.",
-        remove.error,
-      );
-    }
-
-    return NextResponse.json(
-      {
-        ok: true,
-        items: await loadItems(),
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      },
-    );
-  } catch (error) {
-    console.error("[api/admin/lottery-sidebar][DELETE]", error);
-    return errorResponse(
-      "Unable to delete Lottery sidebar item.",
-      error,
-    );
-  }
+  const body = await request.json().catch(() => ({}));
+  return deleteSidebarItem(request, cleanText(body?.id), body);
 }

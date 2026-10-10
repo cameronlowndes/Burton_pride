@@ -530,52 +530,13 @@ async function handleLotterySession(session: Stripe.Checkout.Session) {
     throw new Error("Stripe lottery slug does not match the saved lottery.");
   }
 
-  const paidAt = order.paid_at || new Date().toISOString();
-
-  const { data: paymentUpdated, error: paymentUpdateError } = await supabaseAdmin
-    .from("lottery_orders")
-    .update({
-      payment_status: "paid",
-      payment_reference: session.id,
-      paid_at: paidAt,
-    })
-    .eq("id", order.id)
-    .eq("payment_status", order.payment_status)
-    .eq("payment_reference", session.id)
-    .select("id")
-    .maybeSingle();
-
-  if (paymentUpdateError || !paymentUpdated) {
-    throw new Error(
-      `Unable to mark lottery order as paid: ${paymentUpdateError?.message || "Order state changed"}`
-    );
-  }
-
-  order.payment_status = "paid";
-  order.payment_reference = session.id;
-  order.paid_at = paidAt;
-
-  // Record whether another path got here first. The shared allocator is
-  // idempotent and will return existing numbers without replacing them.
-  const { data: beforeTickets, error: beforeTicketsError } = await supabaseAdmin
-    .from("lottery_tickets")
-    .select("id,ticket_number")
-    .eq("order_id", order.id);
-  if (beforeTicketsError) {
-    throw new Error(`Could not inspect tickets before issuance: ${beforeTicketsError.message}`);
-  }
-  console.info("LOTTERY_RANDOM_ALLOCATOR_V3 before", {
-    orderId: order.id,
-    existingNumbers: (beforeTickets ?? []).map((ticket) => ticket.ticket_number),
-  });
-
-  // IMPORTANT: payment is confirmed before ticket allocation.
-  // If allocation fails, throw so Stripe retries the webhook safely.
-  const tickets = await issueTicketsForPaidOrder(order, lottery);
-  console.info("LOTTERY_RANDOM_ALLOCATOR_V3 after", {
-    orderId: order.id,
-    issuedNumbers: tickets.map((ticket) => ticket.ticket_number),
-  });
+  // The shared issuer currently fails closed. Do not mark an order paid in a
+  // separate write before it rejects. The replacement issuer must own the entire
+  // payment/ticket/entry/audit/outbox transaction using verified provider evidence.
+  // Stripe retries this failed event; its saved session remains the recovery link.
+  const tickets = await issueTicketsForPaidOrder(
+    { ...order, payment_status: "paid" }, lottery,
+  );
 
   if (tickets.length !== Number(order.quantity) ||
       new Set(tickets.map(ticket => ticket.id)).size !== order.quantity ||
