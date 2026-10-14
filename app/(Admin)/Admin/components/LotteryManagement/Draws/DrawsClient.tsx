@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
-
-import LiveDrawSettingsPanel from "./LiveDrawSettingsPanel";
-
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,6 +23,8 @@ import {
   X,
 } from "lucide-react";
 
+import LiveDrawSettingsPanel from "./LiveDrawSettingsPanel";
+
 type DrawStatus =
   | "upcoming"
   | "not_ready"
@@ -33,160 +38,157 @@ type DrawStatus =
 
 type LotteryDrawListItem = {
   id: string;
-
   title: string;
-
   slug: string;
-
   internal_reference: string | null;
-
   lottery_status: string;
-
   draw_at: string | null;
-
   sales_close_at: string | null;
-
   paid_orders: number;
-
   eligible_tickets: number;
-
   excluded_tickets: number;
-
   prizes_available: number;
-
   draw_status: DrawStatus;
-
   latest_draw_id: string | null;
+};
+
+type DrawSummary = {
+  ready: number;
+  upcoming: number;
+  completed: number;
+  blocked: number;
 };
 
 type DrawsResponse = {
   ok?: boolean;
-
   items?: LotteryDrawListItem[];
-
-  summary?: {
-    ready: number;
-
-    upcoming: number;
-
-    completed: number;
-
-    blocked: number;
-  };
-
+  summary?: DrawSummary;
   error?: string;
-
   message?: string;
 };
 
 type ReadinessCheck = {
   key: string;
-
   label: string;
-
   ok: boolean;
-
   detail?: string | null;
 };
 
 type ReadinessResponse = {
   ok?: boolean;
-
   lottery: {
     id: string;
-
     title: string;
-
     internal_reference: string | null;
-
     draw_at: string | null;
-
     sales_close_at: string | null;
   };
-
   metrics: {
     paid_orders: number;
-
     eligible_tickets: number;
-
     excluded_tickets: number;
-
     prizes_available: number;
   };
-
   ready: boolean;
-
   checks: ReadinessCheck[];
-
   error?: string;
-
   message?: string;
 };
 
 type DrawResult = {
   ok?: boolean;
-
   draw: {
     id: string;
-
     completed_at: string;
-
     eligible_ticket_count: number;
-
     snapshot_hash: string;
   };
-
   winners: Array<{
     prize_id: string;
-
     prize_name: string;
-
     ticket_id: string;
-
     ticket_number: string;
-
     winner_status: string;
   }>;
-
   error?: string;
-
   message?: string;
-
   code?: string;
-
   request_id?: string;
-
   details?: unknown;
 };
 
-type DrawErrorDiagnostics = { requestId?: string };
+type DrawErrorDiagnostics = {
+  requestId?: string;
+};
 
-type FilterStatus = "all" | "ready" | "upcoming" | "completed" | "review";
+type FilterStatus =
+  | "all"
+  | "ready"
+  | "upcoming"
+  | "completed"
+  | "review";
 
-type SortMode = "draw_date" | "sales_close" | "title" | "tickets";
+type SortMode =
+  | "draw_date"
+  | "sales_close"
+  | "title"
+  | "tickets";
 
 const DRAW_LIST_ROUTE = "/api/admin/lotterymanagement/draws";
+const READINESS_MAX_AGE_MS = 60_000;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+const DRAW_STATUSES: DrawStatus[] = [
+  "upcoming",
+  "not_ready",
+  "ready",
+  "running",
+  "completed",
+  "blocked",
+  "under_review",
+  "redraw_requested",
+  "superseded",
+];
+
+const BUTTON_CLASS =
+  "inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:cursor-not-allowed disabled:opacity-40";
 
 function drawReadinessRoute(id: string) {
   return `${DRAW_LIST_ROUTE}/${encodeURIComponent(id)}/draw-readiness`;
 }
+
 function runDrawRoute(id: string) {
   return `${DRAW_LIST_ROUTE}/${encodeURIComponent(id)}/draw`;
 }
+
 function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function text(value: unknown): value is string {
   return (
-    typeof value === "string" && value.trim().length > 0 && value.length <= 2048
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
+
+function text(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= 2048
+  );
+}
+
 function nullableText(value: unknown) {
   return value === null || text(value);
 }
+
 function count(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 0;
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+  );
 }
+
 function date(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -194,9 +196,11 @@ function date(value: unknown): value is string {
     Number.isFinite(Date.parse(value))
   );
 }
+
 function nullableDate(value: unknown) {
   return value === null || date(value);
 }
+
 function metrics(value: unknown) {
   return (
     record(value) &&
@@ -208,6 +212,7 @@ function metrics(value: unknown) {
     ].every((key) => count(value[key]))
   );
 }
+
 function isDrawsResponse(
   value: unknown,
 ): value is DrawsResponse & { items: LotteryDrawListItem[] } {
@@ -215,25 +220,25 @@ function isDrawsResponse(
     !record(value) ||
     value.ok === false ||
     !Array.isArray(value.items) ||
-    value.items.length > 10000
-  )
+    value.items.length > 10_000
+  ) {
     return false;
-  const statuses = [
-    "upcoming",
-    "not_ready",
-    "ready",
-    "running",
-    "completed",
-    "blocked",
-    "under_review",
-    "redraw_requested",
-    "superseded",
-  ];
-  const ids = new Set();
+  }
+
+  const ids = new Set<string>();
+
   if (
     !value.items.every((item) => {
-      if (!record(item) || !text(item.id) || ids.has(item.id)) return false;
+      if (
+        !record(item) ||
+        !text(item.id) ||
+        ids.has(item.id)
+      ) {
+        return false;
+      }
+
       ids.add(item.id);
+
       return (
         text(item.title) &&
         text(item.slug) &&
@@ -242,21 +247,27 @@ function isDrawsResponse(
         nullableDate(item.draw_at) &&
         nullableDate(item.sales_close_at) &&
         metrics(item) &&
-        statuses.includes(String(item.draw_status)) &&
+        DRAW_STATUSES.includes(item.draw_status as DrawStatus) &&
         nullableText(item.latest_draw_id)
       );
     })
-  )
+  ) {
     return false;
-  return (
-    value.summary === undefined ||
-    (record(value.summary) &&
-      ["ready", "upcoming", "completed", "blocked"].every((key) =>
-        count((value.summary as Record<string, unknown>)[key]),
-      ))
+  }
+
+  if (value.summary === undefined) return true;
+  if (!record(value.summary)) return false;
+
+  const summary = value.summary;
+
+  return ["ready", "upcoming", "completed", "blocked"].every(
+    (key) => count(summary[key]),
   );
 }
-function isReadinessResponse(value: unknown): value is ReadinessResponse {
+
+function isReadinessResponse(
+  value: unknown,
+): value is ReadinessResponse {
   if (
     !record(value) ||
     value.ok === false ||
@@ -265,10 +276,13 @@ function isReadinessResponse(value: unknown): value is ReadinessResponse {
     typeof value.ready !== "boolean" ||
     !Array.isArray(value.checks) ||
     value.checks.length > 100
-  )
+  ) {
     return false;
+  }
+
   const lottery = value.lottery;
-  const keys = new Set();
+  const keys = new Set<string>();
+
   return (
     text(lottery.id) &&
     text(lottery.title) &&
@@ -276,41 +290,26 @@ function isReadinessResponse(value: unknown): value is ReadinessResponse {
     nullableDate(lottery.draw_at) &&
     nullableDate(lottery.sales_close_at) &&
     value.checks.every((check) => {
-      if (!record(check) || !text(check.key) || keys.has(check.key))
+      if (
+        !record(check) ||
+        !text(check.key) ||
+        keys.has(check.key)
+      ) {
         return false;
+      }
+
       keys.add(check.key);
-      // Check descriptions may contain backend diagnostics; render only approved labels below.
+
       return (
         text(check.label) &&
         typeof check.ok === "boolean" &&
-        (check.detail === undefined || nullableText(check.detail))
+        (check.detail === undefined ||
+          nullableText(check.detail))
       );
     })
   );
 }
-function canRunDraw(
-  item: LotteryDrawListItem,
-  readiness: ReadinessResponse | null,
-  now = Date.now(),
-) {
-  return Boolean(
-    readiness &&
-    readiness.lottery.id === item.id &&
-    readiness.ready === true &&
-    readiness.checks.length > 0 &&
-    readiness.checks.every((check) => check.ok === true) &&
-    readiness.metrics.paid_orders > 0 &&
-    readiness.metrics.eligible_tickets > 0 &&
-    readiness.metrics.prizes_available > 0 &&
-    readiness.lottery.draw_at &&
-    Date.parse(readiness.lottery.draw_at) <= now &&
-    readiness.lottery.sales_close_at &&
-    Date.parse(readiness.lottery.sales_close_at) <= now &&
-    ["sales_closed", "draw_ready"].includes(item.lottery_status) &&
-    item.draw_status === "ready" &&
-    !item.latest_draw_id,
-  );
-}
+
 function isDrawResult(value: unknown): value is DrawResult {
   if (
     !record(value) ||
@@ -318,10 +317,13 @@ function isDrawResult(value: unknown): value is DrawResult {
     !record(value.draw) ||
     !Array.isArray(value.winners) ||
     value.winners.length === 0 ||
-    value.winners.length > 10000
-  )
+    value.winners.length > 10_000
+  ) {
     return false;
+  }
+
   const draw = value.draw;
+
   return (
     text(draw.id) &&
     date(draw.completed_at) &&
@@ -342,26 +344,132 @@ function isDrawResult(value: unknown): value is DrawResult {
     )
   );
 }
+
 function requestId(value: unknown): string | undefined {
-  return record(value) &&
+  return (
+    record(value) &&
     typeof value.request_id === "string" &&
     /^[a-zA-Z0-9_-]{8,80}$/.test(value.request_id)
+  )
     ? value.request_id
     : undefined;
 }
+
 function publicCheck(check: ReadinessCheck): string {
   const labels: Record<string, string> = {
     sales_closed: "Sales closed",
     draw_time: "Draw time reached",
+    draw_time_reached: "Draw time reached",
     eligible_tickets: "Eligible ticket pool",
     prizes_ready: "Prize readiness",
+    prizes_available: "Available prizes",
     no_existing_draw: "Existing draw check",
     compliance: "Compliance check",
     integrity_warnings: "Integrity warning check",
+    paid_orders: "Paid orders",
   };
-  return labels[check.key] || "Server readiness check";
+
+  if (labels[check.key]) return labels[check.key];
+
+  // Avoid displaying arbitrary backend diagnostic text.
+  if (/^[a-zA-Z0-9_]{1,80}$/.test(check.key)) {
+    const label = check.key.replaceAll("_", " ");
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
+  return "Server readiness check";
 }
-// Keep the timeout active through body consumption and bound response memory.
+
+function drawBlockReasons(
+  item: LotteryDrawListItem,
+  readiness: ReadinessResponse | null,
+  now = Date.now(),
+): string[] {
+  const reasons: string[] = [];
+
+  if (!readiness) {
+    return ["Readiness has not been loaded."];
+  }
+
+  if (readiness.lottery.id !== item.id) {
+    reasons.push("Readiness belongs to another lottery.");
+  }
+
+  if (!readiness.ready) {
+    reasons.push("The server has not approved this draw as ready.");
+  }
+
+  if (readiness.checks.length === 0) {
+    reasons.push("The server returned no readiness checks.");
+  }
+
+  for (const check of readiness.checks) {
+    if (!check.ok) {
+      reasons.push(`${publicCheck(check)} has not passed.`);
+    }
+  }
+
+  if (readiness.metrics.paid_orders <= 0) {
+    reasons.push("No paid orders were reported.");
+  }
+
+  if (readiness.metrics.eligible_tickets <= 0) {
+    reasons.push("No eligible tickets were reported.");
+  }
+
+  if (readiness.metrics.prizes_available <= 0) {
+    reasons.push("No prizes are available.");
+  }
+
+  const drawTime = readiness.lottery.draw_at
+    ? Date.parse(readiness.lottery.draw_at)
+    : NaN;
+
+  if (!Number.isFinite(drawTime)) {
+    reasons.push("A valid draw date is required.");
+  } else if (drawTime > now) {
+    reasons.push("The draw time has not been reached.");
+  }
+
+  const salesCloseTime = readiness.lottery.sales_close_at
+    ? Date.parse(readiness.lottery.sales_close_at)
+    : NaN;
+
+  if (!Number.isFinite(salesCloseTime)) {
+    reasons.push("A valid sales closing date is required.");
+  } else if (salesCloseTime > now) {
+    reasons.push("The sales closing time has not been reached.");
+  }
+
+  if (!["sales_closed", "draw_ready"].includes(item.lottery_status)) {
+    reasons.push(
+      `Lottery status is "${item.lottery_status}". It must be "sales_closed" or "draw_ready".`,
+    );
+  }
+
+  if (item.draw_status !== "ready") {
+    reasons.push(
+      `Draw status is "${item.draw_status}", rather than "ready".`,
+    );
+  }
+
+  if (item.latest_draw_id) {
+    reasons.push(
+      `An existing draw (${item.latest_draw_id}) requires review.`,
+    );
+  }
+
+  return reasons;
+}
+
+function canRunDraw(
+  item: LotteryDrawListItem,
+  readiness: ReadinessResponse | null,
+  now = Date.now(),
+) {
+  return drawBlockReasons(item, readiness, now).length === 0;
+}
+
 async function requestJson(
   url: string,
   init: RequestInit = {},
@@ -369,9 +477,15 @@ async function requestJson(
 ): Promise<{ response: Response; data: unknown }> {
   const controller = new AbortController();
   const abort = () => controller.abort();
+
   if (signal?.aborted) abort();
   signal?.addEventListener("abort", abort, { once: true });
-  const timer = setTimeout(abort, init.method === "POST" ? 60000 : 15000);
+
+  const timer = setTimeout(
+    abort,
+    init.method?.toUpperCase() === "POST" ? 60_000 : 15_000,
+  );
+
   try {
     const response = await fetch(url, {
       ...init,
@@ -379,30 +493,40 @@ async function requestJson(
       credentials: "include",
       signal: controller.signal,
     });
+
     const reader = response.body?.getReader();
-    if (!reader) throw new Error("Response unavailable");
+    if (!reader) throw new Error("Response unavailable.");
+
     const chunks: Uint8Array[] = [];
     let size = 0;
+
     try {
       while (true) {
         const { done, value } = await reader.read();
+
         if (done) break;
+
         size += value.byteLength;
-        if (size > 4 * 1024 * 1024) {
+
+        if (size > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          throw new Error("Response too large");
+          throw new Error("Response too large.");
         }
+
         chunks.push(value);
       }
     } finally {
       reader.releaseLock();
     }
+
     const body = new Uint8Array(size);
     let offset = 0;
+
     for (const chunk of chunks) {
       body.set(chunk, offset);
       offset += chunk.byteLength;
     }
+
     return {
       response,
       data: JSON.parse(new TextDecoder().decode(body)) as unknown,
@@ -413,37 +537,71 @@ async function requestJson(
   }
 }
 
+async function fetchCurrentDrawItem(
+  id: string,
+  signal: AbortSignal,
+): Promise<LotteryDrawListItem> {
+  const { response, data } = await requestJson(
+    DRAW_LIST_ROUTE,
+    {},
+    signal,
+  );
+
+  if (!response.ok || !isDrawsResponse(data)) {
+    throw new Error("The current draw register could not be verified.");
+  }
+
+  const item = data.items.find((entry) => entry.id === id);
+
+  if (!item) {
+    throw new Error("This lottery is no longer in the draw register.");
+  }
+
+  return item;
+}
+
+function calculateSummary(items: LotteryDrawListItem[]): DrawSummary {
+  return {
+    ready: items.filter((item) => item.draw_status === "ready").length,
+    upcoming: items.filter((item) =>
+      ["upcoming", "not_ready"].includes(item.draw_status),
+    ).length,
+    completed: items.filter(
+      (item) => item.draw_status === "completed",
+    ).length,
+    blocked: items.filter((item) =>
+      ["blocked", "under_review", "redraw_requested"].includes(
+        item.draw_status,
+      ),
+    ).length,
+  };
+}
+
 function formatDate(value: string | null) {
   if (!value) return "Not scheduled";
   if (!date(value)) return "Unavailable";
 
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
-
     timeStyle: "short",
-
     timeZone: "Europe/London",
   }).format(new Date(value));
+}
+
+function sortTimestamp(value: string | null) {
+  return value ? Date.parse(value) : Number.POSITIVE_INFINITY;
 }
 
 function statusLabel(status: DrawStatus) {
   const labels: Record<DrawStatus, string> = {
     upcoming: "Upcoming",
-
     not_ready: "Not ready",
-
     ready: "Readiness reported",
-
     running: "Running",
-
     completed: "Completed",
-
     blocked: "Blocked",
-
     under_review: "Under review",
-
     redraw_requested: "Redraw requested",
-
     superseded: "Superseded",
   };
 
@@ -451,60 +609,49 @@ function statusLabel(status: DrawStatus) {
 }
 
 function statusClass(status: DrawStatus) {
-  const map: Record<DrawStatus, string> = {
+  const classes: Record<DrawStatus, string> = {
     upcoming: "border-amber-400/25 bg-amber-500/10 text-amber-200",
-
     not_ready: "border-white/15 bg-white/10 text-white/70",
-
     ready: "border-emerald-400/25 bg-emerald-500/10 text-emerald-200",
-
     running: "border-purple-400/25 bg-purple-500/10 text-purple-200",
-
     completed: "border-cyan-400/25 bg-cyan-500/10 text-cyan-200",
-
     blocked: "border-red-400/25 bg-red-500/10 text-red-200",
-
     under_review: "border-orange-400/25 bg-orange-500/10 text-orange-200",
-
     redraw_requested: "border-yellow-400/25 bg-yellow-500/10 text-yellow-200",
-
     superseded: "border-white/15 bg-white/10 text-white/60",
   };
 
-  return map[status];
+  return classes[status];
 }
 
 export default function DrawsClient() {
   const [items, setItems] = useState<LotteryDrawListItem[]>([]);
-
-  const [summary, setSummary] = useState<
-    Required<DrawsResponse>["summary"] | null
-  >(null);
-
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<FilterStatus>("all");
+  const [sort, setSort] = useState<SortMode>("draw_date");
 
+  const [selected, setSelected] = useState<LotteryDrawListItem | null>(
+    null,
+  );
+  const [readiness, setReadiness] = useState<ReadinessResponse | null>(
+    null,
+  );
+  const [readinessCheckedAt, setReadinessCheckedAt] = useState(0);
+  const [loadingReadiness, setLoadingReadiness] = useState(false);
+
+  const [drawError, setDrawError] = useState<string | null>(null);
   const [errorDiagnostics, setErrorDiagnostics] =
     useState<DrawErrorDiagnostics | null>(null);
 
-  const [search, setSearch] = useState("");
-
-  const [status, setStatus] = useState<FilterStatus>("all");
-
-  const [sort, setSort] = useState<SortMode>("draw_date");
-
-  const [selected, setSelected] = useState<LotteryDrawListItem | null>(null);
-
-  const [readiness, setReadiness] = useState<ReadinessResponse | null>(null);
-
-  const [loadingReadiness, setLoadingReadiness] = useState(false);
-
   const [confirm, setConfirm] = useState(false);
-
   const [running, setRunning] = useState(false);
-
   const [result, setResult] = useState<DrawResult | null>(null);
+  const [attemptedHere, setAttemptedHere] = useState(false);
+  const [now, setNow] = useState(Date.now);
 
   const listRequest = useRef<AbortController | null>(null);
   const readinessRequest = useRef<AbortController | null>(null);
@@ -512,54 +659,52 @@ export default function DrawsClient() {
   const drawInFlight = useRef(false);
   const attempted = useRef(new Set<string>());
   const readinessAt = useRef(0);
-  const [attemptedHere, setAttemptedHere] = useState(false);
+
+  const summary = useMemo(
+    () => (hasLoaded ? calculateSummary(items) : null),
+    [hasLoaded, items],
+  );
 
   const loadDraws = useCallback(async () => {
     listRequest.current?.abort();
+
     const controller = new AbortController();
     listRequest.current = controller;
+
     setLoading(true);
-    setSummary(null);
-    setError(null);
+    setListError(null);
+
     try {
       const { response, data } = await requestJson(
         DRAW_LIST_ROUTE,
         {},
         controller.signal,
       );
-      if (!response.ok || !isDrawsResponse(data))
-        throw new Error("Invalid list");
+
+      if (!response.ok || !isDrawsResponse(data)) {
+        throw new Error("Invalid draw list.");
+      }
+
       if (controller.signal.aborted) return;
+
       setItems(data.items);
-      setSummary(
-        data.summary || {
-          ready: data.items.filter((x) => x.draw_status === "ready").length,
-          upcoming: data.items.filter((x) =>
-            ["upcoming", "not_ready"].includes(x.draw_status),
-          ).length,
-          completed: data.items.filter((x) => x.draw_status === "completed")
-            .length,
-          blocked: data.items.filter((x) =>
-            ["blocked", "under_review", "redraw_requested"].includes(
-              x.draw_status,
-            ),
-          ).length,
-        },
-      );
+      setHasLoaded(true);
     } catch {
       if (!controller.signal.aborted) {
-        setItems([]);
-        setError(
-          "Draw records are unavailable. Check your access and try refreshing.",
+        setListError(
+          "The draw register could not be refreshed. Check your access and try again. Any previously loaded records may be out of date.",
         );
       }
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadDraws();
+
     return () => {
       listRequest.current?.abort();
       readinessRequest.current?.abort();
@@ -567,22 +712,33 @@ export default function DrawsClient() {
     };
   }, [loadDraws]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  useEffect(() => {
+    if (!selected) return;
 
-    const result = items.filter((item) => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 5_000);
+
+    return () => clearInterval(timer);
+  }, [selected?.id]);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    const matchingItems = items.filter((item) => {
       const matchesSearch =
-        !q ||
-        item.title.toLowerCase().includes(q) ||
-        item.slug.toLowerCase().includes(q) ||
-        (item.internal_reference || "").toLowerCase().includes(q);
+        !query ||
+        item.title.toLowerCase().includes(query) ||
+        item.slug.toLowerCase().includes(query) ||
+        (item.internal_reference || "").toLowerCase().includes(query);
 
       const matchesStatus =
         status === "all" ||
         (status === "ready" && item.draw_status === "ready") ||
         (status === "upcoming" &&
           ["upcoming", "not_ready"].includes(item.draw_status)) ||
-        (status === "completed" && item.draw_status === "completed") ||
+        (status === "completed" &&
+          item.draw_status === "completed") ||
         (status === "review" &&
           ["blocked", "under_review", "redraw_requested"].includes(
             item.draw_status,
@@ -591,64 +747,98 @@ export default function DrawsClient() {
       return matchesSearch && matchesStatus;
     });
 
-    return result.sort((a, b) => {
-      switch (sort) {
-        case "sales_close":
-          return (
-            +new Date(a.sales_close_at || "9999-12-31") -
-            +new Date(b.sales_close_at || "9999-12-31")
-          );
-
-        case "title":
-          return a.title.localeCompare(b.title);
-
-        case "tickets":
-          return b.eligible_tickets - a.eligible_tickets;
-
-        default:
-          return (
-            +new Date(a.draw_at || "9999-12-31") -
-            +new Date(b.draw_at || "9999-12-31")
-          );
+    return matchingItems.sort((a, b) => {
+      if (sort === "title") {
+        return a.title.localeCompare(b.title, "en-GB");
       }
+
+      if (sort === "tickets") {
+        return b.eligible_tickets - a.eligible_tickets;
+      }
+
+      const first =
+        sort === "sales_close"
+          ? sortTimestamp(a.sales_close_at)
+          : sortTimestamp(a.draw_at);
+
+      const second =
+        sort === "sales_close"
+          ? sortTimestamp(b.sales_close_at)
+          : sortTimestamp(b.draw_at);
+
+      return first === second ? 0 : first < second ? -1 : 1;
     });
   }, [items, search, status, sort]);
 
   async function openDraw(item: LotteryDrawListItem) {
+    if (drawInFlight.current) return;
+
     readinessRequest.current?.abort();
+
     const controller = new AbortController();
     readinessRequest.current = controller;
+
     readinessAt.current = 0;
+
     setSelected(item);
     setReadiness(null);
+    setReadinessCheckedAt(0);
     setResult(null);
     setConfirm(false);
     setAttemptedHere(attempted.current.has(item.id));
     setLoadingReadiness(true);
-    setError(null);
+    setDrawError(null);
     setErrorDiagnostics(null);
+    setNow(Date.now());
+
     try {
+      const currentItem = await fetchCurrentDrawItem(
+        item.id,
+        controller.signal,
+      );
+
+      if (controller.signal.aborted) return;
+
+      setSelected(currentItem);
+
+      setItems((previous) =>
+        previous.map((entry) =>
+          entry.id === currentItem.id ? currentItem : entry,
+        ),
+      );
+
       const { response, data } = await requestJson(
         drawReadinessRoute(item.id),
         {},
         controller.signal,
       );
+
       if (
         !response.ok ||
         !isReadinessResponse(data) ||
         data.lottery.id !== item.id
-      )
-        throw new Error("Invalid readiness");
+      ) {
+        throw new Error("Invalid readiness response.");
+      }
+
       if (controller.signal.aborted) return;
-      readinessAt.current = Date.now();
+
+      const checkedAt = Date.now();
+
+      readinessAt.current = checkedAt;
+      setReadinessCheckedAt(checkedAt);
+      setNow(checkedAt);
       setReadiness(data);
     } catch {
-      if (!controller.signal.aborted)
-        setError(
-          "Draw readiness is unavailable. No draw was submitted by this check.",
+      if (!controller.signal.aborted) {
+        setDrawError(
+          "The current lottery record or readiness checks could not be verified. No draw was submitted by this check. Use Refresh checks to try again.",
         );
+      }
     } finally {
-      if (!controller.signal.aborted) setLoadingReadiness(false);
+      if (!controller.signal.aborted) {
+        setLoadingReadiness(false);
+      }
     }
   }
 
@@ -658,84 +848,174 @@ export default function DrawsClient() {
       !confirm ||
       drawInFlight.current ||
       attempted.current.has(selected.id)
-    )
+    ) {
       return;
+    }
+
+    const initialReasons = drawBlockReasons(selected, readiness);
+
+    if (initialReasons.length > 0) {
+      setConfirm(false);
+      setDrawError(initialReasons.join(" "));
+      return;
+    }
+
     if (
-      !canRunDraw(selected, readiness) ||
-      Date.now() - readinessAt.current > 60000
+      readinessAt.current === 0 ||
+      Date.now() - readinessAt.current > READINESS_MAX_AGE_MS
     ) {
       setConfirm(false);
-      setError(
-        "Readiness is blocked or has expired. Close and reopen this draw to check again.",
+      setDrawError(
+        "Readiness has expired. Use Refresh checks before requesting this draw.",
       );
       return;
     }
-    // Synchronous UI guard only. The server must enforce a single draw under a database lock.
+
+    const lotteryId = selected.id;
+    const controller = new AbortController();
+
     drawInFlight.current = true;
+    runRequest.current = controller;
+
     setRunning(true);
     setConfirm(false);
-    setError(null);
+    setDrawError(null);
     setErrorDiagnostics(null);
-    const controller = new AbortController();
-    runRequest.current = controller;
+
     let submitted = false;
+
     try {
-      // Settings may have changed since the modal opened. Refresh only the read;
-      // a POST is never retried. These checks do not replace atomic server checks.
+      const currentItem = await fetchCurrentDrawItem(
+        lotteryId,
+        controller.signal,
+      );
+
+      if (controller.signal.aborted) return;
+
+      setSelected(currentItem);
+
+      setItems((previous) =>
+        previous.map((entry) =>
+          entry.id === currentItem.id ? currentItem : entry,
+        ),
+      );
+
       const fresh = await requestJson(
-        drawReadinessRoute(selected.id),
+        drawReadinessRoute(lotteryId),
         {},
         controller.signal,
       );
+
       if (controller.signal.aborted) return;
+
       if (
         !fresh.response.ok ||
         !isReadinessResponse(fresh.data) ||
-        !canRunDraw(selected, fresh.data)
+        fresh.data.lottery.id !== lotteryId
       ) {
         setReadiness(null);
-        setError(
-          "The final readiness check failed. No draw was submitted. Review the server checks before further action.",
+        setReadinessCheckedAt(0);
+        readinessAt.current = 0;
+
+        setDrawError(
+          "The final readiness check could not be verified. No draw was submitted.",
         );
         return;
       }
-      setReadiness(fresh.data);
-      attempted.current.add(selected.id);
+
+      const freshReadiness = fresh.data;
+      const checkedAt = Date.now();
+
+      readinessAt.current = checkedAt;
+
+      setReadinessCheckedAt(checkedAt);
+      setNow(checkedAt);
+      setReadiness(freshReadiness);
+
+      const reasons = drawBlockReasons(
+        currentItem,
+        freshReadiness,
+        checkedAt,
+      );
+
+      if (reasons.length > 0) {
+        setDrawError(`No draw was submitted. ${reasons.join(" ")}`);
+        return;
+      }
+
+      // This UI guard does not replace the server's transactional lock.
+      // A submitted POST is never automatically retried.
+      attempted.current.add(lotteryId);
       setAttemptedHere(true);
       submitted = true;
+
       const { response, data } = await requestJson(
-        runDrawRoute(selected.id),
+        runDrawRoute(lotteryId),
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ confirmed: true }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            confirmed: true,
+          }),
         },
         controller.signal,
       );
+
       if (controller.signal.aborted) return;
-      setErrorDiagnostics({ requestId: requestId(data) });
-      if (!response.ok || !isDrawResult(data))
-        throw new Error("Draw outcome unverified");
+
+      setErrorDiagnostics({
+        requestId: requestId(data),
+      });
+
+      if (!response.ok || !isDrawResult(data)) {
+        throw new Error("Draw outcome unverified.");
+      }
+
       setResult(data);
-      // Do not clear the returned result or mistake a list refresh failure for a draw failure.
+
+      // List errors have separate state and cannot overwrite this result.
       void loadDraws();
     } catch {
-      if (!controller.signal.aborted)
-        setError(
+      if (!controller.signal.aborted) {
+        setDrawError(
           submitted
-            ? "The draw outcome could not be verified. It may have completed. Check draw records, winners and the audit log before any further action. Another submission is blocked for this lottery in this screen session."
-            : "The final readiness check is unavailable. No draw was submitted. Close and reopen the draw to check again.",
+            ? "The draw outcome could not be verified. It may have completed. Check the draw records, winners and audit log before any further action. Another submission is blocked in this screen session."
+            : "The final lottery record or readiness check is unavailable. No draw was submitted. Use Refresh checks to try again.",
         );
+      }
     } finally {
       drawInFlight.current = false;
-      if (!controller.signal.aborted) setRunning(false);
+
+      if (runRequest.current === controller) {
+        runRequest.current = null;
+      }
+
+      if (!controller.signal.aborted) {
+        setRunning(false);
+      }
     }
+  }
+
+  function closeDraw() {
+    if (running || drawInFlight.current) return;
+
+    readinessRequest.current?.abort();
+    readinessAt.current = 0;
+
+    setSelected(null);
+    setReadiness(null);
+    setReadinessCheckedAt(0);
+    setLoadingReadiness(false);
+    setResult(null);
+    setConfirm(false);
+    setDrawError(null);
+    setErrorDiagnostics(null);
   }
 
   return (
     <div className="w-full max-w-none space-y-6 px-0 py-4 md:py-6">
-      {/* Header - same layout as Prizes */}
-
       <section className="rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
@@ -744,78 +1024,65 @@ export default function DrawsClient() {
             </div>
 
             <div>
-              <h1 className="text-2xl font-extrabold text-white">Draws</h1>
-
+              <h1 className="text-2xl font-extrabold text-white">
+                Draws
+              </h1>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-white/60">
-                Request lottery draws, check eligible tickets, review draw
+                Request lottery draws, check eligible tickets, review
                 readiness and see completed results.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-
-              onClick={loadDraws}
-
-              disabled={loading}
-
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-              />
-              Refresh
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => void loadDraws()}
+            disabled={loading || running}
+            className={BUTTON_CLASS}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${
+                loading ? "animate-spin motion-reduce:animate-none" : ""
+              }`}
+            />
+            Refresh
+          </button>
         </div>
       </section>
-
-      {/* Stats - same StatCard styling as Prizes */}
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Readiness reported"
           value={summary ? String(summary.ready) : "Unavailable"}
         />
-
         <StatCard
           label="Upcoming"
           value={summary ? String(summary.upcoming) : "Unavailable"}
         />
-
         <StatCard
           label="Completed"
           value={summary ? String(summary.completed) : "Unavailable"}
         />
-
         <StatCard
           label="Blocked / review"
-
           value={summary ? String(summary.blocked) : "Unavailable"}
         />
       </section>
 
-      {error && !selected ? (
+      {listError ? (
         <DrawErrorPanel
-          error={error}
-
-          lottery={selected}
-
-          readiness={readiness}
-
-          diagnostics={errorDiagnostics}
+          title="Draw register unavailable"
+          error={listError}
+          diagnostics={null}
         />
       ) : null}
-
-      {/* Search & filters - same structure as Prizes */}
 
       <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
         <div className="mb-5 flex items-center gap-2">
           <Filter className="h-4 w-4 text-white/65" />
-
-          <h2 className="text-lg font-bold text-white">Search & filters</h2>
+          <h2 className="text-lg font-bold text-white">
+            Search & filters
+          </h2>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -825,85 +1092,86 @@ export default function DrawsClient() {
             <input
               aria-label="Search draws"
               value={search}
-
               onChange={(event) => setSearch(event.target.value)}
-
               placeholder="Lottery, reference or slug..."
-
-              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-white/35"
+              className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-11 text-sm text-white outline-none placeholder:text-white/35 focus-visible:ring-2 focus-visible:ring-purple-300"
             />
+
+            {search ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={(event) => {
+                  setSearch("");
+                  event.currentTarget.parentElement
+                    ?.querySelector("input")
+                    ?.focus();
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-lg p-2 text-white/65 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
 
           <Select
             label="Filter draw status"
             value={status}
-
             onChange={(value) => setStatus(value as FilterStatus)}
           >
             <option value="all">All draw statuses</option>
-
-            <option value="ready">Ready to draw</option>
-
+            <option value="ready">Readiness reported</option>
             <option value="upcoming">Upcoming</option>
-
             <option value="completed">Completed</option>
-
             <option value="review">Blocked / under review</option>
           </Select>
 
           <Select
             label="Sort draws"
             value={sort}
-
             onChange={(value) => setSort(value as SortMode)}
           >
             <option value="draw_date">Draw date</option>
-
             <option value="sales_close">Sales closing date</option>
-
-            <option value="title">Lottery title A-Z</option>
-
+            <option value="title">Lottery title A–Z</option>
             <option value="tickets">Most eligible tickets</option>
           </Select>
         </div>
       </section>
 
-      {/* Draw register - same register card style as Prizes */}
-
-      <section className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
+      <section
+        aria-busy={loading}
+        className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl"
+      >
         <div className="mb-4">
-          <h2 className="text-lg font-bold text-white">Draw register</h2>
-
+          <h2 className="text-lg font-bold text-white">
+            Draw register
+          </h2>
           <p className="mt-1 text-sm text-white/50">
             Showing {filtered.length} of {items.length} draw records
           </p>
         </div>
 
-        {loading ? (
-          <div className="flex min-h-52 items-center justify-center text-white/65">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            Loading draws...
-          </div>
+        {loading && !hasLoaded ? (
+          <LoadingMessage text="Loading draws..." />
+        ) : !hasLoaded ? (
+          <EmptyMessage
+            title="Draw register unavailable"
+            message="Use Refresh to try loading the draw register again."
+          />
         ) : filtered.length === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
-            <Trophy className="mx-auto h-8 w-8 text-white/30" />
-
-            <h3 className="mt-3 font-bold text-white">No draws found</h3>
-
-            <p className="mt-1 text-sm text-white/50">
-              Change the selected filters or wait until a lottery is ready for
-              its draw.
-            </p>
-          </div>
+          <EmptyMessage
+            title="No draws found"
+            message="Change the selected filters or check that your lottery is included in the draw register."
+          />
         ) : (
           <div className="space-y-4">
             {filtered.map((item) => (
               <DrawRow
                 key={item.id}
-
                 item={item}
-
-                onOpen={() => openDraw(item)}
+                disabled={running}
+                onOpen={() => void openDraw(item)}
               />
             ))}
           </div>
@@ -913,40 +1181,20 @@ export default function DrawsClient() {
       {selected ? (
         <DrawModal
           item={selected}
-
           readiness={readiness}
-
+          readinessCheckedAt={readinessCheckedAt}
+          now={now}
           loadingReadiness={loadingReadiness}
-
           result={result}
-
           attemptedHere={attemptedHere}
-          error={error}
+          error={drawError}
           diagnostics={errorDiagnostics}
-
           confirm={confirm}
-
           running={running}
-
           setConfirm={setConfirm}
-
-          onRun={runDraw}
-
-          onClose={() => {
-            if (!running && !drawInFlight.current) {
-              setSelected(null);
-
-              setReadiness(null);
-
-              setResult(null);
-
-              setConfirm(false);
-
-              readinessRequest.current?.abort();
-
-              setErrorDiagnostics(null);
-            }
-          }}
+          onRun={() => void runDraw()}
+          onRefresh={() => void openDraw(selected)}
+          onClose={closeDraw}
         />
       ) : null}
     </div>
@@ -954,21 +1202,22 @@ export default function DrawsClient() {
 }
 
 function DrawErrorPanel({
+  title = "Draw action needs review",
   error,
   diagnostics,
 }: {
+  title?: string;
   error: string;
-  lottery?: LotteryDrawListItem | null;
-  readiness?: ReadinessResponse | null;
   diagnostics: DrawErrorDiagnostics | null;
 }) {
   return (
     <section
       role="alert"
-      className="mb-5 rounded-2xl border border-red-400/35 bg-red-500/10 p-5 text-red-50"
+      className="rounded-2xl border border-red-400/35 bg-red-500/10 p-5 text-red-50"
     >
-      <h2 className="font-bold">Draw action needs review</h2>
+      <h2 className="font-bold">{title}</h2>
       <p className="mt-2 text-sm leading-6">{error}</p>
+
       {diagnostics?.requestId ? (
         <p className="mt-3 break-all text-xs">
           Request reference: {diagnostics.requestId}
@@ -980,17 +1229,14 @@ function DrawErrorPanel({
 
 function StatCard({
   label,
-
   value,
 }: {
   label: string;
-
   value: string;
 }) {
   return (
     <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
       <div className="text-2xl font-black text-white">{value}</div>
-
       <div className="mt-1 text-sm text-white/55">{label}</div>
     </div>
   );
@@ -999,27 +1245,21 @@ function StatCard({
 function Select({
   label,
   value,
-
   onChange,
-
   children,
 }: {
   label: string;
   value: string;
-
   onChange: (value: string) => void;
-
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="relative">
       <select
         aria-label={label}
         value={value}
-
         onChange={(event) => onChange(event.target.value)}
-
-        className="w-full appearance-none rounded-2xl border border-white/10 bg-black/20 px-4 py-3 pr-10 text-sm text-white outline-none"
+        className="w-full cursor-pointer appearance-none rounded-2xl border border-white/10 bg-[#15172a] px-4 py-3 pr-10 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
       >
         {children}
       </select>
@@ -1031,11 +1271,11 @@ function Select({
 
 function DrawRow({
   item,
-
+  disabled,
   onOpen,
 }: {
   item: LotteryDrawListItem;
-
+  disabled: boolean;
   onOpen: () => void;
 }) {
   return (
@@ -1072,56 +1312,32 @@ function DrawRow({
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <Info
                 label="Sales close"
-
                 value={formatDate(item.sales_close_at)}
               />
-
-              <Info
-                label="Draw date"
-
-                value={formatDate(item.draw_at)}
-              />
-
-              <Info
-                label="Paid orders"
-
-                value={String(item.paid_orders)}
-              />
-
+              <Info label="Draw date" value={formatDate(item.draw_at)} />
+              <Info label="Paid orders" value={String(item.paid_orders)} />
               <Info
                 label="Eligible tickets"
-
                 value={String(item.eligible_tickets)}
               />
-
               <Info
                 label="Excluded tickets"
-
                 value={String(item.excluded_tickets)}
               />
-
-              <Info
-                label="Prizes"
-
-                value={String(item.prizes_available)}
-              />
+              <Info label="Prizes" value={String(item.prizes_available)} />
             </div>
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <button
-            type="button"
-
-            onClick={onOpen}
-
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10"
-          >
-            <Eye className="h-3.5 w-3.5" />
-
-            {item.draw_status === "completed" ? "View draw" : "Open draw"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          disabled={disabled}
+          className={`${BUTTON_CLASS} shrink-0 rounded-xl px-3 py-2 text-xs`}
+        >
+          <Eye className="h-3.5 w-3.5" />
+          {item.draw_status === "completed" ? "View draw" : "Open draw"}
+        </button>
       </div>
     </article>
   );
@@ -1129,105 +1345,152 @@ function DrawRow({
 
 function Info({
   label,
-
   value,
 }: {
   label: string;
-
   value: string;
 }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-      <div className="text-[10px] font-bold uppercase tracking-wide text-white/35">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-white/40">
         {label}
       </div>
-
-      <div className="mt-1 break-words text-xs font-bold text-white/75">
+      <div className="mt-1 break-words text-xs font-bold text-white/80">
         {value}
       </div>
     </div>
   );
 }
 
+function LoadingMessage({ text }: { text: string }) {
+  return (
+    <div
+      role="status"
+      className="flex min-h-52 items-center justify-center text-white/70"
+    >
+      <Loader2 className="mr-2 h-5 w-5 animate-spin motion-reduce:animate-none" />
+      {text}
+    </div>
+  );
+}
+
+function EmptyMessage({
+  title,
+  message,
+}: {
+  title: string;
+  message: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
+      <Trophy className="mx-auto h-8 w-8 text-white/30" />
+      <h3 className="mt-3 font-bold text-white">{title}</h3>
+      <p className="mt-1 text-sm text-white/60">{message}</p>
+    </div>
+  );
+}
+
 function DrawModal({
   item,
-
   readiness,
-
+  readinessCheckedAt,
+  now,
   loadingReadiness,
-
   result,
-
   attemptedHere,
   error,
   diagnostics,
-
   confirm,
-
   running,
-
   setConfirm,
-
   onRun,
-
+  onRefresh,
   onClose,
 }: {
   item: LotteryDrawListItem;
-
   readiness: ReadinessResponse | null;
-
+  readinessCheckedAt: number;
+  now: number;
   loadingReadiness: boolean;
-
   result: DrawResult | null;
-
   attemptedHere: boolean;
   error: string | null;
   diagnostics: DrawErrorDiagnostics | null;
-
   confirm: boolean;
-
   running: boolean;
-
   setConfirm: (value: boolean) => void;
-
   onRun: () => void;
-
+  onRefresh: () => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
     setMounted(true);
   }, []);
+
   useEffect(() => {
     if (!mounted || !dialog.current) return;
+
     const element = dialog.current;
     const previous =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
+
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    element.showModal();
+
+    if (!element.open) {
+      element.showModal();
+    }
+
     return () => {
-      element.close();
+      if (element.open) element.close();
       document.body.style.overflow = overflow;
       if (previous?.isConnected) previous.focus();
     };
   }, [mounted]);
+
   if (!mounted) return null;
+
+  const blockReasons = drawBlockReasons(item, readiness, now);
+
+  if (
+    readiness &&
+    (readinessCheckedAt === 0 ||
+      now - readinessCheckedAt > READINESS_MAX_AGE_MS)
+  ) {
+    blockReasons.push(
+      "Readiness has expired. Use Refresh checks before requesting this draw.",
+    );
+  }
+
+  if (attemptedHere) {
+    blockReasons.push(
+      "A draw request has already been submitted during this screen session. Check the draw records, winners and audit log before further action.",
+    );
+  }
+
+  const canRun =
+    !running &&
+    !attemptedHere &&
+    !loadingReadiness &&
+    canRunDraw(item, readiness, now) &&
+    blockReasons.length === 0;
+
   return createPortal(
     <dialog
       ref={dialog}
+      aria-labelledby="draw-details-title"
       onCancel={(event) => {
         event.preventDefault();
         if (!running) onClose();
       }}
       className="m-auto w-[calc(100%-1.5rem)] max-w-5xl bg-transparent p-0 text-white backdrop:bg-black/75 backdrop:backdrop-blur-sm"
-
-      aria-labelledby="draw-details-title"
     >
-      <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
+      <div className="flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-white/10 p-5 md:p-6">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10">
@@ -1237,81 +1500,106 @@ function DrawModal({
             <div>
               <h2
                 id="draw-details-title"
-
                 className="text-xl font-extrabold text-white"
               >
                 {item.title}
               </h2>
-
-              <p className="mt-1 text-sm text-white/55">Draw controls</p>
+              <p className="mt-1 text-sm text-white/60">
+                Draw controls
+              </p>
             </div>
           </div>
 
           <button
             type="button"
-
+            autoFocus
             onClick={onClose}
-
             disabled={running}
-
-            className="rounded-xl border border-white/10 p-2 text-white/70 hover:bg-white/10 disabled:opacity-40"
-
             aria-label="Close draw details"
+            className="cursor-pointer rounded-xl border border-white/10 p-2 text-white/75 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="overflow-y-auto p-5 md:p-6">
+        <div
+          aria-busy={loadingReadiness || running}
+          className="overflow-y-auto p-5 md:p-6"
+        >
           {error ? (
-            <DrawErrorPanel error={error} diagnostics={diagnostics} />
+            <div className="mb-5">
+              <DrawErrorPanel
+                error={error}
+                diagnostics={diagnostics}
+              />
+            </div>
           ) : null}
+
           {(attemptedHere || running) && !result ? (
             <p
               role="status"
-              className="mb-5 rounded-2xl border border-amber-400/30 p-4 text-sm"
+              className="mb-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100"
             >
               {running
-                ? "Draw request in progress. Keep this screen open."
-                : "A draw request has been sent for this lottery. Verify the server records and audit log; this screen will not submit it again."}
+                ? "Checking or submitting the draw. Keep this screen open."
+                : "A draw request has been sent. Verify the draw records, winners and audit log. This screen will not submit it again."}
             </p>
           ) : null}
-          {!running && !attemptedHere && !loadingReadiness && readiness ? (
+
+          {!running && !attemptedHere && !result ? (
+            <div className="mb-5 flex justify-end">
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loadingReadiness}
+                className={BUTTON_CLASS}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    loadingReadiness
+                      ? "animate-spin motion-reduce:animate-none"
+                      : ""
+                  }`}
+                />
+                Refresh checks
+              </button>
+            </div>
+          ) : null}
+
+          {!running &&
+          !attemptedHere &&
+          !loadingReadiness &&
+          readiness &&
+          !result ? (
             <div className="mb-6">
               <LiveDrawSettingsPanel lotteryId={item.id} />
+              <p className="mt-3 text-xs leading-5 text-white/60">
+                After saving settings, use Refresh checks before
+                requesting the draw.
+              </p>
             </div>
           ) : null}
 
           {loadingReadiness ? (
-            <div className="flex min-h-52 items-center justify-center text-white/65">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              Running pre-draw integrity checks...
-            </div>
+            <LoadingMessage text="Checking lottery status and draw readiness..." />
           ) : result ? (
             <DrawResultView result={result} />
           ) : readiness ? (
             <ReadinessView
-              canRun={!attemptedHere && canRunDraw(item, readiness)}
-              readiness={readiness}
-
               item={item}
-
+              readiness={readiness}
+              canRun={canRun}
+              blockReasons={blockReasons}
               confirm={confirm}
-
               running={running}
-
               setConfirm={setConfirm}
-
               onRun={onRun}
             />
           ) : (
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-8 text-center">
-              <AlertTriangle className="mx-auto h-8 w-8 text-white/30" />
-
-              <h3 className="mt-3 font-bold text-white">
-                Draw information unavailable
-              </h3>
-            </div>
+            <EmptyMessage
+              title="Draw information unavailable"
+              message="Use Refresh checks to load the current lottery status and readiness."
+            />
           )}
         </div>
       </div>
@@ -1321,30 +1609,22 @@ function DrawModal({
 }
 
 function ReadinessView({
-  canRun,
-  readiness,
-
   item,
-
+  readiness,
+  canRun,
+  blockReasons,
   confirm,
-
   running,
-
   setConfirm,
-
   onRun,
 }: {
-  canRun: boolean;
-  readiness: ReadinessResponse;
-
   item: LotteryDrawListItem;
-
+  readiness: ReadinessResponse;
+  canRun: boolean;
+  blockReasons: string[];
   confirm: boolean;
-
   running: boolean;
-
   setConfirm: (value: boolean) => void;
-
   onRun: () => void;
 }) {
   return (
@@ -1352,68 +1632,75 @@ function ReadinessView({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <DetailCard
           label="Paid orders"
-
           value={String(readiness.metrics.paid_orders)}
         />
-
         <DetailCard
           label="Eligible tickets"
-
           value={String(readiness.metrics.eligible_tickets)}
         />
-
         <DetailCard
           label="Excluded tickets"
-
           value={String(readiness.metrics.excluded_tickets)}
         />
-
         <DetailCard
           label="Available prizes"
-
           value={String(readiness.metrics.prizes_available)}
         />
       </div>
 
       <p className="mt-5 rounded-2xl border border-purple-400/25 bg-purple-500/10 p-4 text-sm leading-6 text-purple-100">
-        These are reported readiness counts. The server must freeze and validate
-        the paid, non-refunded ticket pool before selecting winners. Readiness
-        counts do not establish final odds or compliance approval.
+        These are reported readiness counts. The draw request will
+        recheck eligibility and approval before selecting winners.
       </p>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Panel title="Draw information">
           <DetailRows
             rows={[
-              ["Sales close", formatDate(readiness.lottery.sales_close_at)],
-
+              [
+                "Sales close",
+                formatDate(readiness.lottery.sales_close_at),
+              ],
               ["Draw date", formatDate(readiness.lottery.draw_at)],
-
               [
                 "Reference",
-
                 readiness.lottery.internal_reference ||
                   item.internal_reference ||
                   item.slug,
               ],
-
+              [
+                "Lottery status",
+                item.lottery_status.replaceAll("_", " "),
+              ],
               ["Draw status", statusLabel(item.draw_status)],
+              [
+                "Server readiness",
+                readiness.ready ? "Ready" : "Not ready",
+              ],
+              [
+                "Existing draw",
+                item.latest_draw_id || "No draw reported",
+              ],
             ]}
           />
         </Panel>
 
         <Panel title="Draw integrity">
-          <div className="space-y-3">
-            {readiness.checks.map((check) => (
-              <IntegrityRow
-                key={check.key}
-
-                ok={check.ok}
-
-                text={publicCheck(check)}
-              />
-            ))}
-          </div>
+          {readiness.checks.length > 0 ? (
+            <div className="space-y-3">
+              {readiness.checks.map((check) => (
+                <IntegrityRow
+                  key={check.key}
+                  ok={check.ok}
+                  text={publicCheck(check)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-red-200">
+              No readiness checks were returned.
+            </p>
+          )}
         </Panel>
       </div>
 
@@ -1421,67 +1708,81 @@ function ReadinessView({
         className={`mt-6 rounded-2xl border p-5 ${
           canRun
             ? "border-emerald-400/25 bg-emerald-500/10"
-            : "border-red-400/25 bg-red-500/10"
+            : running
+              ? "border-amber-400/25 bg-amber-500/10"
+              : "border-red-400/25 bg-red-500/10"
         }`}
       >
         <div className="flex items-start gap-3">
-          {canRun ? (
+          {running ? (
+            <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-amber-300 motion-reduce:animate-none" />
+          ) : canRun ? (
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
           ) : (
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-300" />
           )}
 
-          <div>
+          <div className="min-w-0">
             <h3 className="font-bold text-white">
-              {canRun ? "Draw is ready" : "Draw is currently blocked"}
+              {running
+                ? "Draw request in progress"
+                : canRun
+                  ? "Draw is ready"
+                  : "Draw is currently blocked"}
             </h3>
 
-            <p className="mt-1 text-sm text-white/60">
-              {canRun
-                ? "Reported checks and local date checks allow a request. The server must recheck permissions, recent 2FA, compliance, eligibility and draw locking."
-                : "Check dates, lifecycle state, reported checks and existing draw records. A submitted draw cannot be requested again from this screen session."}
-            </p>
+            {running ? (
+              <p className="mt-1 text-sm leading-6 text-white/75">
+                Wait for the result. Another draw request cannot be
+                submitted while this request is in progress.
+              </p>
+            ) : canRun ? (
+              <p className="mt-1 text-sm leading-6 text-white/75">
+                The checks allow you to request this draw. The server
+                will validate it again before selecting winners.
+              </p>
+            ) : (
+              <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-white/80">
+                {blockReasons.map((reason, index) => (
+                  <li
+                    key={`${index}-${reason}`}
+                    className="break-words"
+                  >
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </div>
 
-      {canRun && item.draw_status !== "completed" ? (
+      {canRun ? (
         <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
-
-              disabled={running}
               checked={confirm}
-
+              disabled={running}
               onChange={(event) => setConfirm(event.target.checked)}
-
-              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/20"
+              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
             />
 
-            <span className="text-sm leading-6 text-white/70">
-              I confirm sales are closed, the information above is correct and I
-              am authorised to execute this draw.
+            <span className="text-sm leading-6 text-white/80">
+              I confirm sales are closed, the information above is
+              correct and I am authorised to execute this draw.
             </span>
           </label>
 
           <div className="mt-5 flex justify-end">
             <button
               type="button"
-
               onClick={onRun}
-
-              disabled={!confirm || running || !canRun}
-
-              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!confirm || running}
+              className="inline-flex min-w-40 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {running ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Trophy className="h-4 w-4" />
-              )}
-
-              {running ? "Submitting draw..." : "Request draw"}
+              <Trophy className="h-4 w-4" />
+              Request draw
             </button>
           </div>
         </div>
@@ -1493,16 +1794,18 @@ function ReadinessView({
 function DrawResultView({ result }: { result: DrawResult }) {
   return (
     <>
-      <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-5">
+      <div
+        role="status"
+        className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-5"
+      >
         <div className="flex items-start gap-3">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
 
           <div>
             <h3 className="font-bold text-white">Draw complete</h3>
-
-            <p className="mt-1 text-sm text-white/60">
-              The server returned a completed draw result. Check the audit log
-              and stored snapshot to verify execution.
+            <p className="mt-1 text-sm leading-6 text-white/75">
+              A completed draw result was returned. Review the winners
+              and audit log below.
             </p>
           </div>
         </div>
@@ -1510,22 +1813,16 @@ function DrawResultView({ result }: { result: DrawResult }) {
 
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <DetailCard label="Draw ID" value={result.draw.id} />
-
         <DetailCard
           label="Eligible tickets"
-
           value={String(result.draw.eligible_ticket_count)}
         />
-
         <DetailCard
           label="Completed"
-
           value={formatDate(result.draw.completed_at)}
         />
-
         <DetailCard
           label="Snapshot"
-
           value={result.draw.snapshot_hash}
         />
       </div>
@@ -1533,23 +1830,22 @@ function DrawResultView({ result }: { result: DrawResult }) {
       <section className="mt-6">
         <div className="mb-4 flex items-center gap-2">
           <Trophy className="h-4 w-4 text-white/65" />
-
-          <h3 className="text-lg font-bold text-white">Winning tickets</h3>
+          <h3 className="text-lg font-bold text-white">
+            Winning tickets
+          </h3>
         </div>
 
         <div className="space-y-4">
           {result.winners.map((winner, index) => (
             <article
               key={`${winner.prize_id}-${winner.ticket_id}`}
-
               className="rounded-2xl border border-white/10 bg-black/20 p-5"
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/35">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-white/40">
                     Prize {index + 1}
                   </p>
-
                   <h4 className="mt-1 text-base font-extrabold text-white">
                     {winner.prize_name}
                   </h4>
@@ -1558,13 +1854,10 @@ function DrawResultView({ result }: { result: DrawResult }) {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Info
                     label="Winning ticket"
-
                     value={winner.ticket_number}
                   />
-
                   <Info
                     label="Winner status"
-
                     value={winner.winner_status.replaceAll("_", " ")}
                   />
                 </div>
@@ -1577,8 +1870,7 @@ function DrawResultView({ result }: { result: DrawResult }) {
       <div className="mt-6 flex flex-wrap justify-end gap-3">
         <a
           href="/Admin/LotteryManagement/AuditLogs"
-
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-3 text-sm font-bold text-white hover:bg-white/10"
+          className={BUTTON_CLASS}
         >
           <ShieldCheck className="h-4 w-4" />
           View audit log
@@ -1586,8 +1878,7 @@ function DrawResultView({ result }: { result: DrawResult }) {
 
         <a
           href="/Admin/LotteryManagement/Winners"
-
-          className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
         >
           <Trophy className="h-4 w-4" />
           Go to winners
@@ -1599,19 +1890,16 @@ function DrawResultView({ result }: { result: DrawResult }) {
 
 function DetailCard({
   label,
-
   value,
 }: {
   label: string;
-
   value: string;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-      <div className="text-xs font-bold uppercase tracking-wide text-white/35">
+      <div className="text-xs font-bold uppercase tracking-wide text-white/40">
         {label}
       </div>
-
       <div className="mt-2 break-words text-sm font-bold text-white/80">
         {value}
       </div>
@@ -1621,34 +1909,37 @@ function DetailCard({
 
 function Panel({
   title,
-
   children,
 }: {
   title: string;
-
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-white/10 bg-black/20 p-5">
       <h3 className="text-base font-extrabold text-white">{title}</h3>
-
       <div className="mt-4">{children}</div>
     </section>
   );
 }
 
-function DetailRows({ rows }: { rows: Array<[string, string]> }) {
+function DetailRows({
+  rows,
+}: {
+  rows: Array<[string, string]>;
+}) {
   return (
     <div className="divide-y divide-white/10">
       {rows.map(([label, value]) => (
         <div
           key={label}
-
           className="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[150px_1fr]"
         >
-          <div className="text-xs font-bold text-white/40">{label}</div>
-
-          <div className="break-words text-sm text-white/75">{value}</div>
+          <div className="text-xs font-bold text-white/50">
+            {label}
+          </div>
+          <div className="break-words text-sm text-white/80">
+            {value}
+          </div>
         </div>
       ))}
     </div>
@@ -1657,16 +1948,10 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
 
 function IntegrityRow({
   ok,
-
   text,
-
-  detail,
 }: {
   ok: boolean;
-
   text: string;
-
-  detail?: string;
 }) {
   return (
     <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1677,11 +1962,12 @@ function IntegrityRow({
       )}
 
       <div>
-        <p className="text-sm font-semibold text-white/75">{text}</p>
-
-        {detail ? (
-          <p className="mt-1 text-xs leading-5 text-white/45">{detail}</p>
-        ) : null}
+        <p className="text-sm font-semibold text-white/80">
+          {text}
+        </p>
+        <p className="mt-1 text-xs text-white/60">
+          {ok ? "Passed" : "Needs attention"}
+        </p>
       </div>
     </div>
   );
