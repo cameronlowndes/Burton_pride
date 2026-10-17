@@ -88,6 +88,7 @@ export async function loadLotterySettings(): Promise<{
   lastUpdatedBy: string | null;
   defaultsUsed: boolean;
   persistedGroups: LotterySettingsGroup[];
+  versions: Record<LotterySettingsGroup, string | null>;
 }> {
   try {
     const { data, error, count } = await getAuditServiceClient()
@@ -100,6 +101,7 @@ export async function loadLotterySettings(): Promise<{
         data.length > SETTINGS_GROUPS.length) throw new Error("Incomplete settings data.");
     const settings = cloneDefaults();
     const seen = new Set<LotterySettingsGroup>();
+    const versions = Object.fromEntries(SETTINGS_GROUPS.map(group => [group, null])) as Record<LotterySettingsGroup, string | null>;
     for (const row of data) {
       const group = row.setting_group as LotterySettingsGroup;
       if (!SETTINGS_GROUPS.includes(group) || seen.has(group) || !plainObject(row.value_json)) {
@@ -125,6 +127,7 @@ export async function loadLotterySettings(): Promise<{
       }
       settings[group] = validated.value as never;
       seen.add(group);
+      versions[group] = row.updated_at;
     }
     return {
       settings,
@@ -132,6 +135,7 @@ export async function loadLotterySettings(): Promise<{
       lastUpdatedBy: data[0]?.updated_by_name ?? null,
       defaultsUsed: seen.size !== SETTINGS_GROUPS.length,
       persistedGroups: [...seen],
+      versions,
     };
   } catch {
     throw Object.assign(new Error("Unable to load complete, valid lottery settings."), { status: 503 });
@@ -558,23 +562,58 @@ export function validateLotterySettingsUpdate(
   }
 }
 
-/** Compatibility API. Saving remains unavailable until one audited transaction
- * validates persisted version/idempotency, permission, reason and recent MFA,
- * then commits the settings change and lottery_audit_logs record together.
- * No settings or audit rows are written by this blocked implementation.
- */
+/** All mutations use one service-only database transaction. Caller context must
+ * come from the verified server session, never from the JSON request body. */
 export async function saveLotterySettingsGroup(
   admin: AuthenticatedLotteryAdmin,
   input: UpdateLotterySettingsRequest,
+  context?: {
+    userId: string;
+    securitySessionHash: string;
+    expectedUpdatedAt: string | null;
+    requestId: string;
+  },
 ): Promise<void> {
   const verified = await getAuthenticatedAdmin();
   if (!verified) throw Object.assign(new Error("Authentication required."), { status: 401 });
-  if (!admin || admin.id !== verified.id || !hasLotteryPermission(verified, "lottery:settings:manage")) {
-    throw Object.assign(new Error("You do not have permission to change lottery settings."), { status: 403 });
+  if (!admin || admin.id !== verified.id || verified.role !== "main_admin" ||
+      !hasLotteryPermission(verified, "lottery:settings:manage")) {
+    throw Object.assign(new Error("Main Admin access is required."), { status: 403, code: "MAIN_ADMIN_REQUIRED" });
   }
-  validateLotterySettingsUpdate(input);
-  throw Object.assign(new Error("Saving settings is unavailable until the audited settings transaction has been verified."), {
-    status: 503,
-    code: "SETTINGS_TRANSACTION_UNVERIFIED",
-  });
+  if (!context) throw Object.assign(new Error("Reload settings before saving."), { status: 409, code: "VERSION_REQUIRED" });
+  if (isHighRiskSettingsGroup(input.group) && (typeof input.reason !== "string" ||
+      input.reason.trim().length < 5 || input.reason.trim().length > 1000)) {
+    throw Object.assign(new Error("Enter a reason of 5 to 1000 characters."), { status: 422, code: "INVALID_SETTINGS" });
+  }
+  let validated: UpdateLotterySettingsRequest;
+  try { validated = validateLotterySettingsUpdate(input); }
+  catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error("Invalid settings."), { status: 422, code: "INVALID_SETTINGS" });
+  }
+  const { data, error } = await getAuditServiceClient().rpc("lottery_save_settings_audited", {
+    p_admin_id: verified.id,
+    p_user_id: context.userId,
+    p_session_hash: context.securitySessionHash,
+    p_group: validated.group,
+    p_value: validated.value,
+    p_reason: validated.reason ?? null,
+    p_expected_updated_at: context.expectedUpdatedAt,
+    p_request_id: context.requestId,
+  }).abortSignal(AbortSignal.timeout(12_000));
+  if (!error && (!data || data.saved !== true)) {
+    throw Object.assign(new Error("The settings save could not be confirmed. Reload before trying again."), { status: 503, code: "SETTINGS_SERVICE_UNAVAILABLE" });
+  }
+  if (error) {
+    const codes: Record<string, [number, string]> = {
+      SETTINGS_CONFLICT: [409, "These settings changed in another session. Reload before saving."],
+      IDEMPOTENCY_CONFLICT: [409, "This save request has already been used. Reload before saving."],
+      RECENT_2FA_REQUIRED: [403, "Complete two-step verification again, then reload settings. Verification must be within 15 minutes."],
+      SECURITY_SESSION_REQUIRED: [403, "Sign in again and complete two-step verification, then reload settings."],
+      MAIN_ADMIN_REQUIRED: [403, "An active Main Admin account is required."],
+      INVALID_SETTINGS: [422, "These settings could not be accepted. Check the values and reason."],
+    };
+    const code = Object.keys(codes).find(key => error.message === key);
+    const [status, message] = code ? codes[code] : [503, "The settings save could not be confirmed. Reload before trying again."];
+    throw Object.assign(new Error(message), { status, code: code ?? "SETTINGS_SERVICE_UNAVAILABLE" });
+  }
 }

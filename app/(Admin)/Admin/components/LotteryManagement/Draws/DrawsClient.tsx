@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -50,6 +51,8 @@ type LotteryDrawListItem = {
   prizes_available: number;
   draw_status: DrawStatus;
   latest_draw_id: string | null;
+  latest_draw_status?: string | null;
+  previous_failed_draw_safe?: boolean;
 };
 
 type DrawSummary = {
@@ -90,6 +93,8 @@ type ReadinessResponse = {
     prizes_available: number;
   };
   ready: boolean;
+  previous_failed_draw_safe?: boolean;
+  previous_failed_draw_id?: string | null;
   checks: ReadinessCheck[];
   error?: string;
   message?: string;
@@ -159,6 +164,53 @@ function drawReadinessRoute(id: string) {
 
 function runDrawRoute(id: string) {
   return `${DRAW_LIST_ROUTE}/${encodeURIComponent(id)}/draw`;
+}
+
+// Requires a server route that verifies the signed-in Main Admin, their own
+// password, recent 2FA, permissions and an auditable, narrowly scoped override.
+// A successful override must never itself select winners or bypass draw safety.
+function drawOverrideRoute(id: string) {
+  return `${DRAW_LIST_ROUTE}/${encodeURIComponent(id)}/draw-override`;
+}
+
+function isOverrideResult(value: unknown, lotteryId: string): boolean {
+  return record(value) && value.ok === true &&
+    value.lottery_id === lotteryId && text(value.override_id);
+}
+
+function canRequestOverride(item: LotteryDrawListItem): boolean {
+  return ["blocked", "under_review"].includes(item.draw_status) &&
+    !item.latest_draw_id;
+}
+
+function canRetryFailedDraw(item: LotteryDrawListItem, readiness: ReadinessResponse | null): boolean {
+  return Boolean(item.latest_draw_id && item.latest_draw_status === "failed" &&
+    item.previous_failed_draw_safe === true && readiness?.previous_failed_draw_safe === true &&
+    readiness.previous_failed_draw_id === item.latest_draw_id);
+}
+
+function drawServerMessage(value: unknown): string | null {
+  if (!record(value) || typeof value.code !== "string") return null;
+  const messages: Record<string, string> = {
+    SALES_NOT_CLOSED: "Close ticket sales and set the lottery status to sales_closed or draw_ready.",
+    DRAW_TIME_BLOCKED: "Set valid sales closing and draw times, and wait until both times have been reached.",
+    COMPLIANCE_NOT_APPROVED: "This lottery needs compliance approval before the draw can run.",
+    NO_PAID_ORDERS: "No paid, non-refunded orders are available.",
+    NO_ELIGIBLE_TICKETS: "No issued, non-refunded tickets on paid, non-refunded orders are available.",
+    INTEGRITY_WARNINGS: "Unresolved integrity warnings must be reviewed before drawing.",
+    EXISTING_DRAW_BLOCKED: "An active or completed draw, or existing winners, require review. Use the separate redraw process when appropriate.",
+    MULTIPLE_PRIZE_QUANTITY: "Each available prize record must have quantity 1. Split multi-quantity prizes into separate records.",
+    INVALID_PRIZE_COUNT: "Check that 1–1,000 confirmed or available prize records exist, then refresh the checks.",
+    INSUFFICIENT_TICKETS: "There must be at least one different eligible ticket for each prize.",
+    INVALID_SNAPSHOT_COUNT: "The frozen ticket count is invalid or exceeds the supported limit of 100,000.",
+    SNAPSHOT_INCOMPLETE: "The frozen ticket pool is incomplete. Review this failed draw and its audit log.",
+    SNAPSHOT_INVALID: "The frozen ticket pool could not be validated. Review the draw records and audit log.",
+    DRAW_CHECK_UNAVAILABLE: "A required database check is unavailable. Check the server logs using the request reference.",
+    DRAW_START_FAILED: "The database could not start the draw. Check the audit log and database configuration using the request reference.",
+    ADMIN_IDENTITY_UNAVAILABLE: "Your administrator identity could not be verified. Sign in again.",
+    INVALID_ORIGIN: "The draw request must come from this website.",
+  };
+  return messages[value.code] ?? null;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -248,7 +300,9 @@ function isDrawsResponse(
         nullableDate(item.sales_close_at) &&
         metrics(item) &&
         DRAW_STATUSES.includes(item.draw_status as DrawStatus) &&
-        nullableText(item.latest_draw_id)
+        nullableText(item.latest_draw_id) &&
+        (item.latest_draw_status === undefined || nullableText(item.latest_draw_status)) &&
+        (item.previous_failed_draw_safe === undefined || typeof item.previous_failed_draw_safe === "boolean")
       );
     })
   ) {
@@ -274,6 +328,8 @@ function isReadinessResponse(
     !record(value.lottery) ||
     !metrics(value.metrics) ||
     typeof value.ready !== "boolean" ||
+    (value.previous_failed_draw_safe !== undefined && typeof value.previous_failed_draw_safe !== "boolean") ||
+    (value.previous_failed_draw_id !== undefined && !nullableText(value.previous_failed_draw_id)) ||
     !Array.isArray(value.checks) ||
     value.checks.length > 100
   ) {
@@ -367,6 +423,11 @@ function publicCheck(check: ReadinessCheck): string {
     compliance: "Compliance check",
     integrity_warnings: "Integrity warning check",
     paid_orders: "Paid orders",
+    lottery_state: "Lottery status",
+    snapshot_limit: "Supported ticket pool size",
+    prize_quantities: "Prize quantities",
+    tickets_for_prizes: "Enough tickets for all prizes",
+    no_existing_winners: "Existing winners check",
   };
 
   if (labels[check.key]) return labels[check.key];
@@ -453,7 +514,7 @@ function drawBlockReasons(
     );
   }
 
-  if (item.latest_draw_id) {
+  if (item.latest_draw_id && !canRetryFailedDraw(item, readiness)) {
     reasons.push(
       `An existing draw (${item.latest_draw_id}) requires review.`,
     );
@@ -970,6 +1031,11 @@ export default function DrawsClient() {
       });
 
       if (!response.ok || !isDrawResult(data)) {
+        const message = drawServerMessage(data);
+        if (message) {
+          setDrawError(`${message} A draw request was submitted; check its records before another attempt. This screen will not submit it again.`);
+          return;
+        }
         throw new Error("Draw outcome unverified.");
       }
 
@@ -1425,6 +1491,7 @@ function DrawModal({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [mounted, setMounted] = useState(false);
+  const [overriding, setOverriding] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -1475,6 +1542,7 @@ function DrawModal({
 
   const canRun =
     !running &&
+    !overriding &&
     !attemptedHere &&
     !loadingReadiness &&
     canRunDraw(item, readiness, now) &&
@@ -1486,7 +1554,7 @@ function DrawModal({
       aria-labelledby="draw-details-title"
       onCancel={(event) => {
         event.preventDefault();
-        if (!running) onClose();
+        if (!running && !overriding) onClose();
       }}
       className="m-auto w-[calc(100%-1.5rem)] max-w-5xl bg-transparent p-0 text-white backdrop:bg-black/75 backdrop:backdrop-blur-sm"
     >
@@ -1514,7 +1582,7 @@ function DrawModal({
             type="button"
             autoFocus
             onClick={onClose}
-            disabled={running}
+            disabled={running || overriding}
             aria-label="Close draw details"
             className="cursor-pointer rounded-xl border border-white/10 p-2 text-white/75 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -1523,7 +1591,7 @@ function DrawModal({
         </div>
 
         <div
-          aria-busy={loadingReadiness || running}
+          aria-busy={loadingReadiness || running || overriding}
           className="overflow-y-auto p-5 md:p-6"
         >
           {error ? (
@@ -1551,7 +1619,7 @@ function DrawModal({
               <button
                 type="button"
                 onClick={onRefresh}
-                disabled={loadingReadiness}
+                disabled={loadingReadiness || overriding}
                 className={BUTTON_CLASS}
               >
                 <RefreshCw
@@ -1566,7 +1634,7 @@ function DrawModal({
             </div>
           ) : null}
 
-          {!running &&
+          {!running && !overriding &&
           !attemptedHere &&
           !loadingReadiness &&
           readiness &&
@@ -1601,10 +1669,215 @@ function DrawModal({
               message="Use Refresh checks to load the current lottery status and readiness."
             />
           )}
+
+          {readiness && !loadingReadiness && !running && !attemptedHere &&
+          !result && readiness.lottery.id === item.id && canRequestOverride(item) ? (
+            <MainAdminOverrideForm
+              key={item.id}
+              lotteryId={item.id}
+              lotteryTitle={item.title}
+              onBusyChange={setOverriding}
+              onVerified={onRefresh}
+            />
+          ) : null}
         </div>
       </div>
     </dialog>,
     document.body,
+  );
+}
+
+function MainAdminOverrideForm({
+  lotteryId, lotteryTitle, onBusyChange, onVerified,
+}: {
+  lotteryId: string;
+  lotteryTitle: string;
+  onBusyChange: (busy: boolean) => void;
+  onVerified: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [reason, setReason] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reference, setReference] = useState<string | undefined>();
+  const [needsRefresh, setNeedsRefresh] = useState(false);
+  const inFlight = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  const toggleButton = useRef<HTMLButtonElement>(null);
+  const restoreToggleFocus = useRef(false);
+
+  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    if (expanded) passwordInput.current?.focus();
+    else if (restoreToggleFocus.current) {
+      restoreToggleFocus.current = false;
+      toggleButton.current?.focus();
+    }
+  }, [expanded]);
+
+  function cancel() {
+    if (inFlight.current) return;
+    setPassword("");
+    setReason("");
+    setShowPassword(false);
+    setConfirmed(false);
+    setError(null);
+    setReference(undefined);
+    restoreToggleFocus.current = true;
+    setExpanded(false);
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (inFlight.current || needsRefresh) return;
+    if (!password || password.length > 1024 || reason.trim().length < 10 ||
+        reason.trim().length > 1000 || !confirmed) {
+      setError("Enter your Main Admin password, a reason of 10–1,000 characters and confirm the request.");
+      return;
+    }
+
+    const controller = new AbortController();
+    request.current = controller;
+    inFlight.current = true;
+    setBusy(true);
+    onBusyChange(true);
+    setError(null);
+    setReference(undefined);
+    let submitted = false;
+    let verified = false;
+
+    try {
+      // Never persist, log or put the password in a URL. The server must use
+      // its existing password-verification and distributed rate-limit helpers.
+      const body = JSON.stringify({
+        main_admin_password: password,
+        reason: reason.trim(),
+        confirmed: true,
+      });
+      setPassword("");
+      setShowPassword(false);
+      const idempotencyKey = crypto.randomUUID();
+      submitted = true;
+      const { response, data } = await requestJson(
+        drawOverrideRoute(lotteryId),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
+          body,
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setReference(requestId(data));
+
+      if (response.status === 404 || response.status === 405 || response.status === 501) {
+        setError("The Main Admin override service is not available. The server route must be connected before an override can be approved.");
+        return;
+      }
+      if (response.status === 401 || response.status === 403) {
+        setError("Override not authorised. Sign in as Main Admin, check your password and complete any required two-factor verification.");
+        return;
+      }
+      if (response.status === 429) {
+        setError("Too many attempts. Wait before trying again.");
+        return;
+      }
+      if (response.status === 400 || response.status === 422) {
+        setError("The override request was not accepted. Check your reason and refresh the draw checks.");
+        return;
+      }
+      if (!response.ok || !isOverrideResult(data, lotteryId)) {
+        setNeedsRefresh(true);
+        setError("The override outcome could not be verified. Refresh the checks and review the audit log before making another request.");
+        return;
+      }
+
+      // Only fresh server readiness can enable the existing draw flow. Never
+      // set ready=true here, remove failed checks, or clear attempted-draw guards.
+      verified = true;
+      setReason("");
+      setConfirmed(false);
+      setExpanded(false);
+    } catch {
+      if (!controller.signal.aborted) {
+        setNeedsRefresh(submitted);
+        setError(submitted
+          ? "The override outcome could not be verified. Refresh the checks and review the audit log before making another request."
+          : "The request could not be prepared. Refresh the page and try again.");
+      }
+    } finally {
+      inFlight.current = false;
+      request.current = null;
+      if (!controller.signal.aborted) {
+        setPassword("");
+        setShowPassword(false);
+        setBusy(false);
+        onBusyChange(false);
+        if (verified) onVerified();
+      }
+    }
+  }
+
+  const fieldClass = "mt-2 w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 text-sm text-white placeholder:text-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:opacity-50";
+
+  return (
+    <section className="mt-6 rounded-2xl border border-amber-400/35 bg-amber-500/10 p-5" aria-labelledby="main-admin-override-heading">
+      <h3 id="main-admin-override-heading" className="font-bold text-amber-100">Main Admin override</h3>
+      <p className="mt-2 text-sm leading-6 text-white/80">
+        Request a reviewed override for this blocked draw. Your Main Admin password
+        and a reason are required. The server decides which blockers can be cleared.
+        Sales, ticket eligibility, integrity and duplicate-draw checks still apply.
+      </p>
+      <p className="mt-2 text-sm leading-6 text-white/70">Approving an override does not run the draw. Refresh the checks, then use the normal draw confirmation.</p>
+      {!expanded ? (
+        <button ref={toggleButton} type="button" onClick={() => setExpanded(true)} className={`${BUTTON_CLASS} mt-4`} aria-expanded={false} aria-controls="main-admin-override-form">
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          Request Main Admin override
+        </button>
+      ) : (
+        <form id="main-admin-override-form" onSubmit={submit} className="mt-5 space-y-4" aria-busy={busy}>
+          <div>
+            <label htmlFor="main-admin-override-password" className="text-sm font-bold text-white">Main Admin password</label>
+            <input ref={passwordInput} id="main-admin-override-password" name="main_admin_password" type={showPassword ? "text" : "password"}
+              autoComplete="current-password" autoCapitalize="none" spellCheck={false} value={password}
+              onChange={(event) => setPassword(event.target.value)} required maxLength={1024} disabled={busy || needsRefresh}
+              aria-describedby="main-admin-password-help" className={fieldClass} />
+            <p id="main-admin-password-help" className="mt-2 text-xs leading-5 text-white/70">Use the password for your own signed-in Main Admin account.</p>
+            <button type="button" onClick={() => setShowPassword((value) => !value)} disabled={busy || needsRefresh} aria-controls="main-admin-override-password" aria-pressed={showPassword}
+              className={`${BUTTON_CLASS} mt-2 px-3 py-2 text-xs`}>{showPassword ? "Hide password" : "Show password"}</button>
+          </div>
+          <div>
+            <label htmlFor="main-admin-override-reason" className="text-sm font-bold text-white">Reason for the override</label>
+            <textarea id="main-admin-override-reason" name="reason" value={reason} onChange={(event) => setReason(event.target.value)}
+              required minLength={10} maxLength={1000} rows={3} disabled={busy || needsRefresh} className={`${fieldClass} resize-y`} aria-describedby="main-admin-reason-help" />
+            <p id="main-admin-reason-help" className="mt-2 text-xs leading-5 text-white/70">Explain what you reviewed and why an override is appropriate (10–1,000 characters). Do not include passwords or entrant details.</p>
+          </div>
+          <label className="flex cursor-pointer items-start gap-3 text-sm leading-6 text-white/80">
+            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} required disabled={busy || needsRefresh}
+              className="mt-1 h-4 w-4 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300" />
+            <span>I have reviewed the block on “{lotteryTitle}” and authorise this override request to be recorded in the audit log.</span>
+          </label>
+          {error ? <div role="alert" className="rounded-xl border border-red-400/35 bg-red-500/10 p-4 text-sm leading-6 text-red-100">
+            <p>{error}</p>{reference ? <p className="mt-2 break-all text-xs">Request reference: {reference}</p> : null}
+          </div> : null}
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" disabled={busy || needsRefresh || !password || reason.trim().length < 10 || !confirmed} className={BUTTON_CLASS}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <ShieldCheck className="h-4 w-4" aria-hidden="true" />}
+              {busy ? "Verifying override…" : "Verify password and request override"}
+            </button>
+            <button type="button" onClick={cancel} disabled={busy} className={BUTTON_CLASS}>Cancel</button>
+            {needsRefresh ? <button type="button" onClick={onVerified} disabled={busy} className={BUTTON_CLASS}>Refresh checks</button> : null}
+          </div>
+        </form>
+      )}
+    </section>
   );
 }
 
@@ -1652,6 +1925,13 @@ function ReadinessView({
         These are reported readiness counts. The draw request will
         recheck eligibility and approval before selecting winners.
       </p>
+
+      {canRetryFailedDraw(item, readiness) ? (
+        <p className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
+          The server confirmed that previous attempts failed without completion and no winners exist.
+          Those records are retained. You can request a new draw when every readiness check passes.
+        </p>
+      ) : null}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Panel title="Draw information">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import { lotteryAdminDb, requireLotteryPermission } from "@/lib/lottery/adminAuth";
 import { getAuthenticatedAdmin } from "@/lib/lottery/audit-server";
+import { DrawReadinessError, loadDrawReadiness } from "@/lib/lottery/drawReadiness";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -139,52 +140,27 @@ export async function POST(request: NextRequest, context: Context) {
     }
 
     db = lotteryAdminDb();
-    const lotteryResult = await db.from("lotteries")
-      .select("id,status,sales_close_at,draw_at,compliance_approved")
-      .eq("id", id).maybeSingle();
-    failQuery(lotteryResult.error, requestId, "Lottery lookup failed");
-    const lottery = lotteryResult.data;
-    if (!lottery) throw new DrawError("Lottery not found.", 404, "LOTTERY_NOT_FOUND");
-    if (!["sales_closed", "draw_ready"].includes(lottery.status)) {
-      throw new DrawError("Sales must be closed before drawing.", 409, "SALES_NOT_CLOSED");
-    }
-    for (const [label, value] of [["Sales closing", lottery.sales_close_at], ["Draw", lottery.draw_at]]) {
-      const time = value ? Date.parse(value) : NaN;
-      if (!Number.isFinite(time) || time > Date.now()) {
-        throw new DrawError(`${label} time must be set and reached before drawing.`, 409, "DRAW_TIME_BLOCKED");
-      }
-    }
-    if (lottery.compliance_approved !== true) {
-      throw new DrawError("This lottery requires compliance approval before drawing.", 409, "COMPLIANCE_NOT_APPROVED");
+    const readiness = await loadDrawReadiness(db, id);
+    if (!readiness) throw new DrawError("Lottery not found.", 404, "LOTTERY_NOT_FOUND");
+    if (!readiness.ready) {
+      const failed = readiness.checks.find((check) => !check.ok)!;
+      throw new DrawError(failed.detail, 409, failed.code);
     }
 
-    const [draws, existingWinners, warnings, prizeResult] = await Promise.all([
-      db.from("lottery_draws").select("id,status,completed_at").eq("lottery_id", id),
-      db.from("lottery_winners").select("id", { count: "exact", head: true }).eq("lottery_id", id),
-      db.from("lottery_integrity_warnings").select("id", { count: "exact", head: true }).eq("lottery_id", id).eq("resolved", false),
-      db.from("lottery_prizes").select("id,name,quantity,status").eq("lottery_id", id)
-        .in("status", ["confirmed", "available_for_draw"])
-        .order("display_order", { ascending: true }).order("id", { ascending: true }),
-    ]);
-    for (const result of [draws, existingWinners, warnings, prizeResult]) {
-      failQuery(result.error, requestId, "Draw prerequisite lookup failed");
-    }
-    if (existingWinners.count === null || warnings.count === null) {
-      throw new DrawError("Draw prerequisite counts are unavailable.", 503, "DRAW_CHECK_UNAVAILABLE");
-    }
-    // A failed record is retained. Any other existing state requires review.
-    if ((draws.data ?? []).some((draw) => draw.status !== "failed" || draw.completed_at) || existingWinners.count > 0) {
-      throw new DrawError("An active/completed draw or existing winners require review. This route does not perform redraws.", 409, "EXISTING_DRAW_BLOCKED");
-    }
-    if (warnings.count > 0) {
-      throw new DrawError("Resolve the integrity warnings before drawing.", 409, "INTEGRITY_WARNINGS");
-    }
+    // Fetch a bounded, ordered prize list after the shared prerequisite check.
+    // The completion transaction rechecks availability and quantity under locks.
+    const prizeResult = await db.from("lottery_prizes")
+      .select("id,name,quantity,status").eq("lottery_id", id)
+      .in("status", ["confirmed", "available_for_draw"])
+      .order("display_order", { ascending: true }).order("id", { ascending: true })
+      .range(0, 1000);
+    failQuery(prizeResult.error, requestId, "Prize lookup failed");
     const prizes: Prize[] = prizeResult.data ?? [];
-    if (!prizes.length || prizes.length > 1000) {
-      throw new DrawError("Between 1 and 1,000 available prizes are required.", 409, "INVALID_PRIZE_COUNT");
+    if (prizes.length !== readiness.metrics.prizes_available || !prizes.length || prizes.length > 1000) {
+      throw new DrawError("Available prizes changed. Refresh the checks before drawing.", 409, "INVALID_PRIZE_COUNT");
     }
     if (prizes.some((prize) => prize.quantity !== 1)) {
-      throw new DrawError("This route supports one winner per prize record. Split prizes with multiple quantities into individual prize records first.", 409, "MULTIPLE_PRIZE_QUANTITY");
+      throw new DrawError("Each available prize record must have quantity 1.", 409, "MULTIPLE_PRIZE_QUANTITY");
     }
 
     const actor = { p_admin_id: admin.id, p_admin_email: adminEmail, p_admin_name: adminName };
@@ -246,6 +222,9 @@ export async function POST(request: NextRequest, context: Context) {
       }
     }
     console.error(`[${requestId}] Draw request failed`, error);
+    if (error instanceof DrawReadinessError) {
+      error = new DrawError("A required database check could not be completed. Refresh the checks and quote the request reference if this continues.", 503, "DRAW_CHECK_UNAVAILABLE");
+    }
     const helperStatus = isRecord(error) ? Number(error.status) : 500;
     const status = error instanceof DrawError ? error.status
       : Number.isInteger(helperStatus) && helperStatus >= 400 && helperStatus <= 599 ? helperStatus : 500;

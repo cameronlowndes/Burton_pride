@@ -1,146 +1,133 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthenticatedAdmin, getAuditServiceClient, hasLotteryPermission } from "@/lib/lottery/audit-server";
-import { loadLotterySettings } from "@/lib/lottery/settings-server";
+import { loadLotterySettings, saveLotterySettingsGroup } from "@/lib/lottery/settings-server";
+import type { UpdateLotterySettingsRequest } from "@/lib/lottery/settings-types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
+const MAX_BYTES = 32 * 1024;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: {
     "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
-    "X-Content-Type-Options": "nosniff",
-    "Vary": "Cookie, Authorization",
+    "X-Content-Type-Options": "nosniff", "X-Robots-Tag": "noindex, nofollow, noarchive",
+    Vary: "Cookie, Authorization",
   } });
 }
-function boundedRead<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(new Error("Settings read timed out."));
-    if (signal.aborted) { abort(); return; }
-    signal.addEventListener("abort", abort, { once: true });
-    Promise.resolve(operation).then(
-      value => { signal.removeEventListener("abort", abort); resolve(value); },
-      error => { signal.removeEventListener("abort", abort); reject(error); },
-    );
-  });
+function fail(message: string, status: number, code: string): never {
+  throw Object.assign(new Error(message), { status, code });
 }
-
-async function authorize(permission: string, signal: AbortSignal) {
+async function authorize() {
   const client = await createClient();
-  const { data: { user }, error } = await boundedRead(client.auth.getUser(), signal);
-  if (error || !user) return { ok: false as const, status: 401, error: "You must be signed in to access Lottery Settings." };
-  const db = getAuditServiceClient();
-  const result = await db.from("admin_users")
+  const { data: { user }, error } = await client.auth.getUser();
+  if (error || !user) fail("Sign in again to access Lottery Settings.", 401, "AUTHENTICATION_REQUIRED");
+  const { data: verified, error: readError } = await getAuditServiceClient().from("admin_users")
     .select("id,supabase_user_id,role,is_active,is_main_admin")
-    .eq("supabase_user_id", user.id).eq("is_active", true).abortSignal(signal).maybeSingle();
-  if (result.error) throw new Error("Administrator verification unavailable.");
-  const verified = result.data;
-  if (!verified || verified.supabase_user_id !== user.id || verified.is_active !== true ||
-      (verified.role !== "main_admin" && verified.is_main_admin !== true)) {
-    return { ok: false as const, status: 403, error: "An active main administrator account is required." };
-  }
-  const admin = await boundedRead(getAuthenticatedAdmin(), signal);
-  if (!admin || admin.id !== verified.id || !hasLotteryPermission(admin, permission as Parameters<typeof hasLotteryPermission>[1])) {
-    return { ok: false as const, status: 403, error: "You do not have permission to perform this settings action." };
-  }
-  return { ok: true as const };
+    .eq("supabase_user_id", user.id).eq("is_active", true)
+    .abortSignal(AbortSignal.timeout(10_000)).maybeSingle();
+  if (readError) fail("Administrator verification is unavailable.", 503, "AUTH_SERVICE_UNAVAILABLE");
+  if (!verified || (verified.role !== "main_admin" && verified.is_main_admin !== true))
+    fail("An active Main Admin account is required.", 403, "MAIN_ADMIN_REQUIRED");
+  const admin = await getAuthenticatedAdmin();
+  if (!admin || admin.id !== verified.id || !hasLotteryPermission(admin, "lottery:settings:manage"))
+    fail("Main Admin settings permission is required.", 403, "MAIN_ADMIN_REQUIRED");
+  return { admin, userId: user.id };
 }
-
-const GROUPS = ["payments", "notifications", "compliance"] as const;
-
-function validateSettingsResponse(value: unknown): asserts value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Settings are unavailable.");
-  const settings = value as Record<string, unknown>;
-  for (const group of GROUPS) {
-    if (!settings[group] || typeof settings[group] !== "object" || Array.isArray(settings[group])) {
-      throw new Error("Settings group is incomplete.");
-    }
-  }
-  // Reject an unexpected secret-bearing response instead of returning partially
-  // redacted settings that a client might accidentally save back as defaults.
-  const inspect = (node: unknown, depth: number): void => {
-    if (depth > 10) throw new Error("Settings nesting exceeds the response limit.");
-    if (node === null || typeof node === "boolean" || typeof node === "string") return;
-    if (typeof node === "number") {
-      if (!Number.isFinite(node)) throw new Error("Invalid numeric settings.");
-      return;
-    }
-    if (!node || typeof node !== "object") throw new Error("Invalid settings response.");
-    if (Array.isArray(node)) { for (const item of node) inspect(item, depth + 1); return; }
-    for (const [key, child] of Object.entries(node)) {
-      if (/password|secret|token|api[_-]?key|private[_-]?key|credential|authorization|cookie/i.test(key) &&
-          child !== null && typeof child !== "boolean" && typeof child !== "number") {
-        throw new Error("Settings response unexpectedly contains a sensitive field.");
-      }
-      inspect(child, depth + 1);
-    }
+async function payload(mutationsAvailable: boolean) {
+  const loaded = await loadLotterySettings();
+  return {
+    success: true, settings: loaded.settings, versions: loaded.versions,
+    persisted_groups: loaded.persistedGroups, defaults_used: loaded.defaultsUsed,
+    status: {
+      paymentProvider: "not_verified", compliance: "not_verified", notifications: "not_verified",
+      security: "not_verified", lastUpdatedAt: loaded.lastUpdatedAt, lastUpdatedBy: loaded.lastUpdatedBy,
+    },
+    permissions: {
+      canView: true, canManageSettings: mutationsAvailable, canManagePayments: mutationsAvailable,
+      canEditSettings: mutationsAvailable, canEditGeneral: mutationsAvailable,
+      canEditFinance: mutationsAvailable, canEditCompliance: mutationsAvailable,
+      canEditSecurity: mutationsAvailable, canEditTickets: mutationsAvailable,
+      canEditDraws: mutationsAvailable, canEditWinners: mutationsAvailable,
+      canEditNotifications: mutationsAvailable,
+    },
+    mutations_available: mutationsAvailable,
+    verification: {
+      persisted_settings_verified: !loaded.defaultsUsed,
+      payment_provider_verified: false, compliance_approval_verified: false,
+      notification_delivery_verified: false, security_enforcement_verified: false,
+    },
+    message: mutationsAvailable
+      ? "Main Admins can save settings. Sensitive changes require two-step verification within 15 minutes. Saving configuration does not verify payment processing or approve a lottery."
+      : "Settings saving is not configured. Install the audited settings database service before editing.",
   };
-  inspect(settings, 0);
-  if (Buffer.byteLength(JSON.stringify(settings), "utf8") > 128 * 1024) throw new Error("Settings response exceeds its size limit.");
 }
-
+function errorResponse(error: unknown, requestId: string) {
+  const known = error instanceof Error && "status" in error;
+  const status = known ? Number(error.status) : 503;
+  const code = known && "code" in error ? String(error.code) : "SETTINGS_SERVICE_UNAVAILABLE";
+  // Never log the request body, session cookie or database error details.
+  console.error("Lottery settings request failed", { requestId, code });
+  return json({ success: false, code, error: known ? error.message : "The settings request could not be confirmed. Reload before trying again.", request_id: requestId }, status);
+}
 export async function GET() {
   const requestId = randomUUID();
   try {
-    const signal = AbortSignal.timeout(15_000);
-    const auth = await authorize("lottery:view", signal);
-    if (!auth.ok) return json({ success: false, error: auth.error, request_id: requestId }, auth.status);
-    const loaded = await boundedRead(loadLotterySettings(), signal);
-    validateSettingsResponse(loaded.settings);
-    // Defaults returned by the helper do not prove that persisted rows exist.
-    const candidate = loaded.lastUpdatedAt;
-    const lastUpdatedAt = typeof candidate === "string" && Number.isFinite(Date.parse(candidate)) ? candidate : null;
-    return json({
-      success: true,
-      settings: loaded.settings,
-      status: {
-        paymentProvider: "not_verified", compliance: "not_verified",
-        notifications: "not_verified", security: "not_verified",
-        lastUpdatedAt, lastUpdatedBy: null,
-      },
-      permissions: {
-        canView: true, canEditSettings: false, canEditGeneral: false,
-        canEditFinance: false, canEditCompliance: false, canEditSecurity: false,
-        canEditTickets: false, canEditDraws: false, canEditWinners: false,
-        canEditNotifications: false,
-      },
-      mutations_available: false,
-      verification: {
-        persisted_settings_verified: false,
-        payment_provider_verified: false,
-        compliance_approval_verified: false,
-        notification_delivery_verified: false,
-        security_enforcement_verified: false,
-      },
-      message: "Settings are read-only until the audited settings transaction service is configured. Configuration flags do not establish operational readiness.",
-    });
-  } catch (error) {
-    console.error(`[${requestId}] Lottery settings read failed:`, error);
-    return json({ success: false, error: "Unable to load complete Lottery Settings. Refresh and try again.", request_id: requestId }, 503);
-  }
+    await authorize();
+    const { data, error } = await getAuditServiceClient().rpc("lottery_settings_service_status")
+      .abortSignal(AbortSignal.timeout(5_000));
+    return json(await payload(!error && data === 1));
+  } catch (error) { return errorResponse(error, requestId); }
 }
-
+async function readBody(request: NextRequest): Promise<Record<string, unknown>> {
+  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json")
+    fail("Send settings as JSON.", 415, "INVALID_CONTENT_TYPE");
+  const reader = request.body?.getReader();
+  if (!reader) fail("Settings are required.", 400, "INVALID_SETTINGS");
+  let bytes = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_BYTES) { await reader.cancel(); fail("Settings request is too large.", 413, "REQUEST_TOO_LARGE"); }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  let body: unknown;
+  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { fail("Settings must contain valid JSON.", 400, "INVALID_SETTINGS"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) fail("Invalid settings request.", 422, "INVALID_SETTINGS");
+  return body as Record<string, unknown>;
+}
 export async function PATCH(request: NextRequest) {
   const requestId = randomUUID();
   try {
-    // No finance-view/compliance role can substitute for this write permission.
-    const auth = await authorize("lottery:settings:manage", AbortSignal.timeout(10_000));
-    if (!auth.ok) return json({ success: false, error: auth.error, request_id: requestId }, auth.status);
     const origin = request.headers.get("origin");
-    const fetchSite = request.headers.get("sec-fetch-site");
-    if (!origin || origin !== request.nextUrl.origin || (fetchSite && fetchSite !== "same-origin")) {
-      return json({ success: false, error: "A same-origin request is required.", request_id: requestId }, 403);
-    }
-    // Do not parse/save settings or mutate audit history while the transactional
-    // write service is absent. No request-body values appear in errors or logs.
-    return json({
-      success: false, code: "SETTINGS_TRANSACTION_SERVICE_UNAVAILABLE",
-      error: "Saving Lottery Settings is unavailable until the audited database transaction service is configured.",
-      request_id: requestId,
-    }, 503);
-  } catch (error) {
-    console.error(`[${requestId}] Lottery settings action rejected:`, error);
-    return json({ success: false, error: "The settings action is unavailable.", request_id: requestId }, 503);
-  }
+    const site = request.headers.get("sec-fetch-site");
+    if (!origin || origin !== request.nextUrl.origin || (site && site !== "same-origin"))
+      fail("A same-origin request is required.", 403, "SAME_ORIGIN_REQUIRED");
+    const { admin, userId } = await authorize();
+    const body = await readBody(request);
+    if (Object.keys(body).some(key => !["group", "value", "reason", "expectedUpdatedAt"].includes(key)))
+      fail("Unsupported settings fields.", 422, "INVALID_SETTINGS");
+    const idempotencyKey = request.headers.get("idempotency-key");
+    if (!idempotencyKey || !UUID.test(idempotencyKey)) fail("A save request ID is required. Reload settings.", 400, "REQUEST_ID_REQUIRED");
+    if (!(body.expectedUpdatedAt === null || (typeof body.expectedUpdatedAt === "string" && Number.isFinite(Date.parse(body.expectedUpdatedAt)))))
+      fail("Reload settings before saving.", 409, "VERSION_REQUIRED");
+    const rawSession = request.cookies.get("burton_admin_security_session")?.value;
+    if (!rawSession || rawSession.length > 4096) fail("Sign in again and complete two-step verification.", 403, "SECURITY_SESSION_REQUIRED");
+    const pepper = process.env.ADMIN_2FA_PEPPER;
+    if (!pepper || pepper.length < 32) fail("Admin security configuration is unavailable.", 503, "SECURITY_SERVICE_UNAVAILABLE");
+    const securitySessionHash = createHash("sha256").update(`${pepper}:${rawSession}`).digest("hex");
+    await saveLotterySettingsGroup(admin, {
+      group: body.group, value: body.value, reason: body.reason,
+    } as UpdateLotterySettingsRequest, {
+      userId, securitySessionHash, requestId: idempotencyKey,
+      expectedUpdatedAt: body.expectedUpdatedAt as string | null,
+    });
+    return json(await payload(true));
+  } catch (error) { return errorResponse(error, requestId); }
 }
