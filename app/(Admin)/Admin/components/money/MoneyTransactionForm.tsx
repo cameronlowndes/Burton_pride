@@ -1,7 +1,15 @@
 "use client";
 
-import type { Dispatch, SetStateAction, SyntheticEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import type {
+  ChangeEvent,
+  Dispatch,
+  InputHTMLAttributes,
+  SetStateAction,
+  SyntheticEvent,
+  TextareaHTMLAttributes,
+} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   AlertTriangle,
   Banknote,
@@ -601,6 +609,114 @@ function formatDuplicateDate(value: string | null | undefined) {
   });
 }
 
+// Keep keystrokes inside the field rather than rerendering the entire money
+// tracker. The parent receives the latest value after a short typing pause,
+// on blur, and before React handles a native submit (including Enter and
+// requestSubmit). No pending text is left behind when Save starts its checks.
+const FIELD_SYNC_DELAY_MS = 200;
+
+type TypingElement = HTMLInputElement | HTMLTextAreaElement;
+
+function useBufferedField<T extends TypingElement>(
+  value: string,
+  onValueChange: (value: string) => void,
+) {
+  const [draft, setDraft] = useState(value);
+  const elementRef = useRef<T | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingRef = useRef<string | null>(null);
+  const lastSentRef = useRef(value);
+  const composingRef = useRef(false);
+  const onValueChangeRef = useRef(onValueChange);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const flushPending = useCallback(() => {
+    clearTimer();
+    const next = pendingRef.current;
+    if (next === null) return;
+    pendingRef.current = null;
+    lastSentRef.current = next;
+    onValueChangeRef.current(next);
+  }, [clearTimer]);
+
+  useLayoutEffect(() => {
+    onValueChangeRef.current = onValueChange;
+  });
+
+  // Accept edits, resets and system-enforced values from the parent. An echo
+  // of our last commit must not overwrite text typed since that commit.
+  useLayoutEffect(() => {
+    if (value === lastSentRef.current) return;
+    clearTimer();
+    pendingRef.current = null;
+    lastSentRef.current = value;
+    setDraft(value);
+  });
+
+  useLayoutEffect(() => {
+    const formElement = elementRef.current?.form;
+    const beforeSubmit = () => flushSync(flushPending);
+    formElement?.addEventListener("submit", beforeSubmit, true);
+    return () => {
+      formElement?.removeEventListener("submit", beforeSubmit, true);
+      clearTimer();
+    };
+  }, [clearTimer, flushPending]);
+
+  function scheduleSync() {
+    clearTimer();
+    if (!composingRef.current) {
+      timerRef.current = setTimeout(flushPending, FIELD_SYNC_DELAY_MS);
+    }
+  }
+
+  return {
+    ref: elementRef,
+    value: draft,
+    onChange: (event: ChangeEvent<T>) => {
+      const next = event.target.value;
+      setDraft(next);
+      pendingRef.current = next;
+      scheduleSync();
+    },
+    onBlur: () => flushSync(flushPending),
+    onCompositionStart: () => {
+      composingRef.current = true;
+      clearTimer();
+    },
+    onCompositionEnd: () => {
+      composingRef.current = false;
+      scheduleSync();
+    },
+  };
+}
+
+type BufferedInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "defaultValue" | "onChange"> & {
+  value: string | number;
+  onValueChange: (value: string) => void;
+};
+
+function BufferedInput({ value, onValueChange, ...props }: BufferedInputProps) {
+  const field = useBufferedField<HTMLInputElement>(String(value), onValueChange);
+  return <input {...props} {...field} />;
+}
+
+type BufferedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "defaultValue" | "onChange"> & {
+  value: string;
+  onValueChange: (value: string) => void;
+};
+
+function BufferedTextarea({ value, onValueChange, ...props }: BufferedTextareaProps) {
+  const field = useBufferedField<HTMLTextAreaElement>(value, onValueChange);
+  return <textarea {...props} {...field} />;
+}
+
 export default function MoneyTransactionForm({
   form,
   setForm,
@@ -703,8 +819,9 @@ export default function MoneyTransactionForm({
   const selectedSupplier =
     supplierOptions.find((supplier) => supplier.id === selectedSupplierId) ||
     null;
-  const activeSuppliers = supplierOptions.filter(
-    (supplier) => supplier.is_active !== false,
+  const activeSuppliers = useMemo(
+    () => supplierOptions.filter((supplier) => supplier.is_active !== false),
+    [supplierOptions],
   );
   const suggestedReceiptDueDate = addDaysToDateInput(
     form.transactionDate,
@@ -925,7 +1042,10 @@ export default function MoneyTransactionForm({
       : 0;
 
   const existingAttachments = editingTransaction?.attachments || [];
-  const usableExistingAttachments = existingAttachments.filter(isUsableAttachment);
+  const usableExistingAttachments = useMemo(
+    () => existingAttachments.filter(isUsableAttachment),
+    [existingAttachments],
+  );
 
   const hasExistingReceipt =
     usableExistingAttachments.length > 0 ||
@@ -1466,6 +1586,7 @@ export default function MoneyTransactionForm({
   return (
     <>
       <form
+        key={editingTransaction?.id || "new-transaction"}
         ref={formRef}
         onSubmit={handleFormSubmit}
         className="min-w-0 rounded-3xl border border-white/10 bg-white/[0.04] p-4 sm:p-5"
@@ -1544,14 +1665,14 @@ export default function MoneyTransactionForm({
               </label>
             )}
 
-            <input
+            <BufferedInput
               value={form.title}
-              onChange={(event) => {
+              onValueChange={(value) => {
                 resetWarnings();
 
                 setForm((prev) => ({
                   ...prev,
-                  title: event.target.value,
+                  title: value,
                 }));
               }}
               placeholder={
@@ -1769,13 +1890,13 @@ export default function MoneyTransactionForm({
               </label>
             )}
 
-            <input
+            <BufferedInput
               value={
                 lockLoanRepaymentAmount
                   ? plannedLoanRepaymentAmount
                   : form.amount
               }
-              onChange={(event) => {
+              onValueChange={(value) => {
                 if (lockLoanRepaymentAmount) {
                   return;
                 }
@@ -1787,7 +1908,7 @@ export default function MoneyTransactionForm({
 
                 setForm((prev) => ({
                   ...prev,
-                  amount: event.target.value,
+                  amount: value,
                 }));
               }}
               placeholder={
@@ -2142,12 +2263,12 @@ export default function MoneyTransactionForm({
                   {form.sponsorId && <span className="text-red-200">*</span>}
                 </label>
 
-                <textarea
+                <BufferedTextarea
                   value={form.sponsorshipNote}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     setForm((prev) => ({
                       ...prev,
-                      sponsorshipNote: event.target.value,
+                      sponsorshipNote: value,
                     }))
                   }
                   placeholder={
@@ -2401,13 +2522,13 @@ export default function MoneyTransactionForm({
                   <label className="mb-2 block text-sm font-black text-sky-100">
                     Person whose account is charged
                   </label>
-                  <input
+                  <BufferedInput
                     value={directDebitAccountHolder}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setForm((prev) =>
                         setDirectDebitDetails(prev, {
                           accountSource: "personal",
-                          accountHolder: event.target.value,
+                          accountHolder: value,
                         }),
                       )
                     }
@@ -2427,13 +2548,13 @@ export default function MoneyTransactionForm({
                   <label className="mb-1 block text-xs font-black text-indigo-100/80">
                     Number of monthly payments
                   </label>
-                  <input
+                  <BufferedInput
                     type="number"
                     min={DIRECT_DEBIT_MIN_MONTHS}
                     max={DIRECT_DEBIT_MAX_MONTHS}
                     step="1"
                     value={directDebitPaymentCount}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setForm((prev) => ({
                         ...prev,
                         isRepeating: true,
@@ -2443,7 +2564,7 @@ export default function MoneyTransactionForm({
                             DIRECT_DEBIT_MAX_MONTHS,
                             Math.max(
                               DIRECT_DEBIT_MIN_MONTHS,
-                              Number(event.target.value || 0),
+                              Number(value || 0),
                             ),
                           ),
                         ),
@@ -2457,12 +2578,12 @@ export default function MoneyTransactionForm({
                   <label className="mb-1 block text-xs font-black text-indigo-100/80">
                     Direct Debit reference
                   </label>
-                  <input
+                  <BufferedInput
                     value={directDebitReference}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       setForm((prev) =>
                         setDirectDebitDetails(prev, {
-                          reference: event.target.value,
+                          reference: value,
                         }),
                       )
                     }
@@ -2476,12 +2597,12 @@ export default function MoneyTransactionForm({
                 <label className="mb-1 block text-xs font-black text-indigo-100/80">
                   Plan note
                 </label>
-                <textarea
+                <BufferedTextarea
                   value={directDebitPlanNote}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     setForm((prev) =>
                       setDirectDebitDetails(prev, {
-                        planNote: event.target.value,
+                        planNote: value,
                       }),
                     )
                   }
@@ -2855,12 +2976,12 @@ export default function MoneyTransactionForm({
                 {selectedFinanceNoteOption.help}
               </p>
 
-              <textarea
+              <BufferedTextarea
                 value={form.financeNote}
-                onChange={(event) =>
+                onValueChange={(value) =>
                   setForm((prev) => ({
                     ...prev,
-                    financeNote: event.target.value,
+                    financeNote: value,
                   }))
                 }
                 placeholder={
@@ -2962,16 +3083,16 @@ export default function MoneyTransactionForm({
                       Number of payments
                     </label>
 
-                    <input
+                    <BufferedInput
                       type="number"
                       min="2"
                       max="60"
                       step="1"
                       value={form.repeatCount}
-                      onChange={(event) =>
+                      onValueChange={(value) =>
                         setForm((prev) => ({
                           ...prev,
-                          repeatCount: event.target.value,
+                          repeatCount: value,
                         }))
                       }
                       className="w-full rounded-xl bg-black/30 p-3 text-sm font-bold text-white outline-none ring-1 ring-purple-300/20 focus:ring-purple-300/50"
@@ -3050,12 +3171,12 @@ export default function MoneyTransactionForm({
           )}
 
           {form.isPersonalFunds && !form.sponsorId && !isDirectDebit && (
-            <input
+            <BufferedInput
               value={form.personalFundsName}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setForm((prev) => ({
                   ...prev,
-                  personalFundsName: event.target.value,
+                  personalFundsName: value,
                 }))
               }
               placeholder="Name of person who paid"
@@ -3241,12 +3362,12 @@ export default function MoneyTransactionForm({
               </label>
             )}
 
-            <textarea
+            <BufferedTextarea
               value={form.description}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setForm((prev) => ({
                   ...prev,
-                  description: event.target.value,
+                  description: value,
                 }))
               }
               placeholder={

@@ -48,18 +48,7 @@ type TrackerBreakdown = {
 
   money_in_including_refunds_pence: number;
   money_out_including_refunds_pence: number;
-
-  /**
-   * The complete calculated Money Management balance:
-   *
-   * opening balance
-   * + money in
-   * + refunds received
-   * - money out
-   * - refunds sent
-   */
   available_balance_pence: number;
-
   current_year_transaction_count: number;
   current_year_refund_count: number;
   completed_current_year_refund_count: number;
@@ -281,11 +270,6 @@ export default function ManualBankBalanceCheck({
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
-  /*
-   * A monotonically increasing request ID prevents an older request from one
-   * year overwriting a newer year after the admin changes the dropdown.
-   */
   const loadRequestIdRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -298,12 +282,6 @@ export default function ManualBankBalanceCheck({
   const realBankBalancePence = parsedRealBankBalance.valid
     ? parsedRealBankBalance.pence
     : null;
-
-  /*
-   * A real bank balance must be compared with the complete calculated tracker
-   * balance, not with gross Money In alone. Gross Money In ignores expenses,
-   * refunds sent and the opening balance.
-   */
   const comparisonTrackerBalancePence =
     breakdown.available_balance_pence;
 
@@ -382,10 +360,6 @@ export default function ManualBankBalanceCheck({
         setLatestCheck(nextLatestCheck);
         setBreakdown(nextBreakdown);
 
-        /*
-         * Prevent values from the previous year remaining in the form when the
-         * new year has no saved check.
-         */
         if (nextLatestCheck) {
           setRealBankBalance(
             penceToPoundsInput(
@@ -495,11 +469,6 @@ export default function ManualBankBalanceCheck({
 
       const successMessage =
         data.message || "Bank balance check saved.";
-
-      /*
-       * Reload without clearing the success notice. The old implementation
-       * immediately erased its own success message inside loadChecks().
-       */
       await loadChecks({ preserveMessage: true });
 
       if (mountedRef.current) {
