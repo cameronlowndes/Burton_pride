@@ -2,7 +2,17 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ArrowUpRight, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  RefreshCw,
+  PoundSterling,
+  Receipt,
+  TrendingUp,
+  ArrowRightLeft,
+  Wallet,
+  CirclePoundSterling,
+} from "lucide-react";
 import {
   FINANCE_API,
   formatGBP,
@@ -16,17 +26,150 @@ import type {
   FinanceTransfer,
   WriteAction,
 } from "../../../../../../lib/lottery/finance";
+type FinanceOperation = "load" | WriteAction;
+const operationLabels: Record<FinanceOperation, string> = {
+  load: "Load lottery finances",
+  cost: "Save lottery cost",
+  reconcile: "Confirm reconciliation",
+  transfer: "Record transfer to Money Tracker",
+  pay_cost: "Mark lottery cost as paid",
+  void_cost: "Void lottery cost",
+};
+class FinanceRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FinanceRequestError";
+  }
+}
+function failureMessage(
+  operation: FinanceOperation,
+  status: number,
+  body: unknown,
+  headers: Headers,
+): string {
+  const data =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  // Render only bounded, plain user-facing error text, never raw HTML or database diagnostics.
+  const raw = typeof data.error === "string" ? data.error.trim() : "";
+  const safeReason =
+    raw &&
+    raw.length <= 600 &&
+    status < 500 &&
+    !/[<>]|(?:stack trace|postgres|sqlstate|password=|authorization:|bearer |service_role|select .* from |insert into )/i.test(
+      raw,
+    )
+      ? raw
+      : "";
+  let next: string;
+  switch (status) {
+    case 400:
+    case 422:
+      next =
+        "Check the amount, date, required fields and confirmation boxes. Correct the highlighted or reported details, then try again.";
+      break;
+    case 401:
+      next =
+        "Your admin session may have expired. Sign in again, reopen this lottery and check its latest history before retrying a save.";
+      break;
+    case 403:
+      next =
+        "Check that your account has permission for this action. If recent two-factor verification is required, complete it and try again. Ask a main admin to check your access if this continues.";
+      break;
+    case 404:
+      next =
+        "The requested lottery or finance record could not be found. Return to All lotteries, refresh the list and open the record again.";
+      break;
+    case 409:
+    case 412:
+      next =
+        "The figures or record may have changed, or a finance requirement may be unmet. Check the latest history and reconciliation status before retrying. For a transfer, check the available balance again.";
+      break;
+    case 429: {
+      const retry = headers.get("Retry-After");
+      next =
+        retry && /^\d{1,6}$/.test(retry)
+          ? `Too many requests. Wait at least ${retry} seconds before trying again.`
+          : "Too many requests. Wait a moment before trying again.";
+      break;
+    }
+    default:
+      next =
+        status >= 500
+          ? "The server could not complete the request normally. Try again shortly. If this continues, report the action, time and any support reference shown to a main admin."
+          : "Refresh the figures and try again. If this continues, report the action and HTTP status to a main admin.";
+  }
+  const ref = headers.get("X-Request-ID") || headers.get("X-Correlation-ID");
+  const reference =
+    ref && /^[a-zA-Z0-9_.:-]{1,100}$/.test(ref)
+      ? ` Support reference: ${ref}.`
+      : "";
+  const uncertain =
+    operation !== "load"
+      ? " A save is not confirmed by this error. Check the relevant history before submitting again; if you retry, keep the same details so the existing request key can be reused."
+      : " The latest figures have not been loaded; do not rely on earlier totals for a transfer.";
+  return `${operationLabels[operation]} failed (HTTP ${status}).\n${safeReason ? `Reason: ${safeReason}\n` : ""}Next step: ${next}\n${uncertain.trim()}${reference ? `\n${reference.trim()}` : ""}`;
+}
+async function readFinanceResponse(
+  response: Response,
+  operation: FinanceOperation,
+): Promise<unknown> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    if (!response.ok)
+      throw new FinanceRequestError(
+        failureMessage(operation, response.status, null, response.headers),
+      );
+    throw new FinanceRequestError(
+      `${operationLabels[operation]}: the server returned an unreadable response (HTTP ${response.status}). ` +
+        (operation === "load"
+          ? "The latest figures could not be displayed. Refresh the figures; if it happens again, report this response error to a main admin."
+          : "The save outcome is unknown. Check the relevant history before retrying with the same details. Do not create another transfer with different details just to try again."),
+    );
+  }
+  if (!response.ok)
+    throw new FinanceRequestError(
+      failureMessage(operation, response.status, body, response.headers),
+    );
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new FinanceRequestError(
+      `${operationLabels[operation]}: the server returned an unexpected response format. ${operation === "load" ? "Refresh the figures. If this continues, ask a main admin to check the finance endpoint." : "The save outcome is unknown. Check the relevant history and retry only with the same details."}`,
+    );
+  return body;
+}
+function describeFailure(error: unknown, operation: FinanceOperation): string {
+  if (error instanceof FinanceRequestError) return error.message;
+  const timeout = error instanceof Error && error.name === "AbortError";
+  if (operation === "load")
+    return timeout
+      ? "Load lottery finances timed out after 20 seconds. No current figures were received. Check your connection and select Refresh figures. If it keeps happening, ask a main admin to check the finance service."
+      : "Lottery finances could not be loaded. The browser could not complete the request or process the response. Check your connection, refresh the figures and sign in again if needed. If this continues, report the time and selected lottery to a main admin.";
+  return `${operationLabels[operation]} could not be confirmed${timeout ? " within 25 seconds" : " because the browser could not complete the request"}. The save may have reached the server. Keep your details unchanged, check the relevant history, then retry with the same details if no matching entry appears. If this repeats, report the action and time to a main admin.`;
+}
+function readAmount(value: string, label: string, allowZero = false): number {
+  try {
+    return parsePounds(value, allowZero);
+  } catch {
+    throw new Error(
+      `${label} is invalid. Enter an amount in pounds with no more than two decimal places, for example 24.56. ${allowZero ? "Use 0.00 if there is no amount." : "The amount must be greater than zero."} No request has been sent; correct this field and try again.`,
+    );
+  }
+}
+
 const input =
-  "w-full rounded-xl border border-white/20 bg-[#11131e] px-3 py-2.5 text-sm text-white [color-scheme:dark] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-300";
+  "w-full rounded-xl border border-white/10 bg-[#0b1421] px-3 py-2.5 text-sm text-white [color-scheme:dark] focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-300";
 const button =
-  "inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10 active:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-300 disabled:cursor-not-allowed disabled:opacity-40";
 const primary = button
-  .replace("bg-white/5", "bg-purple-600")
-  .replace("hover:bg-white/15", "hover:bg-purple-500");
-const panel = "rounded-2xl border border-white/10 bg-white/[0.04] p-4 sm:p-5";
+  .replace("bg-white/5", "bg-purple-500")
+  .replace("hover:bg-white/10", "hover:bg-purple-400");
+// Match the existing lottery dashboard: navy surfaces, subtle borders and purple accents.
+const panel =
+  "min-w-0 rounded-3xl border border-white/10 bg-[#101a28] p-4 sm:p-5";
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="grid gap-2 text-sm font-semibold text-white/80">
+    <label className="grid min-w-0 gap-2 text-sm font-medium text-white/80">
       {label}
       {children}
     </label>
@@ -42,7 +185,7 @@ function Message({
   return (
     <p
       role={error ? "alert" : "status"}
-      className={`rounded-xl border p-3 text-sm ${error ? "border-red-300/30 bg-red-500/10 text-red-100" : "border-purple-300/20 bg-purple-500/10 text-purple-100"}`}
+      className={`whitespace-pre-line break-words rounded-xl border p-3 text-sm leading-6 ${error ? "border-red-300/30 bg-red-500/10 text-red-100" : "border-purple-300/20 bg-purple-500/10 text-purple-100"}`}
     >
       {children}
     </p>
@@ -102,22 +245,22 @@ function useWrite(mutate: Mutate) {
     request = useRef<{ signature: string; key: string } | null>(null);
   async function run(action: WriteAction, data: Record<string, unknown>) {
     if (inFlight.current) return false;
-    const signature = JSON.stringify([action, data]);
-    if (request.current?.signature !== signature)
-      request.current = { signature, key: crypto.randomUUID() };
     inFlight.current = true;
     setBusy(true);
     setError("");
     try {
+      if (typeof crypto === "undefined" || !crypto.randomUUID)
+        throw new FinanceRequestError(
+          `${operationLabels[action]} could not start because this browser cannot create a secure request reference. Open the admin portal over HTTPS in a supported browser and try again. No save request has been sent.`,
+        );
+      const signature = JSON.stringify([action, data]);
+      if (request.current?.signature !== signature)
+        request.current = { signature, key: crypto.randomUUID() };
       await mutate(action, data, request.current.key);
       request.current = null;
       return true;
     } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "The action could not be completed. Retry with the same details.",
-      );
+      setError(describeFailure(error, action));
       return false;
     } finally {
       inFlight.current = false;
@@ -159,19 +302,37 @@ function Metrics({ t }: { t: FinanceReport["summary"] }) {
       "Cleared funds after costs, pending refunds, transfers and reserves.",
     ],
   ] as const;
+  const icons = [
+    PoundSterling,
+    Receipt,
+    TrendingUp,
+    ArrowRightLeft,
+    Wallet,
+    CirclePoundSterling,
+  ];
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {cards.map(([label, value, help]) => (
-        <div key={label} className={panel}>
-          <p className="text-sm font-semibold text-white/70">{label}</p>
-          <p
-            className={`mt-2 text-2xl font-black tabular-nums ${label === "Profit / loss" ? (value < 0 ? "text-red-300" : "text-emerald-300") : "text-white"}`}
-          >
-            {formatGBP(value)}
-          </p>
-          <p className="mt-2 text-xs leading-5 text-white/60">{help}</p>
-        </div>
-      ))}
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {cards.map(([label, value, help], index) => {
+        const Icon = icons[index];
+        return (
+          <div key={label} className={panel}>
+            <div className="flex items-start justify-between gap-3">
+              <p className="pt-1 text-sm font-semibold text-white/60">
+                {label}
+              </p>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-200">
+                <Icon size={20} aria-hidden="true" />
+              </span>
+            </div>
+            <p
+              className={`mt-1 break-words text-2xl font-bold tracking-tight tabular-nums ${label === "Profit / loss" ? (value < 0 ? "text-red-300" : "text-emerald-300") : "text-white"}`}
+            >
+              {formatGBP(value)}
+            </p>
+            <p className="mt-2 text-xs leading-5 text-white/55">{help}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -190,7 +351,7 @@ function CostForm({ mutate }: { mutate: Mutate }) {
       if (
         await run("cost", {
           title,
-          amount_pence: parsePounds(amount),
+          amount_pence: readAmount(amount, "Cost amount"),
           category,
           status,
           date,
@@ -204,12 +365,16 @@ function CostForm({ mutate }: { mutate: Mutate }) {
         setNote("");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Check the cost.");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The cost could not be prepared. Check the title, amount and cost date. No save request was sent; correct the details and try again.",
+      );
     }
   }
   return (
     <form className={panel} onSubmit={submit}>
-      <h2 className="text-lg font-black">Add a lottery cost</h2>
+      <h2 className="text-lg font-bold">Add a lottery cost</h2>
       <p className="mt-2 text-sm text-white/65">
         Record the amount actually paid or owed. A donated prize’s estimated
         value is not a cash cost. Costs already recorded in the main Money
@@ -278,10 +443,15 @@ function CostForm({ mutate }: { mutate: Mutate }) {
         <div className="sm:col-span-2">
           <Field label="Notes">
             <textarea
+              rows={3}
               maxLength={2000}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className={input}
+              className={`${input} min-h-24 resize-none`}
+              onInput={(event) => {
+                event.currentTarget.style.height = "auto";
+                event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+              }}
             />
           </Field>
         </div>
@@ -316,20 +486,28 @@ function ReconciliationForm({
       if (
         await run("reconcile", {
           mode,
-          cleared_gross_pence: parsePounds(cleared, true),
-          reserve_pence: parsePounds(reserve, true),
+          cleared_gross_pence: readAmount(
+            cleared,
+            "Cleared gross receipts",
+            true,
+          ),
+          reserve_pence: readAmount(reserve, "Extra reserve", true),
           note,
           confirmed: checks.every(Boolean),
         })
       )
         setChecks([false, false, false]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Check the figures.");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Reconciliation could not be prepared. Check cleared receipts, the reserve and your reference, then confirm all three checks. No reconciliation request was sent.",
+      );
     }
   }
   return (
     <form className={panel} onSubmit={submit}>
-      <h2 className="text-lg font-black">Reconcile before transferring</h2>
+      <h2 className="text-lg font-bold">Reconcile before transferring</h2>
       <p className="mt-2 text-sm text-white/65">
         Confirmation expires after 24 hours or when sales, refunds or costs
         change. Include outstanding prizes, payment fees and any other costs
@@ -440,9 +618,9 @@ function Dialog({
         e.preventDefault();
         if (!busy) onClose();
       }}
-      className="m-auto w-[calc(100%_-_2rem)] max-w-lg rounded-2xl border border-white/20 bg-[#11131e] p-5 text-white shadow-2xl backdrop:bg-black/75"
+      className="m-auto max-h-[calc(100dvh_-_2rem)] overflow-y-auto w-[calc(100%_-_2rem)] max-w-lg rounded-2xl border border-white/10 bg-[#0b1421] p-5 text-white shadow-2xl backdrop:bg-black/75"
     >
-      <h2 id={heading} className="text-xl font-black">
+      <h2 id={heading} className="text-xl font-bold">
         {title}
       </h2>
       {children}
@@ -460,9 +638,11 @@ function TransferForm({ t, mutate }: { t: FinanceTotals; mutate: Mutate }) {
     event.preventDefault();
     setError("");
     try {
-      const pence = parsePounds(amount);
+      const pence = readAmount(amount, "Transfer amount");
       if (pence > t.available_pence)
-        throw new Error("The amount exceeds the funds available to transfer.");
+        throw new Error(
+          `You entered ${formatGBP(pence)}, but only ${formatGBP(t.available_pence)} is currently available. Reduce the transfer by at least ${formatGBP(pence - t.available_pence)}, or review the costs, refunds and reserves before reconciling again. No transfer request has been sent.`,
+        );
       setReview({
         amount_pence: pence,
         date,
@@ -472,7 +652,11 @@ function TransferForm({ t, mutate }: { t: FinanceTotals; mutate: Mutate }) {
         expected_fingerprint: t.fingerprint,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Check the transfer.");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The transfer could not be prepared. Check the amount, date and bank reference. No transfer request was sent.",
+      );
     }
   }
   async function confirm() {
@@ -485,7 +669,7 @@ function TransferForm({ t, mutate }: { t: FinanceTotals; mutate: Mutate }) {
   }
   return (
     <form className={panel} onSubmit={submit}>
-      <h2 className="text-lg font-black">Transfer to Money Tracker</h2>
+      <h2 className="text-lg font-bold">Transfer to Money Tracker</h2>
       <p className="mt-2 text-sm text-white/65">
         Available:{" "}
         <strong className="text-white">{formatGBP(t.available_pence)}</strong>.
@@ -613,7 +797,12 @@ function CostAction({
         <div className="mt-4">
           <Field label="Reason (at least five characters)">
             <textarea
-              className={input}
+              rows={4}
+              className={`${input} min-h-24 resize-none`}
+              onInput={(event) => {
+                event.currentTarget.style.height = "auto";
+                event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+              }}
               minLength={5}
               maxLength={2000}
               value={reason}
@@ -703,20 +892,22 @@ export default function FinanceClient() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        const body = await response.json();
-        if (!response.ok)
-          throw new Error(body.error || "Finances could not be loaded.");
-        if (current) setReport(body);
+        const body = await readFinanceResponse(response, "load");
+        const candidate = body as Partial<FinanceReport>;
+        if (
+          !candidate.summary ||
+          !candidate.capabilities ||
+          !Array.isArray(candidate.lotteries) ||
+          !Array.isArray(candidate.costs) ||
+          !Array.isArray(candidate.transfers)
+        )
+          throw new FinanceRequestError(
+            "Load lottery finances: the response is missing required totals, permissions or history lists. The current report cannot be displayed safely. Refresh the figures; if this repeats, ask a main admin to check the finance API response.",
+          );
+        if (current) setReport(candidate as FinanceReport);
       })
       .catch((error) => {
-        if (current)
-          setError(
-            error instanceof Error && error.name === "AbortError"
-              ? "Loading timed out. Try refreshing."
-              : error instanceof Error
-                ? error.message
-                : "Finances could not be loaded.",
-          );
+        if (current) setError(describeFailure(error, "load"));
       })
       .finally(() => {
         clearTimeout(timeout);
@@ -730,37 +921,43 @@ export default function FinanceClient() {
   }, [query, revision]);
   const mutate = useCallback<Mutate>(
     async (action, data, key) => {
-      if (!lotteryId) throw new Error("Choose a lottery first.");
+      if (!lotteryId)
+        throw new FinanceRequestError(
+          `${operationLabels[action]} could not start. Open a lottery from All lotteries before saving a cost, reconciliation or transfer. No request has been sent.`,
+        );
+      setSuccess("");
+      if (typeof crypto === "undefined" || !crypto.subtle)
+        throw new FinanceRequestError(
+          `${operationLabels[action]} could not start because secure browser verification is unavailable. Open the admin portal over HTTPS in a supported browser. No save request has been sent.`,
+        );
       const controller = new AbortController(),
         timer = setTimeout(() => controller.abort(), 25000);
       // Preserve an uncertain request across a manual refresh. Only an acknowledged
       // response clears it; the same lottery/action/details reuse the UUID.
-      const digest = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(JSON.stringify([lotteryId, action, data])),
-      );
-      const storageKey =
-        "bp-lottery-finance:" +
-        Array.from(new Uint8Array(digest), (n) =>
-          n.toString(16).padStart(2, "0"),
-        ).join("");
-      let requestKey = key;
       try {
-        requestKey = sessionStorage.getItem(storageKey) || key;
-        sessionStorage.setItem(storageKey, requestKey);
-      } catch {
-        /* Private-mode storage may be unavailable; in-memory retry key remains. */
-      }
-      try {
+        const digest = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(JSON.stringify([lotteryId, action, data])),
+        );
+        const storageKey =
+          "bp-lottery-finance:" +
+          Array.from(new Uint8Array(digest), (n) =>
+            n.toString(16).padStart(2, "0"),
+          ).join("");
+        let requestKey = key;
+        try {
+          requestKey = sessionStorage.getItem(storageKey) || key;
+          sessionStorage.setItem(storageKey, requestKey);
+        } catch {
+          /* Private-mode storage may be unavailable; in-memory retry key remains. */
+        }
         const response = await fetch(FINANCE_API, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, lotteryId, requestKey, data }),
           signal: controller.signal,
         });
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error(result.error || "The action could not be completed.");
+        await readFinanceResponse(response, action);
         try {
           sessionStorage.removeItem(storageKey);
         } catch {
@@ -773,11 +970,7 @@ export default function FinanceClient() {
         );
         setRevision((n) => n + 1);
       } catch (error) {
-        if (error instanceof Error && error.name === "AbortError")
-          throw new Error(
-            "The outcome could not be confirmed. Refresh the history or retry with the same details; the request key prevents duplicate credits.",
-          );
-        throw error;
+        throw new FinanceRequestError(describeFailure(error, action));
       } finally {
         clearTimeout(timer);
       }
@@ -809,29 +1002,49 @@ export default function FinanceClient() {
   ]);
   const t = report?.lottery;
   return (
-    <main className="w-full min-w-0 max-w-none space-y-5 text-white">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-purple-300">
-            Lottery Management
+    <main className="w-full min-w-0 max-w-none space-y-6 pb-8 text-white">
+      <header className="flex flex-col gap-4 px-4 pt-5 sm:px-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-purple-300">
+            Burton Pride Admin Portal
           </p>
-          <h1 className="mt-2 text-3xl font-black">Finance & Transfers</h1>
-          <p className="mt-2 text-sm text-white/65">
-            See what each lottery earns, what it costs and what reaches Burton
-            Pride.
+          <h1 className="mt-2 text-3xl font-bold tracking-tight">
+            Finance &amp; Transfers
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-white/60">
+            Manage lottery income, costs, profit and transfers to the Money
+            Tracker.
           </p>
         </div>
         <button
-          className={button}
+          type="button"
+          className={`${button} min-h-11 shrink-0 self-start lg:self-auto`}
           disabled={loading}
+          aria-busy={loading}
           onClick={() => setRevision((n) => n + 1)}
         >
-          <RefreshCw size={16} />
+          <RefreshCw
+            size={16}
+            aria-hidden="true"
+            className={loading ? "animate-spin motion-reduce:animate-none" : ""}
+          />
           Refresh figures
         </button>
       </header>
       {success && <Message>{success}</Message>}
-      {error && <Message error>{error}</Message>}
+      {error && (
+        <div className="space-y-3">
+          <Message error>{error}</Message>
+          <button
+            type="button"
+            className={button}
+            disabled={loading}
+            onClick={() => setRevision((n) => n + 1)}
+          >
+            <RefreshCw size={16} aria-hidden="true" /> Try loading again
+          </button>
+        </div>
+      )}
       {loading ? (
         <div className={panel} role="status" aria-live="polite">
           Loading lottery finances…
@@ -856,7 +1069,7 @@ export default function FinanceClient() {
                 </button>
                 <div className={panel}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-xl font-black">{t.title}</h2>
+                    <h2 className="text-xl font-bold">{t.title}</h2>
                     <span className="rounded-lg bg-white/10 px-3 py-1 text-sm">
                       {t.mode === "unclassified"
                         ? "Needs classification"
@@ -873,15 +1086,21 @@ export default function FinanceClient() {
                 </div>
                 {t.invalid_sources && (
                   <Message error>
-                    Payment amounts, currencies or refund links need correction
-                    before transfers are allowed.
+                    Transfers are blocked because payment amounts, currencies or
+                    refund links need review. Check this lottery’s orders and
+                    refunds against the payment provider, correct any mismatched
+                    records and refresh the figures. Reconcile again only after
+                    those checks pass.
                   </Message>
                 )}
                 {t.imported_sales && (
                   <Message error>
-                    Some sales already match income in the main Money Tracker.
-                    Resolve those existing entries before using this transfer
-                    page.
+                    Transfers are blocked because some lottery sales already
+                    match income in the main Money Tracker. Compare the existing
+                    income entries with this lottery’s orders before recording
+                    another transfer. Ask a finance admin to resolve the
+                    overlap, then refresh and reconcile again to avoid counting
+                    income twice.
                   </Message>
                 )}
                 {!t.reconciled && (
@@ -893,8 +1112,12 @@ export default function FinanceClient() {
                 )}
                 {t.balance_pence < 0 && (
                   <Message error>
-                    This lottery has a funding shortfall. Review costs, refunds
-                    and previous transfers.
+                    This lottery has a negative remaining balance. Compare paid
+                    costs, completed refunds and previous transfers with
+                    confirmed sales. Correct any inaccurate records or arrange
+                    the missing funds through your normal finance process, then
+                    refresh and reconcile the figures before attempting a
+                    transfer.
                   </Message>
                 )}
                 <Metrics t={t} />
@@ -931,14 +1154,14 @@ export default function FinanceClient() {
                   </div>
                 </div>
                 <section className={panel}>
-                  <h2 className="text-lg font-black">Cost history</h2>
+                  <h2 className="text-lg font-bold">Cost history</h2>
                   <p className="mt-1 text-sm text-white/65">
                     Paid costs and costs still owed are both included in profit
                     / loss.
                   </p>
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-white/20 text-white/60">
+                  <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="border-b border-white/10 bg-white/[0.03] text-xs font-semibold text-white/65">
                         <tr>
                           {["Cost", "Date", "Amount", "Status", "Actions"].map(
                             (x) => (
@@ -953,7 +1176,7 @@ export default function FinanceClient() {
                         {report.costs.map((cost: FinanceCost) => (
                           <tr
                             key={cost.id}
-                            className="border-b border-white/10"
+                            className="border-b border-white/10 last:border-b-0 hover:bg-white/[0.025]"
                           >
                             <td className="p-3">
                               <p className="font-semibold">{cost.title}</p>
@@ -1011,7 +1234,7 @@ export default function FinanceClient() {
                       </tbody>
                     </table>
                     {report.costs.length === 0 && (
-                      <p className="p-4 text-sm text-white/65">
+                      <p className="px-4 py-8 text-center text-sm text-white/65">
                         No costs recorded. Add any paid or outstanding costs
                         before reconciling.
                       </p>
@@ -1025,12 +1248,12 @@ export default function FinanceClient() {
                   />
                 </section>
                 <section className={panel}>
-                  <h2 className="text-lg font-black">
+                  <h2 className="text-lg font-bold">
                     Transfers to Money Tracker
                   </h2>
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-white/20 text-white/60">
+                  <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="border-b border-white/10 bg-white/[0.03] text-xs font-semibold text-white/65">
                         <tr>
                           {[
                             "Date",
@@ -1048,16 +1271,18 @@ export default function FinanceClient() {
                         {report.transfers.map((transfer: FinanceTransfer) => (
                           <tr
                             key={transfer.id}
-                            className="border-b border-white/10"
+                            className="border-b border-white/10 last:border-b-0 hover:bg-white/[0.025]"
                           >
                             <td className="whitespace-nowrap p-3">
                               {transfer.transfer_date}
                             </td>
-                            <td className="p-3 tabular-nums">
+                            <td className="whitespace-nowrap p-3 tabular-nums">
                               {formatGBP(transfer.amount_pence)}
                             </td>
-                            <td className="p-3">{transfer.reference}</td>
-                            <td className="break-all p-3 text-xs">
+                            <td className="max-w-xs break-words p-3">
+                              {transfer.reference}
+                            </td>
+                            <td className="max-w-xs break-all p-3 text-xs">
                               {transfer.money_transaction_id}
                               <p className="mt-1 text-white/60">
                                 Search the Money Tracker for LF-{transfer.id}
@@ -1068,7 +1293,7 @@ export default function FinanceClient() {
                       </tbody>
                     </table>
                     {report.transfers.length === 0 && (
-                      <p className="p-4 text-sm text-white/65">
+                      <p className="px-4 py-8 text-center text-sm text-white/65">
                         No funds transferred yet.
                       </p>
                     )}
@@ -1090,7 +1315,10 @@ export default function FinanceClient() {
                     "-" +
                     (params.get("year") || "")
                   }
-                  className={panel + " flex flex-wrap items-end gap-3"}
+                  className={
+                    panel +
+                    " grid items-end gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(160px,240px)_auto_auto]"
+                  }
                   onSubmit={(e) => {
                     e.preventDefault();
                     const f = new FormData(e.currentTarget);
@@ -1123,6 +1351,14 @@ export default function FinanceClient() {
                   <button type="submit" className={primary}>
                     Apply filters
                   </button>
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={!params.get("q") && !params.get("year")}
+                    onClick={() => navigate({ q: null, year: null, page: 1 })}
+                  >
+                    Clear filters
+                  </button>
                 </form>
                 <Message>
                   Overview totals include lotteries classified as live. The year
@@ -1141,10 +1377,10 @@ export default function FinanceClient() {
                 )}
                 <Metrics t={report.summary} />
                 <section className={panel}>
-                  <h2 className="text-lg font-black">Lottery finances</h2>
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-white/20 text-white/60">
+                  <h2 className="text-lg font-bold">Lottery finances</h2>
+                  <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10">
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="border-b border-white/10 bg-white/[0.03] text-xs font-semibold text-white/65">
                         <tr>
                           {[
                             "Lottery",
@@ -1163,14 +1399,25 @@ export default function FinanceClient() {
                       </thead>
                       <tbody>
                         {report.lotteries.map((row: FinanceTotals) => (
-                          <tr key={row.id} className="border-b border-white/10">
+                          <tr
+                            key={row.id}
+                            className="border-b border-white/10 last:border-b-0 hover:bg-white/[0.025]"
+                          >
                             <td className="p-3 font-semibold">
                               {row.title}
                               <p className="mt-1 text-xs font-normal text-white/60">
                                 {row.lottery_year}
                               </p>
                             </td>
-                            <td className="p-3">{row.mode}</td>
+                            <td className="p-3">
+                              <span className="inline-flex whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/75">
+                                {row.mode === "live"
+                                  ? "Live"
+                                  : row.mode === "test"
+                                    ? "Test"
+                                    : "Needs classification"}
+                              </span>
+                            </td>
                             <td className="whitespace-nowrap p-3">
                               {formatGBP(row.gross_sales_pence)}
                             </td>
@@ -1204,7 +1451,8 @@ export default function FinanceClient() {
                                   })
                                 }
                               >
-                                Open
+                                Open{" "}
+                                <ArrowUpRight size={14} aria-hidden="true" />
                               </button>
                             </td>
                           </tr>
@@ -1212,7 +1460,7 @@ export default function FinanceClient() {
                       </tbody>
                     </table>
                     {report.total === 0 && (
-                      <p className="p-4 text-sm text-white/65">
+                      <p className="px-4 py-8 text-center text-sm text-white/65">
                         No lotteries match these filters.
                       </p>
                     )}
