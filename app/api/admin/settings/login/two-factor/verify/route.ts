@@ -28,7 +28,9 @@ const ADMIN_SECURITY_SESSION_COOKIE =
 const SESSION_MAX_AGE = 60 * 60 * 12;
 const TRUSTED_DEVICE_MAX_AGE = 60 * 60 * 24 * 90;
 const TWO_FACTOR_CODE_LENGTH = 6;
-const MAX_TRUSTED_DEVICES = 3;
+// Keep this in sync with the password-login route and auth middleware.
+// Administrators can use up to five approved devices before removing one.
+const MAX_TRUSTED_DEVICES = 5;
 
 type TwoFactorMethod = "email" | "totp";
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
@@ -114,6 +116,13 @@ type TrustedDeviceResult = {
   riskLevel: AuditRiskLevel;
 };
 
+class TrustedDeviceLimitError extends Error {
+  constructor() {
+    super("Trusted device limit reached.");
+    this.name = "TrustedDeviceLimitError";
+  }
+}
+
 function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -182,11 +191,16 @@ function failed(
   extra: Record<string, unknown> = {},
   pendingCookies: PendingCookie[] = [],
 ): NextResponse {
+  const error =
+    reason === "device_approval_required"
+      ? "This is a new device and all five trusted-device slots are currently in use. Remove an old trusted device, then sign in again."
+      : "Two-step verification failed.";
+
   return createJsonResponse(
     {
       ok: false,
       authenticated: false,
-      error: "Two-step verification failed.",
+      error,
       reason,
       ...extra,
     },
@@ -1341,7 +1355,7 @@ async function createTrustedDevice(params: {
   const now =
     new Date().toISOString();
 
-  const payload = {
+  const fullPayload = {
     admin_id: params.adminId,
     device_token_hash:
       tokenHash,
@@ -1369,35 +1383,102 @@ async function createTrustedDevice(params: {
     revoked_at: null,
   };
 
-  const { data, error } =
+  const corePayload = {
+    admin_id: params.adminId,
+    device_token_hash:
+      tokenHash,
+    trusted_at: now,
+    revoked_at: null,
+  };
+
+  const coreSelect = [
+    "id",
+    "admin_id",
+    "device_token_hash",
+    "trusted_at",
+    "revoked_at",
+  ].join(",");
+
+  let result =
     await supabaseAdmin
       .from(
         "admin_trusted_devices",
       )
-      .insert(payload)
-      .select(
-        [
-          "id",
-          "admin_id",
-          "device_token_hash",
-          "device_name",
-          "browser",
-          "operating_system",
-          "device_type",
-          "trusted_at",
-          "first_seen_at",
-          "last_seen_at",
-          "revoked_at",
-        ].join(","),
-      )
+      .insert(fullPayload)
+      .select(coreSelect)
       .single<TrustedDeviceRecord>();
 
+  /*
+   * Older installations only contain the core trusted-device fields.
+   * PostgREST rejects the whole insert when any newer context column is
+   * missing, so retry once with the schema that the security middleware
+   * actually requires. A failed PostgREST insert is atomic, making this
+   * retry safe and preventing duplicate trusted-device rows.
+   */
+  if (
+    result.error &&
+    isMissingTableOrColumn(
+      result.error,
+      [
+        "device_name",
+        "browser",
+        "operating_system",
+        "device_type",
+        "first_seen_at",
+        "last_seen_at",
+        "last_ip",
+        "last_city",
+        "last_region",
+        "last_country",
+      ],
+    )
+  ) {
+    console.warn(
+      `${ROUTE_NAME}: optional trusted-device columns are unavailable; retrying with the core schema.`,
+      {
+        code: result.error.code,
+        message: result.error.message,
+      },
+    );
+
+    result =
+      await supabaseAdmin
+        .from(
+          "admin_trusted_devices",
+        )
+        .insert(corePayload)
+        .select(coreSelect)
+        .single<TrustedDeviceRecord>();
+  }
+
+  const { data, error } = result;
+
   if (error || !data) {
+    const databaseLimitReached =
+      error?.code === "P0001" &&
+      error.message.includes(
+        "TRUSTED_DEVICE_LIMIT_REACHED",
+      );
+
+    if (databaseLimitReached) {
+      throw new TrustedDeviceLimitError();
+    }
+
+    console.error(
+      `${ROUTE_NAME} trusted device create failed`,
+      {
+        code: error?.code ?? null,
+        message:
+          error?.message ??
+          "No trusted device returned",
+        details: error?.details ?? null,
+        hint: error?.hint ?? null,
+        adminId: params.adminId,
+      },
+    );
+
     throw new Error(
-      `Could not create trusted device: ${
-        error?.message ??
-        "No trusted device returned"
-      }`,
+      "Could not create trusted device.",
     );
   }
 
@@ -1493,7 +1574,7 @@ async function ensureTrustedDeviceAfterMfa(params: {
    * Race-safe second check before insertion.
    * If another request has already filled
    * the final device slot, do not create a
-   * fourth trusted device.
+   * additional trusted device.
    */
   const latestCount =
     await countTrustedDevices(
@@ -1525,12 +1606,54 @@ async function ensureTrustedDeviceAfterMfa(params: {
     };
   }
 
-  const created =
-    await createTrustedDevice({
-      adminId: params.adminId,
-      security:
-        params.security,
-    });
+  let created: Awaited<
+    ReturnType<
+      typeof createTrustedDevice
+    >
+  >;
+
+  try {
+    created =
+      await createTrustedDevice({
+        adminId: params.adminId,
+        security:
+          params.security,
+      });
+  } catch (error) {
+    /*
+     * The database trigger is the final race-safe limit check. If another
+     * login fills the fifth slot between the count and insert, return the
+     * normal device-limit response instead of turning it into a 500 error.
+     */
+    if (
+      error instanceof
+      TrustedDeviceLimitError
+    ) {
+      return {
+        supported: true,
+        created: false,
+        reused: false,
+        trusted: false,
+        deviceId: null,
+        rawDeviceToken: null,
+        trustedDeviceCount:
+          Math.max(
+            latestCount.count,
+            MAX_TRUSTED_DEVICES,
+          ),
+        maxTrustedDevices:
+          MAX_TRUSTED_DEVICES,
+        deviceLabel:
+          params.security.deviceLabel,
+        approximateLocation:
+          params.security
+            .approximateLocation,
+        riskLevel: "high",
+      };
+    }
+
+    throw error;
+  }
 
   return {
     supported: true,

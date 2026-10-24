@@ -1,4 +1,4 @@
-// app/page.tsx or app/(site)/page.tsx — wherever your home route is
+
 import CommuintyArtClient from '../components/Client/CommunityArtClient';
 import MetaHead from '../components/MetaHead';
 

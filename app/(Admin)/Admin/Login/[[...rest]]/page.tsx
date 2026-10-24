@@ -179,23 +179,27 @@ const MAX_PASSWORD_LENGTH = 128;
 const TWO_FACTOR_CODE_LENGTH = 6;
 const LOCAL_MAX_ATTEMPTS = 5;
 const LOCAL_LOCKOUT_MS = 5 * 60 * 1000;
+const MAX_TRUSTED_DEVICES = 5;
 
 const DEBUG_LOGIN_ERRORS =
   process.env.NODE_ENV === "development";
 
 const GENERIC_LOGIN_ERROR: LoginError = {
-  title: "Sign in failed",
-  message: "The details entered could not be accepted. Please try again.",
+  title: "Email or password incorrect",
+  message:
+    "The email address or password entered could not be accepted. Check your details and try again.",
 };
 
 const GENERIC_SERVICE_ERROR: LoginError = {
-  title: "Unable to continue",
-  message: "Something went wrong. Please wait a moment and try again.",
+  title: "Unable to sign in",
+  message:
+    "The secure login service could not complete your request. Please try again.",
 };
 
 const TOO_MANY_ATTEMPTS_ERROR: LoginError = {
-  title: "Sign in temporarily paused",
-  message: "Please wait a few minutes before trying again.",
+  title: "Too many sign-in attempts",
+  message:
+    "Sign in has been temporarily paused for security. Please wait a few minutes before trying again.",
 };
 
 const LOGGED_OUT_MESSAGE: LoginError = {
@@ -236,18 +240,23 @@ function getCurrentRoute() {
 
 function getSafeRedirectFromSearch(search: string): RedirectCheckResult {
   const params = new URLSearchParams(search);
-  const next = params.get("next");
 
-  if (!next) {
+  // Support both redirect styles while keeping the destination restricted
+  // to an internal /Admin path:
+  // /Admin/Login?next=/Admin/LotteryManagement
+  // /Admin/Login?redirect=/Admin/LotteryManagement
+  const requestedPath = params.get("next") ?? params.get("redirect");
+
+  if (!requestedPath) {
     return {
       safePath: DEFAULT_REDIRECT,
       wasRejected: false,
-      reason: "missing_next_path",
+      reason: "missing_redirect_path",
       originalLength: 0,
     };
   }
 
-  const trimmed = next.trim();
+  const trimmed = requestedPath.trim();
   const lower = trimmed.toLowerCase();
 
   if (!trimmed.startsWith("/Admin")) {
@@ -331,12 +340,40 @@ function parseLoginError(
   json?: LoginResponse | VerifyTwoFactorResponse | null,
   endpoint?: string,
 ): LoginError {
-  const base =
-    status === 429
-      ? TOO_MANY_ATTEMPTS_ERROR
-      : status >= 500
-        ? GENERIC_SERVICE_ERROR
-        : GENERIC_LOGIN_ERROR;
+  const rawCode =
+    typeof json?.code === "string"
+      ? json.code.toLowerCase()
+      : "";
+
+  let base: LoginError;
+
+  if (status === 429) {
+    base = TOO_MANY_ATTEMPTS_ERROR;
+  } else if (status >= 500) {
+    base = GENERIC_SERVICE_ERROR;
+  } else if (
+    status === 401 ||
+    rawCode === "invalid_credentials" ||
+    rawCode === "invalid_login_credentials" ||
+    rawCode === "invalid_password" ||
+    rawCode === "user_not_found"
+  ) {
+    // Deliberately use exactly the same public message for an unknown email
+    // and a wrong password. This avoids exposing which admin accounts exist.
+    base = GENERIC_LOGIN_ERROR;
+  } else if (status === 403) {
+    base = {
+      title: "Sign in could not continue",
+      message:
+        "Your sign-in could not be completed. Check your details or contact an authorised administrator if the problem continues.",
+    };
+  } else {
+    base = {
+      title: "Sign in failed",
+      message:
+        "Your sign-in could not be completed. Please check your details and try again.",
+    };
+  }
 
   if (!DEBUG_LOGIN_ERRORS) {
     return base;
@@ -459,9 +496,7 @@ function normaliseSecurityContext(
   if (!value || typeof value !== "object") return null;
 
   const maxTrustedDevices =
-    typeof value.maxTrustedDevices === "number" && value.maxTrustedDevices > 0
-      ? Math.floor(value.maxTrustedDevices)
-      : 3;
+    MAX_TRUSTED_DEVICES;
 
   const trustedDeviceCount =
     typeof value.trustedDeviceCount === "number" && value.trustedDeviceCount >= 0
@@ -499,9 +534,7 @@ function shouldCreateTrustedDevice(
   if (security.requiresDeviceApproval === true) return false;
 
   const maxTrustedDevices =
-    typeof security.maxTrustedDevices === "number" && security.maxTrustedDevices > 0
-      ? Math.floor(security.maxTrustedDevices)
-      : 3;
+    MAX_TRUSTED_DEVICES;
 
   const trustedDeviceCount =
     typeof security.trustedDeviceCount === "number" &&
@@ -1258,11 +1291,29 @@ export default function LoginPage() {
 
       if (returnedSecurityContext?.requiresDeviceApproval) {
         setPassword("");
-        setError({
-          title: "Device approval required",
-          message:
-            "This account has reached its trusted-device limit or this device needs approval. Remove an existing trusted device or contact an authorised admin lead.",
-        });
+
+        const trustedDeviceCount =
+          returnedSecurityContext.trustedDeviceCount;
+        const trustedDeviceLimit =
+          returnedSecurityContext.maxTrustedDevices ?? MAX_TRUSTED_DEVICES;
+        const trustedDeviceLimitReached =
+          typeof trustedDeviceCount === "number" &&
+          trustedDeviceCount >= trustedDeviceLimit;
+
+        if (trustedDeviceLimitReached) {
+          setError({
+            title: "Trusted device limit reached",
+            message:
+              `This administrator account already has ${trustedDeviceLimit} trusted devices. ` +
+              "For security, this device cannot be added automatically. Remove an old trusted device and sign in again, or contact a main administrator.",
+          });
+        } else {
+          setError({
+            title: "Device approval required",
+            message:
+              "This device needs approval before it can access the Admin Portal. Contact a main administrator if you believe this device should be authorised.",
+          });
+        }
 
         void reportAudit({
           action: "login_device_approval_required",
@@ -1275,7 +1326,7 @@ export default function LoginPage() {
             trusted_device_count:
               returnedSecurityContext.trustedDeviceCount ?? null,
             max_trusted_devices:
-              returnedSecurityContext.maxTrustedDevices ?? 3,
+              returnedSecurityContext.maxTrustedDevices ?? MAX_TRUSTED_DEVICES,
           },
         });
 
@@ -3130,9 +3181,7 @@ function DeviceSecurityPanel({
               <SecurityDataLine
                 icon={Users}
                 label="Trusted devices"
-                value={`${securityContext.trustedDeviceCount} / ${
-                  securityContext.maxTrustedDevices || 3
-                }`}
+                value={`${securityContext.trustedDeviceCount} / ${MAX_TRUSTED_DEVICES}`}
               />
             ) : null}
           </div>

@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Banknote,
+  Boxes,
   CalendarDays,
   ChevronRight,
   CreditCard,
@@ -110,6 +111,8 @@ const EVENT_HUB_HOME = "/Admin/BurtonPrideEventHub";
 const ADMIN_DASHBOARD = "/Admin/Dashboard";
 const MONEY_APP = "/Admin/MoneyManagement/TrackingMoney";
 const EMAIL_CENTRE = "/Admin/Email/Sending";
+const LOTTERY_MANAGEMENT = "/Admin/LotteryManagement";
+const STOCK_MANAGEMENT = "/Admin/StockManagement";
 const COLLAPSED_STORAGE_KEY = "burton_event_hub_sidebar_collapsed";
 
 function clsx(...values: Array<string | false | null | undefined>) {
@@ -1496,9 +1499,19 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
           Open Money Management
         </UtilityLink>
 
-        <UtilityLink href={EMAIL_CENTRE} icon={Mail} newTab>
+         <UtilityLink href={EMAIL_CENTRE} icon={Mail} newTab>
           Open Email Centre
         </UtilityLink>
+
+
+        <UtilityLink href={STOCK_MANAGEMENT} icon={Boxes} newTab>
+          Stock Management
+        </UtilityLink>
+
+        <UtilityLink href={LOTTERY_MANAGEMENT} icon={Ticket} newTab>
+          Lottery Management
+        </UtilityLink>
+
       </div>
     </div>
   );

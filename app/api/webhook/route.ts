@@ -1,8 +1,10 @@
 import Stripe from "stripe";
+import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
+import { issueTicketsForPaidOrder } from "@/lib/lottery/secureTicketIssuance";
 
 export const runtime = "nodejs";
 
@@ -25,23 +27,6 @@ function escapeHtml(value: string | null | undefined) {
     .replace(/'/g, "&#039;");
 }
 
-function drivePreviewUrl(url: string) {
-  const u = String(url || "").trim();
-  if (!u) return "";
-  if (u.includes("drive.google.com/uc?")) return u;
-  const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
-  if (m?.[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-  return u;
-}
-
-function driveDownloadUrl(url: string) {
-  const u = String(url || "").trim();
-  if (!u) return "";
-  const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
-  if (m?.[1]) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
-  return u;
-}
-
 function parseEmailList(value: string | undefined) {
   const raw = (value || "").trim();
   if (!raw) return [];
@@ -56,6 +41,528 @@ function safeTicketCount(value: string | number | null | undefined) {
   const n = Number(value || 1);
   if (!Number.isFinite(n) || n < 1) return 1;
   return Math.floor(n);
+}
+
+/* =========================================================
+ * LOTTERY PAYMENT / TICKET ISSUANCE
+ * =========================================================
+ * Stripe Checkout sessions created by the Lottery app use:
+ *   metadata.type = "burton_pride_lottery"
+ *   metadata.lottery_id
+ *   metadata.lottery_slug
+ *   metadata.order_id
+ *   metadata.order_reference
+ *   metadata.quantity
+ *
+ * The webhook is the server-to-server source of truth for payment.
+ * A paid order is reconciled and any missing tickets are issued here.
+ * Remaining: durable event deduplication, capacity reservations and a single
+ * locked transaction for payment/tickets/entries/audit/outbox. The existing
+ * shared allocator has not been supplied or verified in this update.
+ */
+
+const LOTTERY_FROM_EMAIL =
+  process.env.LOTTERY_EMAIL_FROM?.trim() ||
+  "Burton Pride Lotteries <Lotteries@burtonpride.co.uk>";
+
+const LOTTERY_REPLY_TO =
+  process.env.LOTTERY_REPLY_TO?.trim() ||
+  process.env.EMAIL_REPLY_TO?.trim() ||
+  "info@burtonpride.co.uk";
+
+type LotteryPaidOrder = {
+  id: string;
+  lottery_id: string;
+  order_reference: string;
+  purchaser_name: string;
+  purchaser_email: string;
+  purchaser_phone: string | null;
+  quantity: number;
+  total_amount: number;
+  currency: string;
+  payment_status: string;
+  payment_reference: string | null;
+  paid_at: string | null;
+};
+
+type LotteryForWebhook = {
+  id: string;
+  title: string;
+  slug: string;
+  draw_at: string | null;
+  max_tickets: number | null;
+};
+
+type LotteryIssuedTicket = {
+  id: string;
+  ticket_number: string;
+  status: string;
+  issued_at: string | null;
+};
+
+function isLotteryCheckoutSession(session: Stripe.Checkout.Session) {
+  return session.metadata?.type === "burton_pride_lottery";
+}
+
+function formatLotteryMoney(value: number, currency = "GBP") {
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: String(currency || "GBP").toUpperCase(),
+    }).format(Number(value || 0));
+  } catch {
+    return `£${Number(value || 0).toFixed(2)}`;
+  }
+}
+
+function formatLotteryDateTime(value: string | null) {
+  if (!value) return "To be confirmed";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/London",
+  });
+}
+
+async function lotteryNotificationAlreadySent(
+  orderId: string,
+  notificationType: string,
+  recipient: string
+) {
+  const { data, error } = await supabaseAdmin
+    .from("lottery_notifications")
+    .select("id,status")
+    .eq("order_id", orderId)
+    .eq("notification_type", notificationType)
+    .eq("recipient", recipient)
+    .eq("status", "sent")
+    .limit(1);
+
+  if (error) {
+    console.error("Lottery notification history lookup failed:", error);
+    throw new Error("Lottery notification history unavailable.");
+  }
+
+  return Boolean(data?.length);
+}
+
+async function recordLotteryWebhookNotification({
+  orderId,
+  notificationType,
+  recipient,
+  status,
+  errorMessage = null,
+}: {
+  orderId: string;
+  notificationType: string;
+  recipient: string;
+  status: "sent" | "failed";
+  errorMessage?: string | null;
+}) {
+  const now = new Date().toISOString();
+
+  const { error } = await supabaseAdmin.from("lottery_notifications").insert({
+    order_id: orderId,
+    notification_type: notificationType,
+    recipient,
+    status,
+    sent_at: status === "sent" ? now : null,
+    failed_at: status === "failed" ? now : null,
+    error_message: errorMessage,
+  });
+
+  if (error) {
+    console.error("Lottery notification history insert failed:", error);
+  }
+}
+
+function lotteryTicketNumbersHtml(tickets: LotteryIssuedTicket[]) {
+  return tickets
+    .map(
+      (ticket) => `
+        <div style="margin:8px 0;padding:12px 14px;border-radius:10px;background:#f3e8ff;color:#581c87;font-size:18px;font-weight:800;letter-spacing:.04em;">
+          ${escapeHtml(ticket.ticket_number)}
+        </div>
+      `
+    )
+    .join("");
+}
+
+function lotteryTicketNumbersText(tickets: LotteryIssuedTicket[]) {
+  return tickets.map((ticket) => `- ${ticket.ticket_number}`).join("\n");
+}
+
+async function sendLotteryWebhookEmail({
+  to,
+  subject,
+  html,
+  text,
+  idempotencyKey,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  idempotencyKey: string;
+}) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not configured.");
+  }
+
+  const { error } = await resend.emails.send({
+    from: LOTTERY_FROM_EMAIL,
+    to,
+    replyTo: LOTTERY_REPLY_TO,
+    subject,
+    html,
+    text,
+  }, { idempotencyKey });
+
+  if (error) {
+    throw new Error(error.message || "Resend rejected the lottery email.");
+  }
+}
+
+async function sendLotteryPaidEmails({
+  order,
+  lottery,
+  tickets,
+}: {
+  order: LotteryPaidOrder;
+  lottery: LotteryForWebhook;
+  tickets: LotteryIssuedTicket[];
+}) {
+  const customerType = "paid_entry_customer_confirmation";
+  const internalType = "paid_entry_internal_notification";
+
+  const drawText = formatLotteryDateTime(lottery.draw_at);
+  const paidText = formatLotteryMoney(order.total_amount, order.currency);
+  const numbersHtml = lotteryTicketNumbersHtml(tickets);
+  const numbersText = lotteryTicketNumbersText(tickets);
+
+  const customerEmail = String(order.purchaser_email || "")
+    .trim()
+    .toLowerCase();
+
+  if (customerEmail) {
+    const alreadySent = await lotteryNotificationAlreadySent(
+      order.id,
+      customerType,
+      customerEmail
+    );
+
+    if (!alreadySent) {
+      try {
+        await sendLotteryWebhookEmail({
+          to: customerEmail,
+          idempotencyKey: createHash("sha256")
+            .update(`${order.id}:${customerType}:${customerEmail}`)
+            .digest("hex"),
+          subject: `Your ${lottery.title} lottery number${
+            tickets.length === 1 ? "" : "s"
+          }`,
+          html: `
+            <!doctype html>
+            <html>
+              <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#172033;">
+                <div style="max-width:640px;margin:0 auto;padding:30px 18px;">
+                  <div style="overflow:hidden;border-radius:22px;background:#ffffff;border:1px solid #e2e8f0;">
+                    <div style="padding:30px;background:linear-gradient(135deg,#ec4899,#7c3aed,#2563eb);color:#ffffff;text-align:center;">
+                      <div style="font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#fde68a;">Burton Pride Lottery</div>
+                      <h1 style="margin:10px 0 0;font-size:30px;line-height:1.2;">Your lottery entry is confirmed</h1>
+                    </div>
+                    <div style="padding:30px;">
+                      <p style="margin-top:0;font-size:17px;line-height:1.7;">Hello <strong>${escapeHtml(
+                        order.purchaser_name
+                      )}</strong>,</p>
+                      <p style="font-size:16px;line-height:1.7;">Stripe has confirmed your payment and your lottery ticket${
+                        tickets.length === 1 ? " has" : "s have"
+                      } now been issued.</p>
+
+                      <div style="margin:24px 0;padding:20px;border-radius:16px;background:#faf5ff;border:1px solid #e9d5ff;">
+                        <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b21a8;">Your ticket number${
+                          tickets.length === 1 ? "" : "s"
+                        }</div>
+                        ${numbersHtml}
+                      </div>
+
+                      <table role="presentation" style="width:100%;border-collapse:collapse;font-size:15px;">
+                        <tr><td style="padding:8px 0;color:#64748b;">Lottery</td><td style="padding:8px 0;text-align:right;font-weight:700;">${escapeHtml(
+                          lottery.title
+                        )}</td></tr>
+                        <tr><td style="padding:8px 0;color:#64748b;">Order reference</td><td style="padding:8px 0;text-align:right;font-weight:700;">${escapeHtml(
+                          order.order_reference
+                        )}</td></tr>
+                        <tr><td style="padding:8px 0;color:#64748b;">Tickets</td><td style="padding:8px 0;text-align:right;font-weight:700;">${escapeHtml(
+                          String(order.quantity)
+                        )}</td></tr>
+                        <tr><td style="padding:8px 0;color:#64748b;">Amount paid</td><td style="padding:8px 0;text-align:right;font-weight:700;">${escapeHtml(
+                          paidText
+                        )}</td></tr>
+                        <tr><td style="padding:8px 0;color:#64748b;">Draw</td><td style="padding:8px 0;text-align:right;font-weight:700;">${escapeHtml(
+                          drawText
+                        )}</td></tr>
+                      </table>
+
+                      <p style="margin:26px 0 0;font-size:15px;line-height:1.7;color:#475569;">Please keep this email for your records. Winners will be contacted using the details supplied with the order.</p>
+                      <p style="margin:22px 0 0;font-size:15px;line-height:1.7;">Thank you for supporting Burton Pride C.I.C.</p>
+                    </div>
+                  </div>
+                </div>
+              </body>
+            </html>
+          `,
+          text: `Hello ${order.purchaser_name},\n\nYour payment for ${
+            lottery.title
+          } has been confirmed and your lottery tickets have been issued.\n\nOrder reference: ${
+            order.order_reference
+          }\nAmount paid: ${paidText}\nDraw: ${drawText}\n\nTicket number${
+            tickets.length === 1 ? "" : "s"
+          }:\n${numbersText}\n\nThank you for supporting Burton Pride C.I.C.`,
+        });
+
+        await recordLotteryWebhookNotification({
+          orderId: order.id,
+          notificationType: customerType,
+          recipient: customerEmail,
+          status: "sent",
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown email error";
+
+        console.error("Lottery customer confirmation email failed:", error);
+
+        await recordLotteryWebhookNotification({
+          orderId: order.id,
+          notificationType: customerType,
+          recipient: customerEmail,
+          status: "failed",
+          errorMessage: message,
+        });
+      }
+    }
+  }
+
+  const configuredAdmins = parseEmailList(
+    process.env.LOTTERY_NOTIFY_EMAILS ||
+      process.env.BURTON_PRIDE_NOTIFY_EMAILS ||
+      process.env.BURTON_PRIDE_NOTIFY_EMAIL
+  );
+
+  const adminRecipients = configuredAdmins.length
+    ? configuredAdmins
+    : ["info@burtonpride.co.uk", "prideburton@gmail.com"];
+
+  for (const recipient of adminRecipients) {
+    const alreadySent = await lotteryNotificationAlreadySent(
+      order.id,
+      internalType,
+      recipient
+    );
+
+    if (alreadySent) continue;
+
+    try {
+      await sendLotteryWebhookEmail({
+        to: recipient,
+        idempotencyKey: createHash("sha256")
+          .update(`${order.id}:${internalType}:${recipient.toLowerCase()}`)
+          .digest("hex"),
+        subject: `New lottery entry: ${order.purchaser_name} - ${lottery.title}`,
+        html: `
+          <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.7;color:#111827;max-width:700px;margin:0 auto;">
+            <div style="padding:24px;background:#111827;color:#fff;border-radius:18px 18px 0 0;">
+              <h2 style="margin:0;">Paid Lottery Entry</h2>
+            </div>
+            <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 18px 18px;background:#fff;">
+              <p>Stripe has confirmed payment and the ticket${
+                tickets.length === 1 ? " has" : "s have"
+              } been issued.</p>
+              <p><strong>Lottery:</strong> ${escapeHtml(lottery.title)}</p>
+              <p><strong>Order:</strong> ${escapeHtml(
+                order.order_reference
+              )}</p>
+              <p><strong>Purchaser:</strong> ${escapeHtml(
+                order.purchaser_name
+              )}</p>
+              <p><strong>Email:</strong> ${escapeHtml(
+                order.purchaser_email
+              )}</p>
+              <p><strong>Phone:</strong> ${escapeHtml(
+                order.purchaser_phone || "Not provided"
+              )}</p>
+              <p><strong>Amount:</strong> ${escapeHtml(paidText)}</p>
+              <p><strong>Draw:</strong> ${escapeHtml(drawText)}</p>
+              <div style="margin-top:20px;">${numbersHtml}</div>
+            </div>
+          </div>
+        `,
+        text: `Paid lottery entry\n\nLottery: ${lottery.title}\nOrder: ${
+          order.order_reference
+        }\nPurchaser: ${order.purchaser_name}\nEmail: ${
+          order.purchaser_email
+        }\nPhone: ${order.purchaser_phone || "Not provided"}\nAmount: ${
+          paidText
+        }\nDraw: ${drawText}\n\nTickets:\n${numbersText}`,
+      });
+
+      await recordLotteryWebhookNotification({
+        orderId: order.id,
+        notificationType: internalType,
+        recipient,
+        status: "sent",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown email error";
+
+      console.error("Lottery internal notification failed:", error);
+
+      await recordLotteryWebhookNotification({
+        orderId: order.id,
+        notificationType: internalType,
+        recipient,
+        status: "failed",
+        errorMessage: message,
+      });
+    }
+  }
+}
+
+async function handleLotterySession(session: Stripe.Checkout.Session) {
+  if (!isLotteryCheckoutSession(session)) return;
+
+  if (session.payment_status !== "paid") {
+    console.log("Lottery checkout is not paid yet; ticket issuance deferred:", {
+      sessionId: session.id,
+      paymentStatus: session.payment_status,
+    });
+    return;
+  }
+
+  const orderId = String(session.metadata?.order_id || "").trim();
+
+  if (!orderId) {
+    throw new Error("Lottery Stripe session is missing metadata.order_id.");
+  }
+
+  const { data: orderData, error: orderError } = await supabaseAdmin
+    .from("lottery_orders")
+    .select(
+      "id,lottery_id,order_reference,purchaser_name,purchaser_email,purchaser_phone,quantity,total_amount,currency,payment_status,payment_reference,paid_at"
+    )
+    .eq("id", orderId)
+    .single();
+
+  if (orderError || !orderData) {
+    throw new Error(
+      `Unable to load lottery order: ${orderError?.message || "Order not found"}`
+    );
+  }
+
+  const order = orderData as LotteryPaidOrder;
+
+  const terminalStatuses = new Set([
+    "refunded",
+    "partially_refunded",
+    "disputed",
+    "cancelled",
+  ]);
+
+  if (terminalStatuses.has(String(order.payment_status || "").toLowerCase())) {
+    console.warn("Lottery webhook ignored for order in terminal payment state:", {
+      orderId: order.id,
+      orderReference: order.order_reference,
+      paymentStatus: order.payment_status,
+    });
+    return;
+  }
+
+  if (session.mode !== "payment" || session.status !== "complete" ||
+      session.livemode !== Boolean(process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_"))) {
+    throw new Error("Lottery payment mode or completion state is invalid.");
+  }
+  if (!order.payment_reference || order.payment_reference !== session.id) {
+    throw new Error("Stripe session must match the saved lottery payment reference.");
+  }
+  if (session.metadata?.lottery_id !== order.lottery_id || session.metadata?.order_reference !== order.order_reference ||
+      !/^[1-9]\d*$/.test(session.metadata?.quantity || "") ||
+      !Number.isSafeInteger(order.quantity) || order.quantity < 1 || order.quantity > 100 ||
+      Number(session.metadata?.quantity) !== order.quantity) {
+    throw new Error("Stripe lottery order metadata does not match the saved order.");
+  }
+  const amountMatch = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(order.total_amount));
+  const expectedAmountPence = amountMatch
+    ? Number(amountMatch[1]) * 100 + Number((amountMatch[2] ?? "").padEnd(2, "0")) : null;
+  if (expectedAmountPence === null || !Number.isSafeInteger(expectedAmountPence) || expectedAmountPence <= 0 ||
+      !Number.isSafeInteger(session.amount_total) || session.amount_total !== expectedAmountPence ||
+      session.currency !== "gbp" || order.currency !== "GBP") {
+    throw new Error("Stripe lottery amount or currency does not match the saved order.");
+  }
+
+  const { data: lotteryData, error: lotteryError } = await supabaseAdmin
+    .from("lotteries")
+    .select("id,title,slug,draw_at,max_tickets")
+    .eq("id", order.lottery_id)
+    .single();
+
+  if (lotteryError || !lotteryData) {
+    throw new Error(
+      `Unable to load lottery details: ${
+        lotteryError?.message || "Lottery not found"
+      }`
+    );
+  }
+
+  const lottery = lotteryData as LotteryForWebhook;
+  const metadataSlug = String(session.metadata?.lottery_slug || "").trim();
+
+  if (!metadataSlug || metadataSlug !== lottery.slug) {
+    throw new Error("Stripe lottery slug does not match the saved lottery.");
+  }
+
+  // The shared issuer currently fails closed. Do not mark an order paid in a
+  // separate write before it rejects. The replacement issuer must own the entire
+  // payment/ticket/entry/audit/outbox transaction using verified provider evidence.
+  // Stripe retries this failed event; its saved session remains the recovery link.
+  const tickets = await issueTicketsForPaidOrder(
+    { ...order, payment_status: "paid" }, lottery,
+  );
+
+  if (tickets.length !== Number(order.quantity) ||
+      new Set(tickets.map(ticket => ticket.id)).size !== order.quantity ||
+      new Set(tickets.map(ticket => ticket.ticket_number)).size !== order.quantity ||
+      tickets.some(ticket => !ticket.ticket_number || !["issued", "winner"].includes(ticket.status))) {
+    throw new Error(
+      `Lottery reconciliation failed: expected ${order.quantity} tickets but found ${tickets.length}.`
+    );
+  }
+
+  console.log("Lottery order reconciled and tickets issued:", {
+    orderId: order.id,
+    orderReference: order.order_reference,
+    lotteryId: order.lottery_id,
+    quantity: order.quantity,
+    ticketCount: tickets.length,
+    ticketNumbers: tickets.map((ticket) => ticket.ticket_number),
+    stripeSessionId: session.id,
+  });
+
+  // Email failures are recorded, but do not invalidate paid tickets.
+  await sendLotteryPaidEmails({
+    order,
+    lottery,
+    tickets,
+  });
 }
 
 function raffleTicketEmailHtml({
@@ -1622,341 +2129,6 @@ Message: ${donorMessage || "No message provided"}`,
   });
 }
 
-async function handleCompetitionSession(session: Stripe.Checkout.Session) {
-  let entryId = session.metadata?.entryId;
-
-  if (!entryId && session.payment_intent) {
-    try {
-      const pi = await stripe.paymentIntents.retrieve(
-        session.payment_intent as string
-      );
-      entryId = pi.metadata?.entryId;
-    } catch (e: any) {
-      console.error("Failed to retrieve PaymentIntent:", e?.message || e);
-    }
-  }
-
-  if (!entryId) {
-    return;
-  }
-
-  const db = supabaseAdmin;
-
-  const { error: paidErr } = await db
-    .from("competition_entries")
-    .update({ payment_status: "paid" })
-    .eq("id", entryId);
-
-  if (paidErr) {
-    console.error("Failed to update payment_status:", paidErr);
-  }
-
-  const { data: entry, error: entryError } = await db
-    .from("competition_entries")
-    .select(
-      "id, business_name, contact_name, email, phone, address, website, image_url, confirmation_email_sent_at"
-    )
-    .eq("id", entryId)
-    .single();
-
-  if (entryError || !entry) {
-    console.error("Could not load entry:", entryError);
-    return;
-  }
-
-  if (entry.confirmation_email_sent_at) {
-    return;
-  }
-
-  const FROM =
-    process.env.EMAIL_FROM?.trim() ||
-    "Burton Pride <noreply@burtonpride.co.uk>";
-
-  const REPLY_TO =
-    process.env.EMAIL_REPLY_TO?.trim() || "prideburton@gmail.com";
-
-  const adminList = parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
-    .length
-    ? parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAILS)
-    : parseEmailList(process.env.BURTON_PRIDE_NOTIFY_EMAIL);
-
-  const adminRecipients = adminList.length
-    ? adminList
-    : ["prideburton@gmail.com"];
-
-  const customerEmail = String(
-    entry.email || session.customer_details?.email || session.customer_email || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  const rawImageUrl = String(entry.image_url || "").trim();
-  const imageUrl = drivePreviewUrl(rawImageUrl);
-  const imageDownloadUrl = driveDownloadUrl(rawImageUrl);
-
-  const voteUrl = "https://burtonpride.co.uk/Competition/Vote";
-
-  const rawQrImageUrl =
-    "https://drive.google.com/file/d/1YrBOAbYH2NpLpE3qDCJGMRNovrvcQ8l_/view?usp=drive_link";
-  const qrDownloadUrl = driveDownloadUrl(rawQrImageUrl);
-
-  const safeBusiness = escapeHtml(entry.business_name || "");
-  const safeContact = escapeHtml(entry.contact_name || "");
-  const safeEmail = escapeHtml(entry.email || "");
-  const safePhone = escapeHtml(entry.phone || "");
-  const safeAddress = escapeHtml(entry.address || "");
-  const safeWebsite = escapeHtml(entry.website || "");
-  const safeVoteUrl = escapeHtml(voteUrl);
-  const safeImageDownloadUrl = escapeHtml(imageDownloadUrl);
-  const safeQrDownloadUrl = escapeHtml(qrDownloadUrl);
-
-  const footerHtml = `
-    <div style="padding:14px 20px;background:#f9fafb;color:#6b7280;font-size:12px;border-top:1px solid #eef2f7;">
-      Burton Pride C.I.C • Burton-on-Trent<br/>
-      If you need help, email us at ${escapeHtml(REPLY_TO)}.
-    </div>
-  `;
-
-  const headerHtml = `
-    <div style="padding:18px 20px;background:linear-gradient(90deg,#ec4899,#8b5cf6,#3b82f6);color:#fff;">
-      <div>
-        <div style="font-size:16px;font-weight:800;">Burton Pride C.I.C</div>
-        <div style="font-size:13px;opacity:.95;">Windows of Hope Competition 2026</div>
-      </div>
-    </div>
-  `;
-
-  const customerSubject =
-    "Payment received — your Windows of Hope entry is confirmed";
-
-  const customerText = `Hi ${entry.contact_name || "there"},
-
-Your payment has been received and your entry for "${entry.business_name || ""}" is confirmed.
-
-Download your window photo:
-${imageDownloadUrl || "Image download link unavailable"}
-
-Download the QR poster:
-${qrDownloadUrl || "QR download link unavailable"}
-
-Vote here:
-${voteUrl}
-
-If you need help, email us at ${REPLY_TO}.
-
-— Burton Pride C.I.C`;
-
-  const customerHtml = `
-    <div style="background:#f6f7fb;padding:28px 12px;font-family:Arial,sans-serif;">
-      <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e9e9ef;">
-        ${headerHtml}
-        <div style="padding:22px 20px;color:#111827;">
-          <h2 style="margin:0 0 10px;font-size:22px;">Entry confirmed ✅</h2>
-          <p style="margin:0 0 12px;">Hi ${safeContact || "there"},</p>
-          <p style="margin:0 0 14px;">
-            We’ve received your payment. Your entry for <strong>${safeBusiness}</strong> is confirmed.
-          </p>
-
-          <div style="background:#f9fafb;border:1px solid #eef2f7;border-radius:12px;padding:14px;margin:14px 0;">
-            <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">Your details</div>
-            <div style="font-size:14px;"><strong>Business:</strong> ${safeBusiness}</div>
-            <div style="font-size:14px;"><strong>Contact:</strong> ${safeContact}</div>
-            <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
-          </div>
-
-          ${
-            imageUrl
-              ? `
-                <div style="margin:18px 0;">
-                  <div style="font-size:16px;font-weight:700;margin:0 0 10px;">This is your window photo</div>
-                  <p style="margin:0 0 12px;color:#374151;">
-                    Please check this is the image you want displayed for the competition.
-                  </p>
-                  <img
-                    src="${imageUrl}"
-                    alt="Your uploaded window photo"
-                    style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid #e5e7eb;"
-                  />
-                  ${
-                    imageDownloadUrl
-                      ? `
-                        <div style="margin-top:14px;text-align:center;">
-                          <a
-                            href="${safeImageDownloadUrl}"
-                            style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-                          >
-                            Download your window photo
-                          </a>
-                        </div>
-                      `
-                      : ""
-                  }
-                </div>
-              `
-              : `
-                <div style="margin:18px 0;padding:14px;background:#fff7ed;border:1px solid #fdba74;border-radius:12px;color:#9a3412;">
-                  We could not display your image in this email. If your image is missing, please reply to this email.
-                </div>
-              `
-          }
-
-          <div style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;text-align:center;">
-            <div style="font-size:16px;font-weight:700;margin-bottom:10px;">
-              Download your QR poster for voting
-            </div>
-
-            <p style="margin:0 0 14px;color:#374151;">
-              Use this button to download the QR poster from Google Drive, then print it or display it in your window.
-            </p>
-
-            ${
-              qrDownloadUrl
-                ? `
-                  <a
-                    href="${safeQrDownloadUrl}"
-                    style="display:inline-block;padding:12px 18px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-                  >
-                    Download QR poster
-                  </a>
-                `
-                : ""
-            }
-          </div>
-
-          <div style="margin:18px 0;padding:16px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:12px;">
-            <div style="font-size:16px;font-weight:700;margin:0 0 8px;">People can vote for your window</div>
-            <p style="margin:0 0 12px;color:#374151;">
-              Please share the competition voting page so people can vote for your window.
-            </p>
-            <a
-              href="${safeVoteUrl}"
-              style="display:inline-block;padding:12px 18px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-            >
-              Vote for your favourite window
-            </a>
-            <div style="margin-top:10px;font-size:12px;color:#6b7280;word-break:break-all;">
-              ${safeVoteUrl}
-            </div>
-          </div>
-
-          <p style="margin:0;color:#374151;">Thank you for supporting Burton Pride 🌈</p>
-        </div>
-        ${footerHtml}
-      </div>
-    </div>
-  `;
-
-  const adminSubject = "New paid Windows of Hope entry (details inside)";
-  const adminText = `New PAID entry:
-Business: ${entry.business_name || ""}
-Contact: ${entry.contact_name || ""}
-Email: ${entry.email || ""}
-Phone: ${entry.phone || ""}
-Address: ${entry.address || ""}
-Website: ${entry.website || ""}
-Entry ID: ${entry.id}
-Photo: ${imageUrl || "none"}
-Download photo: ${imageDownloadUrl || "none"}
-Download QR poster: ${qrDownloadUrl || "none"}`;
-
-  const adminHtml = `
-    <div style="background:#f6f7fb;padding:28px 12px;font-family:Arial,sans-serif;">
-      <div style="max-width:700px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e9e9ef;">
-        ${headerHtml}
-        <div style="padding:22px 20px;color:#111827;">
-          <h2 style="margin:0 0 12px;font-size:22px;">New paid entry ✅</h2>
-
-          <div style="background:#f9fafb;border:1px solid #eef2f7;border-radius:12px;padding:14px;margin:14px 0;">
-            <div style="font-size:14px;"><strong>Business:</strong> ${safeBusiness}</div>
-            <div style="font-size:14px;"><strong>Contact:</strong> ${safeContact}</div>
-            <div style="font-size:14px;"><strong>Email:</strong> ${safeEmail}</div>
-            <div style="font-size:14px;"><strong>Phone:</strong> ${safePhone}</div>
-            <div style="font-size:14px;"><strong>Address:</strong> ${safeAddress}</div>
-            ${safeWebsite ? `<div style="font-size:14px;"><strong>Website:</strong> ${safeWebsite}</div>` : ""}
-            <div style="font-size:14px;"><strong>Entry ID:</strong> ${escapeHtml(entry.id)}</div>
-          </div>
-
-          ${
-            imageUrl
-              ? `
-                <h3 style="margin:18px 0 10px;font-size:16px;">Photo</h3>
-                <img src="${imageUrl}" alt="Uploaded photo" style="max-width:100%;border-radius:12px;border:1px solid #eee;" />
-                <div style="margin-top:12px;">
-                  <a
-                    href="${safeImageDownloadUrl}"
-                    style="display:inline-block;padding:10px 16px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-                  >
-                    Download photo
-                  </a>
-                </div>
-                <div style="margin-top:8px;font-size:12px;">
-                  <a href="${imageUrl}">Open photo</a>
-                </div>
-              `
-              : `<p><em>Please check Google Drive for the image. If it isn’t there, please email the customer back to let them know the image is missing.</em></p>`
-          }
-
-          ${
-            qrDownloadUrl
-              ? `
-                <div style="margin-top:18px;">
-                  <a
-                    href="${safeQrDownloadUrl}"
-                    style="display:inline-block;padding:10px 16px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-weight:700;"
-                  >
-                    Download QR poster
-                  </a>
-                </div>
-              `
-              : ""
-          }
-        </div>
-        ${footerHtml}
-      </div>
-    </div>
-  `;
-
-  const emailHeaders = {
-    "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=unsubscribe>`,
-  } as Record<string, string>;
-
-  try {
-    if (customerEmail) {
-      await resend.emails.send({
-        from: FROM,
-        to: customerEmail,
-        replyTo: REPLY_TO,
-        subject: customerSubject,
-        text: customerText,
-        html: customerHtml,
-        headers: emailHeaders,
-      });
-      console.log("Customer email sent to:", customerEmail);
-    }
-
-    await resend.emails.send({
-      from: FROM,
-      to: adminRecipients,
-      replyTo: REPLY_TO,
-      subject: adminSubject,
-      text: adminText,
-      html: adminHtml,
-      headers: emailHeaders,
-    });
-
-    const { error: sentErr } = await db
-      .from("competition_entries")
-      .update({ confirmation_email_sent_at: new Date().toISOString() })
-      .eq("id", entryId);
-
-    if (sentErr) {
-      console.error("Failed to set confirmation_email_sent_at:", sentErr);
-    }
-  } catch (err: any) {
-    console.error("Competition email send failed:", err?.message || err);
-  }
-}
-
 export async function POST(req: Request) {
   const body = await req.text();
   const headersList = await headers();
@@ -1986,19 +2158,29 @@ export async function POST(req: Request) {
   try {
     console.log("Stripe webhook received:", event.type);
 
-    if (event.type === "checkout.session.completed") {
+    if (
+      event.type === "checkout.session.completed" ||
+      event.type === "checkout.session.async_payment_succeeded"
+    ) {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      console.log("Checkout session completed:", {
+      console.log("Checkout session payment event:", {
+        event_type: event.type,
         id: session.id,
+        type: session.metadata?.type,
         source: session.metadata?.source,
+        order_id: session.metadata?.order_id,
+        lottery_id: session.metadata?.lottery_id,
         payment_status: session.payment_status,
       });
 
-      if (session.metadata?.source === "website_raffle") {
+      if (isLotteryCheckoutSession(session)) {
+        await handleLotterySession(session);
+      } else if (session.metadata?.source === "website_raffle") {
         await handleRaffleSession(session);
       } else if (session.metadata?.entryId) {
-        await handleCompetitionSession(session);
+        // A legacy checkout may be retried; do not treat it as a donation.
+        console.log("Ignored retired checkout session:", session.id);
       } else {
         await handleDonationSession(session);
         await addDonationSessionToMoneyTracker(session);
@@ -2018,7 +2200,14 @@ export async function POST(req: Request) {
 
       console.log("Payment intent succeeded:", paymentIntent.id);
 
-      await addPaymentIntentToMoneyTracker(paymentIntent);
+      if (paymentIntent.metadata?.type === "burton_pride_lottery") {
+        console.log(
+          "Skipped donation Money Tracker sync for lottery PaymentIntent:",
+          paymentIntent.id
+        );
+      } else {
+        await addPaymentIntentToMoneyTracker(paymentIntent);
+      }
     }
 
     return new NextResponse("OK", { status: 200 });

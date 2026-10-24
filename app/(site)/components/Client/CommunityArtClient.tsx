@@ -932,12 +932,12 @@ export default function HomeClient() {
 
   return (
     <main className="min-h-screen overflow-hidden text-white">
-      <div className="mx-auto w-full max-w-[1180px] px-4 pb-10 pt-24 sm:px-7 sm:pb-14 sm:pt-28 lg:px-10 lg:pb-16 lg:pt-28">
+      <div className="mx-auto w-full max-w-[1180px] px-3 pb-10 pt-20 sm:px-7 sm:pb-14 sm:pt-28 lg:px-10 lg:pb-16 lg:pt-28">
         <motion.header
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55 }}
-          className="relative overflow-hidden rounded-[2rem] border border-white/25 bg-black/10 px-5 py-8 text-center shadow-2xl backdrop-blur-md sm:px-9 sm:py-10 lg:px-12"
+          className="relative overflow-hidden rounded-[1.5rem] border border-white/25 bg-black/10 px-4 py-6 text-center shadow-2xl backdrop-blur-md sm:rounded-[2rem] sm:px-9 sm:py-10 lg:px-12"
         >
           <div className="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full bg-pink-400/35 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-28 -right-20 h-72 w-72 rounded-full bg-blue-400/35 blur-3xl" />
@@ -947,7 +947,7 @@ export default function HomeClient() {
               initial={{ opacity: 0, scale: 0.8, rotate: -8 }}
               animate={{ opacity: 1, scale: 1, rotate: 0 }}
               transition={{ delay: 0.12, type: "spring", stiffness: 130 }}
-              className="relative mb-5 h-28 w-28 overflow-hidden rounded-full border-4 border-white bg-white shadow-2xl shadow-black/25 sm:h-32 sm:w-32"
+              className="relative mb-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-white shadow-2xl shadow-black/25 sm:mb-5 sm:h-32 sm:w-32"
             >
               <Image
                 src="/image/Logo.png"
@@ -959,34 +959,34 @@ export default function HomeClient() {
               />
             </motion.div>
 
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-black uppercase tracking-[0.15em] backdrop-blur-sm sm:text-sm">
+            <div className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full bg-white/15 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] backdrop-blur-sm sm:mb-4 sm:px-4 sm:text-sm sm:tracking-[0.15em]">
               <Sparkles className="h-4 w-4" aria-hidden="true" />
               Created by our community
             </div>
 
-            <h1 className="text-4xl font-black tracking-tight drop-shadow-md sm:text-5xl lg:text-6xl">
+            <h1 className="text-[2rem] font-black leading-[1.05] tracking-tight drop-shadow-md sm:text-5xl lg:text-6xl">
               Community Art Gallery
             </h1>
 
-            <p className="mx-auto mt-4 max-w-3xl text-base font-medium leading-relaxed text-white/90 sm:text-lg">
+            <p className="mx-auto mt-4 max-w-3xl text-sm font-medium leading-6 text-white/90 sm:text-lg sm:leading-relaxed">
               Explore artwork shared by LGBTQIA+ people and allies. Collections
               with several pieces open as a slideshow, alongside the artist’s
               name, pronouns and story.
             </p>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-3 sm:mt-6 sm:flex-row sm:flex-wrap sm:items-center">
               <a
                 href="#community-gallery"
-                className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 font-black text-fuchsia-700 shadow-xl transition hover:-translate-y-0.5 hover:bg-fuchsia-50"
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-fuchsia-700 shadow-xl transition active:scale-[0.99] hover:-translate-y-0.5 hover:bg-fuchsia-50 sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
               >
                 <Heart className="h-5 w-5" aria-hidden="true" />
                 Explore the gallery
               </a>
 
-              <div className="flex flex-wrap justify-center gap-4">
+              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-center sm:gap-4">
                 <Link
                   href="/DonateToUs"
-                  className="rounded-full bg-yellow-300 px-8 py-4 text-lg font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform hover:scale-105 hover:bg-white sm:px-10 sm:text-xl"
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-yellow-300 px-5 py-3 text-base font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform active:scale-[0.99] hover:bg-white sm:w-auto sm:rounded-full sm:px-10 sm:py-4 sm:text-xl"
                 >
                   💖 Please Consider Donating
                 </Link>
@@ -994,7 +994,7 @@ export default function HomeClient() {
                 <button
                   type="button"
                   onClick={openSubmitDialog}
-                  className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-6 py-3 font-black text-purple-950 shadow-xl transition hover:-translate-y-0.5 hover:bg-white"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-yellow-300 px-5 py-3 text-sm font-black text-purple-950 shadow-xl transition active:scale-[0.99] hover:-translate-y-0.5 hover:bg-white sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
                 >
                   <UploadCloud className="h-5 w-5" aria-hidden="true" />
                   Submit up to {MAX_IMAGES} pieces
@@ -1002,7 +1002,7 @@ export default function HomeClient() {
 
                 <Link
                   href="/CommunityArt/TermsAndConditions"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-black/15 px-6 py-3 font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-white/15"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-white/30 bg-black/15 px-5 py-3 text-sm font-black text-white shadow-lg transition active:scale-[0.99] hover:-translate-y-0.5 hover:bg-white/15 sm:w-auto sm:rounded-full sm:px-6 sm:text-base"
                 >
                   <ShieldCheck className="h-5 w-5" aria-hidden="true" />
                   Read the art terms
@@ -1010,7 +1010,7 @@ export default function HomeClient() {
               </div>
             </div>
 
-            <div className="mt-7 grid w-full max-w-3xl gap-3 text-left sm:grid-cols-3">
+            <div className="mt-6 grid w-full max-w-3xl gap-2.5 text-left sm:mt-7 sm:grid-cols-3 sm:gap-3">
               {[
                 "Upload one piece or a full collection",
                 "Each image gets its own description",
@@ -1018,7 +1018,7 @@ export default function HomeClient() {
               ].map((message) => (
                 <div
                   key={message}
-                  className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-bold text-white/90 backdrop-blur-sm"
+                  className="rounded-xl border border-white/15 bg-white/10 px-3 py-3 text-xs font-bold leading-5 text-white/90 backdrop-blur-sm sm:rounded-2xl sm:px-4 sm:text-sm"
                 >
                   <CheckCircle2 className="mb-2 h-5 w-5 text-yellow-300" />
                   {message}
@@ -1030,14 +1030,14 @@ export default function HomeClient() {
 
         <section
           id="community-gallery"
-          className="mt-9 scroll-mt-28 sm:mt-12"
+          className="mt-8 scroll-mt-24 sm:mt-12 sm:scroll-mt-28"
           aria-labelledby="gallery-heading"
         >
-          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-5 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2
                 id="gallery-heading"
-                className="text-2xl font-black sm:text-3xl"
+                className="text-xl font-black leading-tight sm:text-3xl"
               >
                 Artwork from our community
               </h2>
@@ -1057,7 +1057,7 @@ export default function HomeClient() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search art or artists"
-                className="w-full rounded-full border border-white/25 bg-black/20 py-3 pl-12 pr-4 font-semibold text-white outline-none backdrop-blur-md transition placeholder:text-white/65 focus:border-white focus:bg-black/30 focus:ring-4 focus:ring-white/15"
+                className="min-h-12 w-full rounded-2xl border border-white/25 bg-black/20 py-3 pl-12 pr-4 text-sm font-semibold text-white outline-none backdrop-blur-md transition placeholder:text-white/65 focus:border-white focus:bg-black/30 focus:ring-4 focus:ring-white/15 sm:rounded-full sm:text-base"
               />
             </label>
           </div>
@@ -1116,7 +1116,7 @@ export default function HomeClient() {
                 </div>
               ) : null}
 
-              <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-4 md:grid-cols-3 lg:grid-cols-4">
                 {filteredArtworks.map((artwork, index) => {
                   const images = normaliseArtworkImages(artwork);
                   const cover = images[0];
@@ -1141,7 +1141,7 @@ export default function HomeClient() {
                         className="block w-full text-left"
                         aria-label={`View ${artwork.artwork_title} by ${getPublicArtistName(artwork)}`}
                       >
-                        <div className="relative aspect-square overflow-hidden rounded-2xl bg-black/20 shadow-[0_14px_36px_rgba(15,23,42,0.24)] ring-1 ring-white/20 transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_20px_46px_rgba(15,23,42,0.34)]">
+                        <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-black/20 shadow-[0_14px_36px_rgba(15,23,42,0.24)] ring-1 ring-white/20 transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_20px_46px_rgba(15,23,42,0.34)] sm:aspect-square">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={cover.url}
@@ -1150,7 +1150,7 @@ export default function HomeClient() {
                             className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                           />
 
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-4 pb-4 pt-16">
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-3 pb-3 pt-14 sm:px-4 sm:pb-4 sm:pt-16">
                             <h3 className="line-clamp-2 text-base font-black leading-tight sm:text-lg">
                               {artwork.artwork_title}
                             </h3>
@@ -1202,20 +1202,20 @@ export default function HomeClient() {
           className="mt-12 sm:mt-16"
           aria-labelledby="community-art-donation-heading"
         >
-          <div className="relative overflow-hidden rounded-3xl border-4 border-yellow-300 bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 p-5 text-center shadow-2xl shadow-yellow-400/40 sm:p-8">
-            <div className="relative rounded-[28px] border border-white/25 bg-purple-950/85 px-5 py-8 shadow-2xl backdrop-blur-md sm:px-10 sm:py-12">
-              <p className="mb-4 inline-flex rounded-full bg-yellow-300 px-5 py-2 text-sm font-black uppercase tracking-wide text-purple-950 shadow-xl">
+          <div className="relative overflow-hidden rounded-2xl border-2 border-yellow-300 bg-gradient-to-r from-yellow-400 via-orange-400 to-pink-500 p-3 text-center shadow-2xl shadow-yellow-400/40 sm:rounded-3xl sm:border-4 sm:p-8">
+            <div className="relative rounded-[20px] border border-white/25 bg-purple-950/85 px-4 py-7 shadow-2xl backdrop-blur-md sm:rounded-[28px] sm:px-10 sm:py-12">
+              <p className="mb-4 inline-flex max-w-full rounded-xl bg-yellow-300 px-3 py-2 text-xs font-black uppercase tracking-wide text-purple-950 shadow-xl sm:rounded-full sm:px-5 sm:text-sm">
                 Help keep Burton Pride free
               </p>
 
               <h2
                 id="community-art-donation-heading"
-                className="mb-5 text-4xl font-black text-white drop-shadow-lg sm:text-6xl"
+                className="mb-4 text-[2rem] font-black leading-tight text-white drop-shadow-lg sm:mb-5 sm:text-6xl"
               >
                 💖 Support Your Local Pride
               </h2>
 
-              <p className="mx-auto mb-7 max-w-3xl text-base font-semibold leading-8 text-white/95 sm:text-xl">
+              <p className="mx-auto mb-6 max-w-3xl text-sm font-semibold leading-6 text-white/95 sm:mb-7 sm:text-xl sm:leading-8">
                 Help us keep Burton Pride free for everyone. As a grassroots
                 Pride, created by the community for the community, every
                 donation helps us provide local support, celebrate community
@@ -1223,52 +1223,52 @@ export default function HomeClient() {
                 welcoming. Every contribution makes a real difference.
               </p>
 
-              <div className="mx-auto mb-8 grid max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mx-auto mb-7 grid max-w-4xl grid-cols-2 gap-3 sm:mb-8 sm:gap-4 lg:grid-cols-4">
                 <Link
                   href="/DonateToUs?amount=3"
-                  className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/25"
+                  className="rounded-xl border border-white/25 bg-white/15 p-4 shadow-xl backdrop-blur-md transition-transform active:scale-[0.99] hover:bg-white/25 sm:rounded-2xl sm:p-5"
                 >
-                  <p className="text-4xl font-black">£3</p>
-                  <p className="mt-2 text-sm font-bold text-white">
+                  <p className="text-3xl font-black sm:text-4xl">£3</p>
+                  <p className="mt-2 text-xs font-bold leading-5 text-white sm:text-sm">
                     Helps community support
                   </p>
                 </Link>
 
                 <Link
                   href="/DonateToUs?amount=5"
-                  className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/25"
+                  className="rounded-xl border border-white/25 bg-white/15 p-4 shadow-xl backdrop-blur-md transition-transform active:scale-[0.99] hover:bg-white/25 sm:rounded-2xl sm:p-5"
                 >
-                  <p className="text-4xl font-black">£5</p>
-                  <p className="mt-2 text-sm font-bold text-white">
+                  <p className="text-3xl font-black sm:text-4xl">£5</p>
+                  <p className="mt-2 text-xs font-bold leading-5 text-white sm:text-sm">
                     Helps Pride resources
                   </p>
                 </Link>
 
                 <Link
                   href="/DonateToUs?amount=10"
-                  className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/25"
+                  className="rounded-xl border border-white/25 bg-white/15 p-4 shadow-xl backdrop-blur-md transition-transform active:scale-[0.99] hover:bg-white/25 sm:rounded-2xl sm:p-5"
                 >
-                  <p className="text-4xl font-black">£10</p>
-                  <p className="mt-2 text-sm font-bold text-white">
+                  <p className="text-3xl font-black sm:text-4xl">£10</p>
+                  <p className="mt-2 text-xs font-bold leading-5 text-white sm:text-sm">
                     Helps event safety
                   </p>
                 </Link>
 
                 <Link
                   href="/DonateToUs"
-                  className="rounded-2xl border border-white/25 bg-white/15 p-5 shadow-xl backdrop-blur-md transition-transform hover:scale-105 hover:bg-white/25"
+                  className="rounded-xl border border-white/25 bg-white/15 p-4 shadow-xl backdrop-blur-md transition-transform active:scale-[0.99] hover:bg-white/25 sm:rounded-2xl sm:p-5"
                 >
-                  <p className="text-4xl font-black">Any</p>
-                  <p className="mt-2 text-sm font-bold text-white">
+                  <p className="text-3xl font-black sm:text-4xl">Any</p>
+                  <p className="mt-2 text-xs font-bold leading-5 text-white sm:text-sm">
                     Give what you can
                   </p>
                 </Link>
               </div>
 
-              <div className="flex flex-wrap justify-center gap-4">
+              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-center sm:gap-4">
                 <Link
                   href="/DonateToUs"
-                  className="rounded-full bg-yellow-300 px-8 py-4 text-lg font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform hover:scale-105 hover:bg-white sm:px-10 sm:text-xl"
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-yellow-300 px-5 py-3 text-base font-black text-purple-950 shadow-2xl shadow-yellow-300/40 transition-transform active:scale-[0.99] hover:bg-white sm:w-auto sm:rounded-full sm:px-10 sm:py-4 sm:text-xl"
                 >
                   💖 Please Consider Donating
                 </Link>
@@ -1323,7 +1323,7 @@ export default function HomeClient() {
       <AnimatePresence>
         {selectedArtwork && selectedImages.length > 0 ? (
           <motion.div
-            className="fixed inset-0 z-[99999] overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-950/95 p-0 backdrop-blur-lg sm:p-4 lg:p-6"
+            className="fixed inset-0 z-[2147483000] overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-950/95 p-0 backdrop-blur-lg sm:p-4 lg:p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="artwork-dialog-title"
@@ -1342,20 +1342,41 @@ export default function HomeClient() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.98, y: 12 }}
                 transition={{ duration: 0.24 }}
-                className="relative flex min-h-[100svh] min-w-0 w-full max-w-full flex-col overflow-x-hidden bg-white text-slate-950 shadow-[0_30px_100px_rgba(0,0,0,0.55)] sm:my-5 sm:min-h-0 sm:max-h-[94vh] sm:max-w-[1500px] sm:rounded-[2rem] sm:border sm:border-white/15"
+                className="relative flex min-h-[100svh] w-full min-w-0 max-w-full flex-col overflow-x-hidden bg-white pb-[env(safe-area-inset-bottom)] text-slate-950 shadow-[0_30px_100px_rgba(0,0,0,0.55)] sm:my-5 sm:min-h-0 sm:max-h-[94vh] sm:max-w-[1500px] sm:rounded-[2rem] sm:border sm:border-white/15 sm:pb-0"
               >
                 <button
                   type="button"
                   onClick={() => setSelectedArtwork(null)}
-                  className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[100000] grid h-11 w-11 place-items-center rounded-full border border-white/25 bg-slate-950/90 text-white shadow-xl backdrop-blur-md transition hover:scale-105 hover:bg-fuchsia-600 sm:absolute sm:right-5 sm:top-5 sm:h-12 sm:w-12"
+                  className="fixed right-3 top-[max(1rem,env(safe-area-inset-top))] z-[2147483001] grid h-12 w-12 place-items-center rounded-full border-2 border-white/50 bg-slate-950 text-white shadow-2xl backdrop-blur-md transition active:scale-95 hover:scale-105 hover:bg-fuchsia-600 sm:absolute sm:right-5 sm:top-5 sm:h-12 sm:w-12"
                   aria-label="Close artwork"
+                  title="Close artwork"
+                >
+                  <X className="h-6 w-6" aria-hidden="true" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedArtwork(null)}
+                  className="fixed left-3 top-[max(1rem,env(safe-area-inset-top))] z-[2147483001] inline-flex min-h-12 items-center gap-2 rounded-full border-2 border-white/40 bg-slate-950 px-4 text-sm font-black text-white shadow-2xl backdrop-blur-md active:scale-[0.98] sm:hidden"
+                  aria-label="Close artwork viewer"
                 >
                   <X className="h-5 w-5" aria-hidden="true" />
+                  Close
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedArtwork(null)}
+                  className="fixed bottom-[max(1.25rem,calc(env(safe-area-inset-bottom)+0.75rem))] left-1/2 z-[2147483001] inline-flex min-h-12 -translate-x-1/2 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-white/30 bg-slate-950/95 px-5 py-3 text-sm font-black text-white shadow-[0_14px_45px_rgba(0,0,0,0.45)] backdrop-blur-xl transition active:scale-[0.98] sm:hidden"
+                  aria-label="Close artwork viewer"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                  Close artwork
                 </button>
 
                 <div className="grid min-w-0 flex-1 overflow-x-hidden lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
-                  <div className="flex min-w-0 flex-col overflow-x-hidden bg-[radial-gradient(circle_at_top,#1e1b4b_0%,#080817_42%,#020617_100%)] px-2 pb-3 pt-14 sm:p-5 lg:min-h-0 lg:p-6">
-                    <div className="relative grid h-[min(52svh,460px)] min-h-[260px] min-w-0 max-w-full place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black/45 sm:h-auto sm:min-h-[480px] sm:flex-1 lg:min-h-0">
+                  <div className="flex min-w-0 flex-col overflow-x-hidden bg-[radial-gradient(circle_at_top,#1e1b4b_0%,#080817_42%,#020617_100%)] px-2 pb-3 pt-[max(4rem,calc(env(safe-area-inset-top)+3rem))] sm:p-5 lg:min-h-0 lg:p-6">
+                    <div className="relative grid h-[min(48svh,420px)] min-h-[240px] min-w-0 max-w-full place-items-center overflow-hidden rounded-xl border border-white/10 bg-black/45 sm:h-auto sm:min-h-[480px] sm:flex-1 sm:rounded-2xl lg:min-h-0">
                       <AnimatePresence mode="wait">
                         <motion.img
                           key={`${selectedArtwork.id}-${activeSlide}`}
@@ -1365,7 +1386,7 @@ export default function HomeClient() {
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, scale: 1.015 }}
                           transition={{ duration: 0.24 }}
-                          className="block h-full max-h-[min(52svh,460px)] min-w-0 max-w-full object-contain sm:max-h-[68vh]"
+                          className="block h-full max-h-[min(48svh,420px)] min-w-0 max-w-full object-contain sm:max-h-[68vh]"
                         />
                       </AnimatePresence>
 
@@ -1451,7 +1472,7 @@ export default function HomeClient() {
                   </div>
 
                   <aside className="min-w-0 max-w-full overflow-x-hidden border-t border-slate-200 bg-white lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
-                    <div className="relative min-w-0 max-w-full overflow-hidden bg-gradient-to-br from-fuchsia-50 via-white to-indigo-50 px-5 pb-6 pt-6 sm:px-8 sm:pb-8 sm:pt-9 lg:px-9 lg:pr-16">
+                    <div className="relative min-w-0 max-w-full overflow-hidden bg-gradient-to-br from-fuchsia-50 via-white to-indigo-50 px-4 pb-5 pt-5 sm:px-8 sm:pb-8 sm:pt-9 lg:px-9 lg:pr-16">
                       <div className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full bg-fuchsia-200/45 blur-3xl" />
                       <div className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full bg-indigo-200/45 blur-3xl" />
 
@@ -1476,7 +1497,7 @@ export default function HomeClient() {
 
                         <h2
                           id="artwork-dialog-title"
-                          className="mt-5 max-w-full whitespace-normal break-words text-[clamp(2.25rem,9vw,3.75rem)] font-black leading-[1.02] tracking-tight text-slate-950 [overflow-wrap:anywhere] sm:text-5xl lg:text-[3.35rem]"
+                          className="mt-4 max-w-full whitespace-normal break-words text-[clamp(1.9rem,8vw,3.75rem)] font-black leading-[1.04] tracking-tight text-slate-950 [overflow-wrap:anywhere] sm:mt-5 sm:text-5xl lg:text-[3.35rem]"
                         >
                           {getPublicArtistName(selectedArtwork)}
                         </h2>
@@ -1495,7 +1516,7 @@ export default function HomeClient() {
                       </div>
                     </div>
 
-                    <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden px-5 py-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-8 lg:px-9">
+                    <div className="min-w-0 max-w-full space-y-5 overflow-x-hidden px-4 py-5 pb-[max(2rem,env(safe-area-inset-bottom))] sm:space-y-6 sm:px-8 sm:py-8 lg:px-9">
                       {isPublicChoiceEnabled(selectedArtwork.show_story) &&
                       selectedArtwork.story.trim() ? (
                         <section aria-labelledby="artwork-story-heading">
@@ -1559,7 +1580,7 @@ export default function HomeClient() {
       <AnimatePresence>
         {submitOpen ? (
           <motion.div
-            className="fixed inset-0 z-[210] overflow-y-auto bg-slate-950/80 p-3 backdrop-blur-sm sm:p-6"
+            className="fixed inset-0 z-[210] overflow-x-hidden overflow-y-auto overscroll-contain bg-slate-950/80 p-0 backdrop-blur-sm sm:p-6"
             role="dialog"
             aria-modal="true"
             aria-labelledby="submission-dialog-title"
@@ -1578,26 +1599,26 @@ export default function HomeClient() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.98, y: 12 }}
                 transition={{ duration: 0.22 }}
-                className="relative my-5 w-full max-w-6xl overflow-hidden rounded-3xl bg-white text-slate-950 shadow-2xl outline-none"
+                className="relative min-h-[100svh] w-full max-w-6xl overflow-hidden bg-white pb-[env(safe-area-inset-bottom)] text-slate-950 shadow-2xl outline-none sm:my-5 sm:min-h-0 sm:rounded-3xl sm:pb-0"
               >
                 <button
                   type="button"
                   onClick={closeSubmitDialog}
                   disabled={submitting}
-                  className="absolute right-4 top-4 z-20 rounded-full bg-black/55 p-3 text-white shadow-lg backdrop-blur-md transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[220] grid h-11 w-11 place-items-center rounded-full bg-black/70 p-0 text-white shadow-lg backdrop-blur-md transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50 sm:absolute sm:right-4 sm:top-4"
                   aria-label="Close submission form"
                 >
                   <X className="h-5 w-5" aria-hidden="true" />
                 </button>
 
-                <div className="bg-[linear-gradient(115deg,#ef2da3_0%,#bd39e8_47%,#5d70f4_100%)] px-6 py-8 text-white sm:px-9 sm:py-10">
+                <div className="bg-[linear-gradient(115deg,#ef2da3_0%,#bd39e8_47%,#5d70f4_100%)] px-4 pb-6 pt-[max(4.5rem,env(safe-area-inset-top))] text-white sm:px-9 sm:py-10">
                   <p className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide backdrop-blur-sm">
                     <UploadCloud className="h-4 w-4" aria-hidden="true" />
                     Multi-art community submission
                   </p>
                   <h2
                     id="submission-dialog-title"
-                    className="mt-4 pr-12 text-3xl font-black sm:text-5xl"
+                    className="mt-4 text-2xl font-black leading-tight sm:pr-12 sm:text-5xl"
                   >
                     Submit your artwork collection
                   </h2>
@@ -1621,18 +1642,18 @@ export default function HomeClient() {
                         sent to the Burton Pride admin portal for review. It
                         will only appear in the gallery after approval.
                       </p>
-                      <div className="mt-6 flex flex-wrap justify-center gap-3">
+                      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-center">
                         <button
                           type="button"
                           onClick={closeSubmitDialog}
-                          className="rounded-full bg-emerald-700 px-6 py-3 font-black text-white transition hover:bg-emerald-600"
+                          className="min-h-12 w-full rounded-2xl bg-emerald-700 px-5 py-3 font-black text-white transition hover:bg-emerald-600 sm:w-auto sm:rounded-full sm:px-6"
                         >
                           Close window
                         </button>
                         <button
                           type="button"
                           onClick={resetSubmissionForm}
-                          className="rounded-full bg-white px-6 py-3 font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                          className="min-h-12 w-full rounded-2xl bg-white px-5 py-3 font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100 sm:w-auto sm:rounded-full sm:px-6"
                         >
                           Submit another collection
                         </button>
@@ -1642,7 +1663,7 @@ export default function HomeClient() {
                 ) : (
                   <form
                     onSubmit={handleSubmit}
-                    className="p-6 sm:p-9"
+                    className="p-4 sm:p-9"
                     noValidate
                   >
                     {formError ? (
@@ -1665,9 +1686,9 @@ export default function HomeClient() {
                       </div>
                     ) : null}
 
-                    <div className="grid gap-7 lg:grid-cols-[0.92fr_1.08fr]">
+                    <div className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr] lg:gap-7">
                       <div>
-                        <div className="rounded-3xl bg-slate-100 p-5">
+                        <div className="rounded-2xl bg-slate-100 p-4 sm:rounded-3xl sm:p-5">
                           <h3 className="text-xl font-black">
                             Before you submit
                           </h3>
@@ -1704,7 +1725,7 @@ export default function HomeClient() {
                             </span>
                           </div>
 
-                          <label className="group block cursor-pointer overflow-hidden rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-fuchsia-500 hover:bg-fuchsia-50">
+                          <label className="group block cursor-pointer overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-fuchsia-500 hover:bg-fuchsia-50 sm:rounded-3xl">
                             <input
                               type="file"
                               multiple
@@ -1715,7 +1736,7 @@ export default function HomeClient() {
                                 event.currentTarget.value = "";
                               }}
                             />
-                            <div className="grid min-h-40 place-items-center p-6 text-center">
+                            <div className="grid min-h-36 place-items-center p-4 text-center sm:min-h-40 sm:p-6">
                               <div>
                                 {uploadImages.length > 0 ? (
                                   <Plus className="mx-auto h-10 w-10 text-fuchsia-700 transition group-hover:scale-110" />
@@ -1741,14 +1762,14 @@ export default function HomeClient() {
                                   key={item.id}
                                   className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                                 >
-                                  <div className="grid grid-cols-[110px_1fr] sm:grid-cols-[145px_1fr]">
+                                  <div className="grid grid-cols-1 sm:grid-cols-[145px_1fr]">
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                       src={item.previewUrl}
                                       alt=""
-                                      className="h-full min-h-36 w-full bg-slate-100 object-cover"
+                                      className="aspect-[16/9] h-auto w-full bg-slate-100 object-cover sm:aspect-auto sm:h-full sm:min-h-36"
                                     />
-                                    <div className="min-w-0 p-4">
+                                    <div className="min-w-0 p-3 sm:p-4">
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0">
                                           <p className="text-xs font-black uppercase tracking-wide text-fuchsia-700">
@@ -1818,7 +1839,7 @@ export default function HomeClient() {
                                 updateForm("artistName", event.target.value)
                               }
                               placeholder="Only visible to the Burton Pride team"
-                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                              className="min-h-12 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                             <span className="mt-2 block text-xs font-semibold text-slate-500">
                               This is kept private and used only to manage your
@@ -1841,7 +1862,7 @@ export default function HomeClient() {
                                 )
                               }
                               placeholder="For example: Cameron Art Studio"
-                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                              className="min-h-12 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                             <span className="mt-2 block text-xs font-semibold text-slate-500">
                               This can be your chosen name, creative name or
@@ -1861,7 +1882,7 @@ export default function HomeClient() {
                                 updateForm("pronouns", event.target.value)
                               }
                               placeholder="For example: she/her"
-                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                              className="min-h-12 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                           </label>
 
@@ -1877,7 +1898,7 @@ export default function HomeClient() {
                                 updateForm("email", event.target.value)
                               }
                               placeholder="Only visible to the Burton Pride team"
-                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                              className="min-h-12 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                             />
                           </label>
                         </div>
@@ -1892,7 +1913,7 @@ export default function HomeClient() {
                               updateForm("artworkTitle", event.target.value)
                             }
                             placeholder="Give this artwork or collection a title"
-                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                            className="min-h-12 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                           />
                         </label>
 
@@ -1916,11 +1937,11 @@ export default function HomeClient() {
                               updateForm("story", event.target.value)
                             }
                             placeholder="Tell visitors why you created this piece or collection, what inspired it and why you would like it shown in the Burton Pride community gallery."
-                            className="w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
+                            className="w-full resize-y rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-fuchsia-600 focus:ring-4 focus:ring-fuchsia-100"
                           />
                         </label>
 
-                        <div className="mt-5 rounded-3xl border border-fuchsia-200 bg-fuchsia-50 p-5">
+                        <div className="mt-5 rounded-2xl border border-fuchsia-200 bg-fuchsia-50 p-4 sm:rounded-3xl sm:p-5">
                           <div className="flex items-start gap-3">
                             <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-fuchsia-700" />
                             <div>
@@ -2010,7 +2031,7 @@ export default function HomeClient() {
                           />
                         </label>
 
-                        <div className="mt-5 space-y-4 rounded-2xl bg-slate-100 p-5">
+                        <div className="mt-5 space-y-4 rounded-2xl bg-slate-100 p-4 sm:p-5">
                           <h3 className="text-lg font-black text-slate-950">
                             Artist declaration and permission
                           </h3>
@@ -2112,7 +2133,7 @@ export default function HomeClient() {
                         <button
                           type="submit"
                           disabled={submitting}
-                          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(115deg,#ef2da3_0%,#bd39e8_47%,#5d70f4_100%)] px-7 py-4 text-lg font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                          className="mt-6 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(115deg,#ef2da3_0%,#bd39e8_47%,#5d70f4_100%)] px-4 py-4 text-base font-black text-white shadow-lg transition active:scale-[0.99] hover:-translate-y-0.5 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 sm:px-7 sm:text-lg"
                         >
                           {submitting ? (
                             <>

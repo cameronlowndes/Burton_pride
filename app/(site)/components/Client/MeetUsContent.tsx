@@ -134,13 +134,13 @@ function TeamStoryModal({
             fixed
             inset-0
             z-[99999]
-            flex
+            hidden
             items-center
             justify-center
             bg-black/75
-            p-4
+            p-6
             backdrop-blur-md
-            sm:p-6
+            md:flex
           "
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -170,15 +170,17 @@ function TeamStoryModal({
             onClick={(event) => event.stopPropagation()}
             className="
               relative
-              max-h-[90vh]
+              max-h-[88vh]
               w-full
               max-w-3xl
               overflow-y-auto
-              rounded-[28px]
+              rounded-[24px]
+
+          sm:rounded-[28px]
               border
               border-white/50
               bg-white
-              p-6
+              p-7
               text-slate-900
               shadow-[0_30px_100px_rgba(15,23,42,0.35)]
 
@@ -406,9 +408,11 @@ function TeamStoryModal({
 function CardButtons({
   member,
   onOpenStory,
+  isMobileDevice,
 }: {
   member: Member;
   onOpenStory: (member: Member) => void;
+  isMobileDevice: boolean;
 }) {
   const hasStory = Boolean(member.story?.trim());
 
@@ -453,33 +457,65 @@ function CardButtons({
       </Link>
 
       {hasStory ? (
-        <button
-          type="button"
-          onClick={() => onOpenStory(member)}
-          className="
-            inline-flex
-            min-h-11
-            items-center
-            justify-center
-            gap-2
-            rounded-full
-            bg-purple-600
-            px-5
-            py-3
-            text-sm
-            font-black
-            text-white
-            shadow-lg
-            transition
-            hover:bg-purple-500
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              if (!isMobileDevice) {
+                onOpenStory(member);
+              }
+            }}
+            className="
+              hidden
+              min-h-11
+              items-center
+              justify-center
+              gap-2
+              rounded-full
+              bg-purple-600
+              px-5
+              py-3
+              text-sm
+              font-black
+              text-white
+              shadow-lg
+              transition
+              hover:bg-purple-500
 
-            dark:bg-purple-500
-            dark:hover:bg-purple-400
-          "
-        >
-          <MessageCircleMore className="h-4 w-4" />
-          Read Story
-        </button>
+              md:inline-flex
+
+              dark:bg-purple-500
+              dark:hover:bg-purple-400
+            "
+          >
+            <MessageCircleMore className="h-4 w-4" />
+            Read Story
+          </button>
+
+          <div
+            className="
+              rounded-2xl
+              border
+              border-slate-200
+              bg-slate-50
+              px-4
+              py-3
+              text-center
+
+              md:hidden
+
+              dark:border-white/10
+              dark:bg-white/[0.04]
+            "
+          >
+            <p className="text-sm font-black text-slate-700 dark:text-white/80">
+              Story available on larger screens
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-white/50">
+              Use View Profile on mobile to learn more about this team member.
+            </p>
+          </div>
+        </>
       ) : (
         <button
           type="button"
@@ -490,7 +526,7 @@ function CardButtons({
             cursor-not-allowed
             items-center
             justify-center
-            rounded-full
+            rounded-2xl
             border
             border-slate-200
             bg-slate-100
@@ -499,6 +535,8 @@ function CardButtons({
             text-sm
             font-bold
             text-slate-400
+
+            sm:rounded-full
 
             dark:border-white/10
             dark:bg-white/[0.03]
@@ -516,10 +554,12 @@ function CommitteeMemberCard({
   member,
   index,
   onOpenStory,
+  isMobileDevice,
 }: {
   member: Member;
   index: number;
   onOpenStory: (member: Member) => void;
+  isMobileDevice: boolean;
 }) {
   return (
     <motion.div
@@ -617,11 +657,13 @@ function CommitteeMemberCard({
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col p-6">
+        <div className="flex flex-1 flex-col p-4 sm:p-6">
           <h3
             className="
-              text-2xl
+              text-xl
               font-black
+
+              sm:text-2xl
               leading-tight
               text-slate-950
 
@@ -634,8 +676,10 @@ function CommitteeMemberCard({
           <p
             className="
               mt-2
-              text-base
+              text-sm
               font-bold
+
+              sm:text-base
               text-purple-700
 
               dark:text-purple-300
@@ -702,6 +746,7 @@ function CommitteeMemberCard({
           <CardButtons
             member={member}
             onOpenStory={onOpenStory}
+            isMobileDevice={isMobileDevice}
           />
         </div>
       </article>
@@ -717,6 +762,22 @@ export default function MeetUsContent() {
   const [error, setError] = useState<string | null>(null);
   const [activeStoryMember, setActiveStoryMember] =
     useState<Member | null>(null);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+
+    const updateDeviceMode = () => {
+      setIsMobileDevice(mediaQuery.matches);
+    };
+
+    updateDeviceMode();
+    mediaQuery.addEventListener("change", updateDeviceMode);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateDeviceMode);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -773,6 +834,12 @@ export default function MeetUsContent() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isMobileDevice && activeStoryMember) {
+      setActiveStoryMember(null);
+    }
+  }, [isMobileDevice, activeStoryMember]);
+
   const sections = useMemo<Section[]>(() => {
     const grouped = new Map<string, Member[]>();
 
@@ -812,12 +879,13 @@ export default function MeetUsContent() {
       <main
         className="
           min-h-screen
-          px-4
-          pb-24
-          pt-28
+          px-3
+          pb-20
+          pt-24
           text-slate-950
 
           sm:px-6
+          sm:pb-24
           sm:pt-32
 
           lg:px-8
@@ -846,12 +914,15 @@ export default function MeetUsContent() {
             }}
             className="
               grid
-              gap-8
-              rounded-[32px]
+              gap-6
+              rounded-[24px]
+
+              sm:gap-8
+              sm:rounded-[32px]
               border
               border-white/60
               bg-white/85
-              p-6
+              p-5
               shadow-xl
               backdrop-blur-md
 
@@ -870,8 +941,8 @@ export default function MeetUsContent() {
               <div
                 className="
                   relative
-                  h-40
-                  w-40
+                  h-32
+                  w-32
                   overflow-hidden
                   rounded-full
                   border-4
@@ -915,8 +986,10 @@ export default function MeetUsContent() {
               <h1
                 className="
                   mt-3
-                  text-4xl
+                  text-3xl
                   font-black
+
+                  sm:text-5xl
                   leading-tight
                   text-slate-950
 
@@ -993,15 +1066,19 @@ export default function MeetUsContent() {
               duration: prefersReducedMotion ? 0 : 0.5,
             }}
             className="
-              mt-8
+              mt-6
               flex
               items-start
-              gap-4
-              rounded-3xl
+              gap-3
+              rounded-2xl
+
+              sm:mt-8
+              sm:gap-4
+              sm:rounded-3xl
               border
               border-white/50
               bg-white/70
-              p-5
+              p-4
               shadow-sm
               backdrop-blur-md
 
@@ -1100,7 +1177,7 @@ export default function MeetUsContent() {
           ) : null}
 
           {!loading && !error && boardSection ? (
-            <section className="mt-14">
+            <section className="mt-10 sm:mt-14">
               <div className="mb-7">
                 <p
                   className="
@@ -1132,7 +1209,7 @@ export default function MeetUsContent() {
                 </h2>
               </div>
 
-              <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
                 {boardSection.members.map(
                   (member, index) => (
                     <CommitteeMemberCard
@@ -1140,6 +1217,7 @@ export default function MeetUsContent() {
                       member={member}
                       index={index}
                       onOpenStory={setActiveStoryMember}
+                      isMobileDevice={isMobileDevice}
                     />
                   ),
                 )}
@@ -1151,7 +1229,7 @@ export default function MeetUsContent() {
             ? otherSections.map((section, sectionIndex) => (
                 <section
                   key={`${section.title}-${sectionIndex}`}
-                  className="mt-16"
+                  className="mt-12 sm:mt-16"
                 >
                   <div className="mb-7">
                     <h2
@@ -1169,7 +1247,7 @@ export default function MeetUsContent() {
                     </h2>
                   </div>
 
-                  <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 xl:grid-cols-3">
                     {section.members.map(
                       (member, index) => (
                         <CommitteeMemberCard
@@ -1177,6 +1255,7 @@ export default function MeetUsContent() {
                           member={member}
                           index={index + 100}
                           onOpenStory={setActiveStoryMember}
+                          isMobileDevice={isMobileDevice}
                         />
                       ),
                     )}
@@ -1228,15 +1307,18 @@ export default function MeetUsContent() {
             }}
             className="
               relative
-              mt-16
+              mt-12
               overflow-hidden
-              rounded-[30px]
+              rounded-[24px]
+
+              sm:mt-16
+              sm:rounded-[30px]
               bg-gradient-to-r
               from-pink-500
               via-purple-600
               to-blue-600
-              px-6
-              py-10
+              px-5
+              py-8
               text-center
               text-white
               shadow-2xl
@@ -1278,7 +1360,7 @@ export default function MeetUsContent() {
             <div className="relative">
               <h2
                 className="
-                  text-3xl
+                  text-2xl
                   font-black
 
                   sm:text-4xl
@@ -1334,7 +1416,7 @@ export default function MeetUsContent() {
 
       <TeamStoryModal
         member={activeStoryMember}
-        open={Boolean(activeStoryMember)}
+        open={Boolean(activeStoryMember) && !isMobileDevice}
         onClose={() => setActiveStoryMember(null)}
       />
     </>

@@ -28,6 +28,7 @@ type EventRow = {
   website_url: string | null;
 
   is_published: boolean;
+  is_planning: boolean | null;
 
   repeat_rule: RepeatRule | null;
 
@@ -44,12 +45,12 @@ const supabase = createClient(
       persistSession: false,
       autoRefreshToken: false,
     },
-  }
+  },
 );
 
 function addRepeatInterval(
   date: Date,
-  repeatRule: RepeatRule
+  repeatRule: RepeatRule,
 ): Date {
   const next = new Date(date.getTime());
 
@@ -84,15 +85,15 @@ function addRepeatInterval(
 
 function getCurrentOrNextOccurrence(
   event: EventRow,
-  now: Date
+  now: Date,
 ) {
   const originalStart = new Date(
-    event.start_at
+    event.start_at,
   );
 
   if (
     Number.isNaN(
-      originalStart.getTime()
+      originalStart.getTime(),
     )
   ) {
     return null;
@@ -106,7 +107,7 @@ function getCurrentOrNextOccurrence(
 
     if (
       !Number.isNaN(
-        parsedEnd.getTime()
+        parsedEnd.getTime(),
       )
     ) {
       originalEnd = parsedEnd;
@@ -115,11 +116,6 @@ function getCurrentOrNextOccurrence(
 
   const repeatRule: RepeatRule =
     event.repeat_rule || "none";
-
-  /*
-   * Keep the real database dates available
-   * separately for reference.
-   */
   const originalStartIso =
     originalStart.toISOString();
 
@@ -128,17 +124,8 @@ function getCurrentOrNextOccurrence(
       ? originalEnd.toISOString()
       : null;
 
-  /*
-   * ========================================
-   * NON-REPEATING EVENT
-   * ========================================
-   */
+
   if (repeatRule === "none") {
-    /*
-     * Event has an end time.
-     * Remove it only once that end time
-     * has passed.
-     */
     if (originalEnd) {
       if (
         originalEnd.getTime() <
@@ -169,6 +156,7 @@ function getCurrentOrNextOccurrence(
           originalEndIso,
 
         is_repeating: false,
+
         is_current_occurrence:
           originalStart.getTime() <=
             now.getTime() &&
@@ -177,11 +165,7 @@ function getCurrentOrNextOccurrence(
       };
     }
 
-    /*
-     * Event has no end time.
-     * Once its start has passed,
-     * remove it.
-     */
+   
     if (
       originalStart.getTime() <
       now.getTime()
@@ -212,35 +196,20 @@ function getCurrentOrNextOccurrence(
     };
   }
 
-  /*
-   * ========================================
-   * REPEATING EVENT
-   * ========================================
-   */
 
-  /*
-   * Work out how long one occurrence lasts.
-   *
-   * Coffee Morning:
-   * 10:00 -> 13:00
-   * = 3 hours.
-   */
   const durationMs =
     originalEnd
       ? Math.max(
           0,
           originalEnd.getTime() -
-            originalStart.getTime()
+            originalStart.getTime(),
         )
       : 0;
 
   let occurrenceStart =
-    new Date(originalStart.getTime());
-
-  /*
-   * If the very first occurrence is still
-   * in the future, simply return it.
-   */
+    new Date(
+      originalStart.getTime(),
+    );
   if (
     occurrenceStart.getTime() >
     now.getTime()
@@ -249,7 +218,7 @@ function getCurrentOrNextOccurrence(
       durationMs > 0
         ? new Date(
             occurrenceStart.getTime() +
-              durationMs
+              durationMs,
           )
         : null;
 
@@ -271,8 +240,7 @@ function getCurrentOrNextOccurrence(
         originalEndIso,
 
       /*
-       * IMPORTANT:
-       * Public start_at now represents
+       * Public start_at represents
        * the occurrence being displayed.
        */
       start_at:
@@ -292,17 +260,13 @@ function getCurrentOrNextOccurrence(
     };
   }
 
-  /*
-   * Find the latest occurrence whose
-   * start time is <= now.
-   */
   let safety = 0;
 
   while (safety < 10000) {
     const nextStart =
       addRepeatInterval(
         occurrenceStart,
-        repeatRule
+        repeatRule,
       );
 
     if (
@@ -321,7 +285,7 @@ function getCurrentOrNextOccurrence(
   if (safety >= 10000) {
     console.error(
       "Repeat event exceeded safety limit:",
-      event.id
+      event.id,
     );
 
     return null;
@@ -331,14 +295,10 @@ function getCurrentOrNextOccurrence(
     durationMs > 0
       ? new Date(
           occurrenceStart.getTime() +
-            durationMs
+            durationMs,
         )
       : null;
 
-  /*
-   * Is today's/current occurrence
-   * happening right now?
-   */
   const currentOccurrenceRunning =
     occurrenceStart.getTime() <=
       now.getTime() &&
@@ -346,10 +306,6 @@ function getCurrentOrNextOccurrence(
     occurrenceEnd.getTime() >=
       now.getTime();
 
-  /*
-   * If it's currently running,
-   * display this occurrence.
-   */
   if (currentOccurrenceRunning) {
     const occurrenceStartIso =
       occurrenceStart.toISOString();
@@ -384,23 +340,6 @@ function getCurrentOrNextOccurrence(
       is_current_occurrence: true,
     };
   }
-
-  /*
-   * If this occurrence has already finished,
-   * move to the NEXT occurrence.
-   *
-   * Example:
-   *
-   * Friday 21 August
-   * 10:00 -> 13:00
-   *
-   * Current date:
-   * Saturday 22 August
-   *
-   * Result:
-   * Friday 28 August
-   * 10:00 -> 13:00
-   */
   if (
     occurrenceEnd &&
     occurrenceEnd.getTime() <
@@ -409,24 +348,17 @@ function getCurrentOrNextOccurrence(
     occurrenceStart =
       addRepeatInterval(
         occurrenceStart,
-        repeatRule
+        repeatRule,
       );
 
     occurrenceEnd =
       durationMs > 0
         ? new Date(
             occurrenceStart.getTime() +
-              durationMs
+              durationMs,
           )
         : null;
   }
-
-  /*
-   * An event without an end time is
-   * treated as finished once its start
-   * time has passed, so move to the
-   * next occurrence.
-   */
   if (
     !occurrenceEnd &&
     occurrenceStart.getTime() <
@@ -435,7 +367,7 @@ function getCurrentOrNextOccurrence(
     occurrenceStart =
       addRepeatInterval(
         occurrenceStart,
-        repeatRule
+        repeatRule,
       );
   }
 
@@ -449,36 +381,18 @@ function getCurrentOrNextOccurrence(
 
   return {
     ...event,
-
-    /*
-     * Keep the original dates.
-     */
     original_start_at:
       originalStartIso,
 
     original_end_at:
       originalEndIso,
 
-    /*
-     * CRITICAL FIX:
-     *
-     * start_at/end_at now become the
-     * next occurrence for PUBLIC use.
-     *
-     * This means website code that still
-     * reads event.start_at will automatically
-     * receive 28 August instead of 21 August.
-     */
     start_at:
       occurrenceStartIso,
 
     end_at:
       occurrenceEndIso,
 
-    /*
-     * Also provide the explicit occurrence
-     * properties for newer components.
-     */
     occurrence_start_at:
       occurrenceStartIso,
 
@@ -517,18 +431,19 @@ export async function GET() {
         ticket_url,
         website_url,
         is_published,
+        is_planning,
         repeat_rule,
         price_type,
         price_gbp,
         is_free
-        `
+        `,
       )
       .eq("is_published", true);
 
     if (error) {
       console.error(
         "Failed to load public events:",
-        error
+        error,
       );
 
       return NextResponse.json(
@@ -541,10 +456,11 @@ export async function GET() {
           headers: {
             "Cache-Control":
               "no-store, no-cache, must-revalidate, max-age=0",
+
             Pragma: "no-cache",
             Expires: "0",
           },
-        }
+        },
       );
     }
 
@@ -553,30 +469,30 @@ export async function GET() {
         .map((event) =>
           getCurrentOrNextOccurrence(
             event,
-            now
-          )
+            now,
+          ),
         )
         .filter(
           (
-            event
+            event,
           ): event is NonNullable<
             ReturnType<
               typeof getCurrentOrNextOccurrence
             >
-          > => event !== null
+          > => event !== null,
         )
         /*
-         * Sort using the NEW public
-         * start_at date.
+         * Sort using the current/next
+         * PUBLIC occurrence date.
          */
         .sort(
           (a, b) =>
             new Date(
-              a.start_at
+              a.start_at,
             ).getTime() -
             new Date(
-              b.start_at
-            ).getTime()
+              b.start_at,
+            ).getTime(),
         );
 
     return NextResponse.json(
@@ -585,8 +501,8 @@ export async function GET() {
 
         /*
          * Useful while debugging.
-         * Shows when the API calculated
-         * the occurrence list.
+         * Shows when the occurrence list
+         * was generated.
          */
         generated_at:
           now.toISOString(),
@@ -597,7 +513,8 @@ export async function GET() {
           /*
            * Prevent Next.js, browsers and
            * intermediary caches from holding
-           * yesterday's occurrence.
+           * yesterday's occurrence or an old
+           * planning status.
            */
           "Cache-Control":
             "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
@@ -608,12 +525,12 @@ export async function GET() {
           "Surrogate-Control":
             "no-store",
         },
-      }
+      },
     );
   } catch (error) {
     console.error(
       "Unexpected public events API error:",
-      error
+      error,
     );
 
     return NextResponse.json(
@@ -627,7 +544,7 @@ export async function GET() {
           "Cache-Control":
             "no-store, no-cache, must-revalidate, max-age=0",
         },
-      }
+      },
     );
   }
 }

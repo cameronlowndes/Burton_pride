@@ -58,6 +58,15 @@ const ADMIN_DEVICE_COOKIE =
 const ADMIN_SECURITY_SESSION_COOKIE =
   "burton_admin_security_session";
 
+// Keep this in sync with the login and two-factor verification routes.
+const MAX_TRUSTED_DEVICES = 5;
+
+const LEGACY_ADMIN_SESSION_COOKIES = [
+  "burton_admin_session",
+  "burton_admin_id",
+  "burton_admin_email",
+] as const;
+
 const PUBLIC_ADMIN_PAGE_PATHS = new Set([
   "/admin/login",
 ]);
@@ -80,7 +89,7 @@ const SECURITY_HEADERS = {
   Pragma: "no-cache",
   Expires: "0",
   "Permissions-Policy":
-    "camera=(), microphone=(), geolocation=(), payment=()",
+    "camera=(self), microphone=(), geolocation=(), payment=()",
 };
 
 function normalisePath(pathname: string) {
@@ -159,6 +168,109 @@ function addAdminSecurityHeaders(
   }
 
   return response;
+}
+
+function isInvalidRefreshTokenError(
+  error: unknown,
+) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const authError = error as {
+    code?: unknown;
+    message?: unknown;
+  };
+
+  const code =
+    typeof authError.code === "string"
+      ? authError.code.toLowerCase()
+      : "";
+
+  const message =
+    typeof authError.message === "string"
+      ? authError.message.toLowerCase()
+      : "";
+
+  return (
+    code === "refresh_token_not_found" ||
+    message.includes(
+      "refresh token not found",
+    ) ||
+    message.includes(
+      "invalid refresh token",
+    )
+  );
+}
+
+function isSupabaseAuthCookie(
+  name: string,
+) {
+  return (
+    name.startsWith("sb-") &&
+    name.includes("-auth-token")
+  );
+}
+
+function expireCookie(
+  response: NextResponse,
+  name: string,
+) {
+  response.cookies.set({
+    name,
+    value: "",
+    path: "/",
+    expires: new Date(0),
+    maxAge: 0,
+    sameSite: "lax",
+    secure:
+      process.env.NODE_ENV ===
+      "production",
+  });
+}
+
+function clearInvalidAuthSession(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  const cookieNames = new Set(
+    request.cookies
+      .getAll()
+      .map(({ name }) => name)
+      .filter(isSupabaseAuthCookie),
+  );
+
+  for (const { name } of response.cookies.getAll()) {
+    if (isSupabaseAuthCookie(name)) {
+      cookieNames.add(name);
+    }
+  }
+
+  for (const name of cookieNames) {
+    expireCookie(response, name);
+  }
+
+  expireCookie(
+    response,
+    ADMIN_SECURITY_SESSION_COOKIE,
+  );
+
+  for (const name of LEGACY_ADMIN_SESSION_COOKIES) {
+    expireCookie(response, name);
+  }
+
+  return response;
+}
+
+function copyResponseCookies(
+  source: NextResponse,
+  destination: NextResponse,
+) {
+  for (const cookie of source.cookies.getAll()) {
+    destination.cookies.set(cookie);
+  }
+
+  return destination;
 }
 
 function jsonBlocked(
@@ -654,6 +766,18 @@ export async function updateSession(
     error: userError,
   } = await supabase.auth.getUser();
 
+  const invalidRefreshToken =
+    isInvalidRefreshTokenError(
+      userError,
+    );
+
+  if (invalidRefreshToken) {
+    clearInvalidAuthSession(
+      request,
+      response,
+    );
+  }
+
   if (!adminRequest) {
     return response;
   }
@@ -665,11 +789,21 @@ export async function updateSession(
   }
 
   if (userError || !user) {
-    return denyAdminRequest(
-      request,
-      401,
-      "Unauthorised.",
-      "authentication_required",
+    const deniedResponse =
+      denyAdminRequest(
+        request,
+        401,
+        invalidRefreshToken
+          ? "Your session has expired. Please sign in again."
+          : "Unauthorised.",
+        invalidRefreshToken
+          ? "session_expired"
+          : "authentication_required",
+      );
+
+    return copyResponseCookies(
+      response,
+      deniedResponse,
     );
   }
   const assurance =
@@ -775,7 +909,10 @@ export async function updateSession(
     );
   }
 
-  if (trustedDeviceCount > 3) {
+  if (
+    trustedDeviceCount >
+    MAX_TRUSTED_DEVICES
+  ) {
     console.error(
       "Trusted-device limit exceeded",
       {
@@ -854,10 +991,6 @@ export async function updateSession(
       "security_session_expired",
     );
   }
-
-  /**
-   * Fail closed. The Burton security-session record itself must explicitly be AAL2.
-   */
   if (
     securitySession.aal !== "aal2"
   ) {

@@ -2325,6 +2325,19 @@ export default function MoneyTransactionsTable({
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [pageSize, setPageSize] = useState(10);
+  const [pageState, setPageState] = useState({ key: "", page: 1 });
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  // Match the existing Tailwind xl layout. Mount only the active layout;
+  // CSS hiding alone still builds every card and table cell in React.
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    const updateLayout = () => setIsDesktop(media.matches);
+    updateLayout();
+    media.addEventListener("change", updateLayout);
+    return () => media.removeEventListener("change", updateLayout);
+  }, []);
   const [localReceiptReminderDays, setLocalReceiptReminderDays] = useState(
     receiptReminderDaysSafe,
   );
@@ -3339,6 +3352,68 @@ export default function MoneyTransactionsTable({
       return sortDirection === "asc" ? result : result * -1;
     });
   }, [visibleTransactions, visibleRefunds, sortKey, sortDirection]);
+
+  // Pagination affects rendering only. Keep the complete matching dataset for
+  // totals, printing, exports and existing all-results bulk selection.
+  // Keying the requested page resets it synchronously when a filter changes.
+  const paginationKey = JSON.stringify([
+    selectedYear, selectedViewMonth, searchTerm, filter,
+    selectedPaymentMethod, selectedSponsorId, quickFilter,
+    activeReceiptReminderDays, sortKey, sortDirection, pageSize,
+  ]);
+  const pageCount = Math.max(1, Math.ceil(visibleTrackingRows.length / pageSize));
+  const requestedPage = pageState.key === paginationKey ? pageState.page : 1;
+  const currentPage = Math.max(1, Math.min(requestedPage, pageCount));
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedTrackingRows = useMemo(
+    () => visibleTrackingRows.slice(pageStart, pageStart + pageSize),
+    [visibleTrackingRows, pageStart, pageSize],
+  );
+
+  // Commit a clamped page after deletions/refreshes so a later insert does not
+  // unexpectedly move the user back to a formerly out-of-range page.
+  useEffect(() => {
+    setPageState((previous) =>
+      previous.key === paginationKey && previous.page === currentPage
+        ? previous
+        : { key: paginationKey, page: currentPage },
+    );
+  }, [paginationKey, currentPage]);
+
+  const paginationButtonClass =
+    "cursor-pointer rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-300 disabled:cursor-not-allowed disabled:opacity-40";
+
+  // Render helper rather than a nested component, preserving control focus.
+  function renderPagination(position: "top" | "bottom") {
+    return (
+      <nav
+        aria-label={`Transaction pages (${position})`}
+        className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3"
+        data-no-drag-scroll="true"
+      >
+        <p role="status" aria-live={position === "top" ? "polite" : "off"} className="text-xs font-bold text-white/70">
+          Showing {pageStart + 1}–{Math.min(pageStart + pageSize, visibleTrackingRows.length)} of {visibleTrackingRows.length} records
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-xs font-bold text-white/70">
+            Rows per page
+            <select
+              value={pageSize}
+              onChange={(event) => setPageSize(Number(event.target.value))}
+              className="cursor-pointer rounded-xl border border-white/20 bg-[#242435] px-2 py-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-300"
+            >
+              {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <button type="button" className={paginationButtonClass} disabled={currentPage === 1} onClick={() => setPageState({ key: paginationKey, page: 1 })}>First</button>
+          <button type="button" className={paginationButtonClass} disabled={currentPage === 1} onClick={() => setPageState({ key: paginationKey, page: currentPage - 1 })}>Previous</button>
+          <span className="text-xs font-bold text-white/70">Page {currentPage} of {pageCount}</span>
+          <button type="button" className={paginationButtonClass} disabled={currentPage === pageCount} onClick={() => setPageState({ key: paginationKey, page: currentPage + 1 })}>Next</button>
+          <button type="button" className={paginationButtonClass} disabled={currentPage === pageCount} onClick={() => setPageState({ key: paginationKey, page: pageCount })}>Last</button>
+        </div>
+      </nav>
+    );
+  }
 
   const refundTotals = useMemo(() => {
     return refunds.reduce(
@@ -5170,7 +5245,7 @@ export default function MoneyTransactionsTable({
                 onClick={() => setSelectedIds(new Set())}
                 className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-white hover:bg-white/20"
               >
-                Clear selected
+                Clear selected (all pages)
               </button>
             </div>
           </div>
@@ -5197,9 +5272,10 @@ export default function MoneyTransactionsTable({
         </div>
       ) : (
         <>
+          {renderPagination("top")}
           {easyMode ? (
             <div className="grid gap-4">
-              {visibleTrackingRows.map((row) =>
+              {pagedTrackingRows.map((row) =>
                 row.kind === "transaction"
                   ? renderEasyModeCard(row.item)
                   : renderEasyModeRefundCard(row.item),
@@ -5207,17 +5283,19 @@ export default function MoneyTransactionsTable({
             </div>
           ) : null}
 
-          <div className={`${easyMode ? "hidden" : "grid"} gap-3 xl:hidden`}>
-            {visibleTrackingRows.map((row) =>
+          {!easyMode && !isDesktop ? (
+          <div className="grid gap-3 xl:hidden">
+            {pagedTrackingRows.map((row) =>
               row.kind === "transaction"
                 ? renderMobileCard(row.item)
                 : renderMobileRefundCard(row.item),
             )}
           </div>
 
-          <div
-            className={`${easyMode ? "hidden" : "hidden xl:block"} space-y-2`}
-          >
+          ) : null}
+
+          {!easyMode && isDesktop ? (
+          <div className="space-y-2">
             <div
               className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-white/65"
               data-no-drag-scroll="true"
@@ -5266,6 +5344,8 @@ export default function MoneyTransactionsTable({
                     <ColumnHeader column="select" className="p-3 text-left">
                       <input
                         type="checkbox"
+                        aria-label="Select all eligible matching transactions across all pages"
+                        title="Select all eligible matching transactions across all pages"
                         checked={allVisibleSelected}
                         disabled={visibleIds.length === 0}
                         onChange={toggleSelectAllVisible}
@@ -5410,7 +5490,7 @@ export default function MoneyTransactionsTable({
                 </thead>
 
                 <tbody>
-                  {visibleTrackingRows.map((row) => {
+                  {pagedTrackingRows.map((row) => {
                     if (row.kind === "refund") {
                       const refund = row.item;
 
@@ -6310,6 +6390,8 @@ export default function MoneyTransactionsTable({
               </table>
             </div>
           </div>
+          ) : null}
+          {renderPagination("bottom")}
         </>
       )}
 

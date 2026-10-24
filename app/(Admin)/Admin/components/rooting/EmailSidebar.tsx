@@ -18,6 +18,7 @@ import {
   Banknote,
   Bell,
   BookOpen,
+  Boxes,
   ChevronRight,
   Contact,
   ExternalLink,
@@ -50,6 +51,7 @@ import {
   Star,
   Tags,
   TestTube2,
+  Ticket,
   Trash2,
   Users,
   X,
@@ -61,6 +63,8 @@ const EMAIL_SIDEBAR_API = "/api/admin/email-sidebar";
 const ADMIN_DASHBOARD = "/Admin/Dashboard";
 const EVENT_HUB = "/Admin/BurtonPrideEventHub";
 const MONEY_APP = "/Admin/MoneyManagement/TrackingMoney";
+const LOTTERY_MANAGEMENT = "/Admin/LotteryManagement";
+const STOCK_MANAGEMENT = "/Admin/StockManagement";
 const COLLAPSED_STORAGE_KEY = "burton_email_sidebar_collapsed";
 
 type EmailSidebarItem = {
@@ -1713,6 +1717,14 @@ function UtilityLinks({ mobile = false }: { mobile?: boolean }) {
 
         <UtilityLink href={MONEY_APP} icon={Banknote} newTab>
           Open Money Management
+        </UtilityLink>
+
+        <UtilityLink href={STOCK_MANAGEMENT} icon={Boxes} newTab>
+          Stock Management
+        </UtilityLink>
+
+        <UtilityLink href={LOTTERY_MANAGEMENT} icon={Ticket} newTab>
+          Lottery Management
         </UtilityLink>
       </div>
     </div>

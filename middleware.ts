@@ -564,14 +564,6 @@ async function runPageLocker(
   if (
     page.password_protected
   ) {
-    /**
-     * Temporary compatibility with the
-     * existing page-password cookie.
-     *
-     * This is NOT a security boundary.
-     * Replace this with a signed or
-     * server-validated unlock token.
-     */
     const oldCookieName =
       `site_page_access_${page.id}`;
 
@@ -599,22 +591,10 @@ export async function middleware(
     normalisePath(
       request.nextUrl.pathname,
     );
-
-  /**
-   * ADMIN SECURITY
-   */
   if (
     isAdminRoute(pathname) ||
     isAdminApiRoute(pathname)
   ) {
-    /**
-     * CSRF / cross-origin mutation
-     * protection.
-     *
-     * Login/logout/MFA routes are
-     * excluded here because they have
-     * their own authentication lifecycle.
-     */
     if (
       isAdminMutation(request) &&
       !isPublicAdminApiPath(
@@ -639,16 +619,6 @@ export async function middleware(
         },
       );
     }
-
-    /**
-     * updateSession performs:
-     *
-     * - Supabase user validation
-     * - AAL2 / MFA validation
-     * - active admin validation
-     * - trusted-device validation
-     * - Burton security-session validation
-     */
     const adminResponse =
       await updateSession(
         request,
@@ -663,9 +633,6 @@ export async function middleware(
     );
   }
 
-  /**
-   * PUBLIC WEBSITE PAGE LOCKER
-   */
   const lockedResponse =
     await runPageLocker(
       request,
@@ -681,27 +648,12 @@ export async function middleware(
 }
 
 export const config = {
-  /**
-   * Required because
-   * lib/supabase/middleware.ts uses
-   * node:crypto.
-   *
-   * Next.js 15.5 supports the stable
-   * Node.js middleware runtime.
-   */
   runtime: "nodejs",
 
   matcher: [
     "/Admin/:path*",
     "/admin/:path*",
     "/api/admin/:path*",
-
-    /**
-     * Public website routes.
-     *
-     * Skip Next.js internal static/image
-     * requests and common root metadata.
-     */
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };

@@ -1,17 +1,3 @@
-/**
- * Burton Pride Admin Portal
- *
- * CORRECT ROUTE:
- *   app/api/admin/settings/login/route.ts
- *
- * This is the PASSWORD LOGIN endpoint.
- * It accepts:
- *   { email, password, next }
- *
- * Do NOT replace this file with the two-factor verify route.
- * Two-factor verification belongs at:
- *   app/api/admin/settings/login/two-factor/verify/route.ts
- */
 
 import {
   createHash,
@@ -45,7 +31,9 @@ const TRUSTED_DEVICE_MAX_AGE = 60 * 60 * 24 * 90;
 
 const MAX_TWO_FACTOR_ATTEMPTS = 5;
 const MAX_TWO_FACTOR_RESENDS = 3;
-const MAX_TRUSTED_DEVICES = 3;
+// Administrators can use up to five approved devices before an old device
+// needs to be removed. This includes phones, tablets and work computers.
+const MAX_TRUSTED_DEVICES = 5;
 
 type TwoFactorMethod = "email" | "totp";
 type AuditRiskLevel = "low" | "medium" | "high" | "critical";
@@ -330,11 +318,16 @@ function genericFailed(
   reason = "sign_in_failed",
   extra?: Record<string, unknown>,
 ): NextResponse {
+  const message =
+    reason === "device_approval_required"
+      ? "This is a new device and all five trusted-device slots are currently in use. Remove an old trusted device, then try again."
+      : "Sign in failed.";
+
   const response = createJsonResponse(
     {
       ok: false,
       authenticated: false,
-      message: "Sign in failed.",
+      message,
       reason,
       ...(extra || {}),
     },

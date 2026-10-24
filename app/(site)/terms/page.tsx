@@ -6,8 +6,8 @@ export const metadata = {
     "Official Burton Pride C.I.C. Website Policy Terms and Conditions, matching the downloadable PDF version.",
 };
 
-const PDF_URL = "/Document/BurtonPrideCICWebsitePolicies.pdf";
-const PDF_FILENAME = "BurtonPrideCICWebsitePolicies.pdf";
+const PDF_URL = "/Document/BurtonPrideMainPolicies.pdf";
+const PDF_FILENAME = "BurtonPrideMainPolicies.pdf";
 
 const TermsPage = () => {
   return (
@@ -479,7 +479,7 @@ const TermsPage = () => {
           <p className="leading-7 text-gray-700">
             Chair of Burton Pride C.I.C.
           </p>
-          <p className="leading-7 text-gray-700">April 2026</p>
+          <p className="leading-7 text-gray-700">August 2026</p>
         </section>
 
         {/* Separate website notice - not part of the official terms wording */}

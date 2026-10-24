@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 const ROUTE =
   "/api/admin/settings/security/trusted-devices";
 
-const MAX_TRUSTED_DEVICES = 3;
+const MAX_TRUSTED_DEVICES = 5;
 const TRUSTED_DEVICE_COOKIE =
   "burton_admin_trusted_device";
 
