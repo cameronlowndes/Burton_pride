@@ -91,6 +91,50 @@ const localServices: SupportService[] = [
     email: 'info@derbyshirelgbt.org.uk',
     note: 'Based outside Burton. Ask about eligibility and availability before travelling.',
   },
+
+{
+  name: 'Circularity Burton',
+  area: 'The Octagon Shopping Centre · Burton upon Trent',
+  summary:
+    'A welcoming community charity offering supportive conversations, a listening ear, social connections, wellbeing activities and opportunities to get involved in the local community.',
+  forWho:
+    'Anyone looking for friendship, emotional support, a friendly conversation or ways to feel less isolated.',
+  website: 'https://circularity.org',
+  email: 'info@circularity.org',
+  note:
+    'Circularity has an open community shop in The Octagon Shopping Centre in Burton town centre. Visit the shop to learn more about their activities and support. Contact them for opening hours.',
+},
+
+{
+  name: 'Staffordshire Adults Autistic Society (SAAS)',
+  area: 'Staffordshire · Based in Newcastle-under-Lyme',
+  summary:
+    'An autistic-led charity providing peer support, emotional support, practical advice, advocacy, social groups and activities to help autistic adults feel understood and less isolated.',
+  forWho:
+    'Autistic adults looking for friendship, understanding, practical guidance, emotional support or opportunities to connect with other autistic people.',
+  website: 'https://www.saascharity.org',
+  email: 'info@saascharity.org',
+  note:
+    'Registered charity 1191870. Based in Newcastle-under-Lyme, with support across Staffordshire. Contact the charity to check available groups, online support and eligibility for people living in Burton upon Trent.',
+},
+
+
+{
+  name: 'Uniting Staffordshire Against Hate (USAH)',
+  area: 'Staffordshire · Including Burton upon Trent',
+  summary:
+    'Free, confidential support for anyone affected by hate crime, including homophobia, transphobia, racism, religious hatred and disability-related hate. Offers emotional support, practical advice and help reporting incidents.',
+  forWho:
+    'Children, young people and adults who have experienced hate crimes or hate incidents, including LGBTQIA+ people. You do not need to report an incident to the police to receive support.',
+  website: 'https://usah.org.uk',
+  email: 'help@usah.org.uk',
+  phone: { label: '0330 0881 339', href: 'tel:03300881339' },
+  note:
+    'Free and confidential service covering Burton upon Trent and Staffordshire. Phone lines open Monday to Friday, 9am–5pm, excluding bank holidays. Self-referrals are accepted. In an emergency, call 999.',
+},
+
+
+
 ];
 
 const nationalServices: SupportService[] = [
