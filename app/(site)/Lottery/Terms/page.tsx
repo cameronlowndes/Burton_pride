@@ -395,7 +395,7 @@ export async function generateMetadata({
  */
 export default async function LotteryTermsPage({
   params,
-}: PageProps = {}) {
+}: PageProps) {
   const {
     slug,
   } =
@@ -1636,11 +1636,6 @@ function TermSection({
   );
 }
 
-/*
- * =========================================================
- * STRONG VALUE
- * =========================================================
- */
 function StrongValue({
   children,
 }: {
