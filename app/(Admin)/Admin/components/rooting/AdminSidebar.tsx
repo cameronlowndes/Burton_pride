@@ -166,6 +166,52 @@ function getSafeHref(value: string | null | undefined) {
   return isSafeAdminHref(href) ? href : "";
 }
 
+// Used only when the Social Media Moderation menu entry has no usable link.
+// Match this path to the folder containing the moderation page in your project.
+const SOCIAL_MEDIA_MODERATION_HREF = "/Admin/Dashboard/SocialMediaModeration";
+
+function prepareSidebarItem(item: AdminSidebarItem): AdminSidebarItem {
+  const labelKey = normalise(item.label)
+    .replace(/\bcoming soon\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+  const hrefKey = normalise(item.href).replace(/[^a-z0-9]/g, "");
+  const isSocialMediaModeration =
+    ["socialmediamoderation", "soicalmediamoderation", "socialmedia", "soicalmedia"].includes(labelKey) ||
+    hrefKey.includes("socialmediamoderation") ||
+    hrefKey.includes("soicalmediamoderation");
+
+  if (!isSocialMediaModeration) return item;
+
+  let href = String(item.href || "").trim();
+
+  // Accept saved paths without a leading slash and same-origin full URLs.
+  if (/^admin(?:\/|$)/i.test(href)) href = `/${href}`;
+  if (/^https?:\/\//i.test(href) && typeof window !== "undefined") {
+    try {
+      const url = new URL(href);
+      if (url.origin === window.location.origin) {
+        href = `${url.pathname}${url.search}${url.hash}`;
+      }
+    } catch {
+      // An invalid saved link uses the moderation page fallback below.
+    }
+  }
+
+  const enabledItem: ExtendedSidebarItem = {
+    ...item,
+    href: getSafeHref(href) || SOCIAL_MEDIA_MODERATION_HREF,
+    label: item.label.replace(/\s*[-–—:(]*\s*coming soon\s*[)]?\s*$/i, "").trim(),
+    is_enabled: true,
+    disabled: false,
+    disabled_reason: null,
+    is_coming_soon: false,
+    coming_soon: false,
+  };
+
+  // Keep the saved permission fields; the existing permission filter still applies.
+  return enabledItem;
+}
+
 function formatRole(value: AdminRole | null | undefined) {
   if (!value) return "Admin user";
 
@@ -982,7 +1028,7 @@ export default function AdminSidebar({
         }
 
         const filteredItems = filterSidebarItemsByPermissions({
-          items: data.items || [],
+          items: (data.items || []).map(prepareSidebarItem),
           permissions,
           adminRole,
         });
