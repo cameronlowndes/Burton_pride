@@ -445,9 +445,6 @@ export default function HomeClient() {
             lg:space-y-12
           "
         >
-          {/* =====================================================
-              DONATION - MOVED NEAR TOP OF HOME PAGE
-              ===================================================== */}
           <div className="grid gap-6 sm:gap-8 md:grid-cols-2 md:items-stretch md:gap-8">
             <motion.section
             className="h-full"
@@ -921,7 +918,7 @@ export default function HomeClient() {
                     </Link>
 
                     <Link
-                      href="/lottery/terms"
+                      href="/lottery/Terms"
                       className={`
                         ${secondaryButtonClass}
                         border
