@@ -1,5 +1,6 @@
 import { isPublicLottery } from "@/lib/lottery/public-visibility";
 import type { Metadata } from "next";
+import { cache, type ReactNode } from "react";
 
 import Link from "next/link";
 
@@ -15,9 +16,6 @@ import {
   Trophy,
 } from "lucide-react";
 
-import {
-  supabaseAdmin,
-} from "@/lib/supabase/supabaseAdmin";
 
 export const dynamic =
   "force-dynamic";
@@ -26,8 +24,8 @@ export const revalidate =
   0;
 
 type PageProps = {
-  params: Promise<{
-    slug: string;
+  params?: Promise<{
+    slug?: string;
   }>;
 };
 
@@ -188,8 +186,10 @@ function getTicketPricePence(
 function formatDateTime(
   value:
     | string
-    | null,
+    | null
+    | undefined,
 ) {
+  if (value === undefined) return "See individual lottery terms";
   if (!value) {
     return "To be confirmed";
   }
@@ -249,9 +249,10 @@ function formatStatus(
     );
 }
 
-async function getLottery(
-  slug: string,
-): Promise<LotteryRecord | null> {
+const getLottery = cache(async (
+  slug: unknown,
+): Promise<LotteryRecord | null> => {
+  if (typeof slug !== "string") return null;
   const cleanSlug =
     slug.trim()
       .toLowerCase();
@@ -264,6 +265,8 @@ async function getLottery(
   ) {
     return null;
   }
+
+  const { supabaseAdmin } = await import("@/lib/supabase/supabaseAdmin");
 
   const {
     data,
@@ -333,7 +336,7 @@ async function getLottery(
   }
 
   return data as LotteryRecord;
-}
+});
 
 /*
  * =========================================================
@@ -346,12 +349,17 @@ export async function generateMetadata({
   const {
     slug,
   } =
-    await params;
+    (await params) ?? {};
 
-  const lottery =
-    await getLottery(
-      slug,
-    );
+  // /Lottery/Terms has no slug: render every terms section without a database lookup.
+  const lottery = slug ? await getLottery(slug) : null;
+
+  if (!slug) {
+    return {
+      title: "General Lottery Terms | Burton Pride",
+      description: "Burton Pride lottery terms and conditions, including eligibility, ticket sales, payment, prizes and responsible participation.",
+    };
+  }
 
   if (!lottery) {
     return {
@@ -385,25 +393,23 @@ export async function generateMetadata({
  * PAGE
  * =========================================================
  */
-export default async function IndividualLotteryTermsPage({
+export default async function LotteryTermsPage({
   params,
-}: PageProps) {
+}: PageProps = {}) {
   const {
     slug,
   } =
-    await params;
+    (await params) ?? {};
 
-  const lottery =
-    await getLottery(
-      slug,
-    );
+  // /Lottery/Terms has no slug: render every terms section without a database lookup.
+  const lottery = slug ? await getLottery(slug) : null;
 
   /*
    * =======================================================
    * NOT FOUND
    * =======================================================
    */
-  if (!lottery) {
+  if (slug && !lottery) {
     return (
       <main
         className="
@@ -504,16 +510,11 @@ export default async function IndividualLotteryTermsPage({
     );
   }
 
-  const publicVisible = lottery.show_in_public_directory === true;
+  const publicVisible = lottery?.show_in_public_directory === true;
 
-  const ticketPricePence =
-    getTicketPricePence(
-      lottery,
-    );
+  const ticketPricePence = lottery ? getTicketPricePence(lottery) : 0;
 
-  const minimumAge =
-    lottery.minimum_age ??
-    16;
+  const minimumAge = Math.max(18, lottery?.minimum_age ?? 18);
 
   return (
     <main
@@ -545,9 +546,7 @@ export default async function IndividualLotteryTermsPage({
         "
       >
         <Link
-          href={`/Lottery/${encodeURIComponent(
-            lottery.slug,
-          )}`}
+          href={lottery ? `/Lottery/${encodeURIComponent(lottery.slug)}` : "/Lottery"}
           className="
             inline-flex
             min-h-11
@@ -576,7 +575,7 @@ export default async function IndividualLotteryTermsPage({
         >
           <ArrowLeft className="h-4 w-4" />
 
-          Back to {lottery.title}
+          Back to {lottery?.title ?? "lotteries"}
         </Link>
 
         <Link
@@ -658,7 +657,7 @@ export default async function IndividualLotteryTermsPage({
             text-yellow-200
           "
         >
-          Individual Lottery Terms
+          {lottery ? "Individual Lottery Terms" : "General Lottery Terms"}
         </p>
 
         <h1
@@ -673,7 +672,7 @@ export default async function IndividualLotteryTermsPage({
             lg:text-5xl
           "
         >
-          {lottery.title}
+          {lottery?.title ?? "Burton Pride Lottery Terms"}
         </h1>
 
         <p
@@ -687,15 +686,14 @@ export default async function IndividualLotteryTermsPage({
             sm:text-lg
           "
         >
-          These individual terms apply specifically to{" "}
+          {lottery ? "These individual terms apply specifically to " : "These terms apply to "}
           <strong>
-            {lottery.title}
+            {(lottery?.title ?? "Burton Pride lotteries")}
           </strong>
-          . They should be read together with Burton
-          Pride&apos;s General Lottery Terms.
+          . {lottery ? "They should be read together with Burton Pride’s General Lottery Terms." : "Read these terms together with the specific conditions on the page for the lottery you wish to enter."}
         </p>
 
-        {lottery.terms_version && (
+        {lottery?.terms_version && (
           <div
             className="
               mt-6
@@ -712,7 +710,7 @@ export default async function IndividualLotteryTermsPage({
             "
           >
             Terms version:{" "}
-            {lottery.terms_version}
+            {lottery?.terms_version}
           </div>
         )}
       </section>
@@ -759,8 +757,7 @@ export default async function IndividualLotteryTermsPage({
                 dark:text-white
               "
             >
-              These terms do not replace the General
-              Lottery Terms
+              {lottery ? "These terms do not replace the General Lottery Terms" : "Individual lottery conditions also apply"}
             </h2>
 
             <p
@@ -776,8 +773,7 @@ export default async function IndividualLotteryTermsPage({
               Burton Pride&apos;s General Lottery Terms
               apply to all Burton Pride lotteries and
               raffles. The information on this page adds
-              the specific conditions for this particular
-              lottery.
+              {lottery ? "the specific conditions for this particular lottery." : "the general participation conditions. Each lottery page provides its specific price, eligibility, dates and prizes."}
             </p>
 
             <Link
@@ -869,10 +865,10 @@ export default async function IndividualLotteryTermsPage({
               0
                 ? `${formatMoney(
                     ticketPricePence,
-                    lottery.currency ||
+                    lottery?.currency ||
                       "GBP",
                   )} per ticket`
-                : "To be confirmed"
+                : (lottery ? "To be confirmed" : "See individual lottery terms")
             }
           />
 
@@ -882,7 +878,7 @@ export default async function IndividualLotteryTermsPage({
             }
             label="Ticket sales open"
             value={formatDateTime(
-              lottery.sales_open_at,
+              lottery?.sales_open_at,
             )}
           />
 
@@ -892,7 +888,7 @@ export default async function IndividualLotteryTermsPage({
             }
             label="Ticket sales close"
             value={formatDateTime(
-              lottery.sales_close_at,
+              lottery?.sales_close_at,
             )}
           />
 
@@ -902,7 +898,7 @@ export default async function IndividualLotteryTermsPage({
             }
             label="Draw"
             value={formatDateTime(
-              lottery.draw_at,
+              lottery?.draw_at,
             )}
           />
 
@@ -920,8 +916,8 @@ export default async function IndividualLotteryTermsPage({
             }
             label="Eligibility"
             value={
-              lottery.geographic_eligibility ||
-              "See General Lottery Terms"
+              lottery?.geographic_eligibility ||
+              "See individual lottery eligibility requirements"
             }
           />
 
@@ -949,22 +945,22 @@ export default async function IndividualLotteryTermsPage({
           title="The Lottery"
         >
           <p>
-            These individual terms apply to{" "}
+            {lottery ? "These individual terms apply to " : "These terms apply to "}
             <strong>
-              {lottery.title}
+              {(lottery?.title ?? "Burton Pride lotteries")}
             </strong>
             , organised by Burton Pride.
           </p>
 
-          {lottery.short_summary && (
+          {lottery?.short_summary && (
             <p>
-              {lottery.short_summary}
+              {lottery?.short_summary}
             </p>
           )}
 
-          {lottery.description && (
+          {lottery?.description && (
             <p>
-              {lottery.description}
+              {lottery?.description}
             </p>
           )}
         </TermSection>
@@ -981,7 +977,7 @@ export default async function IndividualLotteryTermsPage({
                 <strong>
                   {formatMoney(
                     ticketPricePence,
-                    lottery.currency ||
+                    lottery?.currency ||
                       "GBP",
                   )}
                 </strong>
@@ -996,7 +992,7 @@ export default async function IndividualLotteryTermsPage({
             </>
           ) : (
             <p>
-              The ticket price has not yet been confirmed.
+              {lottery ? "The ticket price has not yet been confirmed." : "Each lottery page states its ticket price. The price applies to each individual ticket purchased. The total amount payable depends on the number of tickets selected."}
             </p>
           )}
         </TermSection>
@@ -1011,7 +1007,7 @@ export default async function IndividualLotteryTermsPage({
 
           <StrongValue>
             {formatDateTime(
-              lottery.sales_open_at,
+              lottery?.sales_open_at,
             )}
           </StrongValue>
 
@@ -1021,7 +1017,7 @@ export default async function IndividualLotteryTermsPage({
 
           <StrongValue>
             {formatDateTime(
-              lottery.sales_close_at,
+              lottery?.sales_close_at,
             )}
           </StrongValue>
 
@@ -1042,7 +1038,7 @@ export default async function IndividualLotteryTermsPage({
 
           <StrongValue>
             {formatDateTime(
-              lottery.draw_at,
+              lottery?.draw_at,
             )}
           </StrongValue>
 
@@ -1084,8 +1080,8 @@ export default async function IndividualLotteryTermsPage({
           </p>
 
           <StrongValue>
-            {lottery.geographic_eligibility ||
-              "As set out within the General Lottery Terms."}
+            {lottery?.geographic_eligibility ||
+              "As set out on the page and individual terms for the lottery you wish to enter."}
           </StrongValue>
 
           <p>
@@ -1099,12 +1095,12 @@ export default async function IndividualLotteryTermsPage({
           number="7"
           title="Ticket Availability"
         >
-          {typeof lottery.max_tickets ===
+          {typeof lottery?.max_tickets ===
           "number" ? (
             <p>
               A maximum of{" "}
               <strong>
-                {lottery.max_tickets.toLocaleString(
+                {lottery?.max_tickets.toLocaleString(
                   "en-GB",
                 )}
               </strong>{" "}
@@ -1112,8 +1108,7 @@ export default async function IndividualLotteryTermsPage({
             </p>
           ) : (
             <p>
-              No public maximum ticket quantity is
-              currently specified for this lottery.
+              {lottery ? "No public maximum ticket quantity is currently specified for this lottery." : "Any maximum ticket quantity is stated on the individual lottery page."}
             </p>
           )}
 
@@ -1158,9 +1153,7 @@ export default async function IndividualLotteryTermsPage({
           </p>
 
           <Link
-            href={`/Lottery/${encodeURIComponent(
-              lottery.slug,
-            )}`}
+            href={lottery ? `/Lottery/${encodeURIComponent(lottery.slug)}` : "/Lottery"}
             className="
               inline-flex
               items-center
@@ -1175,7 +1168,7 @@ export default async function IndividualLotteryTermsPage({
           >
             <Trophy className="h-4 w-4" />
 
-            View {lottery.title} prizes
+            View {(lottery?.title ?? "Burton Pride lotteries")} prizes
           </Link>
 
           <p>
@@ -1190,9 +1183,9 @@ export default async function IndividualLotteryTermsPage({
           number="10"
           title="Fundraising Purpose"
         >
-          {lottery.fundraising_purpose ? (
+          {lottery?.fundraising_purpose ? (
             <p>
-              {lottery.fundraising_purpose}
+              {lottery?.fundraising_purpose}
             </p>
           ) : (
             <p>
@@ -1208,7 +1201,7 @@ export default async function IndividualLotteryTermsPage({
           title="Responsible Participation"
         >
           <p>
-            {lottery.responsible_gambling_info ||
+            {lottery?.responsible_gambling_info ||
               "Please only spend what you can afford. Participation is optional and supports Burton Pride fundraising."}
           </p>
         </TermSection>
@@ -1235,8 +1228,7 @@ export default async function IndividualLotteryTermsPage({
             </li>
 
             <li>
-              these individual terms for{" "}
-              {lottery.title};
+              {lottery ? `these individual terms for ${lottery.title}` : "the individual terms for the lottery being entered"};
             </li>
 
             <li>
@@ -1249,21 +1241,21 @@ export default async function IndividualLotteryTermsPage({
             </li>
           </ul>
 
-          {lottery.terms_version && (
+          {lottery?.terms_version && (
             <p>
               Individual terms version:{" "}
               <strong>
-                {lottery.terms_version}
+                {lottery?.terms_version}
               </strong>
               .
             </p>
           )}
 
-          {lottery.privacy_notice_version && (
+          {lottery?.privacy_notice_version && (
             <p>
               Privacy notice version:{" "}
               <strong>
-                {lottery.privacy_notice_version}
+                {lottery?.privacy_notice_version}
               </strong>
               .
             </p>
@@ -1275,9 +1267,7 @@ export default async function IndividualLotteryTermsPage({
           title="General Lottery Terms"
         >
           <p>
-            These individual terms should always be read
-            together with Burton Pride&apos;s General
-            Lottery Terms.
+            {lottery ? "These individual terms should always be read together with Burton Pride’s General Lottery Terms." : "These general terms should always be read together with the individual terms for the lottery being entered."}
           </p>
 
           <p>
@@ -1346,7 +1336,7 @@ export default async function IndividualLotteryTermsPage({
             dark:text-white/40
           "
         >
-          Current lottery status
+          {lottery ? "Current lottery status" : "Individual lottery status"}
         </p>
 
         <div
@@ -1369,12 +1359,10 @@ export default async function IndividualLotteryTermsPage({
               text-purple-950
             "
           >
-            {formatStatus(
-              lottery.status,
-            )}
+            {lottery ? formatStatus(lottery.status) : "Shown on each lottery page"}
           </span>
 
-          {!publicVisible && (
+          {lottery && !publicVisible && (
             <span
               className="
                 rounded-full
@@ -1409,9 +1397,7 @@ export default async function IndividualLotteryTermsPage({
         "
       >
         <Link
-          href={`/Lottery/${encodeURIComponent(
-            lottery.slug,
-          )}`}
+          href={lottery ? `/Lottery/${encodeURIComponent(lottery.slug)}` : "/Lottery"}
           className="
             inline-flex
             min-h-12
@@ -1432,11 +1418,11 @@ export default async function IndividualLotteryTermsPage({
         >
           <ArrowLeft className="h-4 w-4" />
 
-          Back to {lottery.title}
+          Back to {lottery?.title ?? "lotteries"}
         </Link>
 
         <Link
-          href="/Lottery/tTerms"
+          href="/Lottery/Terms"
           className="
             inline-flex
             min-h-12
@@ -1482,7 +1468,7 @@ function TermsDetail({
   value,
 }: {
   icon:
-    React.ReactNode;
+    ReactNode;
 
   label: string;
 
@@ -1568,7 +1554,7 @@ function TermSection({
   title: string;
 
   children:
-    React.ReactNode;
+    ReactNode;
 }) {
   return (
     <section
@@ -1659,7 +1645,7 @@ function StrongValue({
   children,
 }: {
   children:
-    React.ReactNode;
+    ReactNode;
 }) {
   return (
     <div

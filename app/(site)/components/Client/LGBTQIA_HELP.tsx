@@ -133,6 +133,39 @@ const localServices: SupportService[] = [
     'Free and confidential service covering Burton upon Trent and Staffordshire. Phone lines open Monday to Friday, 9am–5pm, excluding bank holidays. Self-referrals are accepted. In an emergency, call 999.',
 },
 
+{
+  name: 'Positively UK',
+  area: 'Burton upon Trent · Derbyshire · National',
+  summary:
+    'HIV peer support and community groups in Burton upon Trent and Derbyshire, alongside national work supporting people living with HIV. Offers opportunities to connect with others, share experiences and access information and support.',
+  forWho:
+    'People living with HIV, including LGBTQIA+ people, whether recently diagnosed or living with HIV for many years.',
+  website: 'https://positivelyuk.org',
+  email: 'info@positivelyuk.org',
+  phone: {
+    label: '020 7713 0444',
+    href: 'tel:02077130444',
+  },
+  note:
+    'Local support is available in Burton upon Trent and Derbyshire. Contact Positively UK to find out about local peer support, community groups and national services.',
+},
+
+{
+  name: 'OpenClinic – Branston NHS Sexual Health Clinic',
+  area: 'Burton upon Trent · Staffordshire',
+  summary:
+    'Free, confidential NHS sexual health services, including STI testing, contraception, emergency contraception, HIV treatment and care, and PrEP.',
+  forWho:
+    'People seeking sexual health advice, testing or treatment, including LGBTQIA+ people and young people.',
+  website: 'https://openclinic.org.uk/clinics/branston-clinic-burton/',
+  phone: {
+    label: '0808 178 0955',
+    href: 'tel:08081780955',
+  },
+  note:
+    'Located on Main Street, Branston, Burton upon Trent, DE14 3EY. Book online or call for an appointment. Walk-in sessions are available at specific times, with priority based on clinical need. Check the website for current opening times and access arrangements.',
+},
+
 
 
 ];
