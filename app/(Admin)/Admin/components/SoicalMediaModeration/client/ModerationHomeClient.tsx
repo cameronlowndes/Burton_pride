@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import ModerationServerControl from "../Server/ModerationServerControl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, ExternalLink, HeartHandshake, LockKeyhole, MessageSquare, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 
@@ -111,6 +112,8 @@ export default function ModerationHomeClient({ displayName, isMainAdmin, permiss
             </div>
           </div>
         </header>
+
+        <ModerationServerControl />
 
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
           <section aria-labelledby="tools-heading" className="min-w-0 rounded-3xl border border-white/10 bg-slate-900/70 p-5 sm:p-6">

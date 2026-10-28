@@ -1,0 +1,3 @@
+project_id = "burton-pride-moderation"
+[functions.moderation-worker]
+verify_jwt = false # Worker verifies an unguessable Vault token before any work.
