@@ -4,7 +4,7 @@ import {
   validPolicy,
   type Policy,
   type Platform,
-} from "../_shared/moderation.ts";
+} from "../_shared/moderation";
 declare const Deno: {
   env: { get(name: string): string | undefined };
   serve(handler: (request: Request) => Promise<Response>): void;
