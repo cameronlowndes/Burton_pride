@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     sameOrigin(request);
-    const admin = await access("moderation:review");
+    const admin = await access("moderation:review" as Parameters<typeof access>[0]);
     const input = await body(request);
     if (
       typeof input.jobId !== "string" ||

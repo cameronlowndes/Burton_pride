@@ -17,7 +17,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET() {
   try {
-    const admin = await access("moderation:view");
+    const admin = await access("admin:dashboard:view");
     const [
       service,
       connections,
@@ -159,7 +159,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     sameOrigin(request);
-    const admin = await access("moderation:control");
+    const admin = await access("admin:dashboard:view");
     const input = await body(request);
     const action = String(input.action);
     if (

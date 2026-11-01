@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     sameOrigin(request);
-    const admin = await access("moderation:control");
+    const admin = await access("admin:moderation:control" as any);
     const input = await body(request);
     if (!["stop", "restart", "refresh"].includes(String(input.action)))
       fail("Invalid action.");
