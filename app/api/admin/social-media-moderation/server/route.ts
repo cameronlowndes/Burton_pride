@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { PATCH as checkMainAdminPassword } from "../../settings/delete-password/route";
 import {
   access,
   attempt,
@@ -10,7 +11,6 @@ import {
   hash,
   json,
   sameOrigin,
-  verifyMainPassword,
 } from "@/lib/moderation/server";
 import { effectiveStatus } from "@/supabase/functions/_shared/moderation";
 export const runtime = "nodejs";
@@ -190,15 +190,31 @@ export async function POST(request: NextRequest) {
         await audit(admin, action, "proof_rejected");
         fail("Verification expired or was already used. Start again.", 403);
       }
-      if (!(await verifyMainPassword(input.password))) {
+      if (typeof input.password !== "string" || !input.password.trim()) {
+        fail("Enter the Main Admin password.", 400);
+      }
+      // Reuse the verification-only API handler in this request context.
+      // Do not call POST: that handler can also reset the password.
+      const passwordResponse = await checkMainAdminPassword(
+        new NextRequest(new URL("/api/admin/delete-password", request.url), {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            cookie: request.headers.get("cookie") || "",
+          },
+          body: JSON.stringify({ password: input.password }),
+        }),
+      );
+      const passwordResult = await passwordResponse.json().catch(() => null);
+      if (!passwordResponse.ok || passwordResult?.ok !== true) {
         await db
           .from("moderation_proofs")
           .update({ consumed_at: new Date().toISOString() })
           .eq("proof_hash", proofHash);
         await audit(admin, action, "password_rejected");
         fail(
-          "Main Admin password was rejected. Start verification again.",
-          403,
+          `${typeof passwordResult?.error === "string" ? passwordResult.error : "Main Admin password verification failed."} Start Authenticator verification again.`,
+          passwordResponse.status >= 400 ? passwordResponse.status : 502,
         );
       }
       await audit(admin, action, "password_verified");
